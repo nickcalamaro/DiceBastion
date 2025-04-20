@@ -20,8 +20,8 @@ showAppearanceSwitcher = true
 showScrollToTop = true
 
 [homepage]
-layout = "profile"
-homepageImage = "/img/GWC_Logo.png"
+layout = "background"
+homepageImage = "/img/ClubBackground.jpg"
 showRecent = false
 showRecentItems = 5
 showMoreLink = false

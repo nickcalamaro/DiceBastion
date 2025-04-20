@@ -15,7 +15,7 @@ name = "Gibraltar Dice Bastion"
 image = "img/GWC_Logo.png"
 headline = "Tabletop games on the rock"
 links = [
-    { facebook = ""},
+    { facebook = "https://www.facebook.com/gibraltarwarhammerclub"},
     {instagram = "https://www.instagram.com/gibraltarwarhammerclub/" },
-    {whatsapp = ""}
+    {whatsapp = "https://chat.whatsapp.com/DQftL9NRfEKLSUQvJDVEYR"}
 ]

@@ -1,4 +1,4 @@
-<h1>Test</h1>
+<h1>Upcoming Events</h1>
 
 
-Test text
+Check back soon for our latest events!
