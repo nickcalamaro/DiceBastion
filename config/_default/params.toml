@@ -8,6 +8,8 @@ disableImageOptimization = false
 disableTextInHeader = false
 giteaDefaultServer = "https://git.fsfe.org"
 forgejoDefaultServer = "https://v8.next.forgejo.org"
+defaultBackgroundImage = "/img/ClubBackground.jpg"
+
 
 [header]
 layout = "basic"
@@ -58,7 +60,7 @@ showZenMode = false
 [list]
 showHero = true
 layoutBackgroundBlur = true
-layoutBackgroundHeaderSpace = true
+layoutBackgroundHeaderSpace = false
 showBreadcrumbs = false
 showSummary = true
 showViews = false
@@ -70,7 +72,9 @@ groupByYear = false
 cardView = false
 cardViewScreenWidth = false
 constrainItemsWidth = false
-heroStyle = "thumbAndBackground"
+heroStyle = "background"
+layout = "background"
+
 
 [sitemap]
 excludedKinds = [ "taxonomy", "term" ]
