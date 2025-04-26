@@ -32,6 +32,7 @@ cardViewScreenWidth = false
 layoutBackgroundBlur = false
 
 [article]
+showDateOnlyInMeta = true
 showDate = true
 showViews = false
 showLikes = false
@@ -40,7 +41,7 @@ showDateUpdated = false
 showAuthor = false
 showHero = false
 layoutBackgroundBlur = true
-layoutBackgroundHeaderSpace = true
+layoutBackgroundHeaderSpace = false
 showBreadcrumbs = false
 showDraftLabel = true
 showEdit = false

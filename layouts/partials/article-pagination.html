@@ -26,7 +26,9 @@
                   >{{ $prev.Title | emojify }}</span
                 >
                 <span class="mt-[0.1rem] text-xs text-neutral-500 dark:text-neutral-400">
-                  {{ if .Params.showDate | default (.Site.Params.article.showDate | default true) }}
+                  {{ if .Params.showDateOnlyInMeta | default (.Site.Params.article.showDateOnlyInMeta | default false)}}
+                    {{ "" }}
+                  {{else if .Params.showDate | default (.Site.Params.article.showDate | default true) }}
                     {{ partial "meta/date.html" $prev.Date }}
                   {{ end }}
                 </span>
@@ -43,7 +45,9 @@
                   >{{ $next.Title | emojify }}</span
                 >
                 <span class="mt-[0.1rem] text-xs text-neutral-500 dark:text-neutral-400">
-                  {{ if .Params.showDate | default (.Site.Params.article.showDate | default true) }}
+                  {{ if .Params.showDateOnlyInMeta | default (.Site.Params.article.showDateOnlyInMeta | default false)}}
+                  {{ "" }}
+                  {{else if .Params.showDate | default (.Site.Params.article.showDate | default true) }}
                     {{ partial "meta/date.html" $next.Date }}
                   {{ end }}
                 </span>
