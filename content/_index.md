@@ -1,13 +1,19 @@
 ---
 description: Gibraltar's premier location for board games, wargames, card games and RPGs. Open every Friday and available to book for RPG campaigns, board game meetups, Magic the Gathering and more!
 ---
+<div style="
+  padding: 20px;
+  margin: 20px auto;
+  max-width: 90%;
+  font-size: 1rem;
+">
+  Gibraltar's premier location for board games, wargames, card games and RPGs. 
+  <br><br>
+  Open every Friday and available to book for RPG campaigns, board game meetups, Magic the Gathering and more!
+</div>
 
 
-Gibraltar's premier location for board games, wargames, card games and RPGs. 
-</br>
-</br>
-Open every Friday and available to book for RPG campaigns, board game meetups, Magic the Gathering and more!   
-<div style="display: flex; justify-content: center; overflow-x: auto; padding: 0 20px;">
+<div style="display: flex; justify-content: center; overflow-x: auto; padding: 0 100px;">
   <table
     style="width: 90%; min-width: 300px; border-collapse: separate; border-spacing: 0; border: 1px solid black !important; background-color: rgba(255, 255, 255, 0.3); box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); border-radius: 12px;"
   >
