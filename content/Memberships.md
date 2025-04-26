@@ -1,5 +1,7 @@
 ---
 
+title: Memberships
+herostyle: "background"
 
 ---
 
