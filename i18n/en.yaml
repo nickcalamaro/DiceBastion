@@ -44,11 +44,11 @@ error:
 footer:
   dark_appearance: "Switch to dark appearance"
   light_appearance: "Switch to light appearance"
-  powered_by: "Powered by {{ .Hugo }} &amp; {{ .Theme }}"
+  powered_by: "Powered by Nicky &amp; Jen"
 
 list:
   externalurl_title: "Link to external site"
-  no_articles: "There are no articles to list here yet."
+  no_articles: "There's nothing here yet. Check back soon!."
 
 nav:
   scroll_to_top_title: "Scroll to top"
