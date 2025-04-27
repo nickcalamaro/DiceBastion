@@ -1,7 +1,8 @@
 --- 
 title: Upcoming Events
+description: Events for Tabletop Enthusiasts. Magic: The Gathering drafts, Board Game Days, Warhammer Tournaments, Dungeons & Dragons Campaigns, all in a welcoming community space.
 
 ---
 <!-- Cards changed with {{ $articleClasses := "flex flex-wrap article" }} -->
 
-<meta name="description" content="the ultimate haven for tabletop enthusiasts! Whether you're a seasoned Warhammer general, Magic: The Gathering lover, RPG enthusiast, or board game geek, we've got the space and community for you. Join us for Pokémon TCG tournaments, Dungeons & Dragons campaigns, and other unforgettable tabletop gaming experiences.">
+<meta name="description" content="At Dice Bastion Gibraltar, we host a variety of events for tabletop enthusiasts. Enjoy relaxed Magic: The Gathering drafts, regular board game days, Warhammer battles, Pokémon TCG tournaments, and engaging Dungeons & Dragons campaigns in a welcoming community space.">
