@@ -5,6 +5,7 @@ description: Gibraltar's premier location for board games, wargames, card games 
 
 <!-- Add a responsive viewport tag -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Gibraltar's premier location for board games, wargames, card games and RPGs. Open every Friday and available to book for RPG campaigns, board game meetups, Magic the Gathering and more!">
 
 <!-- Description Section -->
 <div style="margin: 0 auto; width: 90%; font-size: 1rem;">
