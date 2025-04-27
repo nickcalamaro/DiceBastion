@@ -100,7 +100,7 @@
         {{ partial "extend-article-link.html" . }}
       {{ end }}
     </div>
-    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+    <div class="font-semibold text-lg text-neutral-500 dark:text-neutral-200">
       {{ partial "article-meta/basic.html" . }}
     </div>
     {{ if .Params.showSummary | default (.Site.Params.list.showSummary | default false) }}
