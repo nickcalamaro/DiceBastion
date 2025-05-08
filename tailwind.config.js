@@ -179,4 +179,9 @@ module.exports = {
     require('@tailwindcss/forms'),
     require('tailwind-scrollbar')({ preferredStrategy: 'pseudoelements' })
   ],
+  safelist: [
+    "bg-contain",
+    "bg-center",
+    "bg-no-repeat"
+  ],
 };
