@@ -31,7 +31,7 @@
 {{ end }}
 
 {{ with .Params.externalUrl }}
-  <a class="{{ $articleClasses }}" href="{{ . }}" target="_blank" rel="external" style="background-color: rgba(255, 255, 255, 0.3);">
+  <a class="{{ $articleClasses }}" href="{{ . }}"/>
 {{ else }}
   <a class="{{ $articleClasses }}" href="{{ .RelPermalink }}">
 {{ end }}
