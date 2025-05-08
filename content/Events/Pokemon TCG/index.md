@@ -8,7 +8,7 @@ showhero: false
 # externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
 ---
 <a href="https://pay.sumup.com/b2c/QPHHL6VI">
-  <img src="/booknow.png" alt="Book Now" class="nozoom rounded-xl" />
+  <img src="./booknow.png" alt="Book Now" class="nozoom rounded-xl" />
 </a>
 Join us for our first ever Pokemon TCG Showdown, sponsored by Vijay and with help from our friends at PB CardShack!
 
