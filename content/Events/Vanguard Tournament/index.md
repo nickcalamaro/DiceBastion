@@ -4,6 +4,8 @@ summary: "Join us for our second Cardfight Vanguard Tournament! Ride your Vangua
 date: 2025-05-25
 weight: 12
 showHero: false
+draft: true
+
 # externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
 
 ---
