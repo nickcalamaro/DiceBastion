@@ -20,4 +20,4 @@ You can sign up for the event here: <a href="https://pay.sumup.com/b2c/QPHHL6VI"
 
 All participants must be at least 14 years of age or accompanied by an adult.
 
-Good luck and may the best trainer win!
+Good luck and may the best trainer win! 
