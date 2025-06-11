@@ -10,6 +10,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          submodules: true
           ref: "${{ github.head_ref }}"
       - name: Install dependencies and Build Theme
         uses: actions/setup-node@v4
