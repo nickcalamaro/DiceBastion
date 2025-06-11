@@ -1,10 +1,11 @@
 
 ---
 title: Pokemon TCG Clash at the Clubhouse <b><u>(Book Now!)</u></b>
-summary: "Powered by Vijay, PB CardShack, and the Gibraltar Warhammer Club, this Standard Format tournament is perfect for beginners and newcomers! Whether you're just learning or looking to sharpen your skills, this is your chance to battle it out in a fun, friendly environment – no expert-level experience needed!."
+summary: "Powered by Vijay, PB CardShack, and the Gibraltar Warhammer Club, this Standard Format tournament is perfect for beginners and newcomers! Whether you’re just learning or looking to sharpen your skills, this is your chance to battle it out in a fun, friendly environment – no expert-level experience needed!."
 date: 2025-06-07
 weight: 14
 showhero: false
+draft: true
 # externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
 ---
 <a href="https://pay.sumup.com/b2c/QPHHL6VI">
