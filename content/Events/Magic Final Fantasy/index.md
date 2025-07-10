@@ -1,8 +1,8 @@
 
 ---
-title: MTG - Final Fantasy Sealed
-summary: "Heroes of the Crystal unite as Magic meets Final Fantasy!  Get 6 packs from the latest set to build a deck and compete for prizes."
-date: 2025-06-18
+title: MTG - Final Fantasy Draft
+summary: "Heroes of the Crystal unite as Magic meets Final Fantasy!  Get 3 packs from the latest set to build a deck and compete for prizes."
+date: 2025-07-21
 weight: 20
 
 ---

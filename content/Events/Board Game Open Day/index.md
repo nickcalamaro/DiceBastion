@@ -5,6 +5,7 @@ date: 2025-07-06
 weight: 26
 showHero: false
 # externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
+draft: true
 
 ---
 

@@ -5,5 +5,6 @@ summary: "Join us for a night of murder, mystery and deception! You’ll receive
 date: 2025-06-25
 weight: 25
 externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
+draft: true
 
 ---
