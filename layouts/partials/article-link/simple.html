@@ -65,10 +65,45 @@
 </div>
 {{ end }}
       {{ else }}
-        {{ with .Resize "600x" }}
-        <div class="{{ $articleImageClasses }}"
-     style="background-image: url({{ .RelPermalink }}); background-size: contain !important; background-position: center; background-repeat: no-repeat;">
-</div>{{ end }}
+{{ with .Resize "600x" }}
+<div class="{{ $articleImageClasses }}" style="
+  position: relative;
+  lg: width: 60%;
+  height: 220px; /* Adjust height as needed */
+  overflow: hidden;
+">
+  <!-- Blurred background -->
+  <div style="
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('{{ .RelPermalink }}');
+    background-size: cover;
+    background-position: center;
+    filter: blur(20px);
+    transform: scale(1.1);
+    z-index: 1;
+  "></div>
+
+  <!-- Foreground image centered vertically -->
+  <div style="
+    position: relative;
+    z-index: 2;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  ">
+    <img src="{{ .RelPermalink }}" alt="{{ $.Title }}" style="
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    ">
+  </div>
+</div>
+{{ end }}
       {{ end }}
     {{- else -}}
       {{- with $.Site.Params.images }}
