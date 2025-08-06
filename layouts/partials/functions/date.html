@@ -1,1 +1,7 @@
-{{ return time.Format (site.Language.Params.dateFormat | default ":date_long") . }}
+{{ $day := .Day }}
+{{ $suffix := "th" }}
+{{ if in (slice 1 21 31) $day }}{{ $suffix = "st" }}
+{{ else if in (slice 2 22) $day }}{{ $suffix = "nd" }}
+{{ else if in (slice 3 23) $day }}{{ $suffix = "rd" }}{{ end }}
+
+{{ return printf "%s %d%s %s" (time.Format "Monday" .) $day $suffix (time.Format "January" .) }}
