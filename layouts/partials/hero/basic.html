@@ -26,8 +26,7 @@
             <div class="w-full h-36 md:h-56 lg:h-72 single_hero_basic nozoom" style="background-image:url({{ .RelPermalink }});"></div>
         {{ end }}
     {{ else }}
-        {{ with .Resize (print ($.Site.Params.backgroundImageWidth | default "1200") "x") }}
-            <div class="w-full h-36 md:h-56 lg:h-72 single_hero_basic nozoom" style="background-image:url({{ .RelPermalink }});"></div>
-        {{ end }}
+<div class="w-full h-auto single_hero_basic nozoom"
+     style="background-image: url({{ .RelPermalink }}); background-size: cover; background-repeat: no-repeat; background-position: center; padding-top:35%;"></div>
     {{ end }}
 {{- end -}}

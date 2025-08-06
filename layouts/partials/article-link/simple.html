@@ -1,7 +1,7 @@
 {{ $constrainItemsWidth := .Page.Site.Params.list.constrainItemsWidth | default false }}
 
 {{/* Use flex-col for small screens (image on top) and flex-row for md+ screens (image on left) */}}
-{{ $articleClasses := "flex flex-col sm:flex-row article" }}
+{{ $articleClasses := "flex flex-col lg:flex-row article" }}
 {{ if .Site.Params.list.showCards }}
   {{ $articleClasses = delimit (slice $articleClasses "border border-neutral-100 dark:border-neutral-700 border-2 rounded-md overflow-hidden") " " }}
 {{ else }}
@@ -9,7 +9,8 @@
 {{ end }}
 
 {{/* The image container remains first in both layouts */}}
-{{ $articleImageClasses := "order-1 w-auto md:w-full h-full thumbnail nozoom" }}
+{{/* Image on left: fixed 1/3 width at md+, full width on mobile */}}
+{{ $articleImageClasses := "order-1 w-1/3 lg:w-full flex-shrink-0 h-56 thumbnail nozoom" }}
 {{ if .Site.Params.list.showCards }}
   {{ $articleImageClasses = delimit (slice $articleImageClasses "") " " }}
 {{ else }}
@@ -19,7 +20,8 @@
 {{ $disableImageOptimization := .Page.Site.Params.disableImageOptimization | default false }}
 
 {{/* The text container remains second */}}
-{{ $articleInnerClasses := "order-2" }}
+{{/* Text on right: full width on mobile, 2/3 at md+, and flex-grow if needed */}}
+{{ $articleInnerClasses := "order-2 w-full md:w-2/3 flex-grow p-4" }}
 {{ if .Site.Params.list.showCards }}
   {{ $articleInnerClasses = delimit (slice $articleInnerClasses "p-4") " " }}
 {{ else }}
@@ -65,10 +67,44 @@
 </div>
 {{ end }}
       {{ else }}
-        {{ with .Resize "600x" }}
-        <div class="{{ $articleImageClasses }}"
-     style="background-image: url({{ .RelPermalink }}); background-size: contain !important; background-position: center; background-repeat: no-repeat;">
-</div>{{ end }}
+{{ with .Resize "600x" }}
+<div class="{{ $articleImageClasses }}" style="
+  background-size: contain;
+  position: relative;
+  overflow: hidden;
+">
+  <!-- Blurred background -->
+  <div style="
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('{{ .RelPermalink }}');
+    background-size: cover;
+    background-position: center;
+    filter: blur(20px);
+    transform: scale(1.1);
+    z-index: 1;
+  "></div>
+
+  <!-- Foreground image centered vertically -->
+  <div style="
+    position: relative;
+    z-index: 2;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  ">
+    <img src="{{ .RelPermalink }}" alt="{{ $.Title }}" style="
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    ">
+  </div>
+</div>
+{{ end }}
       {{ end }}
     {{- else -}}
       {{- with $.Site.Params.images }}
@@ -78,6 +114,7 @@
   {{- end -}}
 
   <div class="{{ $articleInnerClasses }}">
+    
     <div class="items-center text-left text-xl font-semibold">
       {{ with .Params.externalUrl }}
         <div>
