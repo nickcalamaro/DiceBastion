@@ -1,6 +1,6 @@
 ---
 title: Horus Heresy Small Grow League 
-summary: "Forge the future of the Imperium... or tear it down. The perfect place to start a new army, or get into this amazing narrative game for the first time! Start with one squad, build your legion with other players, and compete for glory and some great prizes!"
+summary: "Forge the future of the Imperium.. or tear it down. The perfect place to start a new army, or get into this amazing narrative game for the first time! Start with one squad, build your legion with other players, and compete for glory and some great prizes!"
 date: 2025-08-30
 weight: 7
 showHero: true
