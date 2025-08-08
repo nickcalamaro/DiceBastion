@@ -1,5 +1,5 @@
+<!-- filepath: c:\Users\nickc\Desktop\Dev\DiceBastion\layouts\partials\article-meta\basic.html -->
 {{/* Determine the correct context and scope */}}
-{{/* This allows for different logic depending on where the partial is called */}}
 {{ $context := . }}
 {{ $scope := default nil }}
 
@@ -11,14 +11,60 @@
 {{ with $context }}
 {{ $meta := newScratch }}
 
+{{/* --- Fuzzy Date Logic --- */}}
+{{ $displayDate := .Date }}
+{{ with .Params.fuzzyDate }}
+  {{ $fuzzy := lower . }}
+  {{ $today := now }}
+  {{ $days := dict "sunday" 0 "monday" 1 "tuesday" 2 "wednesday" 3 "thursday" 4 "friday" 5 "saturday" 6 }}
+
+  {{/* Handle "Every [Day]" */}}
+  {{ if (findRE `^every (sunday|monday|tuesday|wednesday|thursday|friday|saturday)$` $fuzzy) }}
+    {{ $parts := split $fuzzy " " }}
+    {{ $targetDay := index $parts 1 }}
+    {{ $targetNum := int (index $days $targetDay) }}
+    {{ $todayNum := int $today.Weekday }}
+    {{ $daysUntil := int (mod (add (sub $targetNum $todayNum) 7) 7) }}
+    {{ $nextDay := $today.AddDate 0 0 $daysUntil }}
+    {{ $displayDate = $nextDay }}
+{{ else if (findRE `^every (first|second|third|fourth|fifth) (sunday|monday|tuesday|wednesday|thursday|friday|saturday)$` $fuzzy) }}
+  {{ $parts := split $fuzzy " " }}
+  {{ $ordinals := dict "first" 1 "second" 2 "third" 3 "fourth" 4 "fifth" 5 }}
+  {{ $ordinal := index $parts 1 }}
+  {{ $targetDay := index $parts 2 }}
+  {{ $targetNum := int (index $days $targetDay) }}
+  {{ $nth := int (index $ordinals $ordinal) }}
+
+  {{ $year := $today.Year }}
+  {{ $month := $today.Month }}
+  {{ $firstOfMonth := time (printf "%d-%02d-01" $year $month) }}
+  {{ $firstWeekday := int $firstOfMonth.Weekday }}
+  {{ $daysToTarget := int (mod (add (sub $targetNum $firstWeekday) 7) 7) }}
+  {{ $nthOffset := int (mul 7 (int (sub $nth 1))) }}
+  {{ $addDays := int (add $daysToTarget $nthOffset) }}
+  {{ $nthDate := $firstOfMonth.AddDate 0 0 $addDays }}
+
+  {{ if lt $nthDate.Unix $today.Unix }}
+    {{ $nextMonth := $firstOfMonth.AddDate 0 1 0 }}
+    {{ $firstOfNextMonth := time (printf "%d-%02d-01" $nextMonth.Year $nextMonth.Month) }}
+    {{ $firstWeekdayNext := int $firstOfNextMonth.Weekday }}
+    {{ $daysToTargetNext := int (mod (add (sub $targetNum $firstWeekdayNext) 7) 7) }}
+    {{ $nthOffsetNext := int (mul 7 (int (sub $nth 1))) }}
+    {{ $addDaysNext := int (add $daysToTargetNext $nthOffsetNext) }}
+    {{ $nthDate = $firstOfNextMonth.AddDate 0 0 $addDaysNext }}
+  {{ end }}
+  {{ $displayDate = $nthDate }}
+{{ end }}
+{{ end }}
+
 {{/* Gather partials for this context */}}
 
 {{ if .Params.showDateOnlyInMeta | default (.Site.Params.article.showDateOnlyInMeta | default false)}}
   {{ "" }}
 {{else if .Params.showDate | default (.Site.Params.article.showDate | default true) }}
-  {{ $meta.Add "partials" (slice (partial "meta/date.html" .Date)) }}
+  {{ $meta.Add "partials" (slice (partial "meta/date.html" $displayDate)) }}
 {{else if and (eq $scope "single") (.Params.showDateOnlyInArticle | default (.Site.Params.article.showDateOnlyInArticle | default false)) }}
-  {{ $meta.Add "partials" (slice (partial "meta/date.html" .Date)) }}
+  {{ $meta.Add "partials" (slice (partial "meta/date.html" $displayDate)) }}
 {{ end }}
 
 {{ if and (.Params.showDateUpdated | default (.Site.Params.article.showDateUpdated | default false)) (ne (partial
@@ -55,14 +101,11 @@
   {{ $meta.Add "partials" (slice (partial "meta/zen-mode.html" .)) }}
 {{ end }}
 
-
 <div class="flex flex-row flex-wrap items-center">
-  {{/* Output partials */}}
   {{ with ($meta.Get "partials") }}
   {{ delimit . "<span class=\"px-2 text-primary-500\">&middot;</span>" | safeHTML }}
   {{ end }}
 
-  {{/* Output draft label */}}
   {{ if and (eq $scope "single") (and .Draft .Site.Params.article.showDraftLabel) }}
   <span class="pl-2">{{ partial "badge.html" (i18n "article.draft" | emojify) }}</span>
   {{ end }}
@@ -82,7 +125,6 @@
 </div>
 {{ end }}
 
-{{/* Output taxonomies */}}
 {{ if .Params.showTaxonomies | default (.Site.Params.article.showTaxonomies | default false) }}
 <div class="flex flex-row flex-wrap items-center">
   {{ range $taxonomy, $terms := .Site.Taxonomies }}
