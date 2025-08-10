@@ -1,0 +1,51 @@
+{{- /* layouts/partials/functions/nextweekday.html */ -}}
+
+{{- /* 0. Capture “now” */ -}}
+{{- $now := now -}}
+
+{{- /* 1. Clean & split input */ -}}
+{{- $raw   := . | lower | trim " " -}}
+{{- $parts := split $raw " " -}}
+
+{{- /* 2. Detect ordinal */ -}}
+{{- $ordMap  := dict "1st" 1 "2nd" 2 "3rd" 3 "4th" 4 -}}
+{{- $ordinal := 0 -}}
+{{- $weekday := "" -}}
+{{- if and (gt (len $parts) 1) (isset $ordMap (index $parts 0)) -}}
+  {{- $ordinal = index $ordMap (index $parts 0) -}}
+  {{- $weekday = index $parts 1 -}}
+{{- else -}}
+  {{- $weekday = $raw -}}
+{{- end -}}
+
+{{- /* 3. Map weekday name → integer */ -}}
+{{- $weekdays := dict
+     "sunday"    0
+     "monday"    1
+     "tuesday"   2
+     "wednesday" 3
+     "thursday"  4
+     "friday"    5
+     "saturday"  6
+  -}}
+{{- $targetIndex := int (index $weekdays $weekday) -}}
+
+{{- /* 4a. No ordinal → next occurrence */ -}}
+{{- if eq $ordinal 0 -}}
+  {{- $todayWD   := int $now.Weekday -}}
+  {{- $diff      := sub $targetIndex $todayWD -}}
+  {{- $rawOffset := mod (add $diff 7) 7 -}}
+  {{- /* if rawOffset==0, use 7; else use rawOffset */ -}}
+  {{- $offset    := cond (eq $rawOffset 0) 7 $rawOffset -}}
+  {{- return $now.AddDate 0 0 $offset -}}
+
+{{- /* 4b. With ordinal → Nth weekday this month */ -}}
+{{- else -}}
+  {{- $year        := $now.Year -}}
+  {{- $month       := int $now.Month -}}
+  {{- $firstOfMonth := time (printf "%d-%02d-01" $year $month) -}}
+  {{- $firstWD     := int $firstOfMonth.Weekday -}}
+  {{- $dayOffset   := mod (add (sub $targetIndex $firstWD) 7) 7 -}}
+  {{- $date        := $firstOfMonth.AddDate 0 0 (add $dayOffset (mul (sub $ordinal 1) 7)) -}}
+  {{- return $date -}}
+{{- end -}}
