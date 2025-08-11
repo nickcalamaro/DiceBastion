@@ -2,34 +2,59 @@
 
 {{ $pages := . }}
 
-{{ if eq (len $pages) 0 }}
-  <p>No events found.</p>
-{{ else }}
-  <table>
+{{ if gt (len $pages) 0 }}
+<table style="
+  width: 100%;
+  border-collapse: collapse;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  overflow: hidden;
+">
     <thead>
-      <tr>
-        <th>Image</th>
-        <th>Title</th>
-        <th>Date</th>
-        <th>Description</th>
+      <tr style="border-bottom: 2px solid #ccc; height: 1px;">
+        <th style="width: 65%; padding: 0; margin: 0; text-align: left;">Image</th>
+        <th style="width: 35%; padding: 0; margin: 0; text-align: center;">Date</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody style="margin: 0; padding: 0;">
       {{ range $pages }}
         {{ $img := .Resources.GetMatch "featured*" }}
-        <tr>
-          <td>
+        {{ $displayDate := partial "functions/eventDisplayDate.html" . }}
+
+        <tr style="margin: 0; padding: 0;">
+          <td style="margin: 0; padding: 0; vertical-align: top;">
             {{ if $img }}
-              <img src="{{ $img.RelPermalink }}" alt="Featured image for {{ .Title }}" style="max-width: 150px;" />
+              <img 
+                src="{{ $img.RelPermalink }}" 
+                alt="Featured image for {{ .Title }}" 
+                style="
+                  width: 100%;
+                  aspect-ratio: 1900/664;
+                  object-fit: cover;
+                  display: block;
+                  margin: 0;
+                  padding: 0;
+                  line-height: 0;
+                "
+              />
             {{ else }}
-              No image
+              <span style="color: #999;">No image</span>
             {{ end }}
           </td>
-          <td><a href="{{ .RelPermalink }}">{{ .Title }}</a></td>
-          <td>{{ .Date.Format "Jan 2, 2006" }}</td>
-          <td>{{ .Params.description | markdownify }}</td>
+<td style="padding: 10px; text-align: center; height: 150px;">
+  <div style="
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 1.1rem; 
+    font-weight: 500;
+  ">            {{ $displayDate }}
+          </td>
         </tr>
       {{ end }}
     </tbody>
   </table>
+{{ else }}
+  <p>No events found.</p>
 {{ end }}

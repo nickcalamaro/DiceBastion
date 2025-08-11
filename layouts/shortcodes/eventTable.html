@@ -1,7 +1,18 @@
-{{ $sec := .Site.GetPage "section" "events" }}
+{{/* eventTable shortcode: finds the Events section and passes its regular pages */}}
+
+{{/* Try common variants to avoid case/path issues */}}
+{{ $sec := site.GetPage "section" "events" | default (site.GetPage "section" "Events") | default (site.GetPage "/events") | default (site.GetPage "/Events") }}
 
 {{ if not $sec }}
-  <p>Could not find events section.</p>
+  <p>Events section not found.</p>
 {{ else }}
-  {{ partial "article-table.html" $sec.RegularPages }}
+  {{/* If you want all event pages (not nested), use RegularPages; for nested content, use Pages */}}
+  {{ $pages := $sec.RegularPages }}
+
+  {{/* Optional: sort by publish date; switch to .Date or Lastmod as you prefer
+      Example for reverse chronological:
+      $pages = sort $pages "Date" "desc"
+  */}}
+
+  {{ partial "article-table.html" $pages }}
 {{ end }}
