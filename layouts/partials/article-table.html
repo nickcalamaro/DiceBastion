@@ -1,0 +1,35 @@
+{{/* article-table.html — expects a slice of Pages */}}
+
+{{ $pages := . }}
+
+{{ if eq (len $pages) 0 }}
+  <p>No events found.</p>
+{{ else }}
+  <table>
+    <thead>
+      <tr>
+        <th>Image</th>
+        <th>Title</th>
+        <th>Date</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range $pages }}
+        {{ $img := .Resources.GetMatch "featured*" }}
+        <tr>
+          <td>
+            {{ if $img }}
+              <img src="{{ $img.RelPermalink }}" alt="Featured image for {{ .Title }}" style="max-width: 150px;" />
+            {{ else }}
+              No image
+            {{ end }}
+          </td>
+          <td><a href="{{ .RelPermalink }}">{{ .Title }}</a></td>
+          <td>{{ .Date.Format "Jan 2, 2006" }}</td>
+          <td>{{ .Params.description | markdownify }}</td>
+        </tr>
+      {{ end }}
+    </tbody>
+  </table>
+{{ end }}

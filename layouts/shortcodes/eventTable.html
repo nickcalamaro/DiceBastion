@@ -1,0 +1,7 @@
+{{ $sec := .Site.GetPage "section" "events" }}
+
+{{ if not $sec }}
+  <p>Could not find events section.</p>
+{{ else }}
+  {{ partial "article-table.html" $sec.RegularPages }}
+{{ end }}
