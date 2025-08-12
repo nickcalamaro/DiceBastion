@@ -3,26 +3,30 @@
 {{ $pages := . }}
 
 {{ if gt (len $pages) 0 }}
-<table style="
-  width: 100%;
-  border-collapse: collapse;
-  border: 2px solid #ccc;
-  border-radius: 4px;
-  overflow: hidden;
-">
+<div class="events-exportable" style="margin-top: 2rem;">
+  <button id="export-top4" type="button">Download top 4 rows (PNG)</button>
+
+  <table id="events-table" style="
+    width: 100%;
+    border-collapse: collapse;
+    border: 2px solid #ccc;
+    border-radius: 4px;
+    overflow: hidden;
+    table-layout: fixed;
+  ">
     <thead>
-      <tr style="border-bottom: 2px solid #ccc; height: 1px;">
-        <th style="width: 65%; padding: 0; margin: 0; text-align: left;">Image</th>
-        <th style="width: 35%; padding: 0; margin: 0; text-align: center;">Date</th>
+      <tr style="border-bottom: 2px solid #ccc;">
+        <th style="width: 60%; padding: 0.5rem; text-align: left;">Image</th>
+        <th style="width: 40%; padding: 0.5rem; text-align: center;">Date</th>
       </tr>
     </thead>
-    <tbody style="margin: 0; padding: 0;">
+    <tbody>
       {{ range $pages }}
         {{ $img := .Resources.GetMatch "featured*" }}
         {{ $displayDate := partial "functions/eventDisplayDate.html" . }}
 
-        <tr style="margin: 0; padding: 0;">
-          <td style="margin: 0; padding: 0; vertical-align: top;">
+        <tr>
+          <td style="vertical-align: top;">
             {{ if $img }}
               <img 
                 src="{{ $img.RelPermalink }}" 
@@ -32,29 +36,193 @@
                   aspect-ratio: 1900/664;
                   object-fit: cover;
                   display: block;
-                  margin: 0;
-                  padding: 0;
-                  line-height: 0;
                 "
               />
             {{ else }}
               <span style="color: #999;">No image</span>
             {{ end }}
           </td>
-<td style="padding: 10px; text-align: center; height: 150px;">
-  <div style="
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    font-size: 1.1rem; 
-    font-weight: 500;
-  ">            {{ $displayDate }}
+          <td style="padding: 10px; text-align: center; height: 150px;">
+            <div style="
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: 100%;
+              font-size: 1.1rem; 
+              font-weight: 500;
+            ">
+              {{ $displayDate }}
+            </div>
           </td>
         </tr>
       {{ end }}
     </tbody>
   </table>
+</div>
+
+<script>
+(function() {
+  function exportTopRowsAsImage({
+    tableSelector = '#events-table',
+    filename = 'gib-events-top4',
+    type = 'png',
+    quality = 0.95,
+    rows = 4,
+    scale = 2
+  } = {}) {
+    const table = document.querySelector(tableSelector);
+    if (!table) return;
+
+    // Clone original table
+    const clone = table.cloneNode(true);
+
+    // Define column widths (image/date). Adjust to taste.
+    const IMAGE_COL_PCT = 65;
+    const DATE_COL_PCT  = 35;
+
+    const colgroup = document.createElement('colgroup');
+    const imageCol = document.createElement('col');
+    const dateCol = document.createElement('col');
+    imageCol.style.width = IMAGE_COL_PCT + '%';
+    dateCol.style.width = DATE_COL_PCT + '%';
+    colgroup.appendChild(imageCol);
+    colgroup.appendChild(dateCol);
+    clone.insertBefore(colgroup, clone.firstChild);
+
+    // Remove header rows
+    const theads = clone.querySelectorAll('thead');
+    theads.forEach(thead => thead.remove());
+
+    // Trim to first N rows
+    Array.from(clone.tBodies).forEach(tbody => {
+      const trs = Array.from(tbody.rows);
+      trs.slice(rows).forEach(tr => tr.remove());
+    });
+
+    // === Unified styling (single source of truth) ===
+    const OUTER_BORDER = '#333';
+    const ROW_BORDER   = '#A9B2BD';
+  const TABLE_BG = 'linear-gradient(145deg, #e2edf9 0%, #c5d9f1 100%)';
+
+    // Table frame + background
+  clone.style.cssText = `
+    width: 100%;
+    table-layout: fixed;
+    margin: 0;
+    border-spacing: 0;
+    border-collapse: collapse;
+    border: 2px solid ${OUTER_BORDER};
+  `;
+
+    // Clear any cell backgrounds and margins (so gradient shows uniformly)
+    clone.querySelectorAll('td, th').forEach(cell => {
+      cell.style.background = 'transparent';
+      cell.style.margin = '0';
+      cell.style.border = '0'; // reset any inherited borders
+    });
+
+    // Consistent row dividers (collapse-friendly): top border on every row except the first
+    Array.from(clone.tBodies).forEach(tbody => {
+      const rowsArr = Array.from(tbody.rows);
+      rowsArr.forEach((tr, idx) => {
+        if (idx > 0) {
+          Array.from(tr.cells).forEach(td => {
+            td.style.borderTop = `1px solid ${ROW_BORDER}`;
+          });
+        }
+      });
+    });
+
+    // Cell spacing and alignment
+    clone.querySelectorAll('td').forEach(td => {
+      td.style.verticalAlign = 'middle';
+      td.style.padding = '8px';
+      td.style.lineHeight = '1.2';
+    });
+
+    // Image cell tightening (first column)
+    clone.querySelectorAll('tr').forEach(tr => {
+      const imageCell = tr.cells[0];
+      if (imageCell) {
+        imageCell.style.padding = '4px';
+        imageCell.style.lineHeight = '1';
+      }
+    });
+
+    // Image rendering: remove baseline gap and keep within cell
+    clone.querySelectorAll('td img').forEach(img => {
+      img.style.display = 'block';
+      img.style.margin = '0 auto';
+      img.style.maxWidth = '100%';
+      img.style.height = 'auto';
+      img.style.objectFit = 'contain';
+    });
+
+    // Offscreen container
+    const container = document.createElement('div');
+container.style.cssText = `
+  position: fixed;
+  left: -99999px;
+  top: 0;
+  width: 800px;
+  height: auto;
+  display: flex;
+  background: linear-gradient(145deg, #e2edf9, #c5d9f1);
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+`;
+
+
+    // Wrap and style the cloned table
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `
+      width: 100%;
+      overflow: hidden;
+      padding: 0;
+      margin: 0;
+    `;
+
+    wrapper.appendChild(clone);
+    container.appendChild(wrapper);
+    document.body.appendChild(container);
+
+    // Render to image
+    html2canvas(container, {
+      backgroundColor: null,
+      scale,
+      useCORS: true,
+      windowWidth: document.documentElement.clientWidth
+    }).then(canvas => {
+      canvas.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${filename}.${type}`;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(a.href);
+        a.remove();
+        container.remove();
+      }, `image/${type}`, quality);
+    }).catch(err => {
+      console.error('Export failed:', err);
+      container.remove();
+    });
+  }
+
+  // Button trigger
+  window.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('export-top4');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        exportTopRowsAsImage();
+      });
+    }
+  });
+})();
+</script>
 {{ else }}
   <p>No events found.</p>
 {{ end }}
