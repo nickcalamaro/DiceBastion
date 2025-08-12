@@ -5,6 +5,7 @@ summary: "Blast off into the Multiverse with our Edge of Eternities draft event!
 date: 2025-08-20
 weight: 4
 showHero: true
+draft: true
 # externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
 ---
 
