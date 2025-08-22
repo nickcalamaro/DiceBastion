@@ -6,6 +6,11 @@ weight: 7
 showHero: true
 # externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
 ---
+_Forge the future of the Imperium.. or tear it down._
+
+The perfect place to start a new army, or get into this amazing narrative game for the first time! Start with one squad, build your legion with other players, and compete for glory and some great prizes!
+
+
 <table class="table-fixed w-full text-left text-base md:text-lg mb-6">
   <tbody>
     <tr>
@@ -28,24 +33,24 @@ showHero: true
 
 <h3 class="font-bold">📜 Rules & Structure</h3>
 <ul class="list-disc pl-5 mb-4">
-  <li>Starting Size: One Rhino + One Tactical Squad</li>
-  <li>Escalation: Increase army size every 3 weeks</li>
-  <li>Missions: From the Age of Darkness Rulebook</li>
-  <li>Painting Encouraged: Hobby progress tracked!</li>
+  <li><strong>Starting Size:</strong> One Rhino + One Tactical Squad</li>
+  <li><strong>Escalation:</strong> Increase army size every 3 weeks</li>
+  <li><strong>Missions:</strong> From the Age of Darkness Rulebook</li>
+  <li><strong>Painting Encouraged:</strong> Bonus points awarded for painted units!</li>
 </ul>
 
 <h3 class="font-bold">🏆 Rewards & Glory</h3>
 <ul class="list-disc pl-5 mb-4">
-  <li>Prizes for Best Painted, Most Sporting, and Champion</li>
+  <li>Prizes for Best Painted, Most Sporting, and of course the Champion</li>
   <li>Eternal glory recorded in the annals of the Horus Heresy</li>
 </ul>
 
 <h3 class="font-bold">⚙️ Sign Up</h3>
 <ul class="list-disc pl-5 mb-4">
-  <li>Entry Fee: £40</li>
-  <li>Register by PM</li>
+  <li><strong>Entry Fee:</strong> £40</li>
+  <li>Register by message to Steven or Nicky</li>
 </ul>
 
-<h3 class="font-bold mb-1">Deadline: 31st of August 2026</h3>
+<h3 class="font-bold mb-1">Campaign Length: September 2025 to August 2026</h3>
 <p><p>
 <i class="block">🔥 Will you defend the Imperium, or embrace the Warmaster’s rebellion? 🔥</i>
