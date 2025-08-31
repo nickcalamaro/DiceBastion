@@ -11,51 +11,7 @@
 {{ with $context }}
 {{ $meta := newScratch }}
 
-{{/* --- Fuzzy Date Logic --- */}}
-{{ $displayDate := .Date }}
-{{ with .Params.fuzzyDate }}
-  {{ $fuzzy := lower . }}
-  {{ $today := now }}
-  {{ $days := dict "sunday" 0 "monday" 1 "tuesday" 2 "wednesday" 3 "thursday" 4 "friday" 5 "saturday" 6 }}
-
-  {{/* Handle "Every [Day]" */}}
-  {{ if (findRE `^every (sunday|monday|tuesday|wednesday|thursday|friday|saturday)$` $fuzzy) }}
-    {{ $parts := split $fuzzy " " }}
-    {{ $targetDay := index $parts 1 }}
-    {{ $targetNum := int (index $days $targetDay) }}
-    {{ $todayNum := int $today.Weekday }}
-    {{ $daysUntil := int (mod (add (sub $targetNum $todayNum) 7) 7) }}
-    {{ $nextDay := $today.AddDate 0 0 $daysUntil }}
-    {{ $displayDate = $nextDay }}
-{{ else if (findRE `^every (first|second|third|fourth|fifth) (sunday|monday|tuesday|wednesday|thursday|friday|saturday)$` $fuzzy) }}
-  {{ $parts := split $fuzzy " " }}
-  {{ $ordinals := dict "first" 1 "second" 2 "third" 3 "fourth" 4 "fifth" 5 }}
-  {{ $ordinal := index $parts 1 }}
-  {{ $targetDay := index $parts 2 }}
-  {{ $targetNum := int (index $days $targetDay) }}
-  {{ $nth := int (index $ordinals $ordinal) }}
-
-  {{ $year := $today.Year }}
-  {{ $month := $today.Month }}
-  {{ $firstOfMonth := time (printf "%d-%02d-01" $year $month) }}
-  {{ $firstWeekday := int $firstOfMonth.Weekday }}
-  {{ $daysToTarget := int (mod (add (sub $targetNum $firstWeekday) 7) 7) }}
-  {{ $nthOffset := int (mul 7 (int (sub $nth 1))) }}
-  {{ $addDays := int (add $daysToTarget $nthOffset) }}
-  {{ $nthDate := $firstOfMonth.AddDate 0 0 $addDays }}
-
-  {{ if lt $nthDate.Unix $today.Unix }}
-    {{ $nextMonth := $firstOfMonth.AddDate 0 1 0 }}
-    {{ $firstOfNextMonth := time (printf "%d-%02d-01" $nextMonth.Year $nextMonth.Month) }}
-    {{ $firstWeekdayNext := int $firstOfNextMonth.Weekday }}
-    {{ $daysToTargetNext := int (mod (add (sub $targetNum $firstWeekdayNext) 7) 7) }}
-    {{ $nthOffsetNext := int (mul 7 (int (sub $nth 1))) }}
-    {{ $addDaysNext := int (add $daysToTargetNext $nthOffsetNext) }}
-    {{ $nthDate = $firstOfNextMonth.AddDate 0 0 $addDaysNext }}
-  {{ end }}
-  {{ $displayDate = $nthDate }}
-{{ end }}
-{{ end }}
+{{ $displayDate := partial "functions/fuzzy-date.html" . }}
 
 {{/* Gather partials for this context */}}
 
