@@ -4,7 +4,7 @@ summary: "Join us for the ultimate battle between unlikely fighters. Choose your
 date: 2025-08-29
 weight: 9
 showHero: true
-draft: false
+draft: true
 
 # externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
 
