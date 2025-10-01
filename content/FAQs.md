@@ -9,7 +9,7 @@ showHero: false
 
 We’re proud to announce that after a couple of years of hosting board game, card game and RPG events, a few of us have decided to set up a new brand as a branch of the GWC family!
 
-Our plan with Dice Bastion is to keep hosting these events while hopefully reaching out to the wider gaming community in Gibraltar who aren’t necessarily familiar with Warhammer. We’ll be setting up our own website to post our upcoming events as well as post other games related content like board game reviews and tournament reports. 
+Dice Bastion will keep hosting these events while giving us the chance to make game related content like board game reviews and tournament reports. We also hope this will help us reach out to the wider gaming community in Gibraltar who aren’t necessarily familiar with Warhammer, which will help us keep raising funds and improving the club for all players!
 
 
 
