@@ -1,10 +1,13 @@
 {{/* article-table.html — expects a slice of Pages */}}
 
-{{ $pages := . }}
+{{/* Filter out pages with no valid date (default 0001-01-01) */}}
+{{ $validPages := where . "Date" "ne" (time "0001-01-01") }}
+{{ $sortedPages := sort $validPages "Date" }}
+{{ $pages := first 5 $sortedPages }}
 
 {{ if gt (len $pages) 0 }}
 <div class="events-exportable" style="margin-top: 2rem;">
-  <button id="export-top4" type="button">Download top 4 rows (PNG)</button>
+  <button id="export-top5" type="button">Download top 5 rows (PNG)</button>
 
   <table id="events-table" style="
     width: 100%;
@@ -64,19 +67,17 @@
 (function() {
   function exportTopRowsAsImage({
     tableSelector = '#events-table',
-    filename = 'gib-events-top4',
+    filename = 'gib-events-top5',
     type = 'png',
     quality = 0.95,
-    rows = 4,
+    rows = 5,
     scale = 2
   } = {}) {
     const table = document.querySelector(tableSelector);
     if (!table) return;
 
-    // Clone original table
     const clone = table.cloneNode(true);
 
-    // Define column widths (image/date). Adjust to taste.
     const IMAGE_COL_PCT = 65;
     const DATE_COL_PCT  = 35;
 
@@ -89,39 +90,32 @@
     colgroup.appendChild(dateCol);
     clone.insertBefore(colgroup, clone.firstChild);
 
-    // Remove header rows
     const theads = clone.querySelectorAll('thead');
     theads.forEach(thead => thead.remove());
 
-    // Trim to first N rows
     Array.from(clone.tBodies).forEach(tbody => {
       const trs = Array.from(tbody.rows);
       trs.slice(rows).forEach(tr => tr.remove());
     });
 
-    // === Unified styling (single source of truth) ===
     const OUTER_BORDER = '#333';
     const ROW_BORDER   = '#A9B2BD';
-  const TABLE_BG = 'linear-gradient(145deg, #e2edf9 0%, #c5d9f1 100%)';
 
-    // Table frame + background
-  clone.style.cssText = `
-    width: 100%;
-    table-layout: fixed;
-    margin: 0;
-    border-spacing: 0;
-    border-collapse: collapse;
-    border: 2px solid ${OUTER_BORDER};
-  `;
+    clone.style.cssText = `
+      width: 100%;
+      table-layout: fixed;
+      margin: 0;
+      border-spacing: 0;
+      border-collapse: collapse;
+      border: 2px solid ${OUTER_BORDER};
+    `;
 
-    // Clear any cell backgrounds and margins (so gradient shows uniformly)
     clone.querySelectorAll('td, th').forEach(cell => {
       cell.style.background = 'transparent';
       cell.style.margin = '0';
-      cell.style.border = '0'; // reset any inherited borders
+      cell.style.border = '0';
     });
 
-    // Consistent row dividers (collapse-friendly): top border on every row except the first
     Array.from(clone.tBodies).forEach(tbody => {
       const rowsArr = Array.from(tbody.rows);
       rowsArr.forEach((tr, idx) => {
@@ -133,14 +127,12 @@
       });
     });
 
-    // Cell spacing and alignment
     clone.querySelectorAll('td').forEach(td => {
       td.style.verticalAlign = 'middle';
       td.style.padding = '8px';
       td.style.lineHeight = '1.2';
     });
 
-    // Image cell tightening (first column)
     clone.querySelectorAll('tr').forEach(tr => {
       const imageCell = tr.cells[0];
       if (imageCell) {
@@ -149,7 +141,6 @@
       }
     });
 
-    // Image rendering: remove baseline gap and keep within cell
     clone.querySelectorAll('td img').forEach(img => {
       img.style.display = 'block';
       img.style.margin = '0 auto';
@@ -158,25 +149,22 @@
       img.style.objectFit = 'contain';
     });
 
-    // Offscreen container
     const container = document.createElement('div');
-container.style.cssText = `
-  position: fixed;
-  left: -99999px;
-  top: 0;
-  width: 800px;
-  height: auto;
-  display: flex;
-  background: linear-gradient(145deg, #e2edf9, #c5d9f1);
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: 0;
-  margin: 0;
-`;
+    container.style.cssText = `
+      position: fixed;
+      left: -99999px;
+      top: 0;
+      width: 800px;
+      height: auto;
+      display: flex;
+      background: linear-gradient(145deg, #e2edf9, #c5d9f1);
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 0;
+      margin: 0;
+    `;
 
-
-    // Wrap and style the cloned table
     const wrapper = document.createElement('div');
     wrapper.style.cssText = `
       width: 100%;
@@ -189,7 +177,6 @@ container.style.cssText = `
     container.appendChild(wrapper);
     document.body.appendChild(container);
 
-    // Render to image
     html2canvas(container, {
       backgroundColor: null,
       scale,
@@ -212,9 +199,8 @@ container.style.cssText = `
     });
   }
 
-  // Button trigger
   window.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('export-top4');
+    const btn = document.getElementById('export-top5');
     if (btn) {
       btn.addEventListener('click', () => {
         exportTopRowsAsImage();
