@@ -3,7 +3,7 @@ title: Upcoming Events
 layout: "simple"
 showHero: false
 description: Events for Tabletop Enthusiasts. Magic The Gathering drafts, Board Game Days, Warhammer Tournaments, Dungeons & Dragons Campaigns, all in a welcoming community space.
-draft: true
+draft: false
 
 ---
 <!-- Cards changed with {{ $articleClasses := "flex flex-wrap article" }} -->
