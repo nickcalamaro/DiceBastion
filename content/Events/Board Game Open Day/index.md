@@ -4,7 +4,7 @@ summary: "Our monthly board game open day! Bring down your favourite games or ch
 # fuzzyDate: "every first sunday"
 date: 2025-11-09
 showHero: false
-# externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
+externalUrl: 'https://calendar.app.google/qnCyYNYNCRFKAXJo7'
 draft: false
 
 ---
