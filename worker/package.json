@@ -1,0 +1,9 @@
+{
+  "name": "dicebastion-memberships-worker",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "dependencies": {
+    "hono": "^4.6.4"
+  }
+}
