@@ -6,7 +6,7 @@ date: 2025-11-18
 weight: 4
 showHero: true
 draft: false
-# externalUrl: "https://gibraltarwarhammerclub.simplybook.it/v2/#book"
+externalUrl: 'https://calendar.app.google/YqVkUnLnGjxdvQVD6'
 showPagination: false
 ---
 
