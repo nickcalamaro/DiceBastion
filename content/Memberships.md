@@ -8,18 +8,11 @@ showDate: false
 
 <meta name="description" content="Become a member of Dice Bastion Gibraltar and enjoy local discounts, free venue access, and exclusive support for our board game, card game, RPG, and wargame events.">
 
-Gibraltar Dice Bastion is completely funded by our members!
+<b>Gibraltar Dice Bastion is completely funded by our members!</b>
 
-If you'd like to support us, free bookings for game tables, and a whole range of other benefits, please consider becoming a member!
+If you'd like to support us, get free bookings for game tables, and a whole range of other benefits, please consider becoming a member!
 
-  <!-- Pricing / Plans (revamped for better UX) -->
-  <section id="membership-plans" style="max-width: 1100px; margin: 2rem auto; padding: 0 16px;">
-    <header style="text-align:center; margin-bottom: 1rem;">
-      <h2 style="margin:0; font-size:2rem;">Join Dice Bastion</h2>
-      <p style="margin:0.5rem 0 0; color:#333;">Free table bookings, local discounts, and member-only perks. Choose a plan and get started in seconds.</p>
-    </header>
-
-  <div class="plans-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items:stretch;">
+  <div class="plans-grid" id="membership-plans" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items:stretch;">
   <!-- Monthly -->
   <div class="plan-card" data-plan="monthly" style="background:linear-gradient(180deg,#ffffff,#f9f9f9); border:1px solid #eaeaea; border-radius:12px; padding:18px; box-shadow:0 4px 14px rgba(0,0,0,0.06); display:flex; flex-direction:column;">
     <div style="font-weight:700; color: rgb(var(--color-primary-600)); font-size:0.85rem;">Most flexible</div>
@@ -47,7 +40,7 @@ If you'd like to support us, free bookings for game tables, and a whole range of
     </div>
     <ul style="list-style: none; padding:0; margin:0 0 12px; color:#333; line-height:1.5;">
       <li>Free table bookings</li>
-      <li>Local discounts (Domino’s, Imperial Newsagents, Music Corner, Euphoria)</li>
+      <li>Local discounts (Dominos, Imperial Newsagents, Music Corner, Euphoria)</li>
       <li>Discounts on club events</li>
       <li>Free drinks at selected events</li>
     </ul>
@@ -66,7 +59,7 @@ If you'd like to support us, free bookings for game tables, and a whole range of
     </div>
     <ul style="list-style: none; padding:0; margin:0 0 12px; color:#333; line-height:1.5;">
       <li>All quarterly benefits</li>
-      <li>~10% cheaper than paying quarterly</li>
+      <li>10% cheaper than paying quarterly</li>
     </ul>
     <button class="cta" data-plan="annual" style="margin-top:auto; padding:10px 12px; border:none; border-radius:8px; background: rgb(var(--color-primary-500)); color:#fff; font-weight:700; cursor:pointer;">
       Join Annual
@@ -88,17 +81,31 @@ If you'd like to support us, free bookings for game tables, and a whole range of
 
 <!-- SumUp modal with email step -->
 <div id="sumup-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:12px; width:min(520px, 92vw); padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.35); position:relative;">
-    <button id="sumup-close" type="button" aria-label="Close" style="position:absolute; right:8px; top:8px; background:transparent; border:none; font-size:20px; cursor:pointer;">×</button>
-    <h3 style="margin:0 0 10px;">Complete your membership</h3>
-    <div id="sumup-email-step" style="display:block;">
-      <label for="modal-email" style="display:block; margin:8px 0 6px;">Email</label>
-      <input id="modal-email" type="email" placeholder="you@example.com" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px;">
-      <button id="modal-continue" type="button" style="margin-top:10px; padding:10px 12px; border:none; border-radius:8px; background: rgb(var(--color-primary-500)); color:#fff; font-weight:700; cursor:pointer; width:100%;">Continue</button>
-    </div>
-    <div id="sumup-card" style="display:none; margin-top: 8px;"></div>
-    <div id="sumup-error" style="display:none; margin-top: 8px; color: #b00020;"></div>
+<div style="background:#fff; border-radius:12px; width:min(520px, 92vw); padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.35); position:relative;">
+<button id="sumup-close" type="button" aria-label="Close" style="position:absolute; right:8px; top:8px; background:transparent; border:none; font-size:20px; cursor:pointer;">×</button>
+<h3 style="margin:0 0 10px;">Complete your membership</h3>
+<div id="sumup-email-step" style="display:block;">
+  <!-- Added: Full name -->
+  <label for="modal-name" style="display:block; margin:8px 0 6px;">Full name</label>
+  <input id="modal-name" type="text" placeholder="Your full name" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px;">
+
+  <label for="modal-email" style="display:block; margin:12px 0 6px;">Email</label>
+  <input id="modal-email" type="email" placeholder="you@example.com" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px;">
+
+  <!-- Added: Privacy consent checkbox -->
+  <div style="margin-top:12px; display:flex; gap:8px; align-items:flex-start;">
+    <input id="modal-privacy" type="checkbox" style="margin-top:3px;">
+    <label for="modal-privacy" style="line-height:1.4;">
+      I agree to the
+      <a href="/privacy-policy/" target="_blank" rel="noopener" style="color: rgb(var(--color-primary-600)); text-decoration: underline;">Privacy Policy</a>.
+    </label>
   </div>
+
+  <button id="modal-continue" type="button" style="margin-top:10px; padding:10px 12px; border:none; border-radius:8px; background: rgb(var(--color-primary-500)); color:#fff; font-weight:700; cursor:pointer; width:100%;">Continue</button>
+</div>
+<div id="sumup-card" style="display:none; margin-top: 8px;"></div>
+<div id="sumup-error" style="display:none; margin-top: 8px; color: #b00020;"></div>
+</div>
 </div>
 
 <script>
@@ -107,20 +114,29 @@ If you'd like to support us, free bookings for game tables, and a whole range of
 
   const qs = new URLSearchParams(window.location.search);
   const orderRef = qs.get('orderRef');
-  const plansGrid = document.getElementById('membership-plans');
+  const plansGrid = document.getElementById('membership-plans') || document.querySelector('.plans-grid');
 
   const modalEl = document.getElementById('sumup-modal');
   const modalClose = document.getElementById('sumup-close');
   const emailStepEl = document.getElementById('sumup-email-step');
+  const modalNameEl = document.getElementById('modal-name'); // added
   const modalEmailEl = document.getElementById('modal-email');
+  const privacyEl = document.getElementById('modal-privacy'); // added
   const modalContinueBtn = document.getElementById('modal-continue');
   const sumupCardEl = document.getElementById('sumup-card');
   const sumupErr = document.getElementById('sumup-error');
 
   let pendingPlan = null;
 
+  // Helper to clear any visible error banner
+  function clearError(){
+    if (!sumupErr) return;
+    sumupErr.textContent = '';
+    sumupErr.style.display = 'none';
+  }
+
   function openModal(){ if (modalEl) modalEl.style.display = 'flex'; }
-  function closeModal(){ if (modalEl) modalEl.style.display = 'none'; if (sumupCardEl) { sumupCardEl.innerHTML = ''; sumupCardEl.style.display='none'; } if (emailStepEl) emailStepEl.style.display='block'; if (sumupErr){ sumupErr.textContent=''; sumupErr.style.display='none'; } }
+  function closeModal(){ if (modalEl) modalEl.style.display = 'none'; if (sumupCardEl) { sumupCardEl.innerHTML = ''; sumupCardEl.style.display='none'; } if (emailStepEl) emailStepEl.style.display='block'; if (sumupErr){ sumupErr.textContent=''; sumupErr.style.display='none'; } if (privacyEl) privacyEl.checked = false; if (modalNameEl) modalNameEl.value=''; if (modalEmailEl) modalEmailEl.value=''; }
   modalClose && modalClose.addEventListener('click', closeModal);
 
   async function loadSumUpSdk(){
@@ -140,6 +156,13 @@ If you'd like to support us, free bookings for game tables, and a whole range of
     sumupErr.textContent = msg || 'Payment error. Please try again.';
     sumupErr.style.display = 'block';
   }
+
+  // Clear errors as users correct inputs
+  [modalNameEl, modalEmailEl, privacyEl].forEach(el => {
+    if (!el) return;
+    const evt = el.type === 'checkbox' ? 'change' : 'input';
+    el.addEventListener(evt, clearError);
+  });
 
   async function confirmOrder(ref){
     const maxAttempts = 15;
@@ -163,13 +186,10 @@ If you'd like to support us, free bookings for game tables, and a whole range of
   }
 
   async function mountSumUpWidget(checkoutId, ref){
+    try { await loadSumUpSdk(); } catch (e) { showError('Could not load payment widget.'); return; }
     try {
-      await loadSumUpSdk();
-    } catch (e) {
-      showError('Could not load payment widget.');
-      return;
-    }
-    try {
+      // Hide any prior warnings when moving into the payment step
+      clearError();
       emailStepEl.style.display = 'none';
       sumupCardEl.style.display = 'block';
       sumupCardEl.innerHTML = '';
@@ -184,53 +204,48 @@ If you'd like to support us, free bookings for game tables, and a whole range of
           }
         }
       });
-    } catch (e) {
-      showError('Could not start payment.');
-    }
+    } catch (e) { showError('Could not start payment.'); }
   }
 
-  async function startCheckout(plan, email){
+  async function startCheckout(plan, email, name, privacyConsent){
     try {
+      // Clear any prior validation messages before starting checkout
+      clearError();
       const resp = await fetch(`${API_BASE}/membership/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, plan })
+        body: JSON.stringify({ email, name, plan, privacyConsent })
       });
       const data = await resp.json();
-      if (!resp.ok) {
-        const msg = data?.message || data?.error || 'Unknown error';
-        showError(`Checkout failed: ${msg}`);
-        return;
-      }
-      if (data.checkoutId) {
-        await mountSumUpWidget(data.checkoutId, data.orderRef);
-        return;
-      }
+      if (!resp.ok) { const msg = data?.message || data?.error || 'Unknown error'; showError(`Checkout failed: ${msg}`); return; }
+      if (data.checkoutId) { await mountSumUpWidget(data.checkoutId, data.orderRef); return; }
       showError('Failed to create in-page checkout.');
-    } catch (e) {
-      showError('Checkout error.');
-    }
+    } catch (e) { showError('Checkout error.'); }
   }
 
-  // Handle clicks on plan CTAs: open modal, request email, then proceed
+  // Attach Continue handler to validate and proceed
+  modalContinueBtn && modalContinueBtn.addEventListener('click', async () => {
+    const email = (modalEmailEl && modalEmailEl.value || '').trim();
+    const name = (modalNameEl && modalNameEl.value || '').trim();
+    const consent = !!(privacyEl && privacyEl.checked);
+    if (!name) { showError('Please enter your full name.'); return; }
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) { showError('Please enter a valid email.'); return; }
+    if (!consent) { showError('Please agree to the Privacy Policy to continue.'); return; }
+    if (!pendingPlan) { showError('Please select a membership plan.'); return; }
+    clearError();
+    await startCheckout(pendingPlan, email, name, consent);
+  });
+
+  // Handle clicks on plan CTAs: open modal
   plansGrid && plansGrid.addEventListener('click', (e) => {
     const btn = e.target.closest('button.cta[data-plan]');
     if (!btn) return;
     pendingPlan = btn.dataset.plan;
     openModal();
-    if (modalEmailEl) {
-      modalEmailEl.focus();
-    }
+    if (modalNameEl) modalNameEl.focus();
   });
 
-  // Continue after entering email
-  modalContinueBtn && modalContinueBtn.addEventListener('click', async () => {
-    const email = (modalEmailEl && modalEmailEl.value || '').trim();
-    if (!email) { showError('Please enter a valid email to continue.'); return; }
-    await startCheckout(pendingPlan, email);
-  });
-
-  // Dynamic pricing: populate prices and CTA labels from /membership/plans
+  // Dynamic pricing remains unchanged
   async function populatePlans(){
     try {
       const resp = await fetch(`${API_BASE}/membership/plans`, { credentials: 'omit' });

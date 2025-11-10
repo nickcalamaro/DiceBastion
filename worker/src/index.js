@@ -101,50 +101,48 @@ async function fetchPayment(env, paymentId) {
 // Create checkout and pending membership
 app.post('/membership/checkout', async (c) => {
   try {
-    const { email, name, plan } = await c.req.json()
-    if (!email || !plan) return c.json({ error: 'email and plan required' }, 400)
-    // Removed hardcoded plan whitelist; rely on services table
-    if (!c.env.SUMUP_MERCHANT_CODE) return c.json({ error: 'missing_merchant_code' }, 500)
+    const { email, name, plan, privacyConsent } = await c.req.json()
+    if (!email || !plan) return c.json({ error: 'missing_fields' }, 400)
+    if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
 
+    // Ensure member exists (capture name on first creation)
     const member = await getOrCreateMember(c.env.DB, email, name)
-    const svc = await getServiceForPlan(c.env.DB, plan)
-    if (!svc) return c.json({ error: 'plan_not_configured', plan }, 400)
 
+    // Load plan from DB
+    const svc = await getServiceForPlan(c.env.DB, plan)
+    if (!svc) return c.json({ error: 'unknown_plan' }, 400)
+
+    const amount = Number(svc.amount)
+    const currency = svc.currency || c.env.CURRENCY || 'GBP'
     const order_ref = crypto.randomUUID()
+
+    // Insert pending membership
     await c.env.DB.prepare(
       'INSERT INTO memberships (member_id, plan, status, order_ref) VALUES (?, ?, "pending", ?)'
     ).bind(member.id, plan, order_ref).run()
 
+    // Create SumUp checkout
     let checkout
     try {
       checkout = await createCheckout(c.env, {
-        amount: svc.amount,
-        currency: svc.currency || c.env.CURRENCY || 'GBP',
+        amount,
+        currency,
         orderRef: order_ref,
-        title: svc.name || `Dice Bastion ${plan}`,
-        description: svc.description || `Purchase: ${svc.name || plan}`
+        title: `Dice Bastion ${plan} membership`,
+        description: `Membership for ${plan}`
       })
     } catch (err) {
-      console.error('SumUp createCheckout failed:', err?.message || err)
       return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
     }
 
+    // Save checkout id
     await c.env.DB.prepare('UPDATE memberships SET checkout_id = ? WHERE order_ref = ?')
       .bind(checkout.id, order_ref)
       .run()
 
-    let checkoutUrl = checkout.checkout_url
-    if (!checkoutUrl) {
-      try {
-        const fresh = await fetchPayment(c.env, checkout.id)
-        checkoutUrl = fresh.checkout_url || fresh.redirect_url || null
-      } catch (e) {}
-    }
-    if (!checkoutUrl) checkoutUrl = `https://checkout.sumup.com/${checkout.id}`
-
-    return c.json({ orderRef: order_ref, checkoutId: checkout.id, checkoutUrl })
+    // Use widget (no redirect)
+    return c.json({ orderRef: order_ref, checkoutId: checkout.id })
   } catch (e) {
-    console.error('checkout endpoint error:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
