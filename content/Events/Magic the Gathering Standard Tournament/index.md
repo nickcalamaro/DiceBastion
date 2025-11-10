@@ -2,6 +2,8 @@
 Title: MTG - Standard Tournament
 Date: 2025-11-01
 Summary: 'Gibraltar&apos;s biggest MTG Tournament to Date! Featuring over £250 in prizes and a great day of friendly competition.'
+draft: true
+
 ---
 
 

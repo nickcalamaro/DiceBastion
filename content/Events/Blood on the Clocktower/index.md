@@ -5,5 +5,5 @@ summary: "Join us for a night of murder, mystery and deception! You’ll receive
 date: 2025-10-29
 weight: 25
 externalUrl: 'https://calendar.app.google/B6zpu2dmXw2FVguZ7'
-
+draft: true
 ---
