@@ -1,0 +1,171 @@
+{{/* eventPurchase shortcode: usage: {{< eventPurchase id="123" sitekey="YOUR_TURNSTILE_SITE_KEY" >}} */}}
+<!-- Renders a ticket purchase button + modal using SumUp in-page widget -->
+<!-- Requires worker endpoints /events/:id, /events/:id/checkout, /events/confirm -->
+
+<div class="event-purchase" data-event-id="{{ .Get "id" }}" style="margin:24px 0;">
+  <div class="event-ticket-box" style="border:1px solid #e3e3e3; border-radius:12px; padding:16px; background:#fff; box-shadow:0 4px 16px rgba(0,0,0,0.06); max-width:560px;">
+    <h3 style="margin:0 0 8px; font-size:1.25rem; font-weight:700; color: rgb(var(--color-primary-700));">Get a Ticket</h3>
+    <div class="event-prices" style="display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+      <div style="flex:1; min-width:140px;">
+        <div style="font-size:0.7rem; font-weight:600; text-transform:uppercase; color:#555; letter-spacing:.5px;">Member Price</div>
+        <div id="evt-member-price-{{ .Get "id" }}" style="font-size:1.4rem; font-weight:800;">–</div>
+      </div>
+      <div style="flex:1; min-width:160px;">
+        <div style="font-size:0.7rem; font-weight:600; text-transform:uppercase; color:#555; letter-spacing:.5px;">Non‑Member Price</div>
+        <div id="evt-nonmember-price-{{ .Get "id" }}" style="font-size:1.4rem; font-weight:800;">–</div>
+      </div>
+    </div>
+    <p style="margin:0 0 12px; font-size:0.9rem; color:#444;">Member discount is applied automatically if an active membership is found for your email.</p>
+    <button type="button" class="evt-buy-btn" data-event-id="{{ .Get "id" }}" style="padding:12px 18px; border:none; border-radius:9px; background: rgb(var(--color-primary-600)); color:#fff; font-weight:700; cursor:pointer; box-shadow:0 3px 10px rgba(0,0,0,0.15);">Buy Ticket</button>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="evt-modal" id="evt-modal-{{ .Get "id" }}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+  <div class="evt-modal-inner" style="background:#fff; width:min(520px,95vw); border-radius:14px; padding:20px 18px 24px; position:relative; box-shadow:0 10px 35px rgba(0,0,0,0.4);">
+    <button type="button" class="evt-close" aria-label="Close" style="position:absolute; top:10px; right:10px; background:transparent; border:none; font-size:22px; cursor:pointer;">×</button>
+    <h3 style="margin:0 0 12px; font-size:1.15rem; font-weight:700;">Ticket Checkout</h3>
+    <div class="evt-step evt-details" style="display:block;">
+      <label style="display:block; margin:6px 0 4px; font-weight:600;">Full name</label>
+      <input type="text" class="evt-name" placeholder="Jane Doe" style="width:100%; padding:10px; border:1px solid #d0d0d0; border-radius:8px;">
+      <label style="display:block; margin:12px 0 4px; font-weight:600;">Email</label>
+      <input type="email" class="evt-email" placeholder="you@example.com" style="width:100%; padding:10px; border:1px solid #d0d0d0; border-radius:8px;">
+      <div style="margin-top:12px; display:flex; gap:8px; align-items:flex-start; font-size:0.85rem; line-height:1.3;">
+        <input type="checkbox" class="evt-privacy" style="margin-top:3px;">
+        <label>I agree to the <a href="/privacy-policy/" target="_blank" rel="noopener" style="color: rgb(var(--color-primary-600)); text-decoration: underline;">Privacy Policy</a>.</label>
+      </div>
+      <div style="margin-top:12px;">
+        <div style="font-size:0.85rem; color:#444; margin-bottom:6px;">Security check</div>
+        <div id="evt-ts-{{ .Get "id" }}" class="cf-turnstile" data-sitekey="{{ .Get "sitekey" | default "0x4AAAAAACAB4xlOnW3S8K0k" }}" data-size="flexible"></div>
+      </div>
+      <button type="button" class="evt-continue" style="margin-top:14px; width:100%; padding:12px; border:none; border-radius:9px; background: rgb(var(--color-primary-600)); color:#fff; font-weight:700; cursor:pointer;">Continue to Payment</button>
+    </div>
+    <div id="evt-card-{{ .Get "id" }}" class="evt-card" style="display:none; margin-top:8px;"></div>
+    <div class="evt-error" style="display:none; margin-top:10px; color:#b00020; font-size:0.85rem; font-weight:600;"></div>
+    <div class="evt-success" style="display:none; margin-top:14px; padding:12px; background:#e9fbe9; border:1px solid #b9e8b9; border-radius:8px; color:#1a5d1a; font-weight:600;">Ticket confirmed! See you there.</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const API_BASE = (window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev').replace(/\/+$/,'');
+  const eventId = '{{ .Get "id" }}';
+  const TS_SITE_KEY = '{{ .Get "sitekey" | default "0x4AAAAAACAB4xlOnW3S8K0k" }}';
+  if(!eventId) return;
+
+  const root = document.querySelector('.event-purchase[data-event-id="'+eventId+'"]');
+  const memberPriceEl = document.getElementById('evt-member-price-'+eventId);
+  const nonMemberPriceEl = document.getElementById('evt-nonmember-price-'+eventId);
+  const modal = document.getElementById('evt-modal-'+eventId);
+  const cardEl = document.getElementById('evt-card-'+eventId);
+
+  function showError(msg){
+    const el = modal && modal.querySelector('.evt-error');
+    if(!el) return; el.textContent = msg || 'Error'; el.style.display='block';
+  }
+  function clearError(){ const el = modal && modal.querySelector('.evt-error'); if(el){ el.textContent=''; el.style.display='none'; } }
+  function showSuccess(){ const el = modal && modal.querySelector('.evt-success'); if(el){ el.style.display='block'; } }
+
+  async function loadEvent(){
+    try {
+      const r = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId));
+      const j = await r.json();
+      if(!r.ok || !j.event){ showError('Event not found'); return; }
+      const ev = j.event;
+      const sym = (c) => ({ GBP:'£', EUR:'€', USD:'$' }[String(c||'').toUpperCase()] || '');
+      if(memberPriceEl) memberPriceEl.textContent = sym('GBP') + String(ev.membership_price);
+      if(nonMemberPriceEl) nonMemberPriceEl.textContent = sym('GBP') + String(ev.non_membership_price);
+    } catch(e){ showError('Failed loading event'); }
+  }
+
+  async function loadSumUpSdk(){
+    if(window.SumUpCard) return true;
+    return new Promise((res,rej)=>{
+      const s=document.createElement('script'); s.src='https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js'; s.async=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('SumUp SDK load failed')); document.head.appendChild(s);
+    });
+  }
+
+  function loadTurnstileSdk(){
+    if (window.turnstile) return Promise.resolve(true);
+    return new Promise((res,rej)=>{
+      const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s);
+    });
+  }
+
+  async function getTurnstileToken(){
+    await loadTurnstileSdk();
+    const tsEl = document.getElementById('evt-ts-'+eventId);
+    if (!tsEl || !window.turnstile) throw new Error('Turnstile not ready');
+    const token = window.turnstile.getResponse(tsEl);
+    if (!token) throw new Error('Please complete the security check.');
+    return token;
+  }
+
+  async function confirm(ref){
+    const attempts=15; for(let i=0;i<attempts;i++){
+      try { const r = await fetch(API_BASE + '/events/confirm?orderRef=' + encodeURIComponent(ref)); const j = await r.json(); if(j.ok && j.status==='active'){ showSuccess(); return true; } if(j.status && String(j.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e) {}
+      await new Promise(r=>setTimeout(r,1500));
+    }
+    showError('Payment still processing. Refresh soon.');
+    return false;
+  }
+
+  async function mountWidget(checkoutId, orderRef){
+    try { await loadSumUpSdk(); } catch(e){ showError('Payment widget failed.'); return; }
+    try {
+      clearError();
+      cardEl.style.display='block';
+      modal.querySelector('.evt-details').style.display='none';
+      cardEl.innerHTML='';
+      window.SumUpCard.mount({ id: 'evt-card-'+eventId, checkoutId, onResponse: async (type) => {
+        if(type && String(type).toLowerCase()==='success'){ await confirm(orderRef); } else { showError('Payment failed'); }
+      }});
+    } catch(e){ showError('Could not start payment'); }
+  }
+
+  function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now()) + '-' + Math.random().toString(36).slice(2); } }
+
+  async function startCheckout(email,name,privacy,turnstileToken){
+    clearError();
+    let resp; try {
+      resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/checkout', { method:'POST', headers:{'Content-Type':'application/json','Idempotency-Key': newIdempotencyKey() }, body: JSON.stringify({ email, name, privacyConsent: privacy, turnstileToken }) });
+    } catch(e){ showError('Network error'); return; }
+    const data = await resp.json();
+    if(!resp.ok){ showError(data?.message || data?.error || 'Checkout failed'); return; }
+    if(data.checkoutId){ mountWidget(data.checkoutId, data.orderRef); return; }
+    showError('Missing checkout ID');
+  }
+
+  function openModal(){ if(modal){ modal.style.display='flex'; const nameInput = modal.querySelector('.evt-name'); if(nameInput) nameInput.focus(); loadTurnstileSdk().catch(()=>{}); } }
+  function closeModal(){ if(modal){ modal.style.display='none'; const d = modal.querySelector('.evt-details'); if(d) d.style.display='block'; if(cardEl){ cardEl.innerHTML=''; cardEl.style.display='none'; } clearError(); const s=modal.querySelector('.evt-success'); if(s) s.style.display='none'; modal.querySelector('.evt-name').value=''; modal.querySelector('.evt-email').value=''; modal.querySelector('.evt-privacy').checked=false; if (window.turnstile) { try { window.turnstile.reset('#evt-ts-'+eventId); } catch(_){} } } }
+
+  root && root.querySelector('.evt-buy-btn')?.addEventListener('click', async () => { openModal(); });
+  modal && modal.querySelector('.evt-close')?.addEventListener('click', closeModal);
+
+  const contBtn = modal && modal.querySelector('.evt-continue');
+  contBtn && contBtn.addEventListener('click', async () => {
+    const name = modal.querySelector('.evt-name').value.trim();
+    const email = modal.querySelector('.evt-email').value.trim();
+    const privacy = modal.querySelector('.evt-privacy').checked;
+    if(!name){ showError('Enter your full name'); return; }
+    if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showError('Enter a valid email'); return; }
+    if(!privacy){ showError('Please agree to the Privacy Policy'); return; }
+    clearError();
+    contBtn.disabled = true;
+    let token; try { token = await getTurnstileToken(); } catch(e){ showError(e.message || 'Security check failed.'); contBtn.disabled = false; return; }
+    contBtn.disabled = false;
+    startCheckout(email,name,privacy,token);
+  });
+
+  ['input','change'].forEach(ev => {
+    ['.evt-name','.evt-email','.evt-privacy'].forEach(sel => {
+      const el = modal && modal.querySelector(sel); if(el) el.addEventListener(ev, clearError);
+    });
+  });
+
+  const qs = new URLSearchParams(location.search); const ref = qs.get('orderRef');
+  if(ref){ confirm(ref).then(()=>{ const u=new URL(location.href); u.searchParams.delete('orderRef'); history.replaceState({},'',u); }); }
+
+  loadEvent();
+})();
+</script>
