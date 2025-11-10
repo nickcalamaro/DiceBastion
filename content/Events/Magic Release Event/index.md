@@ -6,8 +6,9 @@ date: 2025-11-19
 weight: 4
 showHero: true
 draft: false
-externalUrl: 'https://calendar.app.google/YqVkUnLnGjxdvQVD6'
+# externalUrl: 'https://calendar.app.google/YqVkUnLnGjxdvQVD6'
 showPagination: false
 ---
 
 
+{{< eventPurchase id="42" >}}
