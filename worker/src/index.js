@@ -6,7 +6,7 @@ app.use('*', async (c, next) => {
   const allowed = (c.env.ALLOWED_ORIGIN || '').split(',').map(s=>s.trim()).filter(Boolean)
   const origin = c.req.header('Origin')
   const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
-  const allowOrigin = (origin && allowed.includes(origin)) ? origin : (allowed.length ? allowed[0] : '')
+  const allowOrigin = (origin && allowed.includes(origin)) ? origin : ''
   if (allowOrigin) c.res.headers.set('Access-Control-Allow-Origin', allowOrigin)
   c.res.headers.set('Vary','Origin')
   c.res.headers.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key')
@@ -49,6 +49,53 @@ async function getSchema(db){
   }
   __schemaCache = { fkColumn, identityTable }
   return __schemaCache
+}
+
+async function ensureSchema(db, fkColumn){
+  // memberships columns
+  try {
+    const mc = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
+    const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
+    const alter = []
+    if (!mnames.has('amount')) alter.push('ALTER TABLE memberships ADD COLUMN amount TEXT')
+    if (!mnames.has('currency')) alter.push('ALTER TABLE memberships ADD COLUMN currency TEXT')
+    if (!mnames.has('consent_at')) alter.push('ALTER TABLE memberships ADD COLUMN consent_at TEXT')
+    if (!mnames.has('idempotency_key')) alter.push('ALTER TABLE memberships ADD COLUMN idempotency_key TEXT')
+    if (!mnames.has('payment_status')) alter.push('ALTER TABLE memberships ADD COLUMN payment_status TEXT')
+    for (const sql of alter) { await db.prepare(sql).run().catch(()=>{}) }
+  } catch {}
+
+  // tickets table and columns
+  try {
+    // Create with full schema if missing
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER NOT NULL,
+        ${fkColumn} INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT "pending",
+        order_ref TEXT UNIQUE,
+        checkout_id TEXT,
+        payment_id TEXT,
+        amount TEXT,
+        currency TEXT,
+        consent_at TEXT,
+        idempotency_key TEXT,
+        payment_status TEXT,
+        created_at TEXT
+      )`
+    ).run()
+    const tc = await db.prepare('PRAGMA table_info(tickets)').all().catch(()=>({ results: [] }))
+    const tnames = new Set((tc?.results||[]).map(r => String(r.name||'').toLowerCase()))
+    const talter = []
+    if (!tnames.has('amount')) talter.push('ALTER TABLE tickets ADD COLUMN amount TEXT')
+    if (!tnames.has('currency')) talter.push('ALTER TABLE tickets ADD COLUMN currency TEXT')
+    if (!tnames.has('consent_at')) talter.push('ALTER TABLE tickets ADD COLUMN consent_at TEXT')
+    if (!tnames.has('idempotency_key')) talter.push('ALTER TABLE tickets ADD COLUMN idempotency_key TEXT')
+    if (!tnames.has('payment_status')) talter.push('ALTER TABLE tickets ADD COLUMN payment_status TEXT')
+    if (!tnames.has('created_at')) talter.push('ALTER TABLE tickets ADD COLUMN created_at TEXT')
+    for (const sql of talter) { await db.prepare(sql).run().catch(()=>{}) }
+  } catch {}
 }
 
 async function findIdentityByEmail(db, email){
@@ -145,6 +192,9 @@ app.post('/membership/checkout', async (c) => {
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error:'invalid_amount' },400)
     const currency = svc.currency || c.env.CURRENCY || 'GBP'
     const s = await getSchema(c.env.DB)
+
+    // Ensure columns exist before using them
+    await ensureSchema(c.env.DB, s.fkColumn)
 
     // Idempotency reuse
     if (idem){
@@ -279,6 +329,9 @@ app.post('/events/:id/checkout', async c => {
     const currency = c.env.CURRENCY || 'GBP'
     const s = await getSchema(c.env.DB)
 
+    // Ensure columns/table exist
+    await ensureSchema(c.env.DB, s.fkColumn)
+
     if (idem){
       const existing = await c.env.DB.prepare(`SELECT * FROM tickets WHERE event_id = ? AND ${s.fkColumn} = ? AND status = "pending" AND idempotency_key = ? ORDER BY id DESC LIMIT 1`).bind(id, ident.id, idem).first()
       if (existing && existing.checkout_id){
@@ -287,8 +340,8 @@ app.post('/events/:id/checkout', async c => {
     }
 
     const order_ref = `EVT-${id}-${crypto.randomUUID()}`
-    await c.env.DB.prepare(`INSERT INTO tickets (event_id,${s.fkColumn},status,order_ref,amount,currency,consent_at,idempotency_key) VALUES (?,?,?,?,?,?,?,?)`)
-      .bind(id, ident.id, 'pending', order_ref, String(amount), currency, toIso(new Date()), idem || null).run()
+    await c.env.DB.prepare(`INSERT INTO tickets (event_id,${s.fkColumn},status,order_ref,amount,currency,consent_at,idempotency_key,created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+      .bind(id, ident.id, 'pending', order_ref, String(amount), currency, toIso(new Date()), idem || null, toIso(new Date())).run()
 
     let checkout
     try {
