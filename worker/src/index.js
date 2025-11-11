@@ -138,7 +138,9 @@ async function createCheckout(env, { amount, currency, orderRef, title, descript
   const body = { amount: Number(amount), currency, checkout_reference: orderRef, merchant_code: env.SUMUP_MERCHANT_CODE, description: description || title, return_url: returnUrl.toString() }
   const res = await fetch('https://api.sumup.com/v0.1/checkouts', { method: 'POST', headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!res.ok) { const txt = await res.text(); throw new Error(`Create checkout failed: ${txt}`) }
-  return res.json()
+  const json = await res.json()
+  if (!json || !json.id) throw new Error('missing_checkout_id')
+  return json
 }
 
 async function fetchPayment(env, paymentId) {
@@ -215,7 +217,10 @@ app.post('/membership/checkout', async (c) => {
       console.error('sumup checkout error', err)
       return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
     }
-
+    if (!checkout.id) {
+      console.error('membership checkout missing id', checkout)
+      return c.json({ error: 'sumup_missing_id' }, 502)
+    }
     await c.env.DB.prepare('UPDATE memberships SET checkout_id = ? WHERE order_ref = ?').bind(checkout.id, order_ref).run()
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
   } catch (e) {
@@ -349,6 +354,10 @@ app.post('/events/:id/checkout', async c => {
     } catch (e) {
       console.error('SumUp checkout failed for event', id, e)
       return c.json({ error:'sumup_checkout_failed', message:String(e?.message||e) },502)
+    }
+    if (!checkout.id) {
+      console.error('event checkout missing id', checkout)
+      return c.json({ error: 'sumup_missing_id' }, 502)
     }
     await c.env.DB.prepare('UPDATE tickets SET checkout_id = ? WHERE order_ref = ?').bind(checkout.id, order_ref).run()
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
