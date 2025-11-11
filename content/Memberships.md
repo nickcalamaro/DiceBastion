@@ -101,6 +101,12 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     </label>
   </div>
 
+  <!-- Added: Turnstile widget -->
+  <div style="margin-top:12px;">
+    <div style="font-size:0.85rem; color:#444; margin-bottom:6px;">Security check</div>
+    <div id="mship-ts" class="cf-turnstile" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
+  </div>
+
   <button id="modal-continue" type="button" style="margin-top:10px; padding:10px 12px; border:none; border-radius:8px; background: rgb(var(--color-primary-500)); color:#fff; font-weight:700; cursor:pointer; width:100%;">Continue</button>
 </div>
 <div id="sumup-card" style="display:none; margin-top: 8px;"></div>
@@ -111,6 +117,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 <script>
 (function(){
   const API_BASE = (window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev').replace(/\/+$/,'');
+  const TS_SITE_KEY = (window.__DB_TS_SITE_KEY || '{{ with site.Params.turnstile_site_key }}{{ . }}{{ end }}' || (window.TURNSTILE_SITE_KEY || '0x4AAAAAACAB4xlOnW3S8K0k'));
 
   const qs = new URLSearchParams(window.location.search);
   const orderRef = qs.get('orderRef');
@@ -119,160 +126,42 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   const modalEl = document.getElementById('sumup-modal');
   const modalClose = document.getElementById('sumup-close');
   const emailStepEl = document.getElementById('sumup-email-step');
-  const modalNameEl = document.getElementById('modal-name'); // added
+  const modalNameEl = document.getElementById('modal-name');
   const modalEmailEl = document.getElementById('modal-email');
-  const privacyEl = document.getElementById('modal-privacy'); // added
+  const privacyEl = document.getElementById('modal-privacy');
   const modalContinueBtn = document.getElementById('modal-continue');
   const sumupCardEl = document.getElementById('sumup-card');
   const sumupErr = document.getElementById('sumup-error');
 
   let pendingPlan = null;
 
-  // Helper to clear any visible error banner
-  function clearError(){
-    if (!sumupErr) return;
-    sumupErr.textContent = '';
-    sumupErr.style.display = 'none';
-  }
-
-  function openModal(){ if (modalEl) modalEl.style.display = 'flex'; }
-  function closeModal(){ if (modalEl) modalEl.style.display = 'none'; if (sumupCardEl) { sumupCardEl.innerHTML = ''; sumupCardEl.style.display='none'; } if (emailStepEl) emailStepEl.style.display='block'; if (sumupErr){ sumupErr.textContent=''; sumupErr.style.display='none'; } if (privacyEl) privacyEl.checked = false; if (modalNameEl) modalNameEl.value=''; if (modalEmailEl) modalEmailEl.value=''; }
+  function clearError(){ if (!sumupErr) return; sumupErr.textContent = ''; sumupErr.style.display='none'; }
+  function openModal(){ if (modalEl) { modalEl.style.display='flex'; loadTurnstileSdk().catch(()=>{}); } }
+  function closeModal(){ if (modalEl) { modalEl.style.display='none'; if (sumupCardEl) { sumupCardEl.innerHTML=''; sumupCardEl.style.display='none'; } if (emailStepEl) emailStepEl.style.display='block'; if (sumupErr){ sumupErr.textContent=''; sumupErr.style.display='none'; } if (privacyEl) privacyEl.checked=false; if (modalNameEl) modalNameEl.value=''; if (modalEmailEl) modalEmailEl.value=''; if (window.turnstile) { try { window.turnstile.reset('#mship-ts'); } catch(_){} } } }
   modalClose && modalClose.addEventListener('click', closeModal);
 
-  async function loadSumUpSdk(){
-    if (window.SumUpCard) return true;
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js';
-      script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => reject(new Error('Failed to load SumUp SDK'));
-      document.head.appendChild(script);
-    });
-  }
+  async function loadSumUpSdk(){ if (window.SumUpCard) return true; return new Promise((resolve,reject)=>{ const s=document.createElement('script'); s.src='https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js'; s.async=true; s.onload=()=>resolve(true); s.onerror=()=>reject(new Error('Failed to load SumUp SDK')); document.head.appendChild(s); }); }
+  function showError(msg){ if (!sumupErr) return; sumupErr.textContent = msg || 'Payment error. Please try again.'; sumupErr.style.display='block'; }
 
-  function showError(msg){
-    if (!sumupErr) return;
-    sumupErr.textContent = msg || 'Payment error. Please try again.';
-    sumupErr.style.display = 'block';
-  }
+  [modalNameEl, modalEmailEl, privacyEl].forEach(el=>{ if(!el) return; const ev = el.type==='checkbox' ? 'change' : 'input'; el.addEventListener(ev, clearError); });
 
-  // Clear errors as users correct inputs
-  [modalNameEl, modalEmailEl, privacyEl].forEach(el => {
-    if (!el) return;
-    const evt = el.type === 'checkbox' ? 'change' : 'input';
-    el.addEventListener(evt, clearError);
-  });
+  function loadTurnstileSdk(){ if (window.turnstile) return Promise.resolve(true); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s); }); }
+  async function getTurnstileToken(){ await loadTurnstileSdk(); const el = document.getElementById('mship-ts'); if (!el || !window.turnstile) throw new Error('Security check not ready'); const t = window.turnstile.getResponse(el); if (!t) throw new Error('Please complete the security check.'); return t; }
 
-  async function confirmOrder(ref){
-    const maxAttempts = 15;
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        const resp = await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`, { credentials: 'omit' });
-        const data = await resp.json();
-        if (data.ok && data.status === 'active') {
-          closeModal();
-          return true;
-        }
-        if (data.status && String(data.status).toUpperCase() === 'PENDING') {
-          await new Promise(r => setTimeout(r, 1500));
-          continue;
-        }
-      } catch (e) {}
-      await new Promise(r => setTimeout(r, 1500));
-    }
-    showError('Payment is still processing. Please refresh this page shortly.');
-    return false;
-  }
+  async function confirmOrder(ref){ const maxAttempts=15; for(let i=0;i<maxAttempts;i++){ try { const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); const d=await r.json(); if(d.ok && d.status==='active'){ closeModal(); return true; } if(d.status && String(d.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e){} await new Promise(r=>setTimeout(r,1500)); } showError('Payment is still processing. Please refresh shortly.'); return false; }
 
-  async function mountSumUpWidget(checkoutId, ref){
-    try { await loadSumUpSdk(); } catch (e) { showError('Could not load payment widget.'); return; }
-    try {
-      // Hide any prior warnings when moving into the payment step
-      clearError();
-      emailStepEl.style.display = 'none';
-      sumupCardEl.style.display = 'block';
-      sumupCardEl.innerHTML = '';
-      window.SumUpCard.mount({
-        id: 'sumup-card',
-        checkoutId,
-        onResponse: async function(type){
-          if (type && String(type).toLowerCase() === 'success') {
-            await confirmOrder(ref);
-          } else {
-            showError('Payment failed. Please check your details and try again.');
-          }
-        }
-      });
-    } catch (e) { showError('Could not start payment.'); }
-  }
+  async function mountSumUpWidget(checkoutId, ref){ try { await loadSumUpSdk(); } catch(e){ showError('Could not load payment widget.'); return; } try { clearError(); emailStepEl.style.display='none'; sumupCardEl.style.display='block'; sumupCardEl.innerHTML=''; window.SumUpCard.mount({ id:'sumup-card', checkoutId, onResponse: async (type)=>{ if(type && String(type).toLowerCase()==='success'){ await confirmOrder(ref); } else { showError('Payment failed. Please try again.'); } } }); } catch(e){ showError('Could not start payment.'); } }
 
-  async function startCheckout(plan, email, name, privacyConsent){
-    try {
-      // Clear any prior validation messages before starting checkout
-      clearError();
-      const resp = await fetch(`${API_BASE}/membership/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, plan, privacyConsent })
-      });
-      const data = await resp.json();
-      if (!resp.ok) { const msg = data?.message || data?.error || 'Unknown error'; showError(`Checkout failed: ${msg}`); return; }
-      if (data.checkoutId) { await mountSumUpWidget(data.checkoutId, data.orderRef); return; }
-      showError('Failed to create in-page checkout.');
-    } catch (e) { showError('Checkout error.'); }
-  }
+  function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
 
-  // Attach Continue handler to validate and proceed
-  modalContinueBtn && modalContinueBtn.addEventListener('click', async () => {
-    const email = (modalEmailEl && modalEmailEl.value || '').trim();
-    const name = (modalNameEl && modalNameEl.value || '').trim();
-    const consent = !!(privacyEl && privacyEl.checked);
-    if (!name) { showError('Please enter your full name.'); return; }
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) { showError('Please enter a valid email.'); return; }
-    if (!consent) { showError('Please agree to the Privacy Policy to continue.'); return; }
-    if (!pendingPlan) { showError('Please select a membership plan.'); return; }
-    clearError();
-    await startCheckout(pendingPlan, email, name, consent);
-  });
+  async function startCheckout(plan, email, name, privacyConsent){ try { clearError(); const token = await getTurnstileToken(); const resp = await fetch(`${API_BASE}/membership/checkout`, { method:'POST', headers:{ 'Content-Type':'application/json', 'Idempotency-Key': newIdempotencyKey() }, body: JSON.stringify({ email, name, plan, privacyConsent, turnstileToken: token }) }); const data = await resp.json(); if(!resp.ok){ const msg = data?.message || data?.error || 'Unknown error'; showError(`Checkout failed: ${msg}`); return; } if(data.checkoutId){ await mountSumUpWidget(data.checkoutId, data.orderRef); return; } showError('Failed to create in-page checkout.'); } catch(e){ showError('Checkout error.'); } }
 
-  // Handle clicks on plan CTAs: open modal
-  plansGrid && plansGrid.addEventListener('click', (e) => {
-    const btn = e.target.closest('button.cta[data-plan]');
-    if (!btn) return;
-    pendingPlan = btn.dataset.plan;
-    openModal();
-    if (modalNameEl) modalNameEl.focus();
-  });
+  modalContinueBtn && modalContinueBtn.addEventListener('click', async () => { const email=(modalEmailEl&&modalEmailEl.value||'').trim(); const name=(modalNameEl&&modalNameEl.value||'').trim(); const consent=!!(privacyEl&&privacyEl.checked); if(!name){ showError('Please enter your full name.'); return; } if(!email || !/^\S+@\S+\.\S+$/.test(email)){ showError('Please enter a valid email.'); return; } if(!consent){ showError('Please agree to the Privacy Policy to continue.'); return; } if(!pendingPlan){ showError('Please select a membership plan.'); return; } clearError(); await startCheckout(pendingPlan,email,name,consent); });
 
-  // Dynamic pricing remains unchanged
-  async function populatePlans(){
-    try {
-      const resp = await fetch(`${API_BASE}/membership/plans`, { credentials: 'omit' });
-      const data = await resp.json();
-      const plans = (data && data.plans) || [];
-      const byCode = Object.fromEntries(plans.map(p => [p.code, p]));
-      const sym = c => ({ GBP:'£', EUR:'€', USD:'$' })[String(c||'').toUpperCase()] || '';
-      document.querySelectorAll('[data-price-for]')
-        .forEach(span => {
-          const code = span.getAttribute('data-price-for');
-          const svc = byCode[code];
-          if (!svc) return;
-          span.textContent = svc.amount || '';
-          const currencyEl = span.parentElement?.querySelector('.currency');
-          if (currencyEl && svc.currency) currencyEl.textContent = sym(svc.currency);
-        });
-    } catch (e) {}
-  }
+  plansGrid && plansGrid.addEventListener('click', (e)=>{ const btn = e.target.closest('button.cta[data-plan]'); if(!btn) return; pendingPlan = btn.dataset.plan; openModal(); if (modalNameEl) modalNameEl.focus(); });
 
-  (async () => {
-    populatePlans();
-    if (orderRef) {
-      await confirmOrder(orderRef);
-      const url = new URL(window.location.href);
-      url.searchParams.delete('orderRef');
-      window.history.replaceState({}, '', url);
-    }
-  })();
+  async function populatePlans(){ try { const resp = await fetch(`${API_BASE}/membership/plans`); const data = await resp.json(); const plans=(data&&data.plans)||[]; const byCode=Object.fromEntries(plans.map(p=>[p.code,p])); const sym=c=>({GBP:'£',EUR:'€',USD:'$'})[String(c||'').toUpperCase()]||''; document.querySelectorAll('[data-price-for]').forEach(span=>{ const code=span.getAttribute('data-price-for'); const svc=byCode[code]; if(!svc) return; span.textContent = svc.amount || ''; const currencyEl = span.parentElement?.querySelector('.currency'); if(currencyEl && svc.currency) currencyEl.textContent = sym(svc.currency); }); } catch(e){} }
+
+  (async()=>{ populatePlans(); if(orderRef){ await confirmOrder(orderRef); const url=new URL(window.location.href); url.searchParams.delete('orderRef'); window.history.replaceState({},'',url); } })();
 })();
 </script>

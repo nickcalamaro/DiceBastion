@@ -7,11 +7,13 @@ compatibility_date = "2024-10-01"
 # For local dev it will run at http://127.0.0.1:8787
 
 [vars]
-ALLOWED_ORIGIN = "http://localhost:1313,https://dicebastion.com,https://www.dicebastion.com"
-RETURN_URL = "http://localhost:1313,https://dicebastion.com,https://www.dicebastion.com/"
+ALLOWED_ORIGIN = "https://dicebastion.com"
+RETURN_URL = "https://dicebastion.com/thank-you"
 CURRENCY = "GBP"
 SUMUP_REGION = "UK"
 SUMUP_MERCHANT_CODE = "MUZHYEAH"
+TURNSTILE_SITE_KEY = "0x4AAAAAACAB4xlOnW3S8K0k"
+TURNSTILE_SECRET = "0x4AAAAAACAB41xceooY522cbKNKGVTP-iA"
 # The URL to redirect back to after SumUp checkout completes (success/cancel)
 
 [[d1_databases]]
