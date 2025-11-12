@@ -150,7 +150,30 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
   async function confirmOrder(ref){ const maxAttempts=15; for(let i=0;i<maxAttempts;i++){ try { const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); const d=await r.json(); if(d.ok && d.status==='active'){ closeModal(); return true; } if(d.status && String(d.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e){} await new Promise(r=>setTimeout(r,1500)); } showError('Payment is still processing. Please refresh shortly.'); return false; }
 
-  async function mountSumUpWidget(checkoutId, ref){ try { await loadSumUpSdk(); } catch(e){ showError('Could not load payment widget.'); return; } try { clearError(); emailStepEl.style.display='none'; sumupCardEl.style.display='block'; sumupCardEl.innerHTML=''; window.SumUpCard.mount({ id:'sumup-card', checkoutId, onResponse: async (type)=>{ if(type && String(type).toLowerCase()==='success'){ await confirmOrder(ref); } else { showError('Payment failed. Please try again.'); } } }); } catch(e){ showError('Could not start payment.'); } }
+  async function mountSumUpWidget(checkoutId, ref){
+    try { await loadSumUpSdk(); } catch(e){ showError('Could not load payment widget.'); return; }
+    try {
+      clearError();
+      emailStepEl.style.display = 'none';
+      sumupCardEl.style.display = 'block';
+      sumupCardEl.innerHTML = '';
+      window.SumUpCard.mount({
+        id:'sumup-card',
+        checkoutId,
+        onResponse: async (type)=>{
+          const t = String(type||'').toLowerCase();
+          // Always verify with backend before showing any error
+          try {
+            const ok = await confirmOrder(ref);
+            if (ok) return; // success path handled by confirmOrder
+          } catch(_) {}
+          if (t === 'success') return; // already confirmed above
+          // Avoid scary false negatives; show a neutral message instead of hard error
+          showError('Payment is processing. If you were charged, it will confirm shortly.');
+        }
+      });
+    } catch (e) { showError('Could not start payment.'); }
+  }
 
   function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
 
