@@ -23,27 +23,19 @@ Need help? Email support@dicebastion.com.
   const ref = params.get('orderRef');
   if(!ref) return;
 
-  const log = (m)=>{ try{ console.log('[thank-you]', m); }catch(e){} };
+  const mount = (text)=>{ const msg=document.createElement('div'); msg.style.marginTop='12px'; msg.style.fontWeight='600'; msg.textContent=text; document.currentScript.parentElement.appendChild(msg); };
   const isEvent = /^EVT-\d+-[0-9a-f\-]{36}$/i.test(ref);
   const path = isEvent ? `/events/confirm?orderRef=${encodeURIComponent(ref)}` : `/membership/confirm?orderRef=${encodeURIComponent(ref)}`;
 
   (async ()=>{
-    try {
-      const r = await fetch(API_BASE + path, { method:'GET' });
-      const j = await r.json();
-      log(j);
-      const msg = document.createElement('div');
-      msg.style.marginTop = '12px';
-      msg.style.fontWeight = '600';
-      if (j && j.ok && (j.status === 'active' || j.status === 'already_active')) {
-        msg.textContent = 'All set. Your payment is confirmed.';
-      } else if (j && j.status && String(j.status).toUpperCase() === 'PENDING') {
-        msg.textContent = 'Payment is still processing. This page will update shortly.';
-      } else {
-        msg.textContent = 'Could not verify payment automatically. If you were charged, it will reconcile shortly.';
-      }
-      document.currentScript.parentElement.appendChild(msg);
-    } catch(e) { log(e); }
+    // poll a couple of times before deciding
+    for(let i=0;i<3;i++){
+      try { const r = await fetch(API_BASE + path); const j = await r.json(); if (j && j.ok && (j.status==='active'||j.status==='already_active')) { mount('All set. Your payment is confirmed.'); return; }
+        if (j && j.status && String(j.status).toUpperCase()==='PENDING') { await new Promise(r=>setTimeout(r,1200)); continue; }
+      } catch(_){}
+      await new Promise(r=>setTimeout(r,800));
+    }
+    mount('Payment is processing. You can refresh this page in a moment to see the confirmation.');
   })();
 })();
 </script>

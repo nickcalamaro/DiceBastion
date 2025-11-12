@@ -35,24 +35,30 @@ const toIso = (d) => new Date(d).toISOString()
 let __schemaCache
 async function getSchema(db){
   if (__schemaCache) return __schemaCache
-  // Detect memberships FK column
-  const cols = await db.prepare("PRAGMA table_info(memberships)").all().catch(() => ({ results: [] }))
-  const names = new Set((cols?.results || []).map(c => (c.name || c.Name || '').toLowerCase()))
-  const fkColumn = names.has('user_id') ? 'user_id' : 'member_id'
-  // Detect identity table
-  const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().catch(() => ({ results: [] }))
-  const tableSet = new Set((tables?.results || []).map(r => String(r.name || '').toLowerCase()))
-  let identityTable = fkColumn === 'user_id' ? 'users' : 'members'
-  if (!tableSet.has(identityTable)) {
-    // Fallback if mismatch
-    identityTable = tableSet.has('users') ? 'users' : 'members'
-  }
-  __schemaCache = { fkColumn, identityTable }
+  // Detect memberships FK column (prefer user_id if present, else member_id)
+  const mcols = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
+  const mnames = new Set((mcols?.results||[]).map(c => String(c.name||'').toLowerCase()))
+  const fkColumn = mnames.has('user_id') ? 'user_id' : (mnames.has('member_id') ? 'member_id' : 'user_id')
+  // Identity is consolidated to users
+  const identityTable = 'users'
+  // Detect id column in users (user_id vs id)
+  let idColumn = 'user_id'
+  try {
+    const ic = await db.prepare('PRAGMA table_info(users)').all().catch(()=>({ results: [] }))
+    const inames = new Set((ic?.results||[]).map(r => String(r.name||'').toLowerCase()))
+    if (inames.has('user_id')) idColumn = 'user_id'
+    else if (inames.has('id')) idColumn = 'id'
+    else {
+      const pk = (ic?.results||[]).find(r => r.pk === 1)
+      if (pk && pk.name) idColumn = String(pk.name)
+    }
+  } catch {}
+  __schemaCache = { fkColumn, identityTable, idColumn }
   return __schemaCache
 }
 
 async function ensureSchema(db, fkColumn){
-  // memberships columns
+  // memberships columns only (assume tickets already has user_id from migrations)
   try {
     const mc = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
     const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
@@ -64,27 +70,8 @@ async function ensureSchema(db, fkColumn){
     if (!mnames.has('payment_status')) alter.push('ALTER TABLE memberships ADD COLUMN payment_status TEXT')
     for (const sql of alter) { await db.prepare(sql).run().catch(()=>{}) }
   } catch {}
-
-  // tickets table and columns
+  // tickets columns (post consolidation, expect user_id)
   try {
-    // Create with full schema if missing
-    await db.prepare(
-      `CREATE TABLE IF NOT EXISTS tickets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_id INTEGER NOT NULL,
-        ${fkColumn} INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT "pending",
-        order_ref TEXT UNIQUE,
-        checkout_id TEXT,
-        payment_id TEXT,
-        amount TEXT,
-        currency TEXT,
-        consent_at TEXT,
-        idempotency_key TEXT,
-        payment_status TEXT,
-        created_at TEXT
-      )`
-    ).run()
     const tc = await db.prepare('PRAGMA table_info(tickets)').all().catch(()=>({ results: [] }))
     const tnames = new Set((tc?.results||[]).map(r => String(r.name||'').toLowerCase()))
     const talter = []
@@ -100,21 +87,39 @@ async function ensureSchema(db, fkColumn){
 
 async function findIdentityByEmail(db, email){
   const s = await getSchema(db)
-  return await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
+  const row = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
+  if (!row) return null
+  if (typeof row.id === 'undefined') row.id = row[s.idColumn]
+  return row
 }
 
 async function getOrCreateIdentity(db, email, name){
   const s = await getSchema(db)
-  const existing = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
-  if (existing) return existing
+  let existing = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
+  if (existing){ if (typeof existing.id === 'undefined') existing.id = existing[s.idColumn]; return existing }
   await db.prepare(`INSERT INTO ${s.identityTable} (email, name) VALUES (?, ?)`).bind(email, name || null).run()
-  return await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
+  existing = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
+  if (existing && typeof existing.id === 'undefined') existing.id = existing[s.idColumn]
+  return existing
 }
 
 async function getActiveMembership(db, identityId) {
   const now = new Date().toISOString()
-  const s = await getSchema(db)
-  return await db.prepare(`SELECT * FROM memberships WHERE ${s.fkColumn} = ? AND status = "active" AND end_date >= ? ORDER BY end_date DESC LIMIT 1`).bind(identityId, now).first()
+  // Detect available FK columns on memberships
+  const mc = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
+  const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
+  let where = '', binds = []
+  if (mnames.has('user_id') && mnames.has('member_id')) {
+    where = '(user_id = ? OR member_id = ?)'
+    binds = [identityId, identityId, now]
+  } else if (mnames.has('user_id')) {
+    where = 'user_id = ?'
+    binds = [identityId, now]
+  } else {
+    where = 'member_id = ?'
+    binds = [identityId, now]
+  }
+  return await db.prepare(`SELECT * FROM memberships WHERE ${where} AND status = "active" AND end_date >= ? ORDER BY end_date DESC LIMIT 1`).bind(...binds).first()
 }
 
 // Fetch pricing/details for a plan from the services table
@@ -126,7 +131,7 @@ async function getServiceForPlan(db, planCode) {
 async function sumupToken(env) {
   const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: env.SUMUP_CLIENT_ID_BACKUP, client_secret: env.SUMUP_CLIENT_SECRET_BACKUP, scope: 'payments' })
   const res = await fetch('https://api.sumup.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
-  if (!res.ok) { const txt = await res.text().catch(()=>''); throw new Error(`Failed to get SumUp token (${res.status}): ${txt}`) }
+  if (!res.ok) { const txt = await res.text().catch(()=>{}); throw new Error(`Failed to get SumUp token (${res.status}): ${txt}`) }
   const json = await res.json(); const granted = (json.scope||'').split(/\s+/).filter(Boolean); if (!granted.includes('payments')) { throw new Error(`SumUp OAuth token missing required scope "payments" (granted: [${granted.join(', ')}])`) }
   return json
 }
@@ -163,7 +168,7 @@ async function verifyTurnstile(env, token, ip, debug){
     if (debug) console.log('turnstile: siteverify fetch error', String(e))
     return false
   }
-  if (debug) console.log('turnstile: siteverify', { status: res?.status, success: j?.success, errors: j?.['error-codes'], hostname: j?.hostname })
+  if (debug) console.log('turnstile: siteverify', { status: res?.status, success: j?.['success'], errors: j?.['error-codes'], hostname: j?.hostname })
   return !!j.success
 }
 
@@ -198,17 +203,30 @@ app.post('/membership/checkout', async (c) => {
     // Ensure columns exist before using them
     await ensureSchema(c.env.DB, s.fkColumn)
 
+    // Build dynamic FK condition for idempotency
+    const mc = await c.env.DB.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
+    const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
+    let fkCond = '', fkBinds = []
+    if (mnames.has('user_id') && mnames.has('member_id')) { fkCond = '(user_id = ? OR member_id = ?)'; fkBinds = [ident.id, ident.id] }
+    else if (mnames.has('user_id')) { fkCond = 'user_id = ?'; fkBinds = [ident.id] }
+    else { fkCond = 'member_id = ?'; fkBinds = [ident.id] }
+
     // Idempotency reuse
     if (idem){
-      const existing = await c.env.DB.prepare(`SELECT * FROM memberships WHERE ${s.fkColumn} = ? AND plan = ? AND status = "pending" AND idempotency_key = ? ORDER BY id DESC LIMIT 1`).bind(ident.id, plan, idem).first()
+      const existing = await c.env.DB.prepare(`SELECT * FROM memberships WHERE ${fkCond} AND plan = ? AND status = "pending" AND idempotency_key = ? ORDER BY id DESC LIMIT 1`).bind(...fkBinds, plan, idem).first()
       if (existing && existing.checkout_id){
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
     }
 
     const order_ref = crypto.randomUUID()
-    await c.env.DB.prepare(`INSERT INTO memberships (${s.fkColumn}, plan, status, order_ref, amount, currency, consent_at, idempotency_key) VALUES (?, ?, "pending", ?, ?, ?, ?, ?)`)
-      .bind(ident.id, plan, order_ref, String(amount), currency, toIso(new Date()), idem || null).run()
+    // Insert setting both user_id and member_id when both exist to satisfy NOT NULL
+    const cols = ['plan','status','order_ref','amount','currency','consent_at','idempotency_key']
+    const vals = [plan,'pending',order_ref,String(amount),currency,toIso(new Date()), idem || null]
+    if (mnames.has('user_id')) { cols.unshift('user_id'); vals.unshift(ident.id) }
+    if (mnames.has('member_id')) { cols.unshift('member_id'); vals.unshift(ident.id) }
+    const placeholders = cols.map(()=>'?').join(',')
+    await c.env.DB.prepare(`INSERT INTO memberships (${cols.join(',')}) VALUES (${placeholders})`).bind(...vals).run()
 
     let checkout
     try {
@@ -224,8 +242,9 @@ app.post('/membership/checkout', async (c) => {
     await c.env.DB.prepare('UPDATE memberships SET checkout_id = ? WHERE order_ref = ?').bind(checkout.id, order_ref).run()
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
   } catch (e) {
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
     console.error('membership checkout error', e)
-    return c.json({ error: 'internal_error' }, 500)
+    return c.json(debugMode ? { error: 'internal_error', detail: String(e), stack: String(e?.stack||'') } : { error: 'internal_error' }, 500)
   }
 })
 
@@ -259,7 +278,7 @@ app.get('/membership/confirm', async (c) => {
     return c.json({ ok:false, error:'payment_mismatch' },400)
   }
   const s = await getSchema(c.env.DB)
-  const identityId = pending[s.fkColumn]
+  const identityId = (typeof pending.user_id !== 'undefined' && pending.user_id !== null) ? pending.user_id : pending.member_id
   const activeExisting = await getActiveMembership(c.env.DB, identityId)
   const svc = await getServiceForPlan(c.env.DB, pending.plan)
   if (!svc) return c.json({ ok:false, error:'plan_not_configured' },400)
@@ -289,7 +308,7 @@ app.post('/webhooks/sumup', async (c) => {
 
   const now = new Date()
   const s = await getSchema(c.env.DB)
-  const identityId = pending[s.fkColumn]
+  const identityId = (typeof pending.user_id !== 'undefined' && pending.user_id !== null) ? pending.user_id : pending.member_id
   const memberActive = await getActiveMembership(c.env.DB, identityId)
   const baseStart = memberActive ? new Date(memberActive.end_date) : now
   const months = Number(svc.months || 0)
@@ -303,7 +322,8 @@ app.post('/webhooks/sumup', async (c) => {
 // Get event basic info
 app.get('/events/:id', async c => {
   const id = c.req.param('id')
-  const ev = await c.env.DB.prepare('SELECT event_id,event_name,description,event_datetime,location,membership_price,non_membership_price,capacity,tickets_sold,category,image_url FROM events WHERE event_id = ?').bind(id).first()
+  if (!id || isNaN(Number(id))) return c.json({ error:'invalid_event_id' },400)
+  const ev = await c.env.DB.prepare('SELECT event_id,event_name,description,event_datetime,location,membership_price,non_membership_price,capacity,tickets_sold,category,image_url FROM events WHERE event_id = ?').bind(Number(id)).first()
   if (!ev) return c.json({ error:'not_found' },404)
   return c.json({ event: ev })
 })
@@ -312,6 +332,8 @@ app.get('/events/:id', async c => {
 app.post('/events/:id/checkout', async c => {
   try {
     const id = c.req.param('id')
+    if (!id || isNaN(Number(id))) return c.json({ error:'invalid_event_id' },400)
+    const evId = Number(id)
     const ip = c.req.header('CF-Connecting-IP')
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
     const idem = c.req.header('Idempotency-Key')?.trim()
@@ -323,36 +345,53 @@ app.post('/events/:id/checkout', async c => {
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode)
     if (!tsOk) return c.json({ error:'turnstile_failed' },403)
 
-    const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(id).first()
+    const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
     if (!ev) return c.json({ error:'event_not_found' },404)
     if (ev.capacity && ev.tickets_sold >= ev.capacity) return c.json({ error:'sold_out' },409)
 
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
+    if (!ident || typeof ident.id === 'undefined' || ident.id === null) {
+      console.error('identity missing id', ident)
+      return c.json({ error:'identity_error' },500)
+    }
     const isActive = !!(await getActiveMembership(c.env.DB, ident.id))
     const amount = Number(isActive ? ev.membership_price : ev.non_membership_price)
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error:'invalid_amount' },400)
     const currency = c.env.CURRENCY || 'GBP'
-    const s = await getSchema(c.env.DB)
 
-    // Ensure columns/table exist
+    const s = await getSchema(c.env.DB)
     await ensureSchema(c.env.DB, s.fkColumn)
+    // Detect actual FK column present in tickets table; prefer user_id
+    const tinfo = await c.env.DB.prepare('PRAGMA table_info(tickets)').all().catch(()=>({ results: [] }))
+    const tnames = new Set((tinfo?.results||[]).map(r => String(r.name||'').toLowerCase()))
+    const hasUser = tnames.has('user_id')
+    const hasMember = tnames.has('member_id')
+    const ticketFkCol = hasUser ? 'user_id' : (hasMember ? 'member_id' : s.fkColumn)
 
     if (idem){
-      const existing = await c.env.DB.prepare(`SELECT * FROM tickets WHERE event_id = ? AND ${s.fkColumn} = ? AND status = "pending" AND idempotency_key = ? ORDER BY id DESC LIMIT 1`).bind(id, ident.id, idem).first()
+      const existing = await c.env.DB.prepare(`SELECT * FROM tickets WHERE event_id = ? AND ${ticketFkCol} = ? AND status = "pending" AND idempotency_key = ? ORDER BY id DESC LIMIT 1`).bind(evId, ident.id, idem).first()
       if (existing && existing.checkout_id){
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
     }
 
-    const order_ref = `EVT-${id}-${crypto.randomUUID()}`
-    await c.env.DB.prepare(`INSERT INTO tickets (event_id,${s.fkColumn},status,order_ref,amount,currency,consent_at,idempotency_key,created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-      .bind(id, ident.id, 'pending', order_ref, String(amount), currency, toIso(new Date()), idem || null, toIso(new Date())).run()
+    const order_ref = `EVT-${evId}-${crypto.randomUUID()}`
+    const nowIso = toIso(new Date())
+    const colParts = ['event_id']
+    const bindVals = [evId]
+    if (hasUser) { colParts.push('user_id'); bindVals.push(ident.id) }
+    if (hasMember) { colParts.push('member_id'); bindVals.push(ident.id) }
+    colParts.push('status','order_ref','amount','currency','consent_at','idempotency_key','created_at')
+    bindVals.push('pending', order_ref, String(amount), currency, nowIso, idem || null, nowIso)
+    if (bindVals.some(v => typeof v === 'undefined')) { console.error('insert params contain undefined', bindVals); return c.json({ error:'invalid_params' },500) }
+    const placeholders = colParts.map(()=>'?').join(',')
+    await c.env.DB.prepare(`INSERT INTO tickets (${colParts.join(',')}) VALUES (${placeholders})`).bind(...bindVals).run()
 
     let checkout
     try {
       checkout = await createCheckout(c.env, { amount, currency, orderRef: order_ref, title: ev.event_name, description: `Ticket for ${ev.event_name}` })
     } catch (e) {
-      console.error('SumUp checkout failed for event', id, e)
+      console.error('SumUp checkout failed for event', evId, e)
       return c.json({ error:'sumup_checkout_failed', message:String(e?.message||e) },502)
     }
     if (!checkout.id) {
@@ -362,8 +401,9 @@ app.post('/events/:id/checkout', async c => {
     await c.env.DB.prepare('UPDATE tickets SET checkout_id = ? WHERE order_ref = ?').bind(checkout.id, order_ref).run()
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
   } catch (e) {
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
     console.error('events checkout error', e)
-    return c.json({ error:'internal_error' },500)
+    return c.json(debugMode ? { error:'internal_error', detail: String(e), stack: String(e?.stack||'') } : { error:'internal_error' },500)
   }
 })
 
@@ -396,6 +436,21 @@ app.get('/_debug/ping', c => {
   const allowed = (c.env.ALLOWED_ORIGIN || '').split(',').map(s=>s.trim()).filter(Boolean)
   const allow = allowed.includes(origin) ? origin : (allowed[0] || '')
   return c.json({ ok:true, origin, allow, allowed })
+})
+
+// Debug schema inspector
+app.get('/_debug/schema', async c => {
+  try {
+    const s = await getSchema(c.env.DB)
+    const memberships = await c.env.DB.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
+    const tickets = await c.env.DB.prepare('PRAGMA table_info(tickets)').all().catch(()=>({ results: [] }))
+    const tables = await c.env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().catch(()=>({ results: [] }))
+    const tnames = new Set((tickets?.results||[]).map(r => String(r.name||'').toLowerCase()))
+    const ticketFkCol = tnames.has(s.fkColumn) ? s.fkColumn : (tnames.has('member_id') ? 'member_id' : (tnames.has('user_id') ? 'user_id' : null))
+    return c.json({ ok:true, schema: s, ticketFkCol, tables: tables.results||[], memberships: memberships.results||[], tickets: tickets.results||[] })
+  } catch (e) {
+    return c.json({ ok:false, error: String(e) }, 500)
+  }
 })
 
 export default app
