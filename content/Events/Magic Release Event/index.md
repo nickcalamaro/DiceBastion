@@ -5,7 +5,7 @@ summary: "Master the elements with our Avatar: The Last Airbender sealed event! 
 date: 2025-11-19
 weight: 4
 showHero: true
-draft: false
+draft: true
 # externalUrl: 'https://calendar.app.google/YqVkUnLnGjxdvQVD6'
 showPagination: false
 ---
