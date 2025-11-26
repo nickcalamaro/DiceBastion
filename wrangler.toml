@@ -14,6 +14,7 @@ SUMUP_REGION = "UK"
 SUMUP_MERCHANT_CODE = "MUZHYEAH"
 TURNSTILE_SITE_KEY = "0x4AAAAAACAB4xlOnW3S8K0k"
 TURNSTILE_SECRET = "0x4AAAAAACAB41xceooY522cbKNKGVTP-iA"
+MAILERSEND_FROM_NAME = "Dice Bastion"
 # The URL to redirect back to after SumUp checkout completes (success/cancel)
 
 [[d1_databases]]
@@ -24,3 +25,7 @@ database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
 
 [observability]
 enabled = true
+
+# Cron trigger for membership renewals (runs daily at 2 AM UTC)
+[triggers]
+crons = ["0 2 * * *"]

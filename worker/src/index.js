@@ -68,6 +68,9 @@ async function ensureSchema(db, fkColumn){
     if (!mnames.has('consent_at')) alter.push('ALTER TABLE memberships ADD COLUMN consent_at TEXT')
     if (!mnames.has('idempotency_key')) alter.push('ALTER TABLE memberships ADD COLUMN idempotency_key TEXT')
     if (!mnames.has('payment_status')) alter.push('ALTER TABLE memberships ADD COLUMN payment_status TEXT')
+    if (!mnames.has('payment_instrument_id')) alter.push('ALTER TABLE memberships ADD COLUMN payment_instrument_id TEXT')
+    if (!mnames.has('renewal_failed_at')) alter.push('ALTER TABLE memberships ADD COLUMN renewal_failed_at TEXT')
+    if (!mnames.has('renewal_attempts')) alter.push('ALTER TABLE memberships ADD COLUMN renewal_attempts INTEGER DEFAULT 0')
     for (const sql of alter) { await db.prepare(sql).run().catch(()=>{}) }
   } catch {}
   // tickets columns (post consolidation, expect user_id)
@@ -82,6 +85,39 @@ async function ensureSchema(db, fkColumn){
     if (!tnames.has('payment_status')) talter.push('ALTER TABLE tickets ADD COLUMN payment_status TEXT')
     if (!tnames.has('created_at')) talter.push('ALTER TABLE tickets ADD COLUMN created_at TEXT')
     for (const sql of talter) { await db.prepare(sql).run().catch(()=>{}) }
+  } catch {}
+  // Create payment_instruments table if not exists
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS payment_instruments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        instrument_id TEXT NOT NULL,
+        card_type TEXT,
+        last_4 TEXT,
+        expiry_month INTEGER,
+        expiry_year INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        UNIQUE(user_id, instrument_id)
+      )
+    `).run().catch(()=>{})
+  } catch {}
+  // Create renewal_log table for tracking renewal attempts
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS renewal_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        membership_id INTEGER NOT NULL,
+        attempt_date TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payment_id TEXT,
+        error_message TEXT,
+        amount TEXT,
+        currency TEXT
+      )
+    `).run().catch(()=>{})
   } catch {}
 }
 
@@ -128,11 +164,15 @@ async function getServiceForPlan(db, planCode) {
 }
 
 // Obtain SumUp OAuth token to verify payments server-side
-async function sumupToken(env) {
-  const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: env.SUMUP_CLIENT_ID_BACKUP, client_secret: env.SUMUP_CLIENT_SECRET_BACKUP, scope: 'payments' })
+async function sumupToken(env, scopes = 'payments') {
+  const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: env.SUMUP_CLIENT_ID_BACKUP, client_secret: env.SUMUP_CLIENT_SECRET_BACKUP, scope: scopes })
   const res = await fetch('https://api.sumup.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
   if (!res.ok) { const txt = await res.text().catch(()=>{}); throw new Error(`Failed to get SumUp token (${res.status}): ${txt}`) }
-  const json = await res.json(); const granted = (json.scope||'').split(/\s+/).filter(Boolean); if (!granted.includes('payments')) { throw new Error(`SumUp OAuth token missing required scope "payments" (granted: [${granted.join(', ')}])`) }
+  const json = await res.json(); 
+  const granted = (json.scope||'').split(/\s+/).filter(Boolean)
+  const required = scopes.split(/\s+/).filter(Boolean)
+  const missing = required.filter(s => !granted.includes(s))
+  if (missing.length > 0) { throw new Error(`SumUp OAuth token missing required scopes: ${missing.join(', ')} (granted: [${granted.join(', ')}])`) }
   return json
 }
 
@@ -149,10 +189,161 @@ async function createCheckout(env, { amount, currency, orderRef, title, descript
 }
 
 async function fetchPayment(env, paymentId) {
-  const { access_token } = await sumupToken(env)
+  const { access_token } = await sumupToken(env, 'payments')
   const res = await fetch(`https://api.sumup.com/v0.1/checkouts/${paymentId}`, { headers: { Authorization: `Bearer ${access_token}` } })
   if (!res.ok) throw new Error('Failed to fetch payment')
   return res.json()
+}
+
+// Save payment instrument from a successful payment
+async function savePaymentInstrument(db, userId, checkoutId, env) {
+  try {
+    const { access_token } = await sumupToken(env, 'payments payment_instruments')
+    const res = await fetch(`https://api.sumup.com/v0.1/checkouts/${checkoutId}`, {
+      headers: { Authorization: `Bearer ${access_token}` }
+    })
+    if (!res.ok) return null
+    const payment = await res.json()
+    
+    // Extract payment instrument details from payment
+    if (payment.payment_instrument && payment.payment_instrument.token) {
+      const instrument = payment.payment_instrument
+      const now = toIso(new Date())
+      
+      // Deactivate old instruments for this user
+      await db.prepare('UPDATE payment_instruments SET is_active = 0 WHERE user_id = ?').bind(userId).run()
+      
+      // Insert new instrument
+      await db.prepare(`
+        INSERT INTO payment_instruments (user_id, instrument_id, card_type, last_4, expiry_month, expiry_year, created_at, updated_at, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT(user_id, instrument_id) DO UPDATE SET is_active = 1, updated_at = ?
+      `).bind(
+        userId,
+        instrument.token,
+        instrument.card_type || null,
+        instrument.last_4_digits || null,
+        instrument.expiry_month || null,
+        instrument.expiry_year || null,
+        now,
+        now,
+        now
+      ).run()
+      
+      return instrument.token
+    }
+  } catch (e) {
+    console.error('Failed to save payment instrument:', e)
+  }
+  return null
+}
+
+// Charge a saved payment instrument
+async function chargePaymentInstrument(env, instrumentId, amount, currency, orderRef, description) {
+  try {
+    const { access_token } = await sumupToken(env, 'payments payment_instruments')
+    const body = {
+      payment_instrument: instrumentId,
+      amount: Number(amount),
+      currency,
+      checkout_reference: orderRef,
+      merchant_code: env.SUMUP_MERCHANT_CODE,
+      description
+    }
+    
+    const res = await fetch('https://api.sumup.com/v0.1/checkouts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    })
+    
+    if (!res.ok) {
+      const txt = await res.text()
+      throw new Error(`Charge failed: ${txt}`)
+    }
+    
+    return await res.json()
+  } catch (e) {
+    console.error('Charge payment instrument error:', e)
+    throw e
+  }
+}
+
+// Get active payment instrument for user
+async function getActivePaymentInstrument(db, userId) {
+  return await db.prepare('SELECT * FROM payment_instruments WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1')
+    .bind(userId).first()
+}
+
+// Process renewal for a single membership
+async function processMembershipRenewal(db, membership, env) {
+  const s = await getSchema(db)
+  const userId = (typeof membership.user_id !== 'undefined' && membership.user_id !== null) ? membership.user_id : membership.member_id
+  
+  // Get payment instrument
+  const instrument = await getActivePaymentInstrument(db, userId)
+  if (!instrument) {
+    await db.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = renewal_attempts + 1 WHERE id = ?')
+      .bind(toIso(new Date()), membership.id).run()
+    await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message) VALUES (?, ?, ?, ?)')
+      .bind(membership.id, toIso(new Date()), 'failed', 'No active payment instrument').run()
+    return { success: false, error: 'no_instrument' }
+  }
+  
+  // Get service details
+  const svc = await getServiceForPlan(db, membership.plan)
+  if (!svc) {
+    return { success: false, error: 'plan_not_found' }
+  }
+  
+  const amount = Number(svc.amount)
+  const currency = svc.currency || env.CURRENCY || 'GBP'
+  const orderRef = `RENEWAL-${membership.id}-${crypto.randomUUID()}`
+  
+  try {
+    // Charge the payment instrument
+    const payment = await chargePaymentInstrument(
+      env,
+      instrument.instrument_id,
+      amount,
+      currency,
+      orderRef,
+      `Renewal: Dice Bastion ${membership.plan} membership`
+    )
+    
+    // If successful, extend membership
+    if (payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')) {
+      const months = Number(svc.months || 0)
+      const currentEnd = new Date(membership.end_date)
+      const newEnd = addMonths(currentEnd, months)
+      
+      await db.prepare(`
+        UPDATE memberships 
+        SET end_date = ?, 
+            renewal_failed_at = NULL, 
+            renewal_attempts = 0,
+            payment_status = 'PAID'
+        WHERE id = ?
+      `).bind(toIso(newEnd), membership.id).run()
+      
+      await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, payment_id, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(membership.id, toIso(new Date()), 'success', payment.id, String(amount), currency).run()
+      
+      return { success: true, newEndDate: toIso(newEnd), paymentId: payment.id }
+    } else {
+      throw new Error(`Payment not successful: ${payment?.status || 'UNKNOWN'}`)
+    }
+  } catch (e) {
+    await db.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = renewal_attempts + 1 WHERE id = ?')
+      .bind(toIso(new Date()), membership.id).run()
+    await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(membership.id, toIso(new Date()), 'failed', String(e.message || e), String(amount), currency).run()
+    
+    return { success: false, error: String(e.message || e) }
+  }
 }
 
 // Turnstile verification with optional debug logging
@@ -178,13 +369,125 @@ const EVT_UUID_RE = /^EVT-\d+-[0-9a-f\-]{36}$/i
 
 function clampStr(v, max){ return (v||'').substring(0, max) }
 
+// MailerSend email helper
+async function sendEmail(env, { to, subject, html, text }) {
+  if (!env.MAILERSEND_API_KEY) {
+    console.warn('MAILERSEND_API_KEY not configured, skipping email')
+    return { skipped: true }
+  }
+  
+  try {
+    const body = {
+      from: { email: env.MAILERSEND_FROM_EMAIL || 'noreply@dicebastion.com', name: env.MAILERSEND_FROM_NAME || 'Dice Bastion' },
+      to: [{ email: to }],
+      subject,
+      html,
+      text: text || html.replace(/<[^>]*>/g, '')
+    }
+    
+    const res = await fetch('https://api.mailersend.com/v1/email', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.MAILERSEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    })
+    
+    if (!res.ok) {
+      const txt = await res.text()
+      console.error('MailerSend error:', txt)
+      return { success: false, error: txt }
+    }
+    
+    return { success: true }
+  } catch (e) {
+    console.error('Email send error:', e)
+    return { success: false, error: String(e) }
+  }
+}
+
+// Generate email templates
+function getRenewalSuccessEmail(membership, user, newEndDate) {
+  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
+  const planName = planNames[membership.plan] || membership.plan
+  
+  return {
+    subject: `Your Dice Bastion ${planName} Membership Has Been Renewed`,
+    html: `
+      <h2>Membership Renewed Successfully</h2>
+      <p>Hi ${user.name || 'there'},</p>
+      <p>Great news! Your <strong>${planName} Membership</strong> has been automatically renewed.</p>
+      <ul>
+        <li><strong>Plan:</strong> ${planName}</li>
+        <li><strong>Amount:</strong> £${membership.amount}</li>
+        <li><strong>New End Date:</strong> ${new Date(newEndDate).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</li>
+      </ul>
+      <p>Your membership will continue uninterrupted. If you wish to cancel auto-renewal, you can do so from your <a href="https://dicebastion.com/account">account page</a>.</p>
+      <p>Thank you for being a valued member!</p>
+      <p>— The Dice Bastion Team</p>
+    `
+  }
+}
+
+function getRenewalFailedEmail(membership, user) {
+  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
+  const planName = planNames[membership.plan] || membership.plan
+  
+  return {
+    subject: `Action Required: Dice Bastion Membership Renewal Failed`,
+    html: `
+      <h2>Membership Renewal Failed</h2>
+      <p>Hi ${user.name || 'there'},</p>
+      <p>We were unable to automatically renew your <strong>${planName} Membership</strong>.</p>
+      <p>Your membership will expire on <strong>${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>.</p>
+      <p><strong>What to do next:</strong></p>
+      <ul>
+        <li>Update your payment method at <a href="https://dicebastion.com/account">dicebastion.com/account</a></li>
+        <li>Or purchase a new membership at <a href="https://dicebastion.com/memberships">dicebastion.com/memberships</a></li>
+      </ul>
+      <p>If you have any questions, please don't hesitate to contact us.</p>
+      <p>— The Dice Bastion Team</p>
+    `
+  }
+}
+
+function getWelcomeEmail(membership, user, autoRenew) {
+  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
+  const planName = planNames[membership.plan] || membership.plan
+  
+  return {
+    subject: `Welcome to Dice Bastion ${planName} Membership!`,
+    html: `
+      <h2>Welcome to Dice Bastion!</h2>
+      <p>Hi ${user.name || 'there'},</p>
+      <p>Thank you for becoming a <strong>${planName} Member</strong>!</p>
+      <ul>
+        <li><strong>Plan:</strong> ${planName}</li>
+        <li><strong>Valid Until:</strong> ${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</li>
+        <li><strong>Auto-Renewal:</strong> ${autoRenew ? 'Enabled ✓' : 'Disabled'}</li>
+      </ul>
+      ${autoRenew ? '<p>Your membership will automatically renew before expiration. You can manage this at any time from your <a href="https://dicebastion.com/account">account page</a>.</p>' : '<p>Remember to renew your membership before it expires to continue enjoying member benefits!</p>'}
+      <p><strong>Member Benefits:</strong></p>
+      <ul>
+        <li>Discounted event tickets</li>
+        <li>Priority booking for tournaments</li>
+        <li>Exclusive member events</li>
+        <li>And much more!</li>
+      </ul>
+      <p>See you at the club!</p>
+      <p>— The Dice Bastion Team</p>
+    `
+  }
+}
+
 // Membership checkout with idempotency + Turnstile
 app.post('/membership/checkout', async (c) => {
   try {
     const ip = c.req.header('CF-Connecting-IP')
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
     const idem = c.req.header('Idempotency-Key')?.trim()
-    const { email, name, plan, privacyConsent, turnstileToken } = await c.req.json()
+    const { email, name, plan, privacyConsent, turnstileToken, autoRenew } = await c.req.json()
     if (!email || !plan) return c.json({ error: 'missing_fields' }, 400)
     if (!EMAIL_RE.test(email) || email.length > 320) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
@@ -220,9 +523,10 @@ app.post('/membership/checkout', async (c) => {
     }
 
     const order_ref = crypto.randomUUID()
+    const autoRenewValue = autoRenew ? 1 : 0
     // Insert setting both user_id and member_id when both exist to satisfy NOT NULL
-    const cols = ['plan','status','order_ref','amount','currency','consent_at','idempotency_key']
-    const vals = [plan,'pending',order_ref,String(amount),currency,toIso(new Date()), idem || null]
+    const cols = ['plan','status','order_ref','amount','currency','consent_at','idempotency_key','auto_renew']
+    const vals = [plan,'pending',order_ref,String(amount),currency,toIso(new Date()), idem || null, autoRenewValue]
     if (mnames.has('user_id')) { cols.unshift('user_id'); vals.unshift(ident.id) }
     if (mnames.has('member_id')) { cols.unshift('member_id'); vals.unshift(ident.id) }
     const placeholders = cols.map(()=>'?').join(',')
@@ -285,9 +589,33 @@ app.get('/membership/confirm', async (c) => {
   const months = Number(svc.months || 0)
   const baseStart = activeExisting ? new Date(activeExisting.end_date) : new Date()
   const end = addMonths(baseStart, months)
-  await c.env.DB.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ?, payment_status = "PAID" WHERE id = ?')
-    .bind(toIso(baseStart), toIso(end), pending.checkout_id, pending.id).run()
-  return c.json({ ok:true, status:'active', endDate: toIso(end) })
+  
+  // Save payment instrument for auto-renewal ONLY if auto_renew is enabled
+  let instrumentId = null
+  if (pending.auto_renew === 1) {
+    instrumentId = await savePaymentInstrument(c.env.DB, identityId, pending.checkout_id, c.env)
+  }
+  
+  await c.env.DB.prepare(`
+    UPDATE memberships 
+    SET status = "active", 
+        start_date = ?, 
+        end_date = ?, 
+        payment_id = ?, 
+        payment_status = "PAID",
+        payment_instrument_id = ?
+    WHERE id = ?
+  `).bind(toIso(baseStart), toIso(end), pending.checkout_id, instrumentId, pending.id).run()
+  
+  // Get user details and send welcome email
+  const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
+  if (user) {
+    const updatedMembership = { ...pending, end_date: toIso(end) }
+    const emailContent = getWelcomeEmail(updatedMembership, user, pending.auto_renew === 1)
+    await sendEmail(c.env, { to: user.email, ...emailContent })
+  }
+  
+  return c.json({ ok:true, status:'active', endDate: toIso(end), autoRenewalEnabled: !!instrumentId })
 })
 
 app.post('/webhooks/sumup', async (c) => {
@@ -453,4 +781,125 @@ app.get('/_debug/schema', async c => {
   }
 })
 
-export default app
+// === Auto-Renewal Management Endpoints ===
+
+// Get auto-renewal status for a user
+app.get('/membership/auto-renewal', async (c) => {
+  const email = c.req.query('email')
+  if (!email || !EMAIL_RE.test(email)) return c.json({ error: 'invalid_email' }, 400)
+  
+  const ident = await findIdentityByEmail(c.env.DB, email)
+  if (!ident) return c.json({ enabled: false, hasPaymentMethod: false })
+  
+  const membership = await getActiveMembership(c.env.DB, ident.id)
+  if (!membership) return c.json({ enabled: false, hasPaymentMethod: false })
+  
+  const instrument = await getActivePaymentInstrument(c.env.DB, ident.id)
+  
+  return c.json({
+    enabled: membership.auto_renew === 1,
+    hasPaymentMethod: !!instrument,
+    paymentMethod: instrument ? {
+      cardType: instrument.card_type,
+      last4: instrument.last_4,
+      expiryMonth: instrument.expiry_month,
+      expiryYear: instrument.expiry_year
+    } : null,
+    membershipEndDate: membership.end_date,
+    plan: membership.plan
+  })
+})
+
+// Toggle auto-renewal on/off
+app.post('/membership/auto-renewal/toggle', async (c) => {
+  try {
+    const { email, enabled } = await c.req.json()
+    if (!email || !EMAIL_RE.test(email)) return c.json({ error: 'invalid_email' }, 400)
+    if (typeof enabled !== 'boolean') return c.json({ error: 'enabled must be boolean' }, 400)
+    
+    const ident = await findIdentityByEmail(c.env.DB, email)
+    if (!ident) return c.json({ error: 'user_not_found' }, 404)
+    
+    const membership = await getActiveMembership(c.env.DB, ident.id)
+    if (!membership) return c.json({ error: 'no_active_membership' }, 404)
+    
+    await c.env.DB.prepare('UPDATE memberships SET auto_renew = ? WHERE id = ?')
+      .bind(enabled ? 1 : 0, membership.id).run()
+    
+    return c.json({ ok: true, enabled })
+  } catch (e) {
+    console.error('Toggle auto-renewal error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Remove saved payment method (disables auto-renewal)
+app.post('/membership/payment-method/remove', async (c) => {
+  try {
+    const { email } = await c.req.json()
+    if (!email || !EMAIL_RE.test(email)) return c.json({ error: 'invalid_email' }, 400)
+    
+    const ident = await findIdentityByEmail(c.env.DB, email)
+    if (!ident) return c.json({ error: 'user_not_found' }, 404)
+    
+    // Deactivate all payment instruments
+    await c.env.DB.prepare('UPDATE payment_instruments SET is_active = 0 WHERE user_id = ?')
+      .bind(ident.id).run()
+    
+    // Disable auto-renewal for active memberships
+    await c.env.DB.prepare('UPDATE memberships SET auto_renew = 0, payment_instrument_id = NULL WHERE (user_id = ? OR member_id = ?) AND status = "active"')
+      .bind(ident.id, ident.id).run()
+    
+    return c.json({ ok: true })
+  } catch (e) {
+    console.error('Remove payment method error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Cron trigger for processing renewals (runs daily)
+async function handleScheduled(event, env, ctx) {
+  console.log('Starting membership renewal cron job')
+  
+  try {
+    await ensureSchema(env.DB, 'user_id')
+    
+    // Find memberships expiring in the next 7 days that have auto-renewal enabled
+    const sevenDaysFromNow = toIso(addMonths(new Date(), 0.23)) // ~7 days
+    const now = toIso(new Date())
+    
+    const expiringMemberships = await env.DB.prepare(`
+      SELECT * FROM memberships 
+      WHERE status = 'active' 
+        AND auto_renew = 1 
+        AND end_date <= ? 
+        AND end_date >= ?
+        AND (renewal_attempts IS NULL OR renewal_attempts < 3)
+      ORDER BY end_date ASC
+    `).bind(sevenDaysFromNow, now).all()
+    
+    console.log(`Found ${expiringMemberships.results?.length || 0} memberships to renew`)
+    
+    const results = []
+    for (const membership of (expiringMemberships.results || [])) {
+      console.log(`Processing renewal for membership ${membership.id}`)
+      const result = await processMembershipRenewal(env.DB, membership, env)
+      results.push({ membershipId: membership.id, ...result })
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    
+    console.log('Renewal cron job completed', { processed: results.length, successful: results.filter(r => r.success).length })
+    
+    return { success: true, processed: results.length, results }
+  } catch (e) {
+    console.error('Renewal cron job error:', e)
+    return { success: false, error: String(e) }
+  }
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled: handleScheduled
+}

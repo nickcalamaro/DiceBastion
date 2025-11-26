@@ -70,7 +70,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 <div style="display:flex; gap:12px; align-items:center; justify-content:center; margin-top:12px; color:#333;">
   <span style="font-size:0.95rem;">Secure checkout powered by SumUp</span>
   <span aria-hidden="true" style="width:6px; height:6px; background: rgb(var(--color-primary-500)); border-radius:50%; display:inline-block;"></span>
-  <span style="font-size:0.95rem;">One-time payment — no auto-renew</span>
+  <span style="font-size:0.95rem;">Auto-renewal is optional</span>
 </div>
 
 <!-- Simple footer with member login placeholder -->
@@ -98,6 +98,14 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     <label for="modal-privacy" style="line-height:1.4;">
       I agree to the
       <a href="/privacy-policy/" target="_blank" rel="noopener" style="color: rgb(var(--color-primary-600)); text-decoration: underline;">Privacy Policy</a>.
+    </label>
+  </div>
+
+  <!-- Added: Auto-renewal opt-in checkbox -->
+  <div style="margin-top:12px; display:flex; gap:8px; align-items:flex-start;">
+    <input id="modal-auto-renew" type="checkbox" style="margin-top:3px;">
+    <label for="modal-auto-renew" style="line-height:1.4;">
+      Enable auto-renewal (saves your payment method for automatic renewal before expiry)
     </label>
   </div>
 
@@ -140,6 +148,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   const modalNameEl = document.getElementById('modal-name');
   const modalEmailEl = document.getElementById('modal-email');
   const privacyEl = document.getElementById('modal-privacy');
+  const autoRenewEl = document.getElementById('modal-auto-renew');
   const modalContinueBtn = document.getElementById('modal-continue');
   const sumupCardEl = document.getElementById('sumup-card');
   const sumupErr = document.getElementById('sumup-error');
@@ -153,7 +162,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
   function clearError(){ if (!sumupErr) return; sumupErr.textContent = ''; sumupErr.style.display='none'; }
   function openModal(){ if (modalEl) { modalEl.style.display='flex'; loadTurnstileSdk().catch(()=>{}); } }
-  function closeModal(){ if (modalEl) { modalEl.style.display='none'; if (sumupCardEl) { sumupCardEl.innerHTML=''; sumupCardEl.style.display='none'; } if (emailStepEl) emailStepEl.style.display='block'; if (sumupErr){ sumupErr.textContent=''; sumupErr.style.display='none'; } if (privacyEl) privacyEl.checked=false; if (modalNameEl) modalNameEl.value=''; if (modalEmailEl) modalEmailEl.value=''; if (window.turnstile) { try { window.turnstile.reset('#mship-ts'); } catch(_){} } } }
+  function closeModal(){ if (modalEl) { modalEl.style.display='none'; if (sumupCardEl) { sumupCardEl.innerHTML=''; sumupCardEl.style.display='none'; } if (emailStepEl) emailStepEl.style.display='block'; if (sumupErr){ sumupErr.textContent=''; sumupErr.style.display='none'; } if (privacyEl) privacyEl.checked=false; if (autoRenewEl) autoRenewEl.checked=false; if (modalNameEl) modalNameEl.value=''; if (modalEmailEl) modalEmailEl.value=''; if (window.turnstile) { try { window.turnstile.reset('#mship-ts'); } catch(_){} } } }
   modalClose && modalClose.addEventListener('click', closeModal);
 
   // New: guard modal controls
@@ -165,7 +174,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   async function loadSumUpSdk(){ if (window.SumUpCard) return true; return new Promise((resolve,reject)=>{ const s=document.createElement('script'); s.src='https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js'; s.async=true; s.onload=()=>resolve(true); s.onerror=()=>reject(new Error('Failed to load SumUp SDK')); document.head.appendChild(s); }); }
   function showError(msg){ if (!sumupErr) return; sumupErr.textContent = msg || 'Payment error. Please try again.'; sumupErr.style.display='block'; }
 
-  [modalNameEl, modalEmailEl, privacyEl].forEach(el=>{ if(!el) return; const ev = el.type==='checkbox' ? 'change' : 'input'; el.addEventListener(ev, clearError); });
+  [modalNameEl, modalEmailEl, privacyEl, autoRenewEl].forEach(el=>{ if(!el) return; const ev = el.type==='checkbox' ? 'change' : 'input'; el.addEventListener(ev, clearError); });
 
   function loadTurnstileSdk(){ if (window.turnstile) return Promise.resolve(true); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s); }); }
   async function getTurnstileToken(){ await loadTurnstileSdk(); const el = document.getElementById('mship-ts'); if (!el || !window.turnstile) throw new Error('Security check not ready'); const t = window.turnstile.getResponse(el); if (!t) throw new Error('Please complete the security check.'); return t; }
@@ -202,13 +211,13 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
   function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
 
-  async function startCheckout(plan, email, name, privacyConsent){ try { clearError(); const token = await getTurnstileToken(); const resp = await fetch(`${API_BASE}/membership/checkout`, { method:'POST', headers:{ 'Content-Type':'application/json', 'Idempotency-Key': newIdempotencyKey() }, body: JSON.stringify({ email, name, plan, privacyConsent, turnstileToken: token }) }); const data = await resp.json(); if(!resp.ok){ const msg = data?.message || data?.error || 'Unknown error'; showError(`Checkout failed: ${msg}`); return; } if(data.checkoutId){ await mountSumUpWidget(data.checkoutId, data.orderRef); return; } showError('Failed to create in-page checkout.'); } catch(e){ showError('Checkout error.'); } }
+  async function startCheckout(plan, email, name, privacyConsent, autoRenew){ try { clearError(); const token = await getTurnstileToken(); const resp = await fetch(`${API_BASE}/membership/checkout`, { method:'POST', headers:{ 'Content-Type':'application/json', 'Idempotency-Key': newIdempotencyKey() }, body: JSON.stringify({ email, name, plan, privacyConsent, autoRenew, turnstileToken: token }) }); const data = await resp.json(); if(!resp.ok){ const msg = data?.message || data?.error || 'Unknown error'; showError(`Checkout failed: ${msg}`); return; } if(data.checkoutId){ await mountSumUpWidget(data.checkoutId, data.orderRef); return; } showError('Failed to create in-page checkout.'); } catch(e){ showError('Checkout error.'); } }
 
-  modalContinueBtn && modalContinueBtn.addEventListener('click', async () => { const email=(modalEmailEl&&modalEmailEl.value||'').trim(); const name=(modalNameEl&&modalNameEl.value||'').trim(); const consent=!!(privacyEl&&privacyEl.checked); if(!name){ showError('Please enter your full name.'); return; } if(!email || !/^\S+@\S+\.\S+$/.test(email)){ showError('Please enter a valid email.'); return; } if(!consent){ showError('Please agree to the Privacy Policy to continue.'); return; } if(!pendingPlan){ showError('Please select a membership plan.'); return; }
+  modalContinueBtn && modalContinueBtn.addEventListener('click', async () => { const email=(modalEmailEl&&modalEmailEl.value||'').trim(); const name=(modalNameEl&&modalNameEl.value||'').trim(); const consent=!!(privacyEl&&privacyEl.checked); const autoRenew=!!(autoRenewEl&&autoRenewEl.checked); if(!name){ showError('Please enter your full name.'); return; } if(!email || !/^\S+@\S+\.\S+$/.test(email)){ showError('Please enter a valid email.'); return; } if(!consent){ showError('Please agree to the Privacy Policy to continue.'); return; } if(!pendingPlan){ showError('Please select a membership plan.'); return; }
     // Guard: prevent purchase if active membership already exists
     const status = await checkActiveMembership(email);
     if (status.active) { openActiveGuard(status.endDate); return; }
-    clearError(); await startCheckout(pendingPlan,email,name,consent); });
+    clearError(); await startCheckout(pendingPlan,email,name,consent,autoRenew); });
 
   plansGrid && plansGrid.addEventListener('click', (e)=>{ const btn = e.target.closest('button.cta[data-plan]'); if(!btn) return; pendingPlan = btn.dataset.plan; openModal(); if (modalNameEl) modalNameEl.focus(); });
 
