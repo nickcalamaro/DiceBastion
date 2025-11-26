@@ -3,7 +3,7 @@
 <!-- Requires worker endpoints /events/:id, /events/:id/checkout, /events/confirm -->
 
 <div class="event-purchase my-6" data-event-id="{{ .Get "id" }}">
-  <div class="event-ticket-box border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 bg-neutral-50 dark:bg-neutral-800 shadow-lg max-w-xl">
+  <div class="event-ticket-box border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 bg-neutral dark:bg-neutral-800 shadow-lg max-w-xl opacity-100">
     <h3 class="mt-0 mb-2 text-xl font-bold text-primary-700 dark:text-primary-400">Get a Ticket</h3>
     <div class="event-prices flex gap-5 flex-wrap items-end mb-3">
       <div class="flex-1 min-w-[140px]">
@@ -19,23 +19,23 @@
     <button type="button" class="evt-buy-btn w-full py-3 px-6 border-0 rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 text-base font-bold cursor-pointer shadow-md hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors" data-event-id="{{ .Get "id" }}">Buy Ticket</button>
   </div>
   <!-- New membership promo block -->
-  <div class="event-membership-promo mt-3 max-w-xl text-sm text-neutral-800 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 py-3 px-4 rounded-lg">
+  <div class="event-membership-promo mt-3 max-w-xl text-sm text-neutral-800 dark:text-neutral-200 bg-neutral-50 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 py-3 px-4 rounded-lg opacity-100">
     <strong>Not a member yet?</strong> <span>Check out the list of benefits and sign up today!</span>
     <br>
-    <a href="/memberships/" class="inline-block mt-2 py-1.5 px-4 font-semibold text-primary-700 dark:text-primary-400 bg-primary-100 dark:bg-primary-800/50 border border-primary-300 dark:border-primary-600 rounded-md hover:bg-primary-200 dark:hover:bg-primary-700/60 transition-colors">Become a member!</a>
+    <a href="/memberships/" class="inline-block mt-2 py-1.5 px-4 font-semibold text-primary-700 dark:text-primary-400 bg-primary-50 dark:bg-primary-800/50 border border-primary-300 dark:border-primary-600 rounded-md hover:bg-primary-100 dark:hover:bg-primary-700/60 transition-colors">Become a member!</a>
   </div>
 </div>
 
 <!-- Modal -->
 <div class="evt-modal" id="evt-modal-{{ .Get "id" }}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
-  <div class="evt-modal-inner bg-neutral-50 dark:bg-neutral-800 rounded-xl p-5 relative shadow-2xl" style="width:min(520px,95vw);">
+  <div class="evt-modal-inner bg-neutral dark:bg-neutral-800 rounded-xl p-5 relative shadow-2xl opacity-100" style="width:min(520px,95vw);">
     <button type="button" class="evt-close bg-transparent border-none text-2xl cursor-pointer text-neutral-700 dark:text-neutral-300" aria-label="Close" style="position:absolute; top:10px; right:10px;">×</button>
-    <h3 class="m-0 mb-3 text-lg font-bold text-neutral-800 dark:text-neutral-200">Ticket Checkout</h3>
+    <h3 class="mt-0 mb-3 text-lg font-bold text-neutral-800 dark:text-neutral-200">Ticket Checkout</h3>
     <div class="evt-step evt-details" style="display:block;">
       <label class="block mt-2 mb-1 font-semibold text-neutral-700 dark:text-neutral-300">Full name</label>
-      <input type="text" class="evt-name w-full p-2.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral-50 dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200" placeholder="Jane Doe">
+      <input type="text" class="evt-name w-full p-2.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200" placeholder="Jane Doe">
       <label class="block mt-3 mb-1 font-semibold text-neutral-700 dark:text-neutral-300">Email</label>
-      <input type="email" class="evt-email w-full p-2.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral-50 dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200" placeholder="you@example.com">
+      <input type="email" class="evt-email w-full p-2.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200" placeholder="you@example.com">
       <div class="mt-3 flex gap-2 items-start text-sm leading-tight">
         <input type="checkbox" class="evt-privacy mt-1">
         <label class="text-neutral-700 dark:text-neutral-300">I agree to the <a href="/privacy-policy/" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 underline">Privacy Policy</a>.</label>
