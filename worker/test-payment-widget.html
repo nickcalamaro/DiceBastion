@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SumUp Payment Widget Test - Card Tokenization</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        #sumup-card {
+            margin: 20px 0;
+            min-height: 400px;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #2196f3;
+        }
+        .success {
+            background: #e8f5e9;
+            border-left-color: #4caf50;
+        }
+        .error {
+            background: #ffebee;
+            border-left-color: #f44336;
+        }
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 SumUp Card Tokenization Test</h1>
+        
+        <div class="info">
+            <strong>Test Checkout:</strong><br>
+            Checkout ID: <code id="checkout-id">46692602-36b9-474d-a0a3-4d49d881142e</code><br>
+            Amount: £0.01 GBP<br>
+            Purpose: SETUP_RECURRING_PAYMENT<br>
+            Customer: TEST-CUSTOMER-001
+        </div>
+
+        <div id="status" class="info loading">
+            Loading payment widget...
+        </div>
+
+        <div id="sumup-card"></div>
+
+        <div id="result" style="display: none;">
+            <h3>Response:</h3>
+            <pre id="result-json"></pre>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
+    <script type="text/javascript">
+        const checkoutId = '46692602-36b9-474d-a0a3-4d49d881142e';
+        
+        document.getElementById('checkout-id').textContent = checkoutId;
+        
+        try {
+            SumUpCard.mount({
+                id: 'sumup-card',
+                checkoutId: checkoutId,
+                onResponse: function(type, body) {
+                    console.log('Response Type:', type);
+                    console.log('Response Body:', body);
+                    
+                    const statusDiv = document.getElementById('status');
+                    const resultDiv = document.getElementById('result');
+                    const resultJson = document.getElementById('result-json');
+                    
+                    resultDiv.style.display = 'block';
+                    resultJson.textContent = JSON.stringify(body, null, 2);
+                    
+                    if (type === 'success') {
+                        statusDiv.className = 'info success';
+                        statusDiv.innerHTML = '<strong>✓ Payment Successful!</strong><br>' +
+                            'The card has been tokenized. Check the response below for payment_instrument.token';
+                    } else if (type === 'error') {
+                        statusDiv.className = 'info error';
+                        statusDiv.innerHTML = '<strong>✗ Payment Failed</strong><br>' +
+                            'Error: ' + (body.message || 'Unknown error');
+                    } else {
+                        statusDiv.className = 'info';
+                        statusDiv.innerHTML = '<strong>Response Type:</strong> ' + type;
+                    }
+                },
+                onLoad: function() {
+                    console.log('Widget loaded successfully');
+                    const statusDiv = document.getElementById('status');
+                    statusDiv.className = 'info success';
+                    statusDiv.innerHTML = '<strong>✓ Widget Loaded</strong><br>Enter card details below to test tokenization.';
+                },
+                onError: function(error) {
+                    console.error('Widget error:', error);
+                    const statusDiv = document.getElementById('status');
+                    statusDiv.className = 'info error';
+                    statusDiv.innerHTML = '<strong>✗ Widget Error</strong><br>' + 
+                        (error.message || 'Failed to load payment widget');
+                }
+            });
+        } catch (error) {
+            console.error('Failed to mount widget:', error);
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'info error';
+            statusDiv.innerHTML = '<strong>✗ Failed to Mount Widget</strong><br>' + error.message;
+        }
+    </script>
+</body>
+</html>

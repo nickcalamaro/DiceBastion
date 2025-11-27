@@ -1,6 +1,7 @@
 name = "dicebastion-memberships"
 main = "worker/src/index.js"
 compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
 
 # Change this to your real route once ready, e.g. your domain
 # routes = [ { pattern = "yourdomain.com/api/*", zone_name = "yourdomain.com" } ]

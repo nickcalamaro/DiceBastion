@@ -1,0 +1,61 @@
+name: Test and Deploy
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./worker
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ./worker
+        run: npm test
+
+      - name: Run linting (optional)
+        working-directory: ./worker
+        run: npm run lint || echo "No lint script configured"
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: ./worker
+        run: npm ci
+
+      - name: Deploy to Cloudflare Workers
+        working-directory: ./worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler deploy
