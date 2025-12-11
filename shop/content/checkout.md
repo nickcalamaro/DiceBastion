@@ -125,6 +125,17 @@ Place Order
 <div class="order-summary">
 <h2>Order Summary</h2>
 <div id="summary-items"></div>
+<div id="preorder-notice" style="display: none; background: rgb(var(--color-primary-100)); border: 1px solid rgb(var(--color-primary-600)); border-radius: 8px; padding: 1rem; margin: 1rem 0;">
+<div style="display: flex; gap: 0.5rem; align-items: start;">
+<svg width="20" height="20" viewBox="0 0 20 20" fill="none" style="flex-shrink: 0; margin-top: 2px;">
+<path d="M10 0C4.48 0 0 4.48 0 10s4.48 10 10 10 10-4.48 10-10S15.52 0 10 0zm1 15H9v-2h2v2zm0-4H9V5h2v6z" fill="rgb(var(--color-primary-600))"/>
+</svg>
+<div style="flex: 1;">
+<strong style="color: rgb(var(--color-primary-700)); display: block; margin-bottom: 0.25rem;">Pre-order Notice</strong>
+<small style="color: rgb(var(--color-primary-800)); line-height: 1.4;">Your order contains one or more pre-order items. Your entire order will be delivered once all items are available.</small>
+</div>
+</div>
+</div>
 <div class="summary-totals">
 <div class="summary-line">
 <span>Subtotal</span>
@@ -471,10 +482,25 @@ window.location.href = '/cart';
 return;
 }
 
+// Check for pre-order items
+const hasPreorders = cart.some(item => {
+if (item.is_preorder && item.release_date) {
+const releaseDate = new Date(item.release_date);
+return releaseDate > new Date();
+}
+return false;
+});
+
+// Show/hide pre-order notice
+const preorderNotice = document.getElementById('preorder-notice');
+if (preorderNotice) {
+preorderNotice.style.display = hasPreorders ? 'block' : 'none';
+}
+
 const itemsHtml = cart.map(item => `
 <div class="summary-item">
 <div class="summary-item-details">
-<div class="summary-item-name">${item.name}</div>
+<div class="summary-item-name">${item.name}${item.is_preorder ? ' <span style="font-size: 0.75rem; color: rgb(var(--color-primary-600)); font-weight: 600;">(PRE-ORDER)</span>' : ''}</div>
 <div class="summary-item-qty">Qty: ${item.quantity}</div>
 </div>
 <div class="summary-item-price">${formatPrice(item.price * item.quantity)}</div>

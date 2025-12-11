@@ -116,6 +116,18 @@ Login
 </label>
 </div>
 
+<div style="margin-bottom: 1rem;">
+<label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+<input type="checkbox" id="product-preorder" onchange="togglePreorderDate()">
+<span>This is a pre-order item</span>
+</label>
+</div>
+
+<div id="preorder-date-container" style="display: none; margin-bottom: 1rem;">
+<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Expected Release Date</label>
+<input type="date" id="product-release-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral)); color: rgb(var(--color-neutral-900));">
+</div>
+
 <div style="display: flex; gap: 1rem;">
 <button type="submit" style="flex: 1; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
 <span id="product-submit-text">Add Product</span>
@@ -699,6 +711,15 @@ const slug = e.target.value
 document.getElementById('product-slug').value = slug;
 });
 
+function togglePreorderDate() {
+const preorderCheckbox = document.getElementById('product-preorder');
+const dateContainer = document.getElementById('preorder-date-container');
+dateContainer.style.display = preorderCheckbox.checked ? 'block' : 'none';
+if (!preorderCheckbox.checked) {
+document.getElementById('product-release-date').value = '';
+}
+}
+
 async function loadProducts() {
 try {
 const res = await fetch(`${API_BASE}/products`);
@@ -735,6 +756,8 @@ document.getElementById('product-form').addEventListener('submit', async (e) => 
 e.preventDefault();
 const id = document.getElementById('product-id').value;
 const imageUrl = uploadedProductImage || document.getElementById('product-image').value;
+const preorderChecked = document.getElementById('product-preorder').checked;
+const releaseDate = preorderChecked ? document.getElementById('product-release-date').value : null;
 
 const data = {
 name: document.getElementById('product-name').value,
@@ -745,7 +768,8 @@ price: Math.round(parseFloat(document.getElementById('product-price').value) * 1
 stock_quantity: parseInt(document.getElementById('product-stock').value),
 category: document.getElementById('product-category').value,
 image_url: imageUrl,
-is_active: document.getElementById('product-active').checked ? 1 : 0
+is_active: document.getElementById('product-active').checked ? 1 : 0,
+release_date: releaseDate
 };
 
 try {
@@ -769,6 +793,9 @@ document.getElementById('product-form-title').textContent = 'Add New Product';
 document.getElementById('product-submit-text').textContent = 'Add Product';
 document.getElementById('cancel-product-edit').style.display = 'none';
 document.getElementById('product-image-preview').innerHTML = '';
+document.getElementById('product-preorder').checked = false;
+document.getElementById('product-release-date').value = '';
+document.getElementById('preorder-date-container').style.display = 'none';
 uploadedProductImage = null;
 loadProducts();
 } else {
@@ -787,6 +814,9 @@ document.getElementById('product-form-title').textContent = 'Add New Product';
 document.getElementById('product-submit-text').textContent = 'Add Product';
 document.getElementById('cancel-product-edit').style.display = 'none';
 document.getElementById('product-image-preview').innerHTML = '';
+document.getElementById('product-preorder').checked = false;
+document.getElementById('product-release-date').value = '';
+document.getElementById('preorder-date-container').style.display = 'none';
 uploadedProductImage = null;
 });
 
@@ -807,6 +837,17 @@ document.getElementById('product-stock').value = product.stock_quantity;
 document.getElementById('product-category').value = product.category || '';
 document.getElementById('product-image').value = product.image_url || '';
 document.getElementById('product-active').checked = product.is_active === 1;
+
+// Pre-order fields
+if (product.release_date) {
+document.getElementById('product-preorder').checked = true;
+document.getElementById('product-release-date').value = product.release_date;
+document.getElementById('preorder-date-container').style.display = 'block';
+} else {
+document.getElementById('product-preorder').checked = false;
+document.getElementById('product-release-date').value = '';
+document.getElementById('preorder-date-container').style.display = 'none';
+}
 
 if (product.image_url) {
 document.getElementById('product-image-preview').innerHTML = 

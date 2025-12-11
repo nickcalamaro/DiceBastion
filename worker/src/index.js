@@ -1636,7 +1636,7 @@ app.get('/products', async (c) => {
     await ensureSchema(c.env.DB, 'user_id')
     
     const products = await c.env.DB.prepare(`
-      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, created_at
+      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
       FROM products
       WHERE is_active = 1
       ORDER BY name ASC
@@ -1681,7 +1681,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
   try {
     await ensureSchema(c.env.DB, 'user_id')
     
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category } = await c.req.json()
+    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date } = await c.req.json()
     
     if (!name || !slug || price === undefined) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -1689,8 +1689,8 @@ app.post('/admin/products', requireAdmin, async (c) => {
     
     const now = toIso(new Date())
     const result = await c.env.DB.prepare(`
-      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       name, 
       slug, 
@@ -1702,6 +1702,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
       stock_quantity || 0, 
       image_url || null, 
       category || null,
+      release_date || null,
       now,
       now
     ).run()
@@ -1722,7 +1723,7 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     await ensureSchema(c.env.DB, 'user_id')
     
     const id = c.req.param('id')
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active } = await c.req.json()
+    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date } = await c.req.json()
     
     const updates = []
     const binds = []
@@ -1738,6 +1739,7 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     if (image_url !== undefined) { updates.push('image_url = ?'); binds.push(image_url) }
     if (category !== undefined) { updates.push('category = ?'); binds.push(category) }
     if (is_active !== undefined) { updates.push('is_active = ?'); binds.push(is_active ? 1 : 0) }
+    if (release_date !== undefined) { updates.push('release_date = ?'); binds.push(release_date) }
     
     // Handle image update - delete old image if new one provided and different
     if (image_url !== undefined) {
@@ -2143,9 +2145,15 @@ async function processShopOrderPayment(db, orderId, checkoutId, env) {
   // Get full order details with items for email
   const order = await db.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
   
+  // Get product details including release_date for pre-order detection
+  const itemsWithProducts = await Promise.all((items.results || []).map(async (item) => {
+    const product = await db.prepare('SELECT release_date FROM products WHERE id = ?').bind(item.product_id).first()
+    return { ...item, release_date: product?.release_date || null }
+  }))
+  
   if (order && order.email) {
     try {
-      const emailContent = generateShopOrderEmail(order, items.results || [])
+      const emailContent = generateShopOrderEmail(order, itemsWithProducts)
       await sendEmail(env, { to: order.email, ...emailContent })
       console.log(`Order confirmation email sent to ${order.email}`)
     } catch (emailError) {
@@ -2164,6 +2172,15 @@ function generateShopOrderEmail(order, items) {
   
   const deliveryMethod = order.shipping_address ? 'Local Delivery' : 'Collection'
   const shippingCost = order.shipping || 0
+  
+  // Check for pre-order items
+  const hasPreorders = items.some(item => {
+    if (item.release_date) {
+      const releaseDate = new Date(item.release_date)
+      return releaseDate > new Date()
+    }
+    return false
+  })
   
   // Parse shipping address if available
   let shippingAddress = ''
@@ -2185,10 +2202,13 @@ function generateShopOrderEmail(order, items) {
     }
   }
   
-  const itemsHtml = items.map(item => `
+  const itemsHtml = items.map(item => {
+    const isPreorder = item.release_date && new Date(item.release_date) > new Date()
+    return `
     <tr>
       <td style="padding: 1rem; border-bottom: 1px solid #e5e7eb;">
         <strong style="color: #1f2937;">${item.product_name}</strong>
+        ${isPreorder ? '<br><span style="font-size: 0.75rem; color: #2563eb; font-weight: 600;">PRE-ORDER</span>' : ''}
       </td>
       <td style="padding: 1rem; border-bottom: 1px solid #e5e7eb; text-align: center; color: #4b5563;">
         ${item.quantity}
@@ -2200,7 +2220,7 @@ function generateShopOrderEmail(order, items) {
         ${formatPrice(item.subtotal)}
       </td>
     </tr>
-  `).join('')
+  `}).join('')
   
   const html = `
 <!DOCTYPE html>
@@ -2363,6 +2383,22 @@ function generateShopOrderEmail(order, items) {
                   </td>
                 </tr>
               </table>
+              
+              ${hasPreorders ? `
+              <!-- Pre-order Notice -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem;">
+                <tr>
+                  <td>
+                    <p style="margin: 0 0 0.75rem; color: #92400e; font-weight: 700; font-size: 1rem;">
+                      ⏰ Pre-order Notice
+                    </p>
+                    <p style="margin: 0; color: #78350f; font-size: 0.95rem; line-height: 1.5;">
+                      Your order contains one or more pre-order items. Your entire order will be ${deliveryMethod === 'Collection' ? 'ready for collection' : 'delivered'} once all items become available.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              ` : ''}
               
               ${order.notes ? `
               <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 1rem; margin-bottom: 2rem;">

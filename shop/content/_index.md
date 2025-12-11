@@ -342,15 +342,31 @@ function renderProducts(products) {
     return;
   }
   
-  grid.innerHTML = products.map(product => `
+  grid.innerHTML = products.map(product => {
+    const isPreorder = product.release_date && new Date(product.release_date) > new Date();
+    const releaseDate = isPreorder ? new Date(product.release_date).toLocaleDateString('en-GB', { 
+      day: 'numeric', 
+      month: 'long', 
+      year: 'numeric' 
+    }) : null;
+    
+    return `
     <div class="product-card" onclick="showProductDetail(${product.id})">
       ${product.image_url ? 
         `<img src="${product.image_url}" alt="${product.name}" class="product-image">` :
         '<div class="product-image"></div>'
       }
+      ${isPreorder ? 
+        `<div style="position: absolute; top: 10px; left: 10px; background: rgb(var(--color-primary-600)); color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">PRE-ORDER</div>` : 
+        ''
+      }
       <div class="product-content">
         <div class="product-name">${product.name}</div>
         <div class="product-description">${product.summary || ''}</div>
+        ${isPreorder ? 
+          `<div style="font-size: 0.875rem; color: rgb(var(--color-primary-600)); margin: 0.5rem 0; font-weight: 500;">Available ${releaseDate}</div>` : 
+          ''
+        }
         <div class="product-footer">
           <div>
             <div class="product-price">${formatPrice(product.price)}</div>
@@ -363,7 +379,7 @@ function renderProducts(products) {
           </div>
           <button 
             class="add-to-cart-btn" 
-            onclick="event.stopPropagation(); addToCart(${product.id}, '${product.name}', ${product.price}, ${product.stock_quantity}, '${product.image_url || ''}', this)"
+            onclick="event.stopPropagation(); addToCart(${product.id}, '${product.name}', ${product.price}, ${product.stock_quantity}, '${product.image_url || ''}', ${isPreorder}, '${product.release_date || ''}', this)"
             ${product.stock_quantity === 0 ? 'disabled' : ''}
             data-product-id="${product.id}"
           >
@@ -372,11 +388,12 @@ function renderProducts(products) {
         </div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 // Add to cart function
-window.addToCart = function(productId, name, price, stock, imageUrl, btnElement) {
+window.addToCart = function(productId, name, price, stock, imageUrl, isPreorder, releaseDate, btnElement) {
   let cart = loadCart();
   
   // Check if item already in cart
@@ -398,7 +415,9 @@ window.addToCart = function(productId, name, price, stock, imageUrl, btnElement)
       price: price,
       quantity: 1,
       stock_quantity: stock,
-      image_url: imageUrl
+      image_url: imageUrl,
+      is_preorder: isPreorder,
+      release_date: releaseDate
     });
   }
   
@@ -420,6 +439,13 @@ try {
 const response = await fetch(`${API_BASE}/products/${productId}`);
 const product = await response.json();
 
+const isPreorder = product.release_date && new Date(product.release_date) > new Date();
+const releaseDate = isPreorder ? new Date(product.release_date).toLocaleDateString('en-GB', { 
+  day: 'numeric', 
+  month: 'long', 
+  year: 'numeric' 
+}) : null;
+
 const modal = document.getElementById('product-modal');
 const modalBody = document.getElementById('modal-body');
 
@@ -429,7 +455,15 @@ ${product.image_url ?
 `<img src="${product.image_url}" alt="${product.name}" style="width: 100%; max-height: 400px; object-fit: cover; border-radius: 8px; margin-bottom: 1.5rem;">` :
 ''
 }
+${isPreorder ? 
+`<div style="display: inline-block; background: rgb(var(--color-primary-600)); color: white; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem;">PRE-ORDER</div>` : 
+''
+}
 <h2 style="margin: 0 0 1rem 0; color: rgb(var(--color-neutral-800));">${product.name}</h2>
+${isPreorder ? 
+`<div style="font-size: 1rem; color: rgb(var(--color-primary-600)); margin-bottom: 1rem; font-weight: 500;">Available from ${releaseDate}</div>` : 
+''
+}
 <div style="font-size: 2rem; font-weight: 700; color: rgb(var(--color-primary-600)); margin-bottom: 1rem;">${formatPrice(product.price)}</div>
 <div style="margin-bottom: 1rem; color: rgb(var(--color-neutral-600));">
 <strong>Stock:</strong> ${product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
@@ -440,7 +474,7 @@ ${product.full_description ?
 }
 <button 
 class="add-to-cart-btn" 
-onclick="addToCart(${product.id}, '${product.name}', ${product.price}, ${product.stock_quantity}, '${product.image_url || ''}', this); closeProductModal();"
+onclick="addToCart(${product.id}, '${product.name}', ${product.price}, ${product.stock_quantity}, '${product.image_url || ''}', ${isPreorder}, '${product.release_date || ''}', this); closeProductModal();"
 ${product.stock_quantity === 0 ? 'disabled' : ''}
 style="width: 100%; padding: 1rem; font-size: 1.1rem;"
 >

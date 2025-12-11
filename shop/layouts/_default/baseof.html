@@ -55,7 +55,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
       line-height: 1.6;
       color: rgb(var(--color-neutral-800));
       background: rgb(var(--color-neutral-50));
@@ -102,6 +102,25 @@
     
     .logo:hover {
       color: rgb(var(--color-primary-700));
+    }
+    
+    .beta-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: white;
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.25rem 0.75rem;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
+      animation: subtle-pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes subtle-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.9; transform: scale(0.98); }
     }
     
     nav {
@@ -170,6 +189,7 @@
       <a href="/" class="logo">
         <img src="/img/logo.png" alt="Dice Bastion Logo" />
         <span>Dice Bastion Shop</span>
+        <span class="beta-badge">Beta</span>
       </a>
       <nav>
         <a href="https://dicebastion.com">Main Site</a>
@@ -192,6 +212,10 @@
       <p>&copy; {{ now.Year }} Dice Bastion Gibraltar | 
         <a href="https://dicebastion.com/privacy-policy/">Privacy Policy</a> | 
         <a href="https://dicebastion.com/cookie-policy/">Cookie Policy</a>
+      </p>
+      <p style="margin-top: 0.5rem; font-size: 0.875rem; color: rgb(var(--color-neutral-500));">
+       <h3>Our shop is currently in beta. If you encounter any issues, please contact us at 
+        <a href="mailto:contact@dicebastion.com" style="color: rgb(var(--color-primary-600)); text-decoration: none;">contact@dicebastion.com</a></h3>
       </p>
     </div>
   </footer>
