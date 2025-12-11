@@ -91,10 +91,17 @@ Login
 <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Stock Quantity *</label>
 <input type="number" id="product-stock" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
 </div>
-<div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Category</label>
-<input type="text" id="product-category" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
 </div>
+
+<div style="margin-bottom: 1rem;">
+<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Categories (up to 3)</label>
+<div id="category-tags" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; min-height: 2rem; padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral-50));"></div>
+<div style="display: flex; gap: 0.5rem;">
+<input type="text" id="category-input" placeholder="Type category name..." style="flex: 1; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<button type="button" onclick="addCategory()" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Add</button>
+</div>
+<div id="existing-categories" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
+<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Click existing categories below to add them, or type a new one</small>
 </div>
 
 <div style="margin-bottom: 1rem;">
@@ -711,6 +718,92 @@ const slug = e.target.value
 document.getElementById('product-slug').value = slug;
 });
 
+// Category management
+let selectedCategories = [];
+let allCategories = new Set();
+
+function addCategory() {
+const input = document.getElementById('category-input');
+const category = input.value.trim();
+  
+if (!category) return;
+  
+if (selectedCategories.length >= 3) {
+alert('Maximum 3 categories allowed');
+return;
+}
+  
+if (selectedCategories.includes(category)) {
+alert('Category already added');
+return;
+}
+  
+selectedCategories.push(category);
+allCategories.add(category);
+input.value = '';
+renderCategoryTags();
+renderExistingCategories();
+}
+
+function removeCategory(category) {
+selectedCategories = selectedCategories.filter(c => c !== category);
+renderCategoryTags();
+}
+
+function renderCategoryTags() {
+const container = document.getElementById('category-tags');
+if (selectedCategories.length === 0) {
+container.innerHTML = '<span style="color: rgb(var(--color-neutral-400)); font-size: 0.875rem;">No categories selected</span>';
+return;
+}
+  
+container.innerHTML = selectedCategories.map(cat => `
+<span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: rgb(var(--color-primary-600)); color: white; border-radius: 6px; font-size: 0.875rem;">
+${cat}
+<button type="button" onclick="removeCategory('${cat}')" style="background: none; border: none; color: white; cursor: pointer; padding: 0; font-size: 1.25rem; line-height: 1;">&times;</button>
+</span>
+`).join('');
+}
+
+function renderExistingCategories() {
+const container = document.getElementById('existing-categories');
+const availableCategories = Array.from(allCategories).filter(c => !selectedCategories.includes(c));
+  
+if (availableCategories.length === 0) {
+container.innerHTML = '';
+return;
+}
+  
+container.innerHTML = availableCategories.map(cat => `
+<button type="button" onclick="addExistingCategory('${cat}')" style="padding: 0.5rem 0.75rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer; font-size: 0.875rem;">
+${cat}
+</button>
+`).join('');
+}
+
+function addExistingCategory(category) {
+if (selectedCategories.length >= 3) {
+alert('Maximum 3 categories allowed');
+return;
+}
+selectedCategories.push(category);
+renderCategoryTags();
+renderExistingCategories();
+}
+
+// Allow Enter key to add category
+document.addEventListener('DOMContentLoaded', () => {
+const categoryInput = document.getElementById('category-input');
+if (categoryInput) {
+categoryInput.addEventListener('keypress', (e) => {
+if (e.key === 'Enter') {
+e.preventDefault();
+addCategory();
+}
+});
+}
+});
+
 function togglePreorderDate() {
 const preorderCheckbox = document.getElementById('product-preorder');
 const dateContainer = document.getElementById('preorder-date-container');
@@ -726,19 +819,29 @@ const res = await fetch(`${API_BASE}/products`);
 const products = await res.json();
 const list = document.getElementById('products-list');
 
+// Collect all categories
+products.forEach(p => {
+if (p.category) {
+p.category.split(',').forEach(cat => allCategories.add(cat.trim()));
+}
+});
+renderExistingCategories();
+
 if (products.length === 0) {
 list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No products yet</p>';
 return;
 }
 
-list.innerHTML = products.map(p => `
+list.innerHTML = products.map(p => {
+const categories = p.category ? p.category.split(',').map(c => c.trim()).join(', ') : 'N/A';
+return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
 ${p.image_url ? `<img src="${p.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
 <div style="flex: 1;">
 <h3>${p.name} ${p.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'}</h3>
 <p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${p.summary || ''}</p>
-<p style="margin: 0.5rem 0;"><strong>£${(p.price / 100).toFixed(2)}</strong> | Stock: ${p.stock_quantity} | Category: ${p.category || 'N/A'}</p>
+<p style="margin: 0.5rem 0;"><strong>£${(p.price / 100).toFixed(2)}</strong> | Stock: ${p.stock_quantity} | Categories: ${categories}</p>
 </div>
 </div>
 <div class="item-actions">
@@ -746,7 +849,8 @@ ${p.image_url ? `<img src="${p.image_url}" style="width: 80px; height: 80px; obj
 <button class="btn-delete" onclick="deleteProduct(${p.id}, '${p.name}')">Delete</button>
 </div>
 </div>
-`).join('');
+`;
+}).join('');
 } catch (err) {
 console.error('Load products error:', err);
 }
@@ -766,7 +870,7 @@ summary: document.getElementById('product-summary').value,
 full_description: document.getElementById('description-content').innerHTML,
 price: Math.round(parseFloat(document.getElementById('product-price').value) * 100),
 stock_quantity: parseInt(document.getElementById('product-stock').value),
-category: document.getElementById('product-category').value,
+category: selectedCategories.join(','),
 image_url: imageUrl,
 is_active: document.getElementById('product-active').checked ? 1 : 0,
 release_date: releaseDate
@@ -796,6 +900,8 @@ document.getElementById('product-image-preview').innerHTML = '';
 document.getElementById('product-preorder').checked = false;
 document.getElementById('product-release-date').value = '';
 document.getElementById('preorder-date-container').style.display = 'none';
+selectedCategories = [];
+renderCategoryTags();
 uploadedProductImage = null;
 loadProducts();
 } else {
@@ -817,6 +923,8 @@ document.getElementById('product-image-preview').innerHTML = '';
 document.getElementById('product-preorder').checked = false;
 document.getElementById('product-release-date').value = '';
 document.getElementById('preorder-date-container').style.display = 'none';
+selectedCategories = [];
+renderCategoryTags();
 uploadedProductImage = null;
 });
 
@@ -834,9 +942,12 @@ document.getElementById('product-summary').value = product.summary || '';
 document.getElementById('description-content').innerHTML = product.full_description || '';
 document.getElementById('product-price').value = (product.price / 100).toFixed(2);
 document.getElementById('product-stock').value = product.stock_quantity;
-document.getElementById('product-category').value = product.category || '';
 document.getElementById('product-image').value = product.image_url || '';
 document.getElementById('product-active').checked = product.is_active === 1;
+
+// Load categories
+selectedCategories = product.category ? product.category.split(',').map(c => c.trim()) : [];
+renderCategoryTags();
 
 // Pre-order fields
 if (product.release_date) {

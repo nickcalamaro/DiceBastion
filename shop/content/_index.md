@@ -9,6 +9,10 @@ description: "Board games, miniatures, accessories, and more"
     <p>Browse our collection of board games, miniatures, and gaming accessories.</p>
   </div>
   
+  <div id="category-filter" class="category-filter">
+    <button class="category-btn active" onclick="filterByCategory(null)">All Products</button>
+  </div>
+  
   <div id="product-grid" class="product-grid">
     <div class="loading">Loading products...</div>
   </div>
@@ -37,6 +41,47 @@ description: "Board games, miniatures, accessories, and more"
 .shop-header p {
   font-size: 1.125rem;
   color: rgb(var(--color-neutral-600));
+}
+
+.category-filter {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0 0 2rem;
+  padding: 1rem;
+  background: rgb(var(--color-neutral));
+  border-radius: 12px;
+  border: 1px solid rgb(var(--color-neutral-200));
+  overflow-x: auto;
+  flex-wrap: wrap;
+}
+
+.category-btn {
+  padding: 0.625rem 1.25rem;
+  background: rgb(var(--color-neutral-100));
+  color: rgb(var(--color-neutral-700));
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.category-btn:hover {
+  background: rgb(var(--color-neutral-200));
+  border-color: rgb(var(--color-neutral-300));
+}
+
+.category-btn.active {
+  background: rgb(var(--color-primary-600));
+  color: white;
+  border-color: rgb(var(--color-primary-600));
+}
+
+.category-btn.active:hover {
+  background: rgb(var(--color-primary-700));
+  border-color: rgb(var(--color-primary-700));
 }
 
 .modal {
@@ -289,6 +334,9 @@ color: rgb(var(--color-neutral-800));
 // Shop initialization
 const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
 
+let allProducts = [];
+let currentFilter = null;
+
 // Load cart from localStorage
 function loadCart() {
   const stored = localStorage.getItem('shop_cart');
@@ -320,13 +368,66 @@ function formatPrice(pence) {
 async function loadProducts() {
   try {
     const response = await fetch(`${API_BASE}/products`);
-    const products = await response.json();
-    renderProducts(products);
+    allProducts = await response.json();
+    
+    // Build category filter
+    buildCategoryFilter(allProducts);
+    
+    renderProducts(allProducts);
   } catch (error) {
     console.error('Failed to load products:', error);
     document.getElementById('product-grid').innerHTML = 
       '<div class="loading">Failed to load products. Please try again later.</div>';
   }
+}
+
+// Build category filter menu
+function buildCategoryFilter(products) {
+  const categoryCount = {};
+  
+  // Count products per category
+  products.forEach(product => {
+    if (product.category) {
+      product.category.split(',').forEach(cat => {
+        const trimmedCat = cat.trim();
+        categoryCount[trimmedCat] = (categoryCount[trimmedCat] || 0) + 1;
+      });
+    }
+  });
+  
+  // Get top 5 categories by count
+  const topCategories = Object.entries(categoryCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([cat]) => cat);
+  
+  const filterContainer = document.getElementById('category-filter');
+  
+  // Build filter buttons
+  const buttons = ['<button class="category-btn active" onclick="filterByCategory(null)">All Products</button>'];
+  topCategories.forEach(cat => {
+    buttons.push(`<button class="category-btn" onclick="filterByCategory('${cat}')">${cat}</button>`);
+  });
+  
+  filterContainer.innerHTML = buttons.join('');
+}
+
+// Filter products by category
+function filterByCategory(category) {
+  currentFilter = category;
+  
+  // Update active button
+  document.querySelectorAll('.category-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  event.target.classList.add('active');
+  
+  // Filter and render products
+  const filtered = category 
+    ? allProducts.filter(p => p.category && p.category.split(',').map(c => c.trim()).includes(category))
+    : allProducts;
+  
+  renderProducts(filtered);
 }
 
 // Render products
