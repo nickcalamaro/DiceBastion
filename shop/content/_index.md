@@ -98,6 +98,7 @@ color: rgb(var(--color-neutral-800));
 }
 
 .product-card {
+  position: relative;
   border: 1px solid rgb(var(--color-neutral-200));
   border-radius: 12px;
   padding: 0;
