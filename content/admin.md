@@ -294,10 +294,12 @@ max-width: 90vw;
 max-height: 90vh;
 display: flex;
 flex-direction: column;
+overflow-y: auto;
 }
 .crop-image-container {
-max-height: 60vh;
+max-height: 50vh;
 margin: 1rem 0;
+overflow: hidden;
 }
 .crop-actions {
 display: flex;
@@ -312,6 +314,19 @@ justify-content: flex-end;
 <h2>Crop Image</h2>
 <div class="crop-image-container">
 <img id="crop-image" style="max-width: 100%;">
+</div>
+<div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem;">
+<div style="display: flex; align-items: center; gap: 0.5rem;">
+<label style="font-weight: 600; font-size: 0.875rem; min-width: 60px;">🔍 Zoom:</label>
+<input type="range" id="crop-zoom" min="10" max="200" value="100" step="5" style="flex: 1; max-width: 300px;">
+<span id="crop-zoom-value" style="font-size: 0.875rem; color: rgb(var(--color-neutral-600)); min-width: 50px;">100%</span>
+</div>
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+<button id="crop-center-h" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer;">↔️ Center H</button>
+<button id="crop-center-v" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer;">↕️ Center V</button>
+<button id="crop-reset" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer;">🔄 Reset</button>
+<span style="padding: 0.5rem; color: rgb(var(--color-neutral-600)); font-size: 0.875rem; align-self: center;">💡 Drag crop box beyond image for white space</span>
+</div>
 </div>
 <div class="crop-actions">
 <button id="crop-cancel" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">Cancel</button>
@@ -454,16 +469,106 @@ cropper.destroy();
 }
 
 // Initialize cropper to match actual display ratio (336:220)
+// viewMode: 0 allows cropping beyond image boundaries
 cropper = new Cropper(img, {
 aspectRatio: 336 / 220,
-viewMode: 2,
+viewMode: 0,
 autoCropArea: 1,
 responsive: true,
-background: false,
+background: true,
+zoomOnWheel: false, // Disable default wheel zoom to add custom behavior
+ready: function() {
+// Set initial zoom to 100%
+const imageData = this.cropper.getImageData();
+const containerData = this.cropper.getContainerData();
+const initialRatio = Math.min(
+containerData.width / imageData.naturalWidth,
+containerData.height / imageData.naturalHeight
+);
+this.cropper.zoomTo(initialRatio);
+}
+});
+
+// Add custom wheel zoom that always zooms from center
+const cropImageContainer = document.querySelector('.crop-image-container');
+cropImageContainer.addEventListener('wheel', (e) => {
+if (cropper) {
+e.preventDefault();
+const imageData = cropper.getImageData();
+const containerData = cropper.getContainerData();
+const currentRatio = imageData.width / imageData.naturalWidth;
+const delta = e.deltaY > 0 ? -0.1 : 0.1;
+const newRatio = currentRatio + (currentRatio * delta);
+const baseRatio = Math.min(
+containerData.width / imageData.naturalWidth,
+containerData.height / imageData.naturalHeight
+);
+// Limit zoom between 10% and 200% of base ratio
+const minRatio = baseRatio * 0.1;
+const maxRatio = baseRatio * 2;
+const clampedRatio = Math.max(minRatio, Math.min(maxRatio, newRatio));
+// Zoom to center of container
+const centerX = containerData.width / 2;
+const centerY = containerData.height / 2;
+cropper.zoomTo(clampedRatio, { x: centerX, y: centerY });
+// Update slider
+const percentage = Math.round((clampedRatio / baseRatio) * 100);
+document.getElementById('crop-zoom').value = percentage;
+document.getElementById('crop-zoom-value').textContent = percentage + '%';
+}
 });
 };
 reader.readAsDataURL(file);
 }
+
+document.getElementById('crop-zoom').addEventListener('input', (e) => {
+if (cropper) {
+const percentage = parseFloat(e.target.value);
+const imageData = cropper.getImageData();
+const containerData = cropper.getContainerData();
+// Calculate base ratio to fit image in container
+const baseRatio = Math.min(
+containerData.width / imageData.naturalWidth,
+containerData.height / imageData.naturalHeight
+);
+// Apply zoom percentage relative to base ratio
+const zoomRatio = baseRatio * (percentage / 100);
+cropper.zoomTo(zoomRatio);
+document.getElementById('crop-zoom-value').textContent = percentage + '%';
+}
+});
+
+document.getElementById('crop-center-h').addEventListener('click', () => {
+if (cropper) {
+const containerData = cropper.getContainerData();
+const cropBoxData = cropper.getCropBoxData();
+
+// Center horizontally only
+cropper.setCropBoxData({
+left: (containerData.width - cropBoxData.width) / 2,
+});
+}
+});
+
+document.getElementById('crop-center-v').addEventListener('click', () => {
+if (cropper) {
+const containerData = cropper.getContainerData();
+const cropBoxData = cropper.getCropBoxData();
+
+// Center vertically only
+cropper.setCropBoxData({
+top: (containerData.height - cropBoxData.height) / 2,
+});
+}
+});
+
+document.getElementById('crop-reset').addEventListener('click', () => {
+if (cropper) {
+cropper.reset();
+document.getElementById('crop-zoom').value = 100;
+document.getElementById('crop-zoom-value').textContent = '100%';
+}
+});
 
 document.getElementById('crop-cancel').addEventListener('click', () => {
 document.getElementById('crop-modal').classList.remove('active');
@@ -476,16 +581,37 @@ currentCropCallback = null;
 
 document.getElementById('crop-confirm').addEventListener('click', async () => {
 if (cropper && currentCropCallback) {
-// Get cropped canvas (336:220 display ratio at 2x resolution)
-const canvas = cropper.getCroppedCanvas({
-width: 672,
-height: 440,
+// Get crop box data to handle areas outside the image
+const cropData = cropper.getData();
+const imageData = cropper.getImageData();
+const canvasData = cropper.getCanvasData();
+
+// Create a canvas with white background at target size
+const targetWidth = 672;
+const targetHeight = 440;
+const finalCanvas = document.createElement('canvas');
+finalCanvas.width = targetWidth;
+finalCanvas.height = targetHeight;
+const ctx = finalCanvas.getContext('2d');
+
+// Fill with white background
+ctx.fillStyle = '#FFFFFF';
+ctx.fillRect(0, 0, targetWidth, targetHeight);
+
+// Get the cropped portion (may be smaller than target if crop extends beyond image)
+const croppedCanvas = cropper.getCroppedCanvas({
+width: targetWidth,
+height: targetHeight,
 imageSmoothingEnabled: true,
 imageSmoothingQuality: 'high',
+fillColor: '#FFFFFF',
 });
 
+// Draw the cropped image onto the white canvas
+ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
+
 // Convert to base64
-const croppedImage = canvas.toDataURL('image/jpeg', 0.9);
+const croppedImage = finalCanvas.toDataURL('image/jpeg', 0.9);
 
 // Upload to R2
 try {

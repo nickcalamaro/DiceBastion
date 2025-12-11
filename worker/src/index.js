@@ -1739,17 +1739,18 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     if (category !== undefined) { updates.push('category = ?'); binds.push(category) }
     if (is_active !== undefined) { updates.push('is_active = ?'); binds.push(is_active ? 1 : 0) }
     
-    // Handle image update - delete old image if new one provided
+    // Handle image update - delete old image if new one provided and different
     if (image_url !== undefined) {
       // Get current product to find old image
       const currentProduct = await c.env.DB.prepare('SELECT image_url FROM products WHERE id = ?')
         .bind(id).first()
       
-      if (currentProduct && currentProduct.image_url) {
+      if (currentProduct && currentProduct.image_url && currentProduct.image_url !== image_url) {
         const oldKey = extractImageKey(currentProduct.image_url)
         if (oldKey && c.env.IMAGES) {
           try {
             await c.env.IMAGES.delete(oldKey)
+            console.log('Deleted old image:', oldKey)
           } catch (err) {
             console.error('Failed to delete old image:', err)
           }

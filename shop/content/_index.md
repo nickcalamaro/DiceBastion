@@ -356,7 +356,7 @@ function renderProducts(products) {
             <div class="product-price">${formatPrice(product.price)}</div>
             <div class="product-stock ${product.stock_quantity < 5 && product.stock_quantity > 0 ? 'low' : ''} ${product.stock_quantity === 0 ? 'out' : ''}">
               ${product.stock_quantity > 0 ? 
-                (product.stock_quantity < 5 ? `Only ${product.stock_quantity} left!` : `${product.stock_quantity} in stock`) : 
+                `${product.stock_quantity} in stock` : 
                 'Out of stock'
               }
             </div>
