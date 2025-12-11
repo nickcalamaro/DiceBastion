@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import bcrypt from 'bcryptjs'
 
 // Replace generic cors with strict configurable CORS + debug logging
 const app = new Hono()
@@ -9,8 +10,8 @@ app.use('*', async (c, next) => {
   const allowOrigin = (origin && allowed.includes(origin)) ? origin : ''
   if (allowOrigin) c.res.headers.set('Access-Control-Allow-Origin', allowOrigin)
   c.res.headers.set('Vary','Origin')
-  c.res.headers.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key')
-  c.res.headers.set('Access-Control-Allow-Methods','GET,POST,OPTIONS')
+  c.res.headers.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key, X-Session-Token, X-Admin-Key')
+  c.res.headers.set('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS')
   if (debugMode) {
     try { console.log('CORS', { origin, allowOrigin, allowed }) } catch {}
     c.res.headers.set('X-Debug-Origin', origin || '')
@@ -140,6 +141,87 @@ async function ensureSchema(db, fkColumn){
         consent_at TEXT,
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         updated_at TEXT
+      )
+    `).run().catch(()=>{})
+  } catch {}
+  
+  // Create products table for shop items
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        slug TEXT UNIQUE NOT NULL,
+        description TEXT,
+        price INTEGER NOT NULL,
+        currency TEXT DEFAULT 'GBP',
+        stock_quantity INTEGER DEFAULT 0,
+        image_url TEXT,
+        category TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      )
+    `).run().catch(()=>{})
+  } catch {}
+  
+  // Create orders table for shop purchases
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_number TEXT UNIQUE NOT NULL,
+        user_id INTEGER,
+        email TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        subtotal INTEGER NOT NULL,
+        tax INTEGER DEFAULT 0,
+        shipping INTEGER DEFAULT 0,
+        total INTEGER NOT NULL,
+        currency TEXT DEFAULT 'GBP',
+        checkout_id TEXT,
+        payment_id TEXT,
+        payment_status TEXT,
+        shipping_address TEXT,
+        billing_address TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        completed_at TEXT
+      )
+    `).run().catch(()=>{})
+  } catch {}
+  
+  // Create order_items table for items in each order
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price INTEGER NOT NULL,
+        subtotal INTEGER NOT NULL,
+        FOREIGN KEY (order_id) REFERENCES orders(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      )
+    `).run().catch(()=>{})
+  } catch {}
+  
+  // Create cart_items table for temporary shopping carts
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        UNIQUE(session_id, product_id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
       )
     `).run().catch(()=>{})
   } catch {}
@@ -323,15 +405,23 @@ async function getOrCreateSumUpCustomer(env, user) {
 
 async function createCheckout(env, { amount, currency, orderRef, title, description, savePaymentInstrument = false, customerId = null }) {
   const { access_token } = await sumupToken(env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
-  const returnUrl = new URL(env.RETURN_URL)
-  returnUrl.searchParams.set('orderRef', orderRef)
   const body = { 
     amount: Number(amount), 
     currency, 
     checkout_reference: orderRef, 
     merchant_code: env.SUMUP_MERCHANT_CODE, 
-    description: description || title, 
-    return_url: returnUrl.toString()
+    description: description || title
+  }
+  
+  // Add return_url if RETURN_URL is configured (for hosted checkout, not needed for widget)
+  if (env.RETURN_URL) {
+    try {
+      const returnUrl = new URL(env.RETURN_URL)
+      returnUrl.searchParams.set('orderRef', orderRef)
+      body.return_url = returnUrl.toString()
+    } catch (e) {
+      console.warn('Invalid RETURN_URL, skipping return_url in checkout:', e.message)
+    }
   }
   // Request card tokenization using SumUp's recurring payment flow
   if (savePaymentInstrument && customerId) {
@@ -1536,6 +1626,845 @@ app.get('/test/renew-user', async (c) => {
   }
 })
 
+// ============================================================================
+// PRODUCT & SHOP API ENDPOINTS
+// ============================================================================
+
+// Get all active products (public)
+app.get('/products', async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    
+    const products = await c.env.DB.prepare(`
+      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, created_at
+      FROM products
+      WHERE is_active = 1
+      ORDER BY name ASC
+    `).all()
+    
+    return c.json(products.results || [])
+  } catch (e) {
+    console.error('Get products error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Get single product by ID or slug (public)
+app.get('/products/:id', async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    const id = c.req.param('id')
+    
+    // Try to find by ID first, then by slug
+    let product
+    if (/^\d+$/.test(id)) {
+      product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND is_active = 1').bind(id).first()
+    }
+    
+    if (!product) {
+      product = await c.env.DB.prepare('SELECT * FROM products WHERE slug = ? AND is_active = 1').bind(id).first()
+    }
+    
+    if (!product) {
+      return c.json({ error: 'product_not_found' }, 404)
+    }
+    
+    return c.json(product)
+  } catch (e) {
+    console.error('Get product error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Create new product (admin only - TODO: add authentication)
+app.post('/admin/products', requireAdmin, async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    
+    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category } = await c.req.json()
+    
+    if (!name || !slug || price === undefined) {
+      return c.json({ error: 'missing_required_fields' }, 400)
+    }
+    
+    const now = toIso(new Date())
+    const result = await c.env.DB.prepare(`
+      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      name, 
+      slug, 
+      description || null,
+      summary || null, 
+      full_description || null,
+      price, 
+      currency || 'GBP', 
+      stock_quantity || 0, 
+      image_url || null, 
+      category || null,
+      now,
+      now
+    ).run()
+    
+    return c.json({ success: true, product_id: result.meta.last_row_id })
+  } catch (e) {
+    console.error('Create product error:', e)
+    if (e.message?.includes('UNIQUE constraint')) {
+      return c.json({ error: 'slug_already_exists' }, 400)
+    }
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Update product (admin only)
+app.put('/admin/products/:id', requireAdmin, async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    
+    const id = c.req.param('id')
+    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active } = await c.req.json()
+    
+    const updates = []
+    const binds = []
+    
+    if (name !== undefined) { updates.push('name = ?'); binds.push(name) }
+    if (slug !== undefined) { updates.push('slug = ?'); binds.push(slug) }
+    if (description !== undefined) { updates.push('description = ?'); binds.push(description) }
+    if (summary !== undefined) { updates.push('summary = ?'); binds.push(summary) }
+    if (full_description !== undefined) { updates.push('full_description = ?'); binds.push(full_description) }
+    if (price !== undefined) { updates.push('price = ?'); binds.push(price) }
+    if (currency !== undefined) { updates.push('currency = ?'); binds.push(currency) }
+    if (stock_quantity !== undefined) { updates.push('stock_quantity = ?'); binds.push(stock_quantity) }
+    if (image_url !== undefined) { updates.push('image_url = ?'); binds.push(image_url) }
+    if (category !== undefined) { updates.push('category = ?'); binds.push(category) }
+    if (is_active !== undefined) { updates.push('is_active = ?'); binds.push(is_active ? 1 : 0) }
+    
+    // Handle image update - delete old image if new one provided
+    if (image_url !== undefined) {
+      // Get current product to find old image
+      const currentProduct = await c.env.DB.prepare('SELECT image_url FROM products WHERE id = ?')
+        .bind(id).first()
+      
+      if (currentProduct && currentProduct.image_url) {
+        const oldKey = extractImageKey(currentProduct.image_url)
+        if (oldKey && c.env.IMAGES) {
+          try {
+            await c.env.IMAGES.delete(oldKey)
+          } catch (err) {
+            console.error('Failed to delete old image:', err)
+          }
+        }
+      }
+    }
+    
+    if (updates.length === 0) {
+      return c.json({ error: 'no_fields_to_update' }, 400)
+    }
+    
+    updates.push('updated_at = ?')
+    binds.push(toIso(new Date()))
+    binds.push(id)
+    
+    await c.env.DB.prepare(`
+      UPDATE products SET ${updates.join(', ')} WHERE id = ?
+    `).bind(...binds).run()
+    
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('Update product error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Delete product (admin only - soft delete by setting is_active = 0)
+app.delete('/admin/products/:id', requireAdmin, async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    
+    const id = c.req.param('id')
+    
+    // Get product to find image
+    const product = await c.env.DB.prepare('SELECT image_url FROM products WHERE id = ?')
+      .bind(id).first()
+    
+    // Delete image from R2
+    if (product && product.image_url) {
+      const imageKey = extractImageKey(product.image_url)
+      if (imageKey && c.env.IMAGES) {
+        try {
+          await c.env.IMAGES.delete(imageKey)
+        } catch (err) {
+          console.error('Failed to delete image:', err)
+        }
+      }
+    }
+    
+    await c.env.DB.prepare('UPDATE products SET is_active = 0, updated_at = ? WHERE id = ?')
+      .bind(toIso(new Date()), id)
+      .run()
+    
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('Delete product error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Get all orders (admin only)
+app.get('/admin/orders', async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    
+    const adminKey = c.req.header('X-Admin-Key')
+    if (adminKey !== c.env.ADMIN_KEY) {
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    
+    const orders = await c.env.DB.prepare(`
+      SELECT * FROM orders 
+      ORDER BY created_at DESC
+      LIMIT 100
+    `).all()
+    
+    return c.json(orders.results || [])
+  } catch (e) {
+    console.error('Get orders error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Get order details with items (admin only or order owner)
+app.get('/orders/:orderNumber', async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    
+    const orderNumber = c.req.param('orderNumber')
+    const email = c.req.query('email')
+    
+    const order = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+      .bind(orderNumber)
+      .first()
+    
+    if (!order) {
+      return c.json({ error: 'order_not_found' }, 404)
+    }
+    
+    // Check authorization (admin or order owner)
+    const adminKey = c.req.header('X-Admin-Key')
+    if (adminKey !== c.env.ADMIN_KEY && order.email !== email) {
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    
+    // Get order items
+    const items = await c.env.DB.prepare('SELECT * FROM order_items WHERE order_id = ?')
+      .bind(order.id)
+      .all()
+    
+    return c.json({
+      ...order,
+      items: items.results || []
+    })
+  } catch (e) {
+    console.error('Get order error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// ============================================================================
+// SHOP CHECKOUT ENDPOINT
+// ============================================================================
+
+// Create order and SumUp checkout for shop purchases
+app.post('/shop/checkout', async (c) => {
+  try {
+    await ensureSchema(c.env.DB, 'user_id')
+    
+    const { email, name, items, shipping_address, delivery_method, notes, consent_at } = await c.req.json()
+    
+    if (!email || !name || !items || items.length === 0 || !consent_at) {
+      return c.json({ error: 'missing_required_fields' }, 400)
+    }
+
+    if (!delivery_method || !['collection', 'delivery'].includes(delivery_method)) {
+      return c.json({ error: 'invalid_delivery_method' }, 400)
+    }
+
+    // Validate shipping address if delivery is selected
+    if (delivery_method === 'delivery' && !shipping_address) {
+      return c.json({ error: 'shipping_address_required_for_delivery' }, 400)
+    }
+    
+    if (!EMAIL_RE.test(email)) {
+      return c.json({ error: 'invalid_email' }, 400)
+    }
+    
+    // Fetch product details and calculate total
+    let subtotal = 0
+    const orderItems = []
+    
+    for (const item of items) {
+      const product = await c.env.DB.prepare('SELECT * FROM products WHERE id = ? AND is_active = 1')
+        .bind(item.product_id)
+        .first()
+      
+      if (!product) {
+        return c.json({ error: `product_not_found: ${item.product_id}` }, 400)
+      }
+      
+      if (product.stock_quantity < item.quantity) {
+        return c.json({ error: `insufficient_stock: ${product.name}` }, 400)
+      }
+      
+      const itemSubtotal = product.price * item.quantity
+      subtotal += itemSubtotal
+      
+      orderItems.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: item.quantity,
+        unit_price: product.price,
+        subtotal: itemSubtotal
+      })
+    }
+    
+    // Calculate shipping: £4 for delivery, £0 for collection
+    const shipping = delivery_method === 'delivery' ? 400 : 0 // £4.00 in pence
+    const tax = 0 // No VAT in Gibraltar
+    const total = subtotal + shipping + tax
+    
+    // Generate unique order number
+    const orderNumber = 'ORD-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6).toUpperCase()
+    
+    // Create order in database (without checkout_id initially)
+    const now = toIso(new Date())
+    const orderResult = await c.env.DB.prepare(`
+      INSERT INTO orders (
+        order_number, email, name, status, 
+        subtotal, tax, shipping, total, currency,
+        payment_status,
+        shipping_address, billing_address, notes,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      orderNumber, email, name, 'pending',
+      subtotal, tax, shipping, total, 'GBP',
+      'pending',
+      shipping_address ? JSON.stringify(shipping_address) : null,
+      shipping_address ? JSON.stringify(shipping_address) : null,
+      notes || null,
+      now, now
+    ).run()
+    
+    const orderId = orderResult.meta.last_row_id
+    
+    // Insert order items
+    for (const item of orderItems) {
+      await c.env.DB.prepare(`
+        INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(
+        orderId,
+        item.product_id,
+        item.product_name,
+        item.quantity,
+        item.unit_price,
+        item.subtotal
+      ).run()
+    }
+    
+    // Create SumUp checkout
+    let checkout
+    try {
+      checkout = await createCheckout(c.env, {
+        amount: total / 100, // Convert pence to pounds
+        currency: 'GBP',
+        orderRef: orderNumber,
+        title: `Order ${orderNumber}`,
+        description: `Shop order - ${orderItems.length} item(s)`
+      })
+    } catch (err) {
+      console.error('SumUp checkout error:', err)
+      return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
+    }
+    
+    if (!checkout.id) {
+      console.error('SumUp checkout missing id', checkout)
+      return c.json({ error: 'sumup_missing_id' }, 502)
+    }
+    
+    // Update order with checkout_id
+    await c.env.DB.prepare('UPDATE orders SET checkout_id = ? WHERE id = ?')
+      .bind(checkout.id, orderId)
+      .run()
+    
+    // Return checkoutId for widget (same pattern as membership checkout)
+    return c.json({
+      success: true,
+      order_number: orderNumber,
+      checkoutId: checkout.id
+    })
+    
+  } catch (e) {
+    console.error('Shop checkout error:', e)
+    return c.json({ error: 'internal_error', details: String(e) }, 500)
+  }
+})
+
+// Webhook endpoint for SumUp payment notifications
+app.post('/webhooks/sumup/shop-payment', async (c) => {
+  try {
+    const payload = await c.req.json()
+    console.log('SumUp shop payment webhook:', JSON.stringify(payload))
+    
+    // Extract checkout reference (order number)
+    const checkoutReference = payload.checkout_reference || payload.id
+    
+    if (!checkoutReference) {
+      return c.json({ error: 'missing_checkout_reference' }, 400)
+    }
+    
+    // Find order by checkout reference
+    const order = await c.env.DB.prepare(
+      'SELECT * FROM orders WHERE order_number = ? OR checkout_id = ?'
+    ).bind(checkoutReference, checkoutReference).first()
+    
+    if (!order) {
+      console.error('Order not found for checkout reference:', checkoutReference)
+      return c.json({ error: 'order_not_found' }, 404)
+    }
+    
+    // Only process if payment is successful
+    if (payload.status === 'PAID' || payload.status === 'paid') {
+      await processShopOrderPayment(c.env.DB, order.id, payload.id, c.env)
+    }
+    
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('Shop payment webhook error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Manual payment confirmation endpoint (called from order confirmation page)
+app.post('/shop/confirm-payment/:orderNumber', async (c) => {
+  try {
+    const orderNumber = c.req.param('orderNumber')
+    
+    // Find order
+    const order = await c.env.DB.prepare(
+      'SELECT * FROM orders WHERE order_number = ?'
+    ).bind(orderNumber).first()
+    
+    if (!order) {
+      return c.json({ error: 'order_not_found' }, 404)
+    }
+    
+    // If already completed, return success
+    if (order.status === 'completed') {
+      return c.json({ success: true, status: 'completed', order })
+    }
+    
+    // Check payment status with SumUp (using checkout_reference which is the order_number)
+    try {
+      const { access_token } = await sumupToken(c.env, 'payments')
+      
+      // Try to find the checkout by order number (checkout_reference)
+      const checkoutsRes = await fetch(
+        `https://api.sumup.com/v0.1/checkouts?checkout_reference=${orderNumber}`,
+        { headers: { Authorization: `Bearer ${access_token}` } }
+      )
+      
+      if (checkoutsRes.ok) {
+        const checkouts = await checkoutsRes.json()
+        const checkout = checkouts.find(c => c.checkout_reference === orderNumber)
+        
+        if (checkout && (checkout.status === 'PAID' || checkout.status === 'paid')) {
+          // Payment confirmed! Process the order
+          await processShopOrderPayment(c.env.DB, order.id, checkout.id, c.env)
+          
+          // Fetch updated order
+          const updatedOrder = await c.env.DB.prepare(
+            'SELECT * FROM orders WHERE id = ?'
+          ).bind(order.id).first()
+          
+          return c.json({ success: true, status: 'completed', order: updatedOrder })
+        }
+      }
+    } catch (e) {
+      console.error('Error checking payment status:', e)
+    }
+    
+    // Payment not yet confirmed
+    return c.json({ success: true, status: 'pending', order })
+  } catch (e) {
+    console.error('Confirm payment error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Helper function to process shop order payment and reduce stock
+async function processShopOrderPayment(db, orderId, checkoutId, env) {
+  const now = toIso(new Date())
+  
+  // Update order status
+  await db.prepare(`
+    UPDATE orders 
+    SET status = 'completed', 
+        payment_status = 'paid',
+        checkout_id = ?,
+        completed_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).bind(checkoutId, now, now, orderId).run()
+  
+  // Get order items
+  const items = await db.prepare(
+    'SELECT * FROM order_items WHERE order_id = ?'
+  ).bind(orderId).all()
+  
+  // Reduce stock for each item
+  for (const item of items.results || []) {
+    await db.prepare(`
+      UPDATE products 
+      SET stock_quantity = CASE 
+        WHEN stock_quantity >= ? THEN stock_quantity - ?
+        ELSE 0
+      END,
+      updated_at = ?
+      WHERE id = ?
+    `).bind(item.quantity, item.quantity, now, item.product_id).run()
+    
+    console.log(`Reduced stock for product ${item.product_id} by ${item.quantity}`)
+  }
+  
+  console.log(`Order ${orderId} completed, stock reduced`)
+  
+  // Get full order details with items for email
+  const order = await db.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
+  
+  if (order && order.email) {
+    try {
+      const emailContent = generateShopOrderEmail(order, items.results || [])
+      await sendEmail(env, { to: order.email, ...emailContent })
+      console.log(`Order confirmation email sent to ${order.email}`)
+    } catch (emailError) {
+      console.error('Failed to send order confirmation email:', emailError)
+      // Don't fail the entire operation if email fails
+    }
+  }
+}
+
+// Generate shop order confirmation email with invoice
+function generateShopOrderEmail(order, items) {
+  const formatPrice = (pence) => `£${(pence / 100).toFixed(2)}`
+  const orderDate = new Date(order.created_at).toLocaleDateString('en-GB', { 
+    year: 'numeric', month: 'long', day: 'numeric' 
+  })
+  
+  const deliveryMethod = order.shipping_address ? 'Local Delivery' : 'Collection'
+  const shippingCost = order.shipping || 0
+  
+  // Parse shipping address if available
+  let shippingAddress = ''
+  if (order.shipping_address) {
+    try {
+      const addr = typeof order.shipping_address === 'string' 
+        ? JSON.parse(order.shipping_address) 
+        : order.shipping_address
+      shippingAddress = `
+        <p style="margin: 0.25rem 0; color: #4b5563;">
+          ${addr.line1}<br>
+          ${addr.line2 ? addr.line2 + '<br>' : ''}
+          ${addr.city}, ${addr.postcode}<br>
+          ${addr.country}
+        </p>
+      `
+    } catch (e) {
+      console.error('Error parsing shipping address:', e)
+    }
+  }
+  
+  const itemsHtml = items.map(item => `
+    <tr>
+      <td style="padding: 1rem; border-bottom: 1px solid #e5e7eb;">
+        <strong style="color: #1f2937;">${item.product_name}</strong>
+      </td>
+      <td style="padding: 1rem; border-bottom: 1px solid #e5e7eb; text-align: center; color: #4b5563;">
+        ${item.quantity}
+      </td>
+      <td style="padding: 1rem; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937;">
+        ${formatPrice(item.unit_price)}
+      </td>
+      <td style="padding: 1rem; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; font-weight: 600;">
+        ${formatPrice(item.subtotal)}
+      </td>
+    </tr>
+  `).join('')
+  
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Confirmation - ${order.order_number}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f3f4f6; line-height: 1.6;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 2rem 1rem;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); overflow: hidden;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); padding: 2.5rem 2rem; text-align: center;">
+              <h1 style="margin: 0 0 0.5rem; color: #ffffff; font-size: 1.75rem; font-weight: 700;">
+                Order Confirmed!
+              </h1>
+              <p style="margin: 0; color: #dbeafe; font-size: 0.95rem;">
+                Thank you for your purchase from Dice Bastion Shop
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Order Details -->
+          <tr>
+            <td style="padding: 2rem;">
+              <p style="margin: 0 0 1.5rem; color: #4b5563; font-size: 1rem;">
+                Hi <strong>${order.name}</strong>,
+              </p>
+              <p style="margin: 0 0 1.5rem; color: #4b5563; font-size: 1rem;">
+                Your order has been confirmed and ${deliveryMethod === 'Collection' ? 'is being prepared for collection' : 'will be delivered soon'}. 
+                Below is your order invoice for your records.
+              </p>
+              
+              <!-- Invoice Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 2rem;">
+                <tr>
+                  <td style="padding: 1.5rem;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding-bottom: 1rem;">
+                          <p style="margin: 0; color: #6b7280; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">
+                            Invoice
+                          </p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td width="50%" style="vertical-align: top;">
+                          <p style="margin: 0 0 0.5rem; color: #9ca3af; font-size: 0.875rem;">Order Number</p>
+                          <p style="margin: 0 0 1rem; color: #1f2937; font-size: 1.125rem; font-weight: 700; font-family: 'Courier New', monospace;">
+                            ${order.order_number}
+                          </p>
+                          <p style="margin: 0 0 0.5rem; color: #9ca3af; font-size: 0.875rem;">Order Date</p>
+                          <p style="margin: 0; color: #4b5563; font-weight: 600;">
+                            ${orderDate}
+                          </p>
+                        </td>
+                        <td width="50%" style="vertical-align: top; text-align: right;">
+                          <p style="margin: 0 0 0.5rem; color: #9ca3af; font-size: 0.875rem;">Bill To</p>
+                          <p style="margin: 0 0 0.25rem; color: #1f2937; font-weight: 600;">${order.name}</p>
+                          <p style="margin: 0; color: #4b5563; font-size: 0.875rem;">${order.email}</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Items Table -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 1.5rem;">
+                <thead>
+                  <tr style="background-color: #f9fafb;">
+                    <th style="padding: 1rem; text-align: left; font-weight: 600; color: #6b7280; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb;">
+                      Item
+                    </th>
+                    <th style="padding: 1rem; text-align: center; font-weight: 600; color: #6b7280; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb;">
+                      Qty
+                    </th>
+                    <th style="padding: 1rem; text-align: right; font-weight: 600; color: #6b7280; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb;">
+                      Price
+                    </th>
+                    <th style="padding: 1rem; text-align: right; font-weight: 600; color: #6b7280; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb;">
+                      Total
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsHtml}
+                </tbody>
+              </table>
+              
+              <!-- Totals -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 2rem;">
+                <tr>
+                  <td width="60%"></td>
+                  <td width="40%">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding: 0.5rem 0; color: #4b5563;">Subtotal:</td>
+                        <td style="padding: 0.5rem 0; text-align: right; color: #1f2937; font-weight: 600;">
+                          ${formatPrice(order.subtotal)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 0.5rem 0; color: #4b5563;">Shipping:</td>
+                        <td style="padding: 0.5rem 0; text-align: right; color: #1f2937; font-weight: 600;">
+                          ${shippingCost > 0 ? formatPrice(shippingCost) : 'FREE'}
+                        </td>
+                      </tr>
+                      <tr style="border-top: 2px solid #e5e7eb;">
+                        <td style="padding: 1rem 0 0; color: #1f2937; font-size: 1.125rem; font-weight: 700;">
+                          Total:
+                        </td>
+                        <td style="padding: 1rem 0 0; text-align: right; color: #2563eb; font-size: 1.25rem; font-weight: 700;">
+                          ${formatPrice(order.total)}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Delivery Information -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #eff6ff; border-left: 4px solid #2563eb; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem;">
+                <tr>
+                  <td>
+                    <p style="margin: 0 0 0.75rem; color: #1e40af; font-weight: 700; font-size: 1rem;">
+                      ${deliveryMethod === 'Collection' ? '📦 Collection Information' : '🚚 Delivery Information'}
+                    </p>
+                    ${deliveryMethod === 'Collection' ? `
+                      <p style="margin: 0 0 0.5rem; color: #1e3a8a; font-weight: 600;">
+                        Gibraltar Warhammer Club
+                      </p>
+                      <p style="margin: 0 0 0.5rem; color: #3b82f6;">
+                        <a href="https://maps.app.goo.gl/xRVr1Jq58ANZ9DLY6" style="color: #2563eb; text-decoration: none;">
+                          View Location on Map →
+                        </a>
+                      </p>
+                      <p style="margin: 0 0 0.5rem; color: #4b5563;">
+                        <strong>Collection Hours:</strong><br>
+                        Thursdays: 6pm - 10pm<br>
+                        Saturdays: 2pm - 8pm
+                      </p>
+                      <p style="margin: 0.75rem 0 0; color: #6b7280; font-size: 0.875rem;">
+                        We'll email you within 24 hours when your order is ready for collection.
+                      </p>
+                    ` : `
+                      <p style="margin: 0 0 0.5rem; color: #1e3a8a; font-weight: 600;">
+                        Delivery Address:
+                      </p>
+                      ${shippingAddress}
+                      <p style="margin: 0.75rem 0 0; color: #6b7280; font-size: 0.875rem;">
+                        Expected delivery: 2-3 business days
+                      </p>
+                    `}
+                  </td>
+                </tr>
+              </table>
+              
+              ${order.notes ? `
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 1rem; margin-bottom: 2rem;">
+                <tr>
+                  <td>
+                    <p style="margin: 0 0 0.5rem; color: #6b7280; font-size: 0.875rem; font-weight: 600;">
+                      Order Notes:
+                    </p>
+                    <p style="margin: 0; color: #4b5563; font-size: 0.9rem;">
+                      ${order.notes}
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              ` : ''}
+              
+              <p style="margin: 0 0 1rem; color: #4b5563; font-size: 0.95rem;">
+                If you have any questions about your order, please reply to this email or contact us at 
+                <a href="mailto:support@dicebastion.com" style="color: #2563eb; text-decoration: none;">support@dicebastion.com</a>
+              </p>
+              
+              <p style="margin: 0; color: #4b5563; font-size: 0.95rem;">
+                Thank you for supporting your local gaming community!
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f9fafb; padding: 1.5rem 2rem; text-align: center; border-top: 1px solid #e5e7eb;">
+              <p style="margin: 0 0 0.5rem; color: #6b7280; font-size: 0.875rem;">
+                <strong>Dice Bastion Shop</strong>
+              </p>
+              <p style="margin: 0 0 1rem; color: #9ca3af; font-size: 0.8rem;">
+                Gibraltar's Premier Gaming Store
+              </p>
+              <p style="margin: 0; color: #9ca3af; font-size: 0.75rem;">
+                <a href="https://shop.dicebastion.com" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Shop</a> |
+                <a href="https://dicebastion.com" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Main Site</a> |
+                <a href="https://dicebastion.com/privacy-policy" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Privacy Policy</a>
+              </p>
+            </td>
+          </tr>
+          
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim()
+  
+  const text = `
+Order Confirmation - ${order.order_number}
+
+Hi ${order.name},
+
+Thank you for your order! Your order has been confirmed and ${deliveryMethod === 'Collection' ? 'is being prepared for collection' : 'will be delivered soon'}.
+
+ORDER DETAILS
+Order Number: ${order.order_number}
+Order Date: ${orderDate}
+Payment Status: Paid
+
+ITEMS ORDERED
+${items.map(item => `${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal)}`).join('\n')}
+
+SUMMARY
+Subtotal: ${formatPrice(order.subtotal)}
+Shipping: ${shippingCost > 0 ? formatPrice(shippingCost) : 'FREE'}
+Total: ${formatPrice(order.total)}
+
+${deliveryMethod === 'Collection' ? `
+COLLECTION INFORMATION
+Location: Gibraltar Warhammer Club
+View on map: https://maps.app.goo.gl/xRVr1Jq58ANZ9DLY6
+Collection Hours:
+- Thursdays: 6pm - 10pm
+- Saturdays: 2pm - 8pm
+
+We'll email you within 24 hours when your order is ready for collection.
+` : `
+DELIVERY INFORMATION
+Your order will be delivered to the address provided within 2-3 business days.
+`}
+
+${order.notes ? `Order Notes: ${order.notes}\n` : ''}
+
+If you have any questions, please contact us at support@dicebastion.com
+
+Thank you for supporting your local gaming community!
+
+Dice Bastion Shop
+https://shop.dicebastion.com
+  `.trim()
+  
+  return {
+    subject: `Order Confirmation - ${order.order_number}`,
+    html,
+    text
+  }
+}
+
 // Cron trigger for processing renewals and warnings (runs daily at 2 AM UTC)
 async function handleScheduled(event, env, ctx) {
   console.log('Starting membership cron job: renewals + pre-renewal warnings')
@@ -1634,6 +2563,248 @@ async function handleScheduled(event, env, ctx) {
     return { success: false, error: String(e) }
   }
 }
+
+// Debug endpoint
+app.get('/debug/auth', (c) => {
+  const adminKey = c.req.header('X-Admin-Key')
+  const envKey = c.env.ADMIN_KEY
+  return c.json({ 
+    receivedKey: adminKey, 
+    hasEnvKey: !!envKey,
+    match: adminKey === envKey,
+    envKeyLength: envKey?.length
+  })
+})
+
+// ===== ADMIN AUTHENTICATION ENDPOINTS =====
+
+// Helper: Generate secure session token
+function generateSessionToken() {
+  const array = new Uint8Array(32)
+  crypto.getRandomValues(array)
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+// Helper: Verify admin session
+async function verifyAdminSession(db, sessionToken) {
+  if (!sessionToken) return null
+  
+  const now = toIso(new Date())
+  const session = await db.prepare(`
+    SELECT s.*, u.email, u.name, u.is_admin, u.is_active
+    FROM user_sessions s
+    JOIN users u ON s.user_id = u.user_id
+    WHERE s.session_token = ? AND s.expires_at > ? AND u.is_active = 1 AND u.is_admin = 1
+  `).bind(sessionToken, now).first()
+  
+  return session
+}
+
+// Admin Login
+app.post('/admin/login', async (c) => {
+  try {
+    const { email, password } = await c.req.json()
+    
+    if (!email || !password) {
+      return c.json({ error: 'email_and_password_required' }, 400)
+    }
+    
+    // Find user
+    const user = await c.env.DB.prepare(
+      'SELECT * FROM users WHERE email = ? AND is_active = 1'
+    ).bind(email.toLowerCase()).first()
+    
+    if (!user) {
+      return c.json({ error: 'invalid_credentials' }, 401)
+    }
+    
+    // Verify password
+    const validPassword = await bcrypt.compare(password, user.password_hash)
+    if (!validPassword) {
+      return c.json({ error: 'invalid_credentials' }, 401)
+    }
+    
+    // Check admin role
+    if (!user.is_admin) {
+      return c.json({ error: 'insufficient_permissions' }, 403)
+    }
+    
+    // Create session (expires in 7 days)
+    const sessionToken = generateSessionToken()
+    const expiresAt = toIso(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
+    const now = toIso(new Date())
+    
+    await c.env.DB.prepare(`
+      INSERT INTO user_sessions (user_id, session_token, expires_at, created_at)
+      VALUES (?, ?, ?, ?)
+    `).bind(user.user_id, sessionToken, expiresAt, now).run()
+    
+    // Update last login
+    await c.env.DB.prepare(
+      'UPDATE users SET last_login_at = ? WHERE user_id = ?'
+    ).bind(now, user.user_id).run()
+    
+    return c.json({
+      success: true,
+      session_token: sessionToken,
+      expires_at: expiresAt,
+      user: {
+        id: user.user_id,
+        email: user.email,
+        name: user.name
+      }
+    })
+  } catch (err) {
+    console.error('Admin login error:', err)
+    return c.json({ error: 'login_failed' }, 500)
+  }
+})
+
+// Admin Logout
+app.post('/admin/logout', async (c) => {
+  const sessionToken = c.req.header('X-Session-Token')
+  
+  if (sessionToken) {
+    await c.env.DB.prepare(
+      'DELETE FROM user_sessions WHERE session_token = ?'
+    ).bind(sessionToken).run()
+  }
+  
+  return c.json({ success: true })
+})
+
+// Verify Admin Session
+app.get('/admin/verify', async (c) => {
+  const sessionToken = c.req.header('X-Session-Token')
+  const session = await verifyAdminSession(c.env.DB, sessionToken)
+  
+  if (!session) {
+    return c.json({ error: 'invalid_session' }, 401)
+  }
+  
+  return c.json({
+    valid: true,
+    user: {
+      id: session.user_id,
+      email: session.email,
+      name: session.name
+    }
+  })
+})
+
+// Middleware: Require admin session
+async function requireAdminSession(c, next) {
+  const sessionToken = c.req.header('X-Session-Token')
+  const session = await verifyAdminSession(c.env.DB, sessionToken)
+  
+  if (!session) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  
+  c.set('adminUser', { id: session.user_id, email: session.email, name: session.name })
+  await next()
+}
+
+// Update existing admin endpoints to use session-based auth OR fallback to admin key
+async function requireAdmin(c, next) {
+  // Try session-based auth first
+  const sessionToken = c.req.header('X-Session-Token')
+  if (sessionToken) {
+    const session = await verifyAdminSession(c.env.DB, sessionToken)
+    if (session) {
+      c.set('adminUser', { id: session.user_id, email: session.email, name: session.name })
+      return await next()
+    }
+  }
+  
+  // Fallback to legacy admin key (for backward compatibility)
+  const adminKey = c.req.header('X-Admin-Key')
+  if (adminKey && adminKey === c.env.ADMIN_KEY) {
+    c.set('adminUser', { legacy: true })
+    return await next()
+  }
+  
+  return c.json({ error: 'unauthorized' }, 401)
+}
+
+// ============================================================================
+// Image Management (R2)
+// ============================================================================
+
+// Helper: Extract old image filename from URL
+function extractImageKey(imageUrl) {
+  if (!imageUrl || imageUrl.startsWith('data:')) return null
+  try {
+    const url = new URL(imageUrl)
+    // Extract path after domain
+    const path = url.pathname
+    // Remove leading slash and 'images/' prefix if present
+    return path.replace(/^\//, '').replace(/^images\//, '')
+  } catch {
+    return null
+  }
+}
+
+// Upload image to R2
+app.post('/admin/images', requireAdmin, async (c) => {
+  try {
+    const { image, filename } = await c.req.json()
+    
+    if (!image) {
+      return c.json({ error: 'image_required' }, 400)
+    }
+    
+    // Extract base64 data
+    let base64Data = image
+    if (image.startsWith('data:')) {
+      base64Data = image.split(',')[1]
+    }
+    
+    // Convert base64 to binary
+    const binaryString = atob(base64Data)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    
+    // Generate unique filename
+    const timestamp = Date.now()
+    const randomStr = Math.random().toString(36).substring(2, 8)
+    const ext = filename ? filename.split('.').pop() : 'jpg'
+    const key = `${timestamp}-${randomStr}.${ext}`
+    
+    // Upload to R2
+    await c.env.IMAGES.put(key, bytes, {
+      httpMetadata: {
+        contentType: 'image/jpeg',
+      },
+    })
+    
+    // Return public URL
+    const imageUrl = `https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev/${key}`
+    
+    return c.json({ 
+      success: true, 
+      url: imageUrl,
+      key: key
+    })
+  } catch (err) {
+    console.error('Image upload error:', err)
+    return c.json({ error: 'upload_failed' }, 500)
+  }
+})
+
+// Delete image from R2
+app.delete('/admin/images/:key', requireAdmin, async (c) => {
+  try {
+    const key = c.req.param('key')
+    await c.env.IMAGES.delete(key)
+    return c.json({ success: true })
+  } catch (err) {
+    console.error('Image delete error:', err)
+    return c.json({ error: 'delete_failed' }, 500)
+  }
+})
 
 export default {
   fetch: app.fetch,

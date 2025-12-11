@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ if .IsHome }}{{ .Site.Title }}{{ else }}{{ .Title }} &middot; {{ .Site.Title }}{{ end }}</title>
+  <meta name="description" content="{{ .Site.Params.description }}" />
+  <link rel="canonical" href="{{ .Permalink }}" />
+  
+  <!-- Open Graph / Facebook / WhatsApp -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="{{ .Permalink }}" />
+  <meta property="og:title" content="{{ if .IsHome }}{{ .Site.Title }}{{ else }}{{ .Title }} - {{ .Site.Title }}{{ end }}" />
+  <meta property="og:description" content="{{ .Site.Params.description }}" />
+  <meta property="og:image" content="{{ .Site.BaseURL }}img/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="{{ .Permalink }}" />
+  <meta name="twitter:title" content="{{ if .IsHome }}{{ .Site.Title }}{{ else }}{{ .Title }} - {{ .Site.Title }}{{ end }}" />
+  <meta name="twitter:description" content="{{ .Site.Params.description }}" />
+  <meta name="twitter:image" content="{{ .Site.BaseURL }}img/og-image.png" />
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="/img/logo.png" />
+  
+  <style>
+    /* Blowfish color scheme */
+    :root {
+      --color-neutral: 255, 255, 255;
+      --color-neutral-50: 248, 250, 252;
+      --color-neutral-100: 241, 245, 249;
+      --color-neutral-200: 226, 232, 240;
+      --color-neutral-300: 203, 213, 225;
+      --color-neutral-400: 148, 163, 184;
+      --color-neutral-500: 100, 116, 139;
+      --color-neutral-600: 71, 85, 105;
+      --color-neutral-700: 51, 65, 85;
+      --color-neutral-800: 30, 41, 59;
+      --color-neutral-900: 15, 23, 42;
+      --color-primary-50: 239, 246, 255;
+      --color-primary-100: 219, 234, 254;
+      --color-primary-200: 191, 219, 254;
+      --color-primary-300: 147, 197, 253;
+      --color-primary-400: 96, 165, 250;
+      --color-primary-500: 59, 130, 246;
+      --color-primary-600: 37, 99, 235;
+      --color-primary-700: 29, 78, 216;
+      --color-primary-800: 30, 64, 175;
+      --color-primary-900: 30, 58, 138;
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: rgb(var(--color-neutral-800));
+      background: rgb(var(--color-neutral-50));
+      padding: 0;
+      margin: 0;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    
+    header {
+      background: rgb(var(--color-neutral));
+      border-bottom: 1px solid rgb(var(--color-neutral-200));
+      padding: 1rem 0;
+      margin-bottom: 2rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    header .container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 2rem;
+    }
+    
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: rgb(var(--color-primary-600));
+      text-decoration: none;
+      transition: color 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .logo img {
+      height: 48px;
+      width: auto;
+    }
+    
+    .logo:hover {
+      color: rgb(var(--color-primary-700));
+    }
+    
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    
+    nav a {
+      margin-left: 1.5rem;
+      color: rgb(var(--color-neutral-600));
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    
+    nav a:hover {
+      color: rgb(var(--color-primary-600));
+    }
+    
+    footer {
+      background: rgb(var(--color-neutral));
+      border-top: 1px solid rgb(var(--color-neutral-200));
+      padding: 2rem 0;
+      margin-top: 4rem;
+      text-align: center;
+      color: rgb(var(--color-neutral-600));
+      font-size: 0.9rem;
+    }
+    
+    footer a {
+      color: rgb(var(--color-primary-600));
+      text-decoration: none;
+    }
+    
+    footer a:hover {
+      text-decoration: underline;
+    }
+    /* Cart Badge */
+    .cart-link {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    
+    .cart-badge {
+      position: absolute;
+      top: -8px;
+      right: -12px;
+      background: rgb(var(--color-primary-600));
+      color: white;
+      border-radius: 10px;
+      padding: 2px 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      min-width: 20px;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <a href="/" class="logo">
+        <img src="/img/logo.png" alt="Dice Bastion Logo" />
+        <span>Dice Bastion Shop</span>
+      </a>
+      <nav>
+        <a href="https://dicebastion.com">Main Site</a>
+        <a href="/cart" class="cart-link">
+          🛒 Cart
+          <span id="cart-badge" class="cart-badge" style="display: none;">0</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+  
+  <div class="container">
+    <main>
+      {{ block "main" . }}{{ end }}
+    </main>
+  </div>
+  
+  <footer>
+    <div class="container">
+      <p>&copy; {{ now.Year }} Dice Bastion Gibraltar | 
+        <a href="https://dicebastion.com/privacy-policy/">Privacy Policy</a> | 
+        <a href="https://dicebastion.com/cookie-policy/">Cookie Policy</a>
+      </p>
+    </div>
+  </footer>
+  
+  {{/* Cookie Consent Banner */}}
+  {{- partial "cookie-consent.html" . -}}
+  
+  {{/* Global Cart Badge Update Script */}}
+  <script>
+    // Update cart badge across all pages
+    function updateGlobalCartBadge() {
+      const cart = JSON.parse(localStorage.getItem('shop_cart') || '[]');
+      const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+      const badge = document.getElementById('cart-badge');
+      
+      if (badge) {
+        if (totalItems > 0) {
+          badge.textContent = totalItems;
+          badge.style.display = 'block';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+    }
+    
+    // Listen for cart updates
+    window.addEventListener('cartUpdated', updateGlobalCartBadge);
+    
+    // Update on page load
+    document.addEventListener('DOMContentLoaded', updateGlobalCartBadge);
+  </script>
+</body>
+</html>

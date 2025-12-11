@@ -1,0 +1,13 @@
+# Shop Site Configuration
+baseURL = "https://shop.dicebastion.com/"
+languageCode = "en-gb"
+title = "Dice Bastion Shop"
+copyright = "© 2025 Dice Bastion"
+
+disableKinds = ["taxonomy", "term"]
+
+[params]
+  description = "Board games, miniatures, and gaming accessories from Dice Bastion Gibraltar"
+
+[markup.goldmark.renderer]
+  unsafe = true

@@ -54,8 +54,42 @@ Your data may be processed in the UK, EU, or other locations by our service prov
 - Access, rectification, erasure, restriction, portability, and objection (where applicable)
 To exercise these rights, contact us using the details below.
 
-## Cookies
-We use necessary cookies for site operation and may use analytics cookies to improve the site. You can control cookies in your browser settings.
+## Cookies {#cookies}
+We use cookies to provide essential functionality and improve your experience on our website.
+
+### What are cookies?
+Cookies are small text files stored on your device when you visit a website. They help websites remember your preferences and actions.
+
+### Types of cookies we use
+
+#### Essential Cookies (Always Active)
+These cookies are necessary for the website to function properly and cannot be disabled:
+- **Session Management**: Keeps you logged in, remembers your shopping cart items
+- **Security**: Protects against fraud and ensures secure connections
+- **Consent Preferences**: Remembers your cookie choices
+
+#### Analytics Cookies (Optional)
+With your consent, we use analytics cookies to understand how visitors use our site:
+- **Usage Data**: Pages visited, time spent, navigation patterns
+- **Performance**: Loading times, errors encountered
+- **Purpose**: Help us improve the website experience
+
+We do NOT use:
+- Advertising/tracking cookies
+- Third-party cookies for marketing
+- Social media tracking pixels (unless you explicitly interact with embedded content)
+
+### Managing cookies
+You can control cookies through:
+1. **Our Cookie Banner**: Click the cookie icon (🍪) at the bottom right of any page to change your preferences
+2. **Browser Settings**: Most browsers allow you to refuse or delete cookies
+
+**Note**: Disabling essential cookies may prevent parts of our website from working properly (e.g., shopping cart, checkout).
+
+### Cookie retention
+- Session cookies expire when you close your browser
+- Preference cookies last for 12 months
+- Analytics cookies last for 24 months
 
 ## Payments via SumUp
 We use SumUp to process payments. Card details are collected and processed by SumUp. We receive status updates and references (e.g., checkout_id) from SumUp to activate your membership.
