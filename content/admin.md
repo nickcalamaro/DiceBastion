@@ -161,21 +161,126 @@ Login
 </div>
 
 <div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Description</label>
-<textarea id="event-description" rows="4" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;"></textarea>
+<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
+<input type="text" id="event-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: monospace;">
+<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Auto-generated from title, used in URL</small>
 </div>
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-<div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Date *</label>
-<input type="date" id="event-date" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<div style="margin-bottom: 1rem;">
+<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Summary</label>
+<textarea id="event-description" rows="3" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="Short description for event cards..."></textarea>
+<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Brief summary shown on events listing</small>
 </div>
+
+<div style="margin-bottom: 1rem;">
+<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Full Description</label>
+<div id="event-description-editor" style="border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; min-height: 200px;">
+<div style="border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 0.5rem; background: rgb(var(--color-neutral-50)); display: flex; gap: 0.5rem; flex-wrap: wrap;">
+<button type="button" onclick="formatEventText('bold')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; font-weight: bold;">B</button>
+<button type="button" onclick="formatEventText('italic')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; font-style: italic;">I</button>
+<button type="button" onclick="formatEventText('underline')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; text-decoration: underline;">U</button>
+<button type="button" onclick="formatEventText('insertUnorderedList')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer;">• List</button>
+<button type="button" onclick="insertEventLink()" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer;">🔗 Link</button>
+</div>
+<div id="event-full-description" contenteditable="true" style="padding: 1rem; min-height: 150px; outline: none; font-family: inherit;" placeholder="Detailed event information..."></div>
+</div>
+<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Rich text shown on event detail page</small>
+</div>
+
+<div id="one-time-date-fields" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+  <div>
+    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Date *</label>
+    <input type="date" id="event-date" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+  <div>
+    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Time</label>
+    <input type="time" id="event-time" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 1rem;">
+    <input type="checkbox" id="event-is-recurring" onchange="toggleRecurringFields()">
+    <span style="font-weight: 600;">Recurring Event</span>
+  </label>
+  
+  <div id="recurring-fields" style="display: none; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200));">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+      <div>
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Recurrence Type</label>
+        <select id="recurrence-type" onchange="updateRecurrenceFields()" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+          <option value="weekly">Weekly</option>
+          <option value="monthly_day">Monthly (by day)</option>
+          <option value="monthly_date">Monthly (by date)</option>
+        </select>
+      </div>
+      <div>
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Time *</label>
+        <input type="time" id="recurring-time" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+      </div>
+    </div>
+
+<div id="weekly-fields" style="display: none;">
+    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Day of Week</label>
+    <select id="weekly-day" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; margin-bottom: 1rem;">
+    <option value="1">Monday</option>
+    <option value="2">Tuesday</option>
+    <option value="3">Wednesday</option>
+    <option value="4">Thursday</option>
+    <option value="5">Friday</option>
+    <option value="6">Saturday</option>
+    <option value="0">Sunday</option>
+    </select>
+</div>
+
+<div id="monthly-day-fields" style="display: none;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+    <div>
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Week of Month</label>
+        <select id="monthly-week" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+        <option value="1">First</option>
+        <option value="2">Second</option>
+        <option value="3">Third</option>
+        <option value="4">Fourth</option>
+        <option value="5">Last</option>
+        </select>
+    </div>
+    <div>
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Day of Week</label>
+        <select id="monthly-day" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+        <option value="1">Monday</option>
+        <option value="2">Tuesday</option>
+        <option value="3">Wednesday</option>
+        <option value="4">Thursday</option>
+        <option value="5">Friday</option>
+        <option value="6">Saturday</option>
+        <option value="0">Sunday</option>
+        </select>
+    </div>
+    </div>
+</div>
+
+<div id="monthly-date-fields" style="display: none;">
+    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Day of Month</label>
+    <input type="number" id="monthly-date" min="1" max="31" placeholder="15" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; margin-bottom: 1rem;">
+</div>
+
 <div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Time</label>
-<input type="time" id="event-time" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">End Date (optional)</label>
+    <input type="date" id="recurrence-end-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Leave empty for indefinite recurrence</small>
+</div>
 </div>
 </div>
 
+<div style="margin-bottom: 1rem;">
+  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 1rem;">
+    <input type="checkbox" id="event-requires-purchase" checked onchange="toggleEventPricing()">
+    <span style="font-weight: 600;">Requires Ticket Purchase</span>
+  </label>
+</div>
+
+<div id="event-pricing-fields">
 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
 <div>
 <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Member Price (£) *</label>
@@ -188,6 +293,7 @@ Login
 <div>
 <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Max Attendees</label>
 <input type="number" id="event-max-attendees" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+</div>
 </div>
 </div>
 
@@ -302,18 +408,22 @@ z-index: 9999;
 align-items: center;
 justify-content: center;
 }
-#crop-modal.active {
+#crop-modal.is-open {
 display: flex;
 }
 .crop-container {
 background: white;
 border-radius: 12px;
-padding: 2rem;
+padding: 1rem 2rem 2rem 2rem;
 max-width: 90vw;
 max-height: 90vh;
 display: flex;
 flex-direction: column;
 overflow-y: auto;
+}
+.crop-container h2 {
+margin-top: 0;
+margin-bottom: 1rem;
 }
 .crop-image-container {
 max-height: 50vh;
@@ -470,27 +580,143 @@ document.getElementById('description-content').focus();
 }
 }
 
+// Event Rich Text Editor Functions
+function formatEventText(command) {
+document.execCommand(command, false, null);
+document.getElementById('event-full-description').focus();
+}
+
+function insertEventLink() {
+  const url = prompt('Enter URL:');
+  if (url) {
+    document.execCommand('createLink', false, url);
+    document.getElementById('event-full-description').focus();
+  }
+}
+
+// Recurring Events UI
+function toggleRecurringFields() {
+  const isRecurring = document.getElementById('event-is-recurring').checked;
+  const fields = document.getElementById('recurring-fields');
+  const dateFields = document.getElementById('one-time-date-fields');
+  const dateField = document.getElementById('event-date');
+  const recurringTime = document.getElementById('recurring-time');
+  
+  fields.style.display = isRecurring ? 'block' : 'none';
+  dateFields.style.display = isRecurring ? 'none' : 'grid';
+  dateField.required = !isRecurring;
+  
+  // Toggle required on recurring-time based on visibility
+  if (recurringTime) {
+    recurringTime.required = isRecurring;
+  }
+  
+  if (isRecurring) {
+    updateRecurrenceFields();
+  }
+}
+
+function updateRecurrenceFields() {
+  const type = document.getElementById('recurrence-type').value;
+  
+  document.getElementById('weekly-fields').style.display = type === 'weekly' ? 'block' : 'none';
+  document.getElementById('monthly-day-fields').style.display = type === 'monthly_day' ? 'block' : 'none';
+  document.getElementById('monthly-date-fields').style.display = type === 'monthly_date' ? 'block' : 'none';
+}
+
+function getRecurrencePattern() {
+  const type = document.getElementById('recurrence-type').value;
+  const time = document.getElementById('recurring-time').value || '00:00';
+  
+  const pattern = { type, time };
+  
+  switch (type) {
+    case 'weekly':
+      pattern.day = parseInt(document.getElementById('weekly-day').value);
+      break;
+    case 'monthly_day':
+      pattern.week = parseInt(document.getElementById('monthly-week').value);
+      pattern.day = parseInt(document.getElementById('monthly-day').value);
+      break;
+    case 'monthly_date':
+      pattern.date = parseInt(document.getElementById('monthly-date').value);
+      break;
+  }
+  
+  return JSON.stringify(pattern);
+}
+
+function setRecurrencePattern(patternJson) {
+  if (!patternJson) return;
+  
+  try {
+    const pattern = JSON.parse(patternJson);
+    document.getElementById('recurrence-type').value = pattern.type;
+    if (pattern.time) {
+      document.getElementById('recurring-time').value = pattern.time;
+    }
+    updateRecurrenceFields();
+    
+    switch (pattern.type) {
+      case 'weekly':
+        document.getElementById('weekly-day').value = pattern.day;
+        break;
+      case 'monthly_day':
+        document.getElementById('monthly-week').value = pattern.week;
+        document.getElementById('monthly-day').value = pattern.day;
+        break;
+      case 'monthly_date':
+        document.getElementById('monthly-date').value = pattern.date;
+        break;
+    }
+  } catch (e) {
+    console.error('Error parsing recurrence pattern:', e);
+  }
+}
+
+function toggleEventPricing() {
+const checkbox = document.getElementById('event-requires-purchase');
+const pricingFields = document.getElementById('event-pricing-fields');
+const memberPrice = document.getElementById('event-member-price');
+const nonMemberPrice = document.getElementById('event-nonmember-price');
+
+if (checkbox.checked) {
+pricingFields.style.display = 'block';
+memberPrice.required = true;
+nonMemberPrice.required = true;
+} else {
+pricingFields.style.display = 'none';
+memberPrice.required = false;
+nonMemberPrice.required = false;
+memberPrice.value = '';
+nonMemberPrice.value = '';
+document.getElementById('event-max-attendees').value = '';
+}
+}
+
 // Image Cropping
 let cropper = null;
 let currentCropCallback = null;
+let currentAspectRatio = 336 / 220;
 
-function showCropModal(file, callback) {
-const reader = new FileReader();
-reader.onload = (e) => {
-const img = document.getElementById('crop-image');
-img.src = e.target.result;
-document.getElementById('crop-modal').classList.add('active');
-currentCropCallback = callback;
+function showCropModal(file, callback, aspectRatio = 336 / 220) {
+  currentAspectRatio = aspectRatio;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = document.getElementById('crop-image');
+    img.src = e.target.result;
+    document.getElementById('crop-modal').classList.add('is-open');
+    currentCropCallback = callback;
 
 // Destroy existing cropper if any
 if (cropper) {
 cropper.destroy();
 }
 
-// Initialize cropper to match actual display ratio (336:220)
+// Initialize cropper with specified aspect ratio
 // viewMode: 0 allows cropping beyond image boundaries
 cropper = new Cropper(img, {
-aspectRatio: 336 / 220,
+aspectRatio: aspectRatio,
 viewMode: 0,
 autoCropArea: 1,
 responsive: true,
@@ -590,7 +816,7 @@ document.getElementById('crop-zoom-value').textContent = '100%';
 });
 
 document.getElementById('crop-cancel').addEventListener('click', () => {
-document.getElementById('crop-modal').classList.remove('active');
+document.getElementById('crop-modal').classList.remove('is-open');
 if (cropper) {
 cropper.destroy();
 cropper = null;
@@ -599,73 +825,77 @@ currentCropCallback = null;
 });
 
 document.getElementById('crop-confirm').addEventListener('click', async () => {
-if (cropper && currentCropCallback) {
-// Get crop box data to handle areas outside the image
-const cropData = cropper.getData();
-const imageData = cropper.getImageData();
-const canvasData = cropper.getCanvasData();
+  if (!cropper || !currentCropCallback) return;
 
-// Create a canvas with white background at target size
-const targetWidth = 672;
-const targetHeight = 440;
-const finalCanvas = document.createElement('canvas');
-finalCanvas.width = targetWidth;
-finalCanvas.height = targetHeight;
-const ctx = finalCanvas.getContext('2d');
+  // Determine target dimensions based on aspect ratio
+  let targetWidth, targetHeight;
+  if (Math.abs(currentAspectRatio - (800 / 379)) < 0.01) {
+    // Event image (800x379)
+    targetWidth = 800;
+    targetHeight = 379;
+  } else {
+    // Product image (672x440, which is 336/220 * 2)
+    targetWidth = 672;
+    targetHeight = 440;
+  }
 
-// Fill with white background
-ctx.fillStyle = '#FFFFFF';
-ctx.fillRect(0, 0, targetWidth, targetHeight);
+  // Create a canvas with white background at target size
+  const finalCanvas = document.createElement('canvas');
+  finalCanvas.width = targetWidth;
+  finalCanvas.height = targetHeight;
+  const ctx = finalCanvas.getContext('2d');
 
-// Get the cropped portion (may be smaller than target if crop extends beyond image)
-const croppedCanvas = cropper.getCroppedCanvas({
-width: targetWidth,
-height: targetHeight,
-imageSmoothingEnabled: true,
-imageSmoothingQuality: 'high',
-fillColor: '#FFFFFF',
-});
+  // Fill with white background
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
 
-// Draw the cropped image onto the white canvas
-ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
+  // Get the cropped portion
+  const croppedCanvas = cropper.getCroppedCanvas({
+    width: targetWidth,
+    height: targetHeight,
+    imageSmoothingEnabled: true,
+    imageSmoothingQuality: 'high',
+    fillColor: '#FFFFFF',
+  });
 
-// Convert to base64
-const croppedImage = finalCanvas.toDataURL('image/jpeg', 0.9);
+  // Draw the cropped image onto the white canvas
+  ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
 
-// Upload to R2
-try {
-const uploadRes = await fetch(`${API_BASE}/admin/images`, {
-method: 'POST',
-headers: {
-'Content-Type': 'application/json',
-'X-Session-Token': sessionToken
-},
-body: JSON.stringify({ 
-image: croppedImage,
-filename: 'product-image.jpg'
-})
-});
+  // Convert to base64
+  const croppedImage = finalCanvas.toDataURL('image/jpeg', 0.9);
 
-const uploadData = await uploadRes.json();
+  // Upload to R2
+  try {
+    const uploadRes = await fetch(`${API_BASE}/admin/images`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': sessionToken
+      },
+      body: JSON.stringify({ 
+        image: croppedImage,
+        filename: 'product-image.jpg'
+      })
+    });
 
-if (uploadData.success) {
-// Pass the R2 URL to callback
-currentCropCallback(uploadData.url);
-} else {
-alert('Failed to upload image');
-console.error('Upload error:', uploadData);
-}
-} catch (err) {
-alert('Error uploading image');
-console.error('Upload error:', err);
-}
+    const uploadData = await uploadRes.json();
 
-// Close modal
-document.getElementById('crop-modal').classList.remove('active');
-cropper.destroy();
-cropper = null;
-currentCropCallback = null;
-}
+    if (uploadData.success) {
+      currentCropCallback(uploadData.url);
+      document.getElementById('crop-modal').classList.remove('is-open');
+      if (cropper) {
+        cropper.destroy();
+        cropper = null;
+      }
+      currentCropCallback = null;
+    } else {
+      alert('Failed to upload image');
+      console.error('Upload error:', uploadData);
+    }
+  } catch (err) {
+    alert('Error uploading image');
+    console.error('Upload error:', err);
+  }
 });
 
 // Tabs
@@ -705,7 +935,7 @@ showCropModal(file, (croppedImage) => {
 uploadedEventImage = croppedImage;
 document.getElementById('event-image-preview').innerHTML = 
 `<img src="${croppedImage}" class="image-preview" alt="Preview">`;
-});
+}, 800 / 379);
 }
 });
 
@@ -995,6 +1225,14 @@ alert('Error deleting product');
 }
 
 // Events
+document.getElementById('event-title').addEventListener('input', (e) => {
+const slug = e.target.value
+.toLowerCase()
+.replace(/[^a-z0-9]+/g, '-')
+.replace(/^-+|-+$/g, '');
+document.getElementById('event-slug').value = slug;
+});
+
 async function loadEvents() {
 try {
 const res = await fetch(`${API_BASE}/events`);
@@ -1006,79 +1244,100 @@ list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No events yet
 return;
 }
 
-list.innerHTML = events.map(e => `
+list.innerHTML = events.map(e => {
+const requiresPurchase = e.requires_purchase === 1;
+const eventDate = e.event_datetime ? new Date(e.event_datetime).toLocaleDateString() : 'No date';
+const eventTime = e.event_datetime ? new Date(e.event_datetime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+const eventId = e.id || e.event_id;
+return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
 ${e.image_url ? `<img src="${e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
 <div style="flex: 1;">
-<h3>${e.title} ${e.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'}</h3>
+<h3>${e.title} ${e.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'} ${requiresPurchase ? '' : '<span style="color: #2563eb; font-size: 0.875rem;">(Free Event)</span>'}</h3>
 <p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${e.description || ''}</p>
-<p style="margin: 0.5rem 0;"><strong>${e.event_date}</strong> ${e.time || ''} | Member: £${(e.membership_price / 100).toFixed(2)} | Non-member: £${(e.non_membership_price / 100).toFixed(2)}</p>
-${e.max_attendees ? `<p style="margin: 0.5rem 0;">Max: ${e.max_attendees} | Location: ${e.location || 'N/A'}</p>` : ''}
+<p style="margin: 0.5rem 0;"><strong>${eventDate}</strong> ${eventTime} ${e.location ? `| ${e.location}` : ''}</p>
+${requiresPurchase ? `<p style="margin: 0.5rem 0;">Member: £${(e.membership_price / 100).toFixed(2)} | Non-member: £${(e.non_membership_price / 100).toFixed(2)}${e.capacity ? ` | Max: ${e.capacity}` : ''}</p>` : ''}
 </div>
 </div>
 <div class="item-actions">
-<button class="btn-edit" onclick="editEvent(${e.id})">Edit</button>
-<button class="btn-delete" onclick="deleteEvent(${e.id}, '${e.title.replace(/'/g, "\\'")}')">Delete</button>
+<button class="btn-edit" onclick="editEvent(${eventId})">Edit</button>
+<button class="btn-delete" onclick="deleteEvent(${eventId}, '${e.title.replace(/'/g, "\\'")}')">Delete</button>
 </div>
 </div>
-`).join('');
+`;
+}).join('');
 } catch (err) {
 console.error('Load events error:', err);
 }
 }
 
 document.getElementById('event-form').addEventListener('submit', async (e) => {
-e.preventDefault();
-const id = document.getElementById('event-id').value;
-const imageUrl = uploadedEventImage || document.getElementById('event-image').value;
+  e.preventDefault();
+  const id = document.getElementById('event-id').value;
+  const imageUrl = uploadedEventImage || document.getElementById('event-image').value;
+  const requiresPurchase = document.getElementById('event-requires-purchase').checked;
+  const isRecurring = document.getElementById('event-is-recurring').checked;
 
-const data = {
-title: document.getElementById('event-title').value,
-description: document.getElementById('event-description').value,
-event_date: document.getElementById('event-date').value,
-time: document.getElementById('event-time').value,
-membership_price: Math.round(parseFloat(document.getElementById('event-member-price').value) * 100),
-non_membership_price: Math.round(parseFloat(document.getElementById('event-nonmember-price').value) * 100),
-max_attendees: parseInt(document.getElementById('event-max-attendees').value) || null,
-location: document.getElementById('event-location').value,
-image_url: imageUrl,
-is_active: document.getElementById('event-active').checked ? 1 : 0
-};
+  const data = {
+    title: document.getElementById('event-title').value,
+    slug: document.getElementById('event-slug').value,
+    description: document.getElementById('event-description').value,
+    full_description: document.getElementById('event-full-description').innerHTML,
+    event_date: isRecurring ? '2025-01-01' : document.getElementById('event-date').value,
+    time: isRecurring ? document.getElementById('recurring-time').value : document.getElementById('event-time').value,
+    requires_purchase: requiresPurchase ? 1 : 0,
+    membership_price: requiresPurchase ? parseFloat(document.getElementById('event-member-price').value) : 0,
+    non_membership_price: requiresPurchase ? parseFloat(document.getElementById('event-nonmember-price').value) : 0,
+    max_attendees: requiresPurchase ? (parseInt(document.getElementById('event-max-attendees').value) || null) : null,
+    location: document.getElementById('event-location').value,
+    image_url: imageUrl,
+    is_active: document.getElementById('event-active').checked ? 1 : 0,
+    is_recurring: isRecurring ? 1 : 0,
+    recurrence_pattern: isRecurring ? getRecurrencePattern() : null,
+    recurrence_end_date: isRecurring ? (document.getElementById('recurrence-end-date').value || null) : null
+  };
 
-try {
-const url = id ? `${API_BASE}/events/${id}` : `${API_BASE}/events`;
-const method = id ? 'PUT' : 'POST';
+  try {
+    const url = id ? `${API_BASE}/admin/events/${id}` : `${API_BASE}/admin/events`;
+    const method = id ? 'PUT' : 'POST';
 
-const res = await fetch(url, {
-method,
-headers: {
-'Content-Type': 'application/json',
-'X-Session-Token': sessionToken
-},
-body: JSON.stringify(data)
-});
+    const res = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': sessionToken
+      },
+      body: JSON.stringify(data)
+    });
 
-if (res.ok) {
-document.getElementById('event-form').reset();
-document.getElementById('event-id').value = '';
-document.getElementById('event-form-title').textContent = 'Add New Event';
-document.getElementById('event-submit-text').textContent = 'Add Event';
-document.getElementById('cancel-event-edit').style.display = 'none';
-document.getElementById('event-image-preview').innerHTML = '';
+    if (res.ok) {
+      document.getElementById('event-form').reset();
+      document.getElementById('event-id').value = '';
+      document.getElementById('event-form-title').textContent = 'Add New Event';
+      document.getElementById('event-submit-text').textContent = 'Add Event';
+      document.getElementById('cancel-event-edit').style.display = 'none';
+      document.getElementById('event-image-preview').innerHTML = '';
+      document.getElementById('event-full-description').innerHTML = '';
 uploadedEventImage = null;
 loadEvents();
+alert('Event saved successfully!');
 } else {
-alert('Failed to save event');
+const error = await res.json();
+alert('Failed to save event: ' + (error.error || error.message || 'Unknown error'));
 }
 } catch (err) {
-alert('Error saving event');
+alert('Error saving event: ' + err.message);
 }
 });
 
 document.getElementById('cancel-event-edit').addEventListener('click', () => {
 document.getElementById('event-form').reset();
 document.getElementById('event-id').value = '';
+document.getElementById('event-slug').value = '';
+document.getElementById('event-full-description').innerHTML = '';
+document.getElementById('event-requires-purchase').checked = true;
+document.getElementById('event-pricing-fields').style.display = 'block';
 document.getElementById('event-form-title').textContent = 'Add New Event';
 document.getElementById('event-submit-text').textContent = 'Add Event';
 document.getElementById('cancel-event-edit').style.display = 'none';
@@ -1087,53 +1346,89 @@ uploadedEventImage = null;
 });
 
 async function editEvent(id) {
-try {
-const res = await fetch(`${API_BASE}/events/${id}`);
-const event = await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/events/${id}`);
+    const data = await res.json();
+    const event = data.event || data;
 
-document.getElementById('event-id').value = event.id;
-document.getElementById('event-title').value = event.title;
-document.getElementById('event-description').value = event.description || '';
-document.getElementById('event-date').value = event.event_date;
-document.getElementById('event-time').value = event.time || '';
-document.getElementById('event-member-price').value = (event.membership_price / 100).toFixed(2);
-document.getElementById('event-nonmember-price').value = (event.non_membership_price / 100).toFixed(2);
-document.getElementById('event-max-attendees').value = event.max_attendees || '';
-document.getElementById('event-location').value = event.location || '';
-document.getElementById('event-image').value = event.image_url || '';
-document.getElementById('event-active').checked = event.is_active === 1;
+    document.getElementById('event-id').value = event.id || event.event_id;
+    document.getElementById('event-title').value = event.title || event.event_name;
+    document.getElementById('event-slug').value = event.slug || '';
+    document.getElementById('event-description').value = event.description || '';
+    document.getElementById('event-full-description').innerHTML = event.full_description || '';
 
-if (event.image_url) {
-document.getElementById('event-image-preview').innerHTML = 
-`<img src="${event.image_url}" class="image-preview" alt="Current">`;
-}
+    // Parse datetime (treat as local time, not UTC)
+    if (event.event_datetime) {
+      // Split the ISO string directly without Date parsing to avoid timezone conversion
+      const datetimeStr = event.event_datetime.replace('Z', ''); // Remove Z if present
+      const [eventDate, eventTime] = datetimeStr.split('T');
+      document.getElementById('event-date').value = eventDate;
+      document.getElementById('event-time').value = eventTime ? eventTime.slice(0, 5) : '';
+      if (event.is_recurring === 1) {
+        document.getElementById('recurring-time').value = eventTime ? eventTime.slice(0, 5) : '';
+      }
+    }
 
-document.getElementById('event-form-title').textContent = 'Edit Event';
-document.getElementById('event-submit-text').textContent = 'Update Event';
-document.getElementById('cancel-event-edit').style.display = 'block';
-document.getElementById('event-form').scrollIntoView({ behavior: 'smooth' });
-} catch (err) {
-alert('Error loading event');
-}
+    document.getElementById('event-location').value = event.location || '';
+    document.getElementById('event-image').value = event.image_url || '';
+
+    // Pricing
+    const requiresPurchase = event.requires_purchase === 1;
+    document.getElementById('event-requires-purchase').checked = requiresPurchase;
+    toggleEventPricing();
+
+    if (requiresPurchase) {
+      document.getElementById('event-member-price').value = event.membership_price || '';
+      document.getElementById('event-nonmember-price').value = event.non_membership_price || '';
+      document.getElementById('event-max-attendees').value = event.capacity || '';
+    }
+
+    document.getElementById('event-active').checked = event.is_active === 1;
+
+    // Recurring event fields
+    const isRecurring = event.is_recurring === 1;
+    document.getElementById('event-is-recurring').checked = isRecurring;
+    toggleRecurringFields();
+    
+    if (isRecurring && event.recurrence_pattern) {
+      setRecurrencePattern(event.recurrence_pattern);
+    }
+    
+    if (event.recurrence_end_date) {
+      document.getElementById('recurrence-end-date').value = event.recurrence_end_date;
+    }
+
+    if (event.image_url) {
+      document.getElementById('event-image-preview').innerHTML = 
+        `<img src="${event.image_url}" class="image-preview" alt="Current">`;
+    }
+
+    document.getElementById('event-form-title').textContent = 'Edit Event';
+    document.getElementById('event-submit-text').textContent = 'Update Event';
+    document.getElementById('cancel-event-edit').style.display = 'block';
+    document.getElementById('event-form').scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    alert('Error loading event: ' + err.message);
+  }
 }
 
 async function deleteEvent(id, title) {
-if (!confirm(`Delete event "${title}"?`)) return;
+  if (!confirm(`Delete event "${title}"?`)) return;
 
-try {
-const res = await fetch(`${API_BASE}/events/${id}`, {
-method: 'DELETE',
-headers: { 'X-Session-Token': sessionToken }
-});
+  try {
+    const res = await fetch(`${API_BASE}/admin/events/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-Session-Token': sessionToken }
+    });
 
-if (res.ok) {
-loadEvents();
-} else {
-alert('Failed to delete event');
-}
-} catch (err) {
-alert('Error deleting event');
-}
+    if (res.ok) {
+      loadEvents();
+    } else {
+      alert('Failed to delete event');
+    }
+  } catch (err) {
+    alert('Error deleting event');
+  }
 }
 
 // Orders

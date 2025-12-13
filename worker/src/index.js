@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
+import { calculateNextOccurrence } from './utils/recurring.js'
 
 // Replace generic cors with strict configurable CORS + debug logging
 const app = new Hono()
@@ -1234,13 +1235,216 @@ app.post('/webhooks/sumup', async (c) => {
   return c.json({ ok: true })
 })
 
-// Get event basic info
+// ============================================================================
+// EVENTS CRUD ENDPOINTS
+// ============================================================================
+
+// Get all active events (public)
+app.get('/events', async c => {
+  try {
+    const events = await c.env.DB.prepare(
+      'SELECT event_id as id, event_name as title, slug, description, full_description, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, category, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date FROM events WHERE is_active = 1 ORDER BY event_datetime ASC'
+    ).all()
+    
+    // Calculate next occurrence for recurring events
+    const processedEvents = (events.results || []).map(event => {
+      if (event.is_recurring) {
+        const nextOccurrence = calculateNextOccurrence(event);
+        if (nextOccurrence) {
+          // Format as local datetime without timezone conversion
+          const year = nextOccurrence.getFullYear();
+          const month = String(nextOccurrence.getMonth() + 1).padStart(2, '0');
+          const day = String(nextOccurrence.getDate()).padStart(2, '0');
+          const hours = String(nextOccurrence.getHours()).padStart(2, '0');
+          const minutes = String(nextOccurrence.getMinutes()).padStart(2, '0');
+          const seconds = String(nextOccurrence.getSeconds()).padStart(2, '0');
+          event.event_datetime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+        }
+      }
+      return event;
+    });
+    
+    return c.json(processedEvents)
+  } catch (e) {
+    console.error('Get events error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Get single event by ID or slug (public)
 app.get('/events/:id', async c => {
   const id = c.req.param('id')
-  if (!id || isNaN(Number(id))) return c.json({ error:'invalid_event_id' },400)
-  const ev = await c.env.DB.prepare('SELECT event_id,event_name,description,event_datetime,location,membership_price,non_membership_price,capacity,tickets_sold,category,image_url FROM events WHERE event_id = ?').bind(Number(id)).first()
-  if (!ev) return c.json({ error:'not_found' },404)
-  return c.json({ event: ev })
+  
+  try {
+    let event
+    // Try numeric ID first
+    if (/^\d+$/.test(id)) {
+      event = await c.env.DB.prepare(
+        'SELECT event_id as id, event_name as title, slug, description, full_description, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, category, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date FROM events WHERE event_id = ? AND is_active = 1'
+      ).bind(Number(id)).first()
+    }
+    
+    // Try slug if not found by ID
+    if (!event) {
+      event = await c.env.DB.prepare(
+        'SELECT event_id as id, event_name as title, slug, description, full_description, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, category, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date FROM events WHERE slug = ? AND is_active = 1'
+      ).bind(id).first()
+    }
+    
+    if (!event) return c.json({ error: 'not_found' }, 404)
+    
+    // Calculate next occurrence for recurring events
+    if (event.is_recurring) {
+      const nextOccurrence = calculateNextOccurrence(event);
+      if (nextOccurrence) {
+        // Format as local datetime without timezone conversion
+        const year = nextOccurrence.getFullYear();
+        const month = String(nextOccurrence.getMonth() + 1).padStart(2, '0');
+        const day = String(nextOccurrence.getDate()).padStart(2, '0');
+        const hours = String(nextOccurrence.getHours()).padStart(2, '0');
+        const minutes = String(nextOccurrence.getMinutes()).padStart(2, '0');
+        const seconds = String(nextOccurrence.getSeconds()).padStart(2, '0');
+        event.event_datetime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+      }
+    }
+    
+    // Return in format expected by checkout
+    return c.json({ 
+      event: {
+        event_id: event.id,
+        event_name: event.title,
+        slug: event.slug,
+        description: event.description,
+        full_description: event.full_description,
+        event_datetime: event.event_datetime,
+        location: event.location,
+        membership_price: event.membership_price,
+        non_membership_price: event.non_membership_price,
+        capacity: event.capacity,
+        tickets_sold: event.tickets_sold,
+        category: event.category,
+        image_url: event.image_url,
+        requires_purchase: event.requires_purchase,
+        is_active: event.is_active
+      }
+    })
+  } catch (e) {
+    console.error('Get event error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Create new event (admin only)
+app.post('/admin/events', requireAdmin, async c => {
+  try {
+    const { title, slug, description, full_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    
+    if (!title || !slug || !event_date) {
+      return c.json({ error: 'missing_required_fields' }, 400)
+    }
+    
+    // Combine date and time
+    const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
+    
+    const result = await c.env.DB.prepare(`
+      INSERT INTO events (event_name, slug, description, full_description, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      title,
+      slug,
+      description || null,
+      full_description || null,
+      datetime,
+      location || null,
+      membership_price || 0,
+      non_membership_price || 0,
+      max_attendees || null,
+      image_url || null,
+      requires_purchase !== undefined ? requires_purchase : 1,
+      is_active !== undefined ? is_active : 1,
+      is_recurring || 0,
+      recurrence_pattern || null,
+      recurrence_end_date || null
+    ).run()
+    
+    return c.json({ success: true, id: result.meta.last_row_id })
+  } catch (e) {
+    console.error('Create event error:', e)
+    if (e.message && e.message.includes('UNIQUE constraint')) {
+      return c.json({ error: 'slug_already_exists' }, 400)
+    }
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Update event (admin only)
+app.put('/admin/events/:id', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    const { title, slug, description, full_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    
+    if (!title || !slug || !event_date) {
+      return c.json({ error: 'missing_required_fields' }, 400)
+    }
+    
+    // Combine date and time
+    const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
+    
+    await c.env.DB.prepare(`
+      UPDATE events 
+      SET event_name = ?, slug = ?, description = ?, full_description = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?
+      WHERE event_id = ?
+    `).bind(
+      title,
+      slug,
+      description || null,
+      full_description || null,
+      datetime,
+      location || null,
+      membership_price || 0,
+      non_membership_price || 0,
+      max_attendees || null,
+      image_url || null,
+      requires_purchase !== undefined ? requires_purchase : 1,
+      is_active !== undefined ? is_active : 1,
+      is_recurring || 0,
+      recurrence_pattern || null,
+      recurrence_end_date || null,
+      id
+    ).run()
+    
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('Update event error:', e)
+    if (e.message && e.message.includes('UNIQUE constraint')) {
+      return c.json({ error: 'slug_already_exists' }, 400)
+    }
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Delete event (admin only)
+app.delete('/admin/events/:id', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    
+    // Check if event has tickets sold
+    const event = await c.env.DB.prepare('SELECT tickets_sold FROM events WHERE event_id = ?').bind(id).first()
+    if (!event) {
+      return c.json({ error: 'not_found' }, 404)
+    }
+    
+    if (event.tickets_sold > 0) {
+      return c.json({ error: 'cannot_delete_event_with_tickets' }, 400)
+    }
+    
+    await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
+    
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('Delete event error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
 })
 
 // Create ticket checkout with idempotency + Turnstile
