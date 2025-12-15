@@ -21,11 +21,10 @@
           <span class="cookie-desc">Help us improve the site</span>
         </label>
       </div>
-    </div>
-    <div class="cookie-consent-buttons">
-      <button id="cookie-accept-all" class="cookie-btn cookie-btn-primary">Accept All</button>
-      <button id="cookie-accept-selected" class="cookie-btn cookie-btn-secondary">Save Preferences</button>
-      <button id="cookie-decline-all" class="cookie-btn cookie-btn-text">Essential Only</button>
+    </div>    <div class="cookie-consent-buttons">
+      <button id="cookie-accept-all" class="cookie-btn cookie-btn-equal">Accept All</button>
+      <button id="cookie-accept-selected" class="cookie-btn cookie-btn-equal">Save Preferences</button>
+      <button id="cookie-decline-all" class="cookie-btn cookie-btn-equal">Essential Only</button>
     </div>
   </div>
 </div>
@@ -138,6 +137,18 @@
   transition: all 0.2s ease;
 }
 
+/* GDPR Compliant: All buttons have equal visual weight */
+.cookie-btn-equal {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ccc;
+}
+
+.cookie-btn-equal:hover {
+  background: #e5e5e5;
+  border-color: #bbb;
+}
+
 .cookie-btn-primary {
   background: rgb(var(--color-primary-600));
   color: white;
@@ -206,6 +217,17 @@
   .cookie-consent-text p,
   .cookie-desc {
     color: #bbb;
+  }
+  
+  .cookie-btn-equal {
+    background: #2a2a2a;
+    color: #eee;
+    border-color: #555;
+  }
+  
+  .cookie-btn-equal:hover {
+    background: #3a3a3a;
+    border-color: #666;
   }
   
   .cookie-btn-secondary {
@@ -384,5 +406,41 @@
       });
     }
   });
+  
+  // ============================================
+  // PUBLIC API for user account integration
+  // ============================================
+  // Expose methods for external scripts to use
+  window.DiceBastionCookies = {
+    // Get current consent state
+    getConsent: getConsent,
+    
+    // Check if analytics are enabled
+    hasAnalyticsConsent: function() {
+      const consent = getConsent();
+      return consent && consent.preferences && consent.preferences.analytics === true;
+    },
+    
+    // Programmatically set consent (for syncing from user account)
+    setConsent: function(preferences, fromServer) {
+      const consent = {
+        version: CONSENT_VERSION,
+        timestamp: new Date().toISOString(),
+        preferences: preferences,
+        synced: fromServer ? true : false
+      };
+      localStorage.setItem(CONSENT_KEY, JSON.stringify(consent));
+      loadAnalytics();
+      return consent;
+    },
+    
+    // Show the consent banner (useful for settings page links)
+    showBanner: showBanner,
+    
+    // Get consent version (for checking if re-consent needed after update)
+    getVersion: function() {
+      return CONSENT_VERSION;
+    }
+  };
 })();
 </script>

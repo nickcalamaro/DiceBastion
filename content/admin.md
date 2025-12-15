@@ -31,8 +31,15 @@ Login
 
 <!-- Admin Dashboard -->
 <div id="admin-dashboard" style="display: none;">
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">  <h1 style="margin: 0;">Admin Dashboard</h1>
+  <div style="display: flex; gap: 1rem; align-items: center;">
+    <a href="/admin/docs/" style="color: rgb(var(--color-primary-600)); text-decoration: none; font-weight: 500; display: flex; align-items: center; gap: 0.5rem;">
+      📚 <span>Developer Docs</span>
+    </a>
+    <button id="logout-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+      Logout
+    </button>
+  </div>
 </div>
 
 <!-- Tabs -->
@@ -533,6 +540,7 @@ sessionToken = data.session_token;
 currentUser = data.user;
 localStorage.setItem('admin_session', sessionToken);
 localStorage.setItem('admin_user', JSON.stringify(currentUser));
+localStorage.setItem('admin_token', sessionToken); // For docs auth guard
 
 document.getElementById('login-container').style.display = 'none';
 document.getElementById('admin-dashboard').style.display = 'block';
@@ -560,6 +568,7 @@ headers: { 'X-Session-Token': sessionToken }
 
 localStorage.removeItem('admin_session');
 localStorage.removeItem('admin_user');
+localStorage.removeItem('admin_token');
 sessionToken = null;
 currentUser = null;
 document.getElementById('login-container').style.display = 'block';
