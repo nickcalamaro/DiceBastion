@@ -19,5 +19,23 @@ pageRef = "About"
 identifier = "MU5KHCnt3y"
 weight = 9999
 
+[[main]]
+name = "FAQs"
+pageRef = "FAQs"
+parent = "MU5KHCnt3y"
+weight = 1
+
+[[main]]
+name = "Team"
+pageRef = "team"
+parent = "MU5KHCnt3y"
+weight = 2
+
+[[main]]
+name = "Shop"
+url = "https://shop.dicebastion.com"
+identifier = "MU5KHCnt3yaa"
+weight = 10000
+
 [[footer]]
 none = "none"
