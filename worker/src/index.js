@@ -1,6 +1,17 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
+import { createHmac } from 'crypto'
 import { calculateNextOccurrence } from './utils/recurring.js'
+import { getEventReminderEmail, shouldSendEventReminder } from './email-templates/event-reminder.js'
+import {
+  createEmailVerificationToken,
+  verifyEmailVerificationToken,
+  getUserEmailPreferences,
+  updateUserEmailPreferences,
+  validateEmailPreferencesSession,
+  checkEmailVerificationRateLimit,
+  generateVerificationLink
+} from './auth-utils.js'
 
 // Replace generic cors with strict configurable CORS + debug logging
 const app = new Hono()
@@ -32,6 +43,206 @@ const addMonths = (date, months) => {
 }
 
 const toIso = (d) => new Date(d).toISOString()
+
+// Rate limiting storage (in-memory for this worker instance)
+const checkoutRateLimits = new Map()
+const membershipCheckoutRateLimits = new Map()
+const eventCheckoutRateLimits = new Map()
+
+// Rate limiting helper function
+function checkRateLimit(ip, rateLimitMap, limit, windowMinutes) {
+  const now = Date.now()
+  const windowMs = windowMinutes * 60 * 1000
+  
+  if (rateLimitMap.has(ip)) {
+    const [timestamp, count] = rateLimitMap.get(ip)
+    
+    // Reset count if outside the time window
+    if (now - timestamp > windowMs) {
+      rateLimitMap.set(ip, [now, 1])
+      return true
+    }
+    
+    // Check if limit exceeded
+    if (count >= limit) {
+      return false
+    }
+    
+    // Increment count
+    rateLimitMap.set(ip, [timestamp, count + 1])
+    return true
+  }
+  
+  // First request from this IP
+  rateLimitMap.set(ip, [now, 1])
+  return true
+}
+
+// Webhook signature verification helper
+function verifySumUpWebhookSignature(payload, signature, webhookSecret) {
+  if (!signature || !webhookSecret) {
+    console.warn('Missing signature or webhook secret for verification')
+    return false
+  }
+  
+  try {
+    const expectedSignature = createHmac('sha256', webhookSecret)
+      .update(payload)
+      .digest('hex')
+    
+    // SumUp sends signature in format: sha256=hexdigest
+    const actualSignature = signature.startsWith('sha256=') 
+      ? signature.substring(7) 
+      : signature
+      
+    return expectedSignature === actualSignature
+  } catch (error) {
+    console.error('Webhook signature verification error:', error)
+    return false
+  }
+}
+
+// Webhook duplicate prevention helper
+async function checkAndMarkWebhookProcessed(db, webhookId, entityType, entityId) {
+  try {
+    // Create webhook_logs table if it doesn't exist
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS webhook_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        webhook_id TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        processed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        payload TEXT,
+        UNIQUE(webhook_id, entity_type, entity_id)
+      )
+    `).run().catch(() => {})
+    
+    // Check if this webhook has already been processed
+    const existing = await db.prepare(
+      'SELECT * FROM webhook_logs WHERE webhook_id = ? AND entity_type = ? AND entity_id = ?'
+    ).bind(webhookId, entityType, entityId).first()
+    
+    if (existing) {
+      console.log(`Duplicate webhook detected (ID: ${webhookId}, Type: ${entityType}, Entity: ${entityId})`)
+      return true // Already processed
+    }
+    
+    // Mark this webhook as processed
+    await db.prepare(
+      'INSERT INTO webhook_logs (webhook_id, entity_type, entity_id, payload) VALUES (?, ?, ?, ?)'
+    ).bind(webhookId, entityType, entityId, JSON.stringify({ webhookId, entityType, entityId })).run()
+    
+    return false // Not a duplicate
+  } catch (error) {
+    console.error('Error checking webhook duplicate:', error)
+    return false // Continue processing if there's an error
+  }
+}
+
+// Stock reservation helper functions
+async function reserveStock(db, productId, quantity) {
+  try {
+    // Create stock_reservations table if it doesn't exist
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS stock_reservations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL,
+        order_id INTEGER,
+        checkout_id TEXT,
+        status TEXT NOT NULL DEFAULT 'reserved',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        expires_at TEXT NOT NULL,
+        UNIQUE(product_id, order_id)
+      )
+    `).run().catch(() => {})
+    
+    // Check available stock
+    const product = await db.prepare('SELECT stock_quantity FROM products WHERE id = ?').bind(productId).first()
+    if (!product) {
+      throw new Error('Product not found')
+    }
+    
+    // Check if there's enough stock available (considering existing reservations)
+    const existingReservations = await db.prepare(
+      'SELECT SUM(quantity) as reserved FROM stock_reservations WHERE product_id = ? AND status = "reserved"'
+    ).bind(productId).first()
+    
+    const reservedQuantity = existingReservations?.reserved || 0
+    const availableStock = product.stock_quantity - reservedQuantity
+    
+    if (availableStock < quantity) {
+      throw new Error(`Insufficient available stock: ${availableStock} available, ${quantity} requested`)
+    }
+    
+    // Reserve the stock
+    const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString() // 1 hour reservation
+    await db.prepare(
+      'INSERT INTO stock_reservations (product_id, quantity, status, expires_at) VALUES (?, ?, ?, ?)'
+    ).bind(productId, quantity, 'reserved', expiresAt).run()
+    
+    return true
+  } catch (error) {
+    console.error('Stock reservation error:', error)
+    throw error
+  }
+}
+
+async function releaseStockReservation(db, productId, orderId) {
+  try {
+    await db.prepare(
+      'UPDATE stock_reservations SET status = "released" WHERE product_id = ? AND order_id = ? AND status = "reserved"'
+    ).bind(productId, orderId).run()
+  } catch (error) {
+    console.error('Stock release error:', error)
+    // Don't throw to avoid breaking the flow
+  }
+}
+
+async function commitStockReservation(db, productId, orderId) {
+  try {
+    // Update reservation status
+    await db.prepare(
+      'UPDATE stock_reservations SET status = "committed" WHERE product_id = ? AND order_id = ? AND status = "reserved"'
+    ).bind(productId, orderId).run()
+    
+    // Reduce actual stock
+    const reservation = await db.prepare(
+      'SELECT quantity FROM stock_reservations WHERE product_id = ? AND order_id = ? AND status = "committed"'
+    ).bind(productId, orderId).first()
+    
+    if (reservation) {
+      await db.prepare(
+        'UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?'
+      ).bind(reservation.quantity, productId).run()
+    }
+  } catch (error) {
+    console.error('Stock commitment error:', error)
+    throw error
+  }
+}
+
+// Cleanup expired stock reservations (should be called periodically)
+async function cleanupExpiredStockReservations(db) {
+  try {
+    const now = new Date().toISOString()
+    const expiredReservations = await db.prepare(
+      'SELECT * FROM stock_reservations WHERE status = "reserved" AND expires_at < ?'
+    ).bind(now).all()
+    
+    for (const reservation of expiredReservations.results || []) {
+      await db.prepare(
+        'UPDATE stock_reservations SET status = "expired" WHERE id = ?'
+      ).bind(reservation.id).run()
+    }
+    
+    return expiredReservations.results?.length || 0
+  } catch (error) {
+    console.error('Stock reservation cleanup error:', error)
+    return 0
+  }
+}
 
 // --- Schema compatibility helpers (users/user_id vs members/member_id) ---
 let __schemaCache
@@ -226,6 +437,26 @@ async function ensureSchema(db, fkColumn){
       )
     `).run().catch(()=>{})
   } catch {}
+  
+  // Create email_history table for tracking sent emails
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS email_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email_type TEXT NOT NULL,
+        recipient_email TEXT NOT NULL,
+        recipient_name TEXT,
+        subject TEXT NOT NULL,
+        template_used TEXT NOT NULL,
+        related_id INTEGER,
+        related_type TEXT,
+        sent_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        status TEXT DEFAULT 'sent',
+        error_message TEXT,
+        metadata TEXT
+      )
+    `).run().catch(()=>{})
+  } catch {}
 }
 
 // One-time migration: copy payment data from memberships/tickets to transactions
@@ -298,7 +529,8 @@ async function migrateToTransactions(db) {
 
 async function findIdentityByEmail(db, email){
   const s = await getSchema(db)
-  const row = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
+  // Use case-insensitive email lookup
+  const row = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE LOWER(email) = LOWER(?)`).bind(email).first()
   if (!row) return null
   if (typeof row.id === 'undefined') row.id = row[s.idColumn]
   return row
@@ -306,10 +538,18 @@ async function findIdentityByEmail(db, email){
 
 async function getOrCreateIdentity(db, email, name){
   const s = await getSchema(db)
-  let existing = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
-  if (existing){ if (typeof existing.id === 'undefined') existing.id = existing[s.idColumn]; return existing }
+  // Normalize email to lowercase for case-insensitive comparison
+  const normalizedEmail = email?.toLowerCase()
+  
+  let existing = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE LOWER(email) = LOWER(?)`).bind(email).first()
+  if (existing){ 
+    if (typeof existing.id === 'undefined') existing.id = existing[s.idColumn]; 
+    return existing 
+  }
+  
+  // Store the original email but use normalized version for lookups
   await db.prepare(`INSERT INTO ${s.identityTable} (email, name) VALUES (?, ?)`).bind(email, name || null).run()
-  existing = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE email = ?`).bind(email).first()
+  existing = await db.prepare(`SELECT * FROM ${s.identityTable} WHERE LOWER(email) = LOWER(?)`).bind(email).first()
   if (existing && typeof existing.id === 'undefined') existing.id = existing[s.idColumn]
   return existing
 }
@@ -656,7 +896,14 @@ async function processMembershipRenewal(db, membership, env) {
       // Send renewal success email
       if (user) {
         const emailContent = getRenewalSuccessEmail(membership, user, toIso(newEnd))
-        await sendEmail(env, { to: user.email, ...emailContent }).catch(err => {
+        await sendEmail(env, { 
+          to: user.email, 
+          ...emailContent,
+          emailType: 'membership_renewal_success',
+          relatedId: membership.id,
+          relatedType: 'membership',
+          metadata: { plan: membership.plan, new_end_date: toIso(newEnd) }
+        }).catch(err => {
           console.error('Renewal success email error:', err)
         })
       }
@@ -681,13 +928,27 @@ async function processMembershipRenewal(db, membership, env) {
       await db.prepare('UPDATE memberships SET auto_renew = 0 WHERE id = ?').bind(membership.id).run()
       
       const emailContent = getRenewalFailedFinalEmail(membership, user)
-      await sendEmail(env, { to: user.email, ...emailContent }).catch(err => {
+      await sendEmail(env, { 
+        to: user.email, 
+        ...emailContent,
+        emailType: 'membership_renewal_final_failed',
+        relatedId: membership.id,
+        relatedType: 'membership',
+        metadata: { plan: membership.plan, attempts: currentAttempts }
+      }).catch(err => {
         console.error('Renewal final failure email error:', err)
       })
     } else if (user) {
       // Send regular failure notification (attempts 1 or 2)
       const emailContent = getRenewalFailedEmail(membership, user, currentAttempts)
-      await sendEmail(env, { to: user.email, ...emailContent }).catch(err => {
+      await sendEmail(env, { 
+        to: user.email, 
+        ...emailContent,
+        emailType: 'membership_renewal_failed',
+        relatedId: membership.id,
+        relatedType: 'membership',
+        metadata: { plan: membership.plan, attempt_number: currentAttempts }
+      }).catch(err => {
         console.error('Renewal failed email error:', err)
       })
     }
@@ -719,8 +980,36 @@ const EVT_UUID_RE = /^EVT-\d+-[0-9a-f\-]{36}$/i
 
 function clampStr(v, max){ return (v||'').substring(0, max) }
 
+// Log email to history database
+async function logEmailHistory(db, emailData) {
+  try {
+    await db.prepare(`
+      INSERT INTO email_history (
+        email_type, recipient_email, recipient_name, subject, template_used,
+        related_id, related_type, status, error_message, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      emailData.email_type,
+      emailData.recipient_email,
+      emailData.recipient_name || null,
+      emailData.subject,
+      emailData.template_used,
+      emailData.related_id || null,
+      emailData.related_type || null,
+      emailData.status || 'sent',
+      emailData.error_message || null,
+      emailData.metadata ? JSON.stringify(emailData.metadata) : null
+    ).run()
+    
+    return { success: true }
+  } catch (e) {
+    console.error('Email history logging error:', e)
+    return { success: false, error: String(e) }
+  }
+}
+
 // MailerSend email helper
-async function sendEmail(env, { to, subject, html, text }) {
+async function sendEmail(env, { to, subject, html, text, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null }) {
   if (!env.MAILERSEND_API_KEY) {
     console.warn('MAILERSEND_API_KEY not configured, skipping email')
     return { skipped: true }
@@ -747,13 +1036,211 @@ async function sendEmail(env, { to, subject, html, text }) {
     if (!res.ok) {
       const txt = await res.text()
       console.error('MailerSend error:', txt)
+      
+      // Log failed email attempt
+      await logEmailHistory(env.DB, {
+        email_type: emailType,
+        recipient_email: to,
+        subject: subject,
+        template_used: emailType,
+        related_id: relatedId,
+        related_type: relatedType,
+        status: 'failed',
+        error_message: txt,
+        metadata: metadata
+      })
+      
       return { success: false, error: txt }
     }
+    
+    // Log successful email
+    await logEmailHistory(env.DB, {
+      email_type: emailType,
+      recipient_email: to,
+      subject: subject,
+      template_used: emailType,
+      related_id: relatedId,
+      related_type: relatedType,
+      status: 'sent',
+      metadata: metadata
+    })
     
     return { success: true }
   } catch (e) {
     console.error('Email send error:', e)
+    
+    // Log failed email attempt
+    await logEmailHistory(env.DB, {
+      email_type: emailType,
+      recipient_email: to,
+      subject: subject,
+      template_used: emailType,
+      related_id: relatedId,
+      related_type: relatedType,
+      status: 'failed',
+      error_message: String(e),
+      metadata: metadata
+    })
+    
     return { success: false, error: String(e) }
+  }
+}
+
+// UTM Parameter Helper
+function addUtmParams(url, source = 'email', medium = 'transactional', campaign = null) {
+  try {
+    const baseUrl = new URL(url.startsWith('http') ? url : `https://${url}`)
+    baseUrl.searchParams.set('utm_source', source)
+    baseUrl.searchParams.set('utm_medium', medium)
+    if (campaign) baseUrl.searchParams.set('utm_campaign', campaign)
+    return baseUrl.toString()
+  } catch (e) {
+    console.error('UTM parameter error:', e)
+    return url
+  }
+}
+
+// Generate admin notification email
+function getAdminNotificationEmail(purchaseType, details) {
+  const formatPrice = (pence) => `£${(pence / 100).toFixed(2)}`
+  
+  let subject, htmlContent, textContent
+  
+  switch (purchaseType) {
+    case 'membership':
+      subject = `📈 New Membership Purchase: ${details.plan} Plan`
+      htmlContent = `
+        <h2>New Membership Purchase</h2>
+        <p><strong>Plan:</strong> ${details.plan}</p>
+        <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+        <p><strong>Amount:</strong> ${formatPrice(details.amount)}</p>
+        <p><strong>Auto-Renewal:</strong> ${details.autoRenew ? 'Yes' : 'No'}</p>
+        <p><strong>Purchase Date:</strong> ${new Date().toLocaleString('en-GB')}</p>
+        <p><strong>Membership ID:</strong> ${details.membershipId}</p>
+        <p><strong>Order Reference:</strong> ${details.orderRef}</p>
+      `
+      textContent = `
+New Membership Purchase
+
+Plan: ${details.plan}
+Customer: ${details.customerName} (${details.customerEmail})
+Amount: ${formatPrice(details.amount)}
+Auto-Renewal: ${details.autoRenew ? 'Yes' : 'No'}
+Purchase Date: ${new Date().toLocaleString('en-GB')}
+Membership ID: ${details.membershipId}
+Order Reference: ${details.orderRef}
+      `.trim()
+      break
+    
+    case 'shop_order':
+      subject = `🛒 New Shop Order: ${details.orderNumber}`
+      const itemsHtml = details.items.map(item => 
+        `<li>${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal)}</li>`
+      ).join('')
+      
+      htmlContent = `
+        <h2>New Shop Order</h2>
+        <p><strong>Order Number:</strong> ${details.orderNumber}</p>
+        <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+        <p><strong>Total Amount:</strong> ${formatPrice(details.total)}</p>
+        <p><strong>Delivery Method:</strong> ${details.deliveryMethod}</p>
+        <p><strong>Purchase Date:</strong> ${new Date().toLocaleString('en-GB')}</p>
+        <p><strong>Items Ordered:</strong></p>
+        <ul>${itemsHtml}</ul>
+      `
+      textContent = `
+New Shop Order
+
+Order Number: ${details.orderNumber}
+Customer: ${details.customerName} (${details.customerEmail})
+Total Amount: ${formatPrice(details.total)}
+Delivery Method: ${details.deliveryMethod}
+Purchase Date: ${new Date().toLocaleString('en-GB')}
+
+Items Ordered:
+${details.items.map(item => `• ${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal)}`).join('\n')}
+      `.trim()
+      break
+    
+    case 'event_ticket':
+      subject = `🎟️ New Event Ticket Purchase: ${details.eventName}`
+      htmlContent = `
+        <h2>New Event Ticket Purchase</h2>
+        <p><strong>Event:</strong> ${details.eventName}</p>
+        <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+        <p><strong>Amount:</strong> ${formatPrice(details.amount)}</p>
+        <p><strong>Event Date:</strong> ${new Date(details.eventDate).toLocaleString('en-GB')}</p>
+        <p><strong>Purchase Date:</strong> ${new Date().toLocaleString('en-GB')}</p>
+        <p><strong>Ticket ID:</strong> ${details.ticketId}</p>
+        <p><strong>Order Reference:</strong> ${details.orderRef}</p>
+      `
+      textContent = `
+New Event Ticket Purchase
+
+Event: ${details.eventName}
+Customer: ${details.customerName} (${details.customerEmail})
+Amount: ${formatPrice(details.amount)}
+Event Date: ${new Date(details.eventDate).toLocaleString('en-GB')}
+Purchase Date: ${new Date().toLocaleString('en-GB')}
+Ticket ID: ${details.ticketId}
+Order Reference: ${details.orderRef}
+      `.trim()
+      break
+    
+    default:
+      subject = `💰 New Purchase Notification`
+      htmlContent = `
+        <h2>New Purchase Notification</h2>
+        <p><strong>Type:</strong> ${purchaseType}</p>
+        <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+        <p><strong>Amount:</strong> ${formatPrice(details.amount)}</p>
+        <p><strong>Purchase Date:</strong> ${new Date().toLocaleString('en-GB')}</p>
+      `
+      textContent = `
+New Purchase Notification
+
+Type: ${purchaseType}
+Customer: ${details.customerName} (${details.customerEmail})
+Amount: ${formatPrice(details.amount)}
+Purchase Date: ${new Date().toLocaleString('en-GB')}
+      `.trim()
+  }
+  
+  return {
+    subject: `🔔 ADMIN ALERT: ${subject}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${subject}</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .header { background: #dc2626; color: white; padding: 1rem; text-align: center; }
+          .content { padding: 1rem; }
+          .footer { margin-top: 1rem; padding: 1rem; background: #f3f4f6; text-align: center; font-size: 0.9rem; color: #666; }
+          .alert-badge { display: inline-block; background: #dc2626; color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.875rem; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>🔔 DICE BASTION ADMIN ALERT</h1>
+          <div class="alert-badge">NEW PURCHASE</div>
+        </div>
+        <div class="content">
+          ${htmlContent}
+          <p style="margin-top: 1.5rem; font-size: 0.9rem; color: #666;">
+            This is an automated notification from Dice Bastion. 
+            Please do not reply to this email.
+          </p>
+        </div>
+        <div class="footer">
+          <p>© ${new Date().getFullYear()} Dice Bastion Gibraltar | Admin Dashboard: <a href="https://dicebastion.com/admin">dicebastion.com/admin</a></p>
+        </div>
+      </body>
+      </html>
+    `,
+    text: `ADMIN ALERT: ${textContent}\n\nThis is an automated notification from Dice Bastion.`
   }
 }
 
@@ -773,7 +1260,7 @@ function getRenewalSuccessEmail(membership, user, newEndDate) {
         <li><strong>Amount:</strong> £${membership.amount}</li>
         <li><strong>New End Date:</strong> ${new Date(newEndDate).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</li>
       </ul>
-      <p>Your membership will continue uninterrupted. If you wish to cancel auto-renewal, you can do so from your <a href="https://dicebastion.com/account">account page</a>.</p>
+      <p>Your membership will continue uninterrupted. If you wish to cancel auto-renewal, you can do so from your <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'membership_renewal')}">account page</a>.</p>
       <p>Thank you for being a valued member!</p>
       <p>— The Dice Bastion Team</p>
     `
@@ -804,7 +1291,7 @@ function getUpcomingRenewalEmail(membership, user, daysUntil) {
       <p>Your card will be charged automatically, and your membership will continue uninterrupted.</p>
       <p><strong>Need to make changes?</strong></p>
       <ul>
-        <li>Update your payment method at <a href="https://dicebastion.com/memberships">dicebastion.com/memberships</a></li>
+        <li>Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'renewal_reminder')}">dicebastion.com/memberships</a></li>
         <li>Cancel auto-renewal if you don't wish to continue</li>
       </ul>
       <p>Thank you for being part of the Dice Bastion community!</p>
@@ -831,9 +1318,9 @@ function getRenewalFailedEmail(membership, user, attemptNumber = 1) {
       ` : ''}
       <p><strong>What to do next:</strong></p>
       <ul>
-        <li><strong>Recommended:</strong> Update your payment method at <a href="https://dicebastion.com/memberships">dicebastion.com/memberships</a></li>
-        <li>Or purchase a new membership at <a href="https://dicebastion.com/memberships">dicebastion.com/memberships</a></li>
-        <li>Contact us if you need help: support@dicebastion.com</li>
+        <li><strong>Recommended:</strong> Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
+        <li>Or purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
+        <li>Contact us if you need help: <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
       </ul>
       <p><strong>Common reasons for payment failure:</strong></p>
       <ul>
@@ -866,9 +1353,9 @@ function getRenewalFailedFinalEmail(membership, user) {
       </div>
       <p><strong>What to do now:</strong></p>
       <ul>
-        <li><strong>Option 1:</strong> Purchase a new membership at <a href="https://dicebastion.com/memberships">dicebastion.com/memberships</a> (you can do this now or when your current membership expires)</li>
+        <li><strong>Option 1:</strong> Purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'auto_renewal_disabled')}">dicebastion.com/memberships</a> (you can do this now or when your current membership expires)</li>
         <li><strong>Option 2:</strong> Update your payment method and contact us to re-enable auto-renewal</li>
-        <li><strong>Need help?</strong> Email us at support@dicebastion.com</li>
+        <li><strong>Need help?</strong> Email us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
       </ul>
       <p>We'd love to keep you as a member! If you're experiencing payment issues, please reach out and we'll help resolve them.</p>
       <p>— The Dice Bastion Team</p>
@@ -962,7 +1449,7 @@ function getWelcomeEmail(membership, user, autoRenew) {
         <li><strong>Valid Until:</strong> ${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</li>
         <li><strong>Auto-Renewal:</strong> ${autoRenew ? 'Enabled ✓' : 'Disabled'}</li>
       </ul>
-      ${autoRenew ? '<p>Your membership will automatically renew before expiration. You can manage this at any time from your <a href="https://dicebastion.com/account">account page</a>.</p>' : '<p>Remember to renew your membership before it expires to continue enjoying member benefits!</p>'}
+      ${autoRenew ? '<p>Your membership will automatically renew before expiration. You can manage this at any time from your <a href="' + addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'welcome') + '">account page</a>.</p>' : '<p>Remember to renew your membership before it expires to continue enjoying member benefits!</p>'}
       <p><strong>Member Benefits:</strong></p>
       <ul>
         <li>Discounted event tickets</li>
@@ -981,8 +1468,14 @@ app.post('/membership/checkout', async (c) => {
   try {
     const ip = c.req.header('CF-Connecting-IP')
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    
+    // Rate limiting: 3 requests per minute per IP (more restrictive for memberships)
+    if (!checkRateLimit(ip, membershipCheckoutRateLimits, 3, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many membership checkout requests. Please try again in a minute.' }, 429)
+    }
+    
     const idem = c.req.header('Idempotency-Key')?.trim()
-    const { email, name, plan, privacyConsent, turnstileToken, autoRenew } = await c.req.json()
+    const { email, name, plan, privacyConsent, marketingConsent, turnstileToken, autoRenew } = await c.req.json()
     if (!email || !plan) return c.json({ error: 'missing_fields' }, 400)
     if (!EMAIL_RE.test(email) || email.length > 320) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
@@ -1062,7 +1555,26 @@ app.post('/membership/checkout', async (c) => {
                                 checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
       VALUES ('membership', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `).bind(membershipId, ident.id, email, clampStr(name,200), order_ref, checkout.id, 
-            String(amount), currency, idem || null, toIso(new Date())).run()
+            String(amount), currency, idem || null, toIso(new Date()))
+    
+    // Only update email preferences if user is explicitly opting IN
+    // Once consent is given, it can only be revoked through email preferences page
+    if (marketingConsent) {
+      const now = toIso(new Date())
+      // Check if user already has preferences
+      const existingPrefs = await c.env.DB.prepare(`
+        SELECT * FROM email_preferences WHERE user_id = ?
+      `).bind(ident.id).first()
+      
+      // Only create/update if no existing consent or explicitly opting in
+      if (!existingPrefs || !existingPrefs.consent_given) {
+        await c.env.DB.prepare(`
+          INSERT OR REPLACE INTO email_preferences 
+          (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
+          VALUES (?, 1, 1, 1, ?, ?)
+        `).bind(ident.id, now, now).run()
+      }
+    }
     
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
   } catch (e) {
@@ -1171,7 +1683,39 @@ app.get('/membership/confirm', async (c) => {
   if (user) {
     const updatedMembership = { ...pending, end_date: toIso(end) }
     const emailContent = getWelcomeEmail(updatedMembership, user, pending.auto_renew === 1)
-    await sendEmail(c.env, { to: user.email, ...emailContent })
+    await sendEmail(c.env, { 
+      to: user.email, 
+      ...emailContent,
+      emailType: 'membership_welcome',
+      relatedId: pending.id,
+      relatedType: 'membership',
+      metadata: { plan: pending.plan, auto_renew: pending.auto_renew }
+    })
+  }
+  
+  // Send admin notification
+  try {
+    const adminEmailContent = getAdminNotificationEmail('membership', {
+      plan: pending.plan,
+      customerName: name || 'Customer',
+      customerEmail: email,
+      amount: amount,
+      autoRenew: pending.auto_renew === 1,
+      membershipId: pending.id,
+      orderRef: order_ref
+    })
+    
+    await sendEmail(c.env, { 
+      to: 'admin@dicebastion.com',
+      ...adminEmailContent,
+      emailType: 'admin_membership_notification',
+      relatedId: pending.id,
+      relatedType: 'membership',
+      metadata: { plan: pending.plan, amount: amount }
+    })
+  } catch (adminEmailError) {
+    console.error('Failed to send admin notification for membership:', adminEmailError)
+    // Don't fail the main transaction if admin email fails
   }
   
   // Get payment instrument details for display
@@ -1195,9 +1739,25 @@ app.get('/membership/confirm', async (c) => {
 })
 
 app.post('/webhooks/sumup', async (c) => {
+  const signature = c.req.header('SumUp-Signature')
   const payload = await c.req.json()
   const { id: paymentId, checkout_reference: orderRef, currency } = payload
+  
+  // Verify webhook signature
+  if (!verifySumUpWebhookSignature(JSON.stringify(payload), signature, c.env.SUMUP_WEBHOOK_SECRET)) {
+    console.warn('Invalid webhook signature for membership webhook')
+    return c.json({ error: 'invalid_signature' }, 401)
+  }
+  
   if (!paymentId || !orderRef) return c.json({ ok: false }, 400)
+
+  // Check for duplicate webhook processing
+  const webhookId = `${paymentId}-${orderRef}` // Create unique webhook ID
+  const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, 'membership', orderRef)
+  if (isDuplicate) {
+    console.log('Duplicate membership webhook received, skipping processing')
+    return c.json({ ok: true, status: 'already_processed' })
+  }
 
   let payment
   try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
@@ -1226,10 +1786,44 @@ app.post('/webhooks/sumup', async (c) => {
   if (user) {
     const updatedMembership = { ...pending, end_date: toIso(end) }
     const emailContent = getWelcomeEmail(updatedMembership, user, pending.auto_renew === 1)
-    await sendEmail(c.env, { to: user.email, ...emailContent }).catch(err => {
+    await sendEmail(c.env, { 
+      to: user.email, 
+      ...emailContent,
+      emailType: 'membership_welcome',
+      relatedId: pending.id,
+      relatedType: 'membership',
+      metadata: { plan: pending.plan, auto_renew: pending.auto_renew }
+    }).catch(err => {
       console.error('Webhook email failed:', err)
       // Don't fail webhook if email fails
     })
+  }
+  
+  // Send admin notification
+  try {
+    const adminEmailContent = getAdminNotificationEmail('membership', {
+      plan: pending.plan,
+      customerName: user?.name || 'Customer',
+      customerEmail: user?.email || email,
+      amount: amount,
+      autoRenew: pending.auto_renew === 1,
+      membershipId: pending.id,
+      orderRef: orderRef
+    })
+    
+    await sendEmail(c.env, { 
+      to: 'admin@dicebastion.com',
+      ...adminEmailContent,
+      emailType: 'admin_membership_notification',
+      relatedId: pending.id,
+      relatedType: 'membership',
+      metadata: { plan: pending.plan, amount: amount }
+    }).catch(err => {
+      console.error('Webhook admin email failed:', err)
+      // Don't fail webhook if admin email fails
+    })
+  } catch (adminEmailError) {
+    console.error('Failed to send admin notification for membership (webhook):', adminEmailError)
   }
   
   return c.json({ ok: true })
@@ -1455,8 +2049,14 @@ app.post('/events/:id/checkout', async c => {
     const evId = Number(id)
     const ip = c.req.header('CF-Connecting-IP')
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    
+    // Rate limiting: 5 requests per minute per IP (same as shop checkout)
+    if (!checkRateLimit(ip, eventCheckoutRateLimits, 5, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many event checkout requests. Please try again in a minute.' }, 429)
+    }
+    
     const idem = c.req.header('Idempotency-Key')?.trim()
-    const { email, name, privacyConsent, turnstileToken } = await c.req.json()
+    const { email, name, privacyConsent, marketingConsent, turnstileToken } = await c.req.json()
     if (!email) return c.json({ error:'email_required' },400)
     if (!EMAIL_RE.test(email)) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error:'privacy_consent_required' },400)
@@ -1528,10 +2128,29 @@ app.post('/events/:id/checkout', async c => {
     // Store payment details in transactions table
     await c.env.DB.prepare(`
       INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
-                                checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
-      VALUES ('ticket', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                                checkout_id, amount, currency, payment_status, idempotency_key)
+      VALUES ('ticket', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     `).bind(ticketId, ident.id, email, clampStr(name,200), order_ref, checkout.id,
-            String(amount), currency, idem || null, toIso(new Date())).run()
+            String(amount), currency, idem || null).run()
+    
+    // Only update email preferences if user is explicitly opting IN
+    // Once consent is given, it can only be revoked through email preferences page
+    if (marketingConsent) {
+      const now = toIso(new Date())
+      // Check if user already has preferences
+      const existingPrefs = await c.env.DB.prepare(`
+        SELECT * FROM email_preferences WHERE user_id = ?
+      `).bind(ident.id).first()
+      
+      // Only create/update if no existing consent or explicitly opting in
+      if (!existingPrefs || !existingPrefs.consent_given) {
+        await c.env.DB.prepare(`
+          INSERT OR REPLACE INTO email_preferences 
+          (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
+          VALUES (?, 1, 1, 1, ?, ?)
+        `).bind(ident.id, now, now).run()
+      }
+    }
     
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
   } catch (e) {
@@ -1600,7 +2219,39 @@ app.get('/events/confirm', async c => {
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(transaction.user_id).first()
   if (user) {
     const emailContent = getTicketConfirmationEmail(ev, user, transaction)
-    await sendEmail(c.env, { to: user.email, ...emailContent })
+    await sendEmail(c.env, { 
+      to: user.email, 
+      ...emailContent,
+      emailType: 'event_ticket_confirmation',
+      relatedId: ticket.id,
+      relatedType: 'ticket',
+      metadata: { event_id: ev.id, event_name: ev.event_name }
+    })
+  }
+  
+  // Send admin notification for event tickets
+  try {
+    const adminEmailContent = getAdminNotificationEmail('event_ticket', {
+      eventName: ev.event_name,
+      customerName: user?.name || 'Customer',
+      customerEmail: user?.email || transaction.email,
+      amount: transaction.amount,
+      eventDate: ev.event_datetime,
+      ticketId: ticket.id,
+      orderRef: transaction.order_ref
+    })
+    
+    await sendEmail(c.env, { 
+      to: 'admin@dicebastion.com',
+      ...adminEmailContent,
+      emailType: 'admin_event_notification',
+      relatedId: ticket.id,
+      relatedType: 'ticket',
+      metadata: { event_id: ev.id, event_name: ev.event_name }
+    })
+  } catch (adminEmailError) {
+    console.error('Failed to send admin notification for event ticket:', adminEmailError)
+    // Don't fail the main transaction if admin email fails
   }
   
   return c.json({ 
@@ -2084,9 +2735,15 @@ app.get('/orders/:orderNumber', async (c) => {
 // Create order and SumUp checkout for shop purchases
 app.post('/shop/checkout', async (c) => {
   try {
+    // Rate limiting: 5 requests per minute per IP
+    const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown'
+    if (!checkRateLimit(ip, checkoutRateLimits, 5, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many checkout requests. Please try again in a minute.' }, 429)
+    }
+    
     await ensureSchema(c.env.DB, 'user_id')
     
-    const { email, name, items, shipping_address, delivery_method, notes, consent_at } = await c.req.json()
+    const { email, name, items, shipping_address, delivery_method, notes, consent_at, marketingConsent } = await c.req.json()
     
     if (!email || !name || !items || items.length === 0 || !consent_at) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -2164,6 +2821,44 @@ app.post('/shop/checkout', async (c) => {
     
     const orderId = orderResult.meta.last_row_id
     
+    // Update email preferences based on current consent choice
+    const ident = await c.env.DB.prepare('SELECT user_id FROM users WHERE email = ?')
+      .bind(email.toLowerCase()).first()
+    
+    if (ident) {
+      const now = toIso(new Date())
+      // Check if user already has preferences
+      const existingPrefs = await c.env.DB.prepare(`
+        SELECT * FROM email_preferences WHERE user_id = ?
+      `).bind(ident.user_id).first()
+      
+      // Only create/update if no existing consent or explicitly opting in
+      if (!existingPrefs || !existingPrefs.consent_given) {
+        await c.env.DB.prepare(`
+          INSERT OR REPLACE INTO email_preferences 
+          (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
+          VALUES (?, 1, 1, 1, ?, ?)
+        `).bind(ident.user_id, now, now).run()
+      }
+    }
+    
+    // Reserve stock for all items in the order
+    try {
+      for (const item of items) {
+        await reserveStock(c.env.DB, item.product_id, item.quantity)
+        
+        // Update the reservation with order_id
+        await c.env.DB.prepare(
+          'UPDATE stock_reservations SET order_id = ?, checkout_id = ? WHERE product_id = ? AND order_id IS NULL AND status = "reserved" ORDER BY created_at DESC LIMIT 1'
+        ).bind(orderId, 'pending', item.product_id).run()
+      }
+    } catch (error) {
+      console.error('Stock reservation failed, rolling back order:', error)
+      // Delete the order since we couldn't reserve stock
+      await c.env.DB.prepare('DELETE FROM orders WHERE id = ?').bind(orderId).run()
+      return c.json({ error: 'stock_reservation_failed', details: String(error) }, 400)
+    }
+    
     // Insert order items
     for (const item of orderItems) {
       await c.env.DB.prepare(`
@@ -2185,17 +2880,25 @@ app.post('/shop/checkout', async (c) => {
       checkout = await createCheckout(c.env, {
         amount: total / 100, // Convert pence to pounds
         currency: 'GBP',
-        orderRef: orderNumber,
+        orderRef: `${orderNumber}-${orderId}`, // Include order_id for better tracking
         title: `Order ${orderNumber}`,
         description: `Shop order - ${orderItems.length} item(s)`
       })
     } catch (err) {
       console.error('SumUp checkout error:', err)
+      // Release stock reservations since checkout failed
+      for (const item of items) {
+        await releaseStockReservation(c.env.DB, item.product_id, orderId)
+      }
       return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
     }
     
     if (!checkout.id) {
       console.error('SumUp checkout missing id', checkout)
+      // Release stock reservations since checkout failed
+      for (const item of items) {
+        await releaseStockReservation(c.env.DB, item.product_id, orderId)
+      }
       return c.json({ error: 'sumup_missing_id' }, 502)
     }
     
@@ -2203,6 +2906,11 @@ app.post('/shop/checkout', async (c) => {
     await c.env.DB.prepare('UPDATE orders SET checkout_id = ? WHERE id = ?')
       .bind(checkout.id, orderId)
       .run()
+    
+    // Update stock reservations with the actual checkout_id
+    await c.env.DB.prepare(
+      'UPDATE stock_reservations SET checkout_id = ? WHERE order_id = ? AND checkout_id = "pending"'
+    ).bind(checkout.id, orderId).run()
     
     // Return checkoutId for widget (same pattern as membership checkout)
     return c.json({
@@ -2220,7 +2928,15 @@ app.post('/shop/checkout', async (c) => {
 // Webhook endpoint for SumUp payment notifications
 app.post('/webhooks/sumup/shop-payment', async (c) => {
   try {
+    const signature = c.req.header('SumUp-Signature')
     const payload = await c.req.json()
+    
+    // Verify webhook signature
+    if (!verifySumUpWebhookSignature(JSON.stringify(payload), signature, c.env.SUMUP_WEBHOOK_SECRET)) {
+      console.warn('Invalid webhook signature for shop payment webhook')
+      return c.json({ error: 'invalid_signature' }, 401)
+    }
+    
     console.log('SumUp shop payment webhook:', JSON.stringify(payload))
     
     // Extract checkout reference (order number)
@@ -2230,10 +2946,28 @@ app.post('/webhooks/sumup/shop-payment', async (c) => {
       return c.json({ error: 'missing_checkout_reference' }, 400)
     }
     
+    // Check for duplicate webhook processing
+    const webhookId = `${payload.id || 'unknown'}-${checkoutReference}`
+    const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, 'shop_order', checkoutReference)
+    if (isDuplicate) {
+      console.log('Duplicate shop payment webhook received, skipping processing')
+      return c.json({ success: true, status: 'already_processed' })
+    }
+    
     // Find order by checkout reference
-    const order = await c.env.DB.prepare(
+    // Handle new format: "ORDER_NUMBER-ORDER_ID" or just order_number or checkout_id
+    let order = await c.env.DB.prepare(
       'SELECT * FROM orders WHERE order_number = ? OR checkout_id = ?'
     ).bind(checkoutReference, checkoutReference).first()
+    
+    // If not found, try parsing the new format ORDER_NUMBER-ORDER_ID
+    if (!order && checkoutReference.includes('-')) {
+      const parts = checkoutReference.split('-')
+      // Try to find by order_id (last part after last dash)
+      const potentialOrderId = parts[parts.length - 1]
+      order = await c.env.DB.prepare('SELECT * FROM orders WHERE id = ?')
+        .bind(potentialOrderId).first()
+    }
     
     if (!order) {
       console.error('Order not found for checkout reference:', checkoutReference)
@@ -2242,6 +2976,19 @@ app.post('/webhooks/sumup/shop-payment', async (c) => {
     
     // Only process if payment is successful
     if (payload.status === 'PAID' || payload.status === 'paid') {
+      // Commit stock reservations
+      try {
+        const orderItems = await c.env.DB.prepare('SELECT * FROM order_items WHERE order_id = ?')
+          .bind(order.id).all()
+        
+        for (const item of orderItems.results || []) {
+          await commitStockReservation(c.env.DB, item.product_id, order.id)
+        }
+      } catch (stockError) {
+        console.error('Stock commitment failed for order', order.id, ':', stockError)
+        // Continue with order processing even if stock commitment fails
+      }
+      
       await processShopOrderPayment(c.env.DB, order.id, payload.id, c.env)
     }
     
@@ -2358,11 +3105,44 @@ async function processShopOrderPayment(db, orderId, checkoutId, env) {
   if (order && order.email) {
     try {
       const emailContent = generateShopOrderEmail(order, itemsWithProducts)
-      await sendEmail(env, { to: order.email, ...emailContent })
+      await sendEmail(env, { 
+        to: order.email, 
+        ...emailContent,
+        emailType: 'shop_order_confirmation',
+        relatedId: order.id,
+        relatedType: 'order',
+        metadata: { order_number: order.order_number, total_amount: order.total }
+      })
       console.log(`Order confirmation email sent to ${order.email}`)
     } catch (emailError) {
       console.error('Failed to send order confirmation email:', emailError)
       // Don't fail the entire operation if email fails
+    }
+    
+    // Send admin notification for shop orders
+    try {
+      const adminEmailContent = getAdminNotificationEmail('shop_order', {
+        orderNumber: order.order_number,
+        customerName: order.name,
+        customerEmail: order.email,
+        total: order.total,
+        deliveryMethod: order.shipping_address ? 'Delivery' : 'Collection',
+        items: itemsWithProducts
+      })
+      
+      await sendEmail(env, { 
+        to: 'admin@dicebastion.com',
+        ...adminEmailContent,
+        emailType: 'admin_shop_notification',
+        relatedId: order.id,
+        relatedType: 'order',
+        metadata: { order_number: order.order_number, total_amount: order.total }
+      })
+      
+      console.log(`Admin notification sent for order ${order.order_number}`)
+    } catch (adminEmailError) {
+      console.error('Failed to send admin notification for shop order:', adminEmailError)
+      // Don't fail the main transaction if admin email fails
     }
   }
 }
@@ -2640,9 +3420,9 @@ function generateShopOrderEmail(order, items) {
                 Gibraltar's Premier Gaming Store
               </p>
               <p style="margin: 0; color: #9ca3af; font-size: 0.75rem;">
-                <a href="https://shop.dicebastion.com" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Shop</a> |
-                <a href="https://dicebastion.com" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Main Site</a> |
-                <a href="https://dicebastion.com/privacy-policy" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Privacy Policy</a>
+                <a href="${addUtmParams('https://shop.dicebastion.com', 'email', 'transactional', 'order_confirmation')}" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Shop</a> |
+                <a href="${addUtmParams('https://dicebastion.com', 'email', 'transactional', 'order_confirmation')}" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Main Site</a> |
+                <a href="${addUtmParams('https://dicebastion.com/privacy-policy', 'email', 'transactional', 'order_confirmation')}" style="color: #2563eb; text-decoration: none; margin: 0 0.5rem;">Privacy Policy</a>
               </p>
             </td>
           </tr>
@@ -2706,17 +3486,50 @@ https://shop.dicebastion.com
   }
 }
 
-// Cron trigger for processing renewals and warnings (runs daily at 2 AM UTC)
+// Cron trigger for processing renewals, warnings, and payment reconciliation (runs daily at 2 AM UTC)
 async function handleScheduled(event, env, ctx) {
-  console.log('Starting membership cron job: renewals + pre-renewal warnings')
+  console.log('Starting daily cron job: membership renewals + payment reconciliation')
   
   try {
     await ensureSchema(env.DB, 'user_id')
     
+    // Get current time to determine which jobs to run
     const now = new Date()
-    const sevenDaysFromNow = toIso(addMonths(now, 0.23)) // ~7 days
-    const twoDaysFromNow = toIso(addMonths(now, 0.067)) // ~2 days
-    const nowIso = toIso(now)
+    const hours = now.getUTCHours()
+    const minutes = now.getUTCMinutes()
+    
+    // Run payment reconciliation at 3 AM UTC (after membership renewals)
+    if (hours === 3 && minutes === 0) {
+      console.log('Running payment reconciliation...')
+      const reconciliationResult = await reconcilePayments(event, env, ctx)
+      console.log('Payment reconciliation result:', reconciliationResult)
+      
+      // Clean up expired stock reservations
+      console.log('Cleaning up expired stock reservations...')
+      const expiredCount = await cleanupExpiredStockReservations(env.DB)
+      console.log(`Released ${expiredCount} expired stock reservations`)
+    }
+    
+    // Run event reminders at 9 AM UTC (for events happening tomorrow)
+    if (hours === 9 && minutes === 0) {
+      console.log('Running event reminder emails...')
+      const reminderResult = await sendEventReminders(env.DB, env)
+      console.log('Event reminder result:', reminderResult)
+      
+      // Clean up expired email verification tokens
+      console.log('Cleaning up expired email verification tokens...')
+      const cleanedTokens = await cleanupExpiredVerificationTokens(env.DB)
+      console.log(`Cleaned up ${cleanedTokens} expired verification tokens`)
+    }
+    
+    // Run membership renewals at 2 AM UTC
+    if (hours === 2 && minutes === 0) {
+      console.log('Running membership renewals and warnings...')
+      
+      const now = new Date()
+      const sevenDaysFromNow = toIso(addMonths(now, 0.23)) // ~7 days
+      const twoDaysFromNow = toIso(addMonths(now, 0.067)) // ~2 days
+      const nowIso = toIso(now)
     
     // 1. Find memberships expiring in 7 days or less (ready for renewal)
     const expiringMemberships = await env.DB.prepare(`
@@ -2799,6 +3612,7 @@ async function handleScheduled(event, env, ctx) {
       renewals: renewalResults, 
       warnings: warningResults 
     }
+    }
   } catch (e) {
     console.error('Cron job error:', e)
     return { success: false, error: String(e) }
@@ -2820,7 +3634,7 @@ app.get('/debug/auth', (c) => {
 // ===== ADMIN AUTHENTICATION ENDPOINTS =====
 
 // Helper: Generate secure session token
-function generateSessionToken() {
+export function generateSessionToken() {
   const array = new Uint8Array(32)
   crypto.getRandomValues(array)
   return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('')
@@ -2912,6 +3726,222 @@ app.post('/admin/logout', async (c) => {
   }
   
   return c.json({ success: true })
+})
+
+// ============================================================================
+// EMAIL PREFERENCES & VERIFICATION ENDPOINTS
+// ============================================================================
+
+// Request email verification token for email preferences
+app.post('/api/request-email-verification', async (c) => {
+  try {
+    const { email } = await c.req.json()
+    const ip = c.req.header('CF-Connecting-IP') || 'unknown'
+    
+    // Validate email format
+    if (!email || !EMAIL_RE.test(email)) {
+      return c.json({ error: 'invalid_email' }, 400)
+    }
+    
+    // Rate limiting
+    if (!checkEmailVerificationRateLimit(ip, email)) {
+      return c.json({ 
+        error: 'rate_limit_exceeded', 
+        message: 'Too many requests. Please try again in 1 hour.' 
+      }, 429)
+    }
+    
+    // Find user by email
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE email = ?')
+      .bind(email.toLowerCase()).first()
+    
+    if (!user) {
+      // Don't reveal whether email exists for security
+      return c.json({ 
+        error: 'email_not_found', 
+        message: 'If this email exists, a verification link has been sent.' 
+      }, 200)
+    }
+    
+    // Create verification token
+    const { token, expiresAt } = await createEmailVerificationToken(
+      c.env.DB, 
+      user.email, 
+      user.user_id, 
+      60 // 1 hour expiration
+    )
+    
+    // Generate verification link
+    const verificationLink = generateVerificationLink(
+      'https://dicebastion.com', 
+      user.email, 
+      token
+    )
+    
+    // Send verification email
+    const emailContent = {
+      subject: `üîê Verify Your Email for Dice Bastion`,
+      html: `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Verify Your Email</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #667eea; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h1 style="margin: 0; font-size: 24px;">üîê Email Verification</h1>
+        </div>
+        <div style="background: white; padding: 30px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p>Hello ${user.name || 'there'},</p>
+            <p>You requested to manage your email preferences for Dice Bastion. Please click the button below to verify your email address:</p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${verificationLink}" style="
+                    display: inline-block; 
+                    background: #667eea; 
+                    color: white; 
+                    padding: 12px 24px; 
+                    text-decoration: none; 
+                    border-radius: 6px; 
+                    font-weight: bold; 
+                    font-size: 16px;
+                ">Verify Email Address</a>
+            </div>
+            <p>This link will expire in 1 hour for security reasons.</p>
+            <p>If you didn't request this, please ignore this email or contact our support team.</p>
+            <p style="margin-top: 30px; color: #666; font-size: 14px;">
+                Dice Bastion | Gibraltar's Premier Gaming Club<br>
+                <a href="https://dicebastion.com" style="color: #667eea;">dicebastion.com</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+      `,
+      text: `
+Email Verification Request
+==========================
+
+Hello ${user.name || 'there'},
+
+You requested to manage your email preferences for Dice Bastion. Please visit the following link to verify your email address:
+
+${verificationLink}
+
+This link will expire in 1 hour for security reasons.
+
+If you didn't request this, please ignore this email or contact our support team.
+
+Dice Bastion | Gibraltar's Premier Gaming Club
+dicebastion.com
+      `
+    }
+    
+    const sendResult = await sendEmail(c.env, {
+      to: user.email,
+      ...emailContent,
+      emailType: 'email_verification',
+      relatedId: user.user_id,
+      relatedType: 'user'
+    })
+    
+    if (!sendResult.success) {
+      console.error('Failed to send verification email:', sendResult.error)
+      return c.json({ 
+        error: 'email_send_failed', 
+        message: 'Failed to send verification email. Please try again.' 
+      }, 500)
+    }
+    
+    return c.json({
+      success: true,
+      message: 'Verification email sent. Please check your inbox.',
+      expiresAt
+    })
+    
+  } catch (error) {
+    console.error('Email verification request error:', error)
+    return c.json({ 
+      error: 'internal_error', 
+      message: 'An error occurred. Please try again.' 
+    }, 500)
+  }
+})
+
+// Get email preferences (requires valid verification token)
+app.get('/api/email-preferences', async (c) => {
+  try {
+    const { email, token } = c.req.query()
+    
+    // Require both email and token
+    if (!email || !token) {
+      return c.json({ error: 'missing_parameters', message: 'Email and token are required' }, 400)
+    }
+    
+    // Verify the token
+    const verification = await verifyEmailVerificationToken(c.env.DB, token, email)
+    
+    if (!verification.valid) {
+      return c.json({ error: 'unauthorized', message: verification.error || 'Invalid or expired token' }, 401)
+    }
+    
+    if (verification.purpose !== 'email_preferences') {
+      return c.json({ error: 'unauthorized', message: 'Invalid token purpose' }, 401)
+    }
+    
+    // Get preferences for the verified user
+    const preferences = await getUserEmailPreferences(c.env.DB, verification.userId)
+    return c.json(preferences)
+    
+  } catch (error) {
+    console.error('Get email preferences error:', error)
+    return c.json({ error: 'internal_error', message: 'Failed to get preferences' }, 500)
+  }
+})
+
+// Update email preferences (requires valid verification token)
+app.post('/api/email-preferences', async (c) => {
+  try {
+    const { email, token, preferences } = await c.req.json()
+    
+    // Validate preferences
+    if (!preferences || typeof preferences !== 'object') {
+      return c.json({ error: 'invalid_preferences' }, 400)
+    }
+    
+    // Require email and token
+    if (!email || !token) {
+      return c.json({ error: 'missing_parameters', message: 'Email and token are required' }, 400)
+    }
+    
+    // Verify the token
+    const verification = await verifyEmailVerificationToken(c.env.DB, token, email)
+    
+    if (!verification.valid) {
+      return c.json({ error: 'unauthorized', message: verification.error || 'Invalid or expired token' }, 401)
+    }
+    
+    if (verification.purpose !== 'email_preferences') {
+      return c.json({ error: 'unauthorized', message: 'Invalid token purpose' }, 401)
+    }
+    
+    // Update preferences for the verified user
+    const result = await updateUserEmailPreferences(c.env.DB, verification.userId, preferences)
+    
+    if (!result.success) {
+      return c.json({ error: 'update_failed', message: result.error }, 500)
+    }
+    
+    return c.json({
+      success: true,
+      message: 'Email preferences updated successfully'
+    })
+    
+  } catch (error) {
+    console.error('Update email preferences error:', error)
+    return c.json({ error: 'internal_error', message: 'Failed to update preferences' }, 500)
+  }
 })
 
 // Verify Admin Session
@@ -3046,6 +4076,644 @@ app.delete('/admin/images/:key', requireAdmin, async (c) => {
     return c.json({ error: 'delete_failed' }, 500)
   }
 })
+
+// ============================================================================
+// EMAIL TESTING & MANAGEMENT ENDPOINTS
+// ============================================================================
+
+// Email Preview Endpoint - Preview email templates without sending
+app.post('/admin/email/preview', requireAdmin, async (c) => {
+  try {
+    const { template, params } = await c.req.json()
+    
+    if (!template || !params) {
+      return c.json({ error: 'template and params required' }, 400)
+    }
+    
+    // Import the template function dynamically
+    let emailContent
+    
+    switch (template) {
+      case 'welcome':
+        emailContent = getWelcomeEmail(params.membership, params.user, params.autoRenew)
+        break
+      case 'renewal_success':
+        emailContent = getRenewalSuccessEmail(params.membership, params.user, params.newEndDate)
+        break
+      case 'renewal_reminder':
+        emailContent = getUpcomingRenewalEmail(params.membership, params.user, params.daysUntil)
+        break
+      case 'renewal_failed':
+        emailContent = getRenewalFailedEmail(params.membership, params.user, params.attemptNumber)
+        break
+      case 'renewal_final_failed':
+        emailContent = getRenewalFailedFinalEmail(params.membership, params.user)
+        break
+      case 'ticket_confirmation':
+        emailContent = getTicketConfirmationEmail(params.event, params.user, params.transaction)
+        break
+      case 'shop_order':
+        emailContent = generateShopOrderEmail(params.order, params.items)
+        break
+      default:
+        return c.json({ error: 'unknown_template' }, 400)
+    }
+    
+    return c.json({
+      success: true,
+      template: template,
+      preview: emailContent
+    })
+    
+  } catch (e) {
+    console.error('Email preview error:', e)
+    return c.json({ error: 'internal_error', details: String(e) }, 500)
+  }
+})
+
+// Email Test Send Endpoint - Send test emails to specified address
+app.post('/admin/email/test', requireAdmin, async (c) => {
+  try {
+    const { template, params, testEmail } = await c.req.json()
+    
+    if (!template || !params || !testEmail) {
+      return c.json({ error: 'template, params, and testEmail required' }, 400)
+    }
+    
+    // Validate email format
+    if (!EMAIL_RE.test(testEmail)) {
+      return c.json({ error: 'invalid_test_email' }, 400)
+    }
+    
+    // Generate email content
+    let emailContent
+    switch (template) {
+      case 'welcome':
+        emailContent = getWelcomeEmail(params.membership, params.user, params.autoRenew)
+        break
+      case 'renewal_success':
+        emailContent = getRenewalSuccessEmail(params.membership, params.user, params.newEndDate)
+        break
+      case 'renewal_reminder':
+        emailContent = getUpcomingRenewalEmail(params.membership, params.user, params.daysUntil)
+        break
+      case 'renewal_failed':
+        emailContent = getRenewalFailedEmail(params.membership, params.user, params.attemptNumber)
+        break
+      case 'renewal_final_failed':
+        emailContent = getRenewalFailedFinalEmail(params.membership, params.user)
+        break
+      case 'ticket_confirmation':
+        emailContent = getTicketConfirmationEmail(params.event, params.user, params.transaction)
+        break
+      case 'shop_order':
+        emailContent = generateShopOrderEmail(params.order, params.items)
+        break
+      default:
+        return c.json({ error: 'unknown_template' }, 400)
+    }
+    
+    // Add test banner to subject
+    emailContent.subject = `[TEST] ${emailContent.subject}`
+    
+    // Add test notice to email body
+    emailContent.html = `
+      <div style="background: #fef08a; padding: 15px; border-left: 4px solid #ca8a04; margin-bottom: 20px;">
+        <strong>⚠️ TEST EMAIL</strong> - This is a test email sent from the Dice Bastion admin panel.
+        No action is required. The recipient would normally see the content below.
+      </div>
+      <div style="border: 2px dashed #fbbf24; padding: 15px; border-radius: 6px;">
+        ${emailContent.html}
+      </div>
+    `
+    
+    emailContent.text = `=== TEST EMAIL ===
+This is a test email sent from the Dice Bastion admin panel.
+No action is required. The recipient would normally see the content below.
+
+${emailContent.text}
+
+=== END TEST EMAIL ===
+`
+    
+    // Send the test email
+    const result = await sendEmail(c.env, { 
+      to: testEmail, 
+      ...emailContent 
+    })
+    
+    if (!result.success) {
+      return c.json({ 
+        success: false, 
+        error: 'email_send_failed',
+        details: result.error 
+      }, 500)
+    }
+    
+    return c.json({
+      success: true,
+      template: template,
+      sentTo: testEmail,
+      subject: emailContent.subject
+    })
+    
+  } catch (e) {
+    console.error('Email test error:', e)
+    return c.json({ error: 'internal_error', details: String(e) }, 500)
+  }
+})
+
+// Get Email History
+app.get('/admin/email/history', requireAdmin, async (c) => {
+  try {
+    const { limit = 50, offset = 0, type, status, email } = c.req.query()
+    
+    let query = 'SELECT * FROM email_history'
+    let conditions = []
+    let params = []
+    
+    if (type) {
+      conditions.push('email_type = ?')
+      params.push(type)
+    }
+    
+    if (status) {
+      conditions.push('status = ?')
+      params.push(status)
+    }
+    
+    if (email) {
+      conditions.push('recipient_email LIKE ?')
+      params.push(`%${email}%`)
+    }
+    
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ')
+    }
+    
+    query += ' ORDER BY sent_at DESC LIMIT ? OFFSET ?'
+    params.push(Number(limit), Number(offset))
+    
+    const emails = await c.env.DB.prepare(query).bind(...params).all()
+    
+    // Get total count for pagination
+    let countQuery = 'SELECT COUNT(*) as total FROM email_history'
+    if (conditions.length > 0) {
+      countQuery += ' WHERE ' + conditions.join(' AND ')
+    }
+    const countResult = await c.env.DB.prepare(countQuery).bind(...params.slice(0, -2)).first()
+    
+    return c.json({
+      success: true,
+      emails: emails.results || [],
+      total: countResult?.total || 0,
+      limit: Number(limit),
+      offset: Number(offset)
+    })
+    
+  } catch (e) {
+    console.error('Email history error:', e)
+    return c.json({ error: 'internal_error', details: String(e) }, 500)
+  }
+})
+
+// Get Email History for specific user
+app.get('/admin/email/history/user', requireAdmin, async (c) => {
+  try {
+    const { email } = c.req.query()
+    
+    if (!email) {
+      return c.json({ error: 'email parameter required' }, 400)
+    }
+    
+    const emails = await c.env.DB.prepare(
+      'SELECT * FROM email_history WHERE recipient_email = ? ORDER BY sent_at DESC LIMIT 100'
+    ).bind(email).all()
+    
+    return c.json({
+      success: true,
+      email: email,
+      history: emails.results || []
+    })
+    
+  } catch (e) {
+    console.error('User email history error:', e)
+    return c.json({ error: 'internal_error', details: String(e) }, 500)
+  }
+})
+
+// Get Email History for specific related entity (membership, order, etc.)
+app.get('/admin/email/history/related', requireAdmin, async (c) => {
+  try {
+    const { type, id } = c.req.query()
+    
+    if (!type || !id) {
+      return c.json({ error: 'type and id parameters required' }, 400)
+    }
+    
+    const emails = await c.env.DB.prepare(
+      'SELECT * FROM email_history WHERE related_type = ? AND related_id = ? ORDER BY sent_at DESC'
+    ).bind(type, id).all()
+    
+    return c.json({
+      success: true,
+      related_type: type,
+      related_id: id,
+      history: emails.results || []
+    })
+    
+  } catch (e) {
+    console.error('Related email history error:', e)
+    return c.json({ error: 'internal_error', details: String(e) }, 500)
+  }
+})
+
+// Payment Reconciliation Cron Job
+// Runs daily at 3 AM UTC (after membership renewal processing)
+async function reconcilePayments(event, env, ctx) {
+  const db = env.DB
+  const startTime = Date.now()
+  const maxDuration = 10 * 60 * 1000 // 10 minutes
+  
+  console.log('Starting payment reconciliation...')
+  
+  try {
+    // 1. Create reconciliation_log table if it doesn't exist
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS reconciliation_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_id INTEGER NOT NULL,
+        entity_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        reference_id TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        resolved_at TEXT
+      )
+    `).run().catch(() => {})
+    
+    // 2. Check for pending transactions older than 24 hours
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    
+    const pendingTransactions = await db.prepare(`
+      SELECT * FROM transactions 
+      WHERE payment_status = 'pending' 
+      AND created_at < ?
+      LIMIT 100
+    `).bind(twentyFourHoursAgo.toISOString()).all()
+    
+    console.log(`Found ${pendingTransactions.results?.length || 0} pending transactions to check`)
+    
+    // 3. Verify each pending transaction with SumUp
+    for (const transaction of pendingTransactions.results || []) {
+      if (Date.now() - startTime > maxDuration) {
+        console.log('Reconciliation timeout reached')
+        break
+      }
+      
+      try {
+        // Check payment status with SumUp
+        const payment = await fetchPayment(env, transaction.checkout_id)
+        
+        if (payment?.status === 'PAID') {
+          // Payment succeeded but webhook failed
+          console.log(`Processing missed payment for transaction ${transaction.id}`)
+          
+          // Handle based on transaction type
+          if (transaction.transaction_type === 'membership') {
+            await processMembershipPayment(db, transaction, env)
+          } else if (transaction.transaction_type === 'ticket') {
+            await processTicketPayment(db, transaction, env)
+          }
+          
+          // Log reconciliation
+          await logReconciliation(db, transaction.id, 'payment_found', payment.id)
+        } else if (payment?.status === 'FAILED') {
+          // Payment failed, mark transaction accordingly
+          await db.prepare(`
+            UPDATE transactions 
+            SET payment_status = 'failed', 
+                updated_at = ?
+            WHERE id = ?
+          `).bind(new Date().toISOString(), transaction.id).run()
+          
+          await logReconciliation(db, transaction.id, 'payment_failed', payment.id)
+        }
+        
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100))
+      } catch (error) {
+        console.error(`Reconciliation error for transaction ${transaction.id}:`, error)
+        await logReconciliation(db, transaction.id, 'reconciliation_error', null, String(error))
+      }
+    }
+    
+    // 4. Check for orphaned orders (paid but not processed)
+    const orphanedOrders = await db.prepare(`
+      SELECT o.* FROM orders o
+      JOIN transactions t ON o.order_number = t.order_ref
+      WHERE t.payment_status = 'PAID'
+      AND o.status != 'completed'
+      AND t.created_at > ?
+      LIMIT 50
+    `).bind(twentyFourHoursAgo.toISOString()).all()
+    
+    console.log(`Found ${orphanedOrders.results?.length || 0} orphaned orders to process`)
+    
+    for (const order of orphanedOrders.results || []) {
+      if (Date.now() - startTime > maxDuration) {
+        console.log('Reconciliation timeout reached')
+        break
+      }
+      
+      try {
+        console.log(`Processing orphaned order ${order.order_number}`)
+        await processShopOrderPayment(db, order.id, order.checkout_id, env)
+        await logReconciliation(db, order.id, 'orphaned_order_processed', order.checkout_id)
+        
+        await new Promise(resolve => setTimeout(resolve, 100))
+      } catch (error) {
+        console.error(`Error processing orphaned order ${order.order_number}:`, error)
+        await logReconciliation(db, order.id, 'orphaned_order_error', order.checkout_id, String(error))
+      }
+    }
+    
+    console.log('Payment reconciliation completed successfully')
+    return { success: true, checkedTransactions: pendingTransactions.results?.length || 0 }
+    
+  } catch (error) {
+    console.error('Reconciliation failed:', error)
+    return { success: false, error: String(error) }
+  }
+}
+
+// Helper functions for reconciliation
+async function processMembershipPayment(db, transaction, env) {
+  try {
+    const pending = await db.prepare('SELECT * FROM memberships WHERE order_ref = ?').bind(transaction.order_ref).first()
+    if (!pending) {
+      console.warn(`Membership not found for order_ref ${transaction.order_ref}`)
+      return
+    }
+    
+    const svc = await getServiceForPlan(db, pending.plan)
+    if (!svc) {
+      console.warn(`Plan not configured for membership ${pending.id}`)
+      return
+    }
+    
+    const now = new Date()
+    const s = await getSchema(db)
+    const identityId = (typeof pending.user_id !== 'undefined' && pending.user_id !== null) ? pending.user_id : pending.member_id
+    const memberActive = await getActiveMembership(db, identityId)
+    const baseStart = memberActive ? new Date(memberActive.end_date) : now
+    const months = Number(svc.months || 0)
+    const start = baseStart
+    const end = addMonths(baseStart, months)
+    
+    await db.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ? WHERE id = ?')
+      .bind(toIso(start), toIso(end), transaction.checkout_id, pending.id).run()
+    
+    // Send welcome email
+    const user = await db.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
+    if (user) {
+      const updatedMembership = { ...pending, end_date: toIso(end) }
+      const emailContent = getWelcomeEmail(updatedMembership, user, pending.auto_renew === 1)
+      await sendEmail(env, { 
+        to: user.email, 
+        ...emailContent,
+        emailType: 'membership_welcome',
+        relatedId: pending.id,
+        relatedType: 'membership',
+        metadata: { plan: pending.plan, auto_renew: pending.auto_renew }
+      }).catch(err => {
+        console.error('Reconciliation welcome email failed:', err)
+      })
+    }
+    
+    // Update transaction status
+    await db.prepare('UPDATE transactions SET payment_status = "PAID", updated_at = ? WHERE id = ?')
+      .bind(new Date().toISOString(), transaction.id).run()
+    
+  } catch (error) {
+    console.error('Error processing membership payment during reconciliation:', error)
+    throw error
+  }
+}
+
+async function processTicketPayment(db, transaction, env) {
+  try {
+    const pending = await db.prepare('SELECT * FROM tickets WHERE order_ref = ?').bind(transaction.order_ref).first()
+    if (!pending) {
+      console.warn(`Ticket not found for order_ref ${transaction.order_ref}`)
+      return
+    }
+    
+    // Update ticket status
+    await db.prepare('UPDATE tickets SET payment_status = "PAID", status = "confirmed" WHERE id = ?')
+      .bind(pending.id).run()
+    
+    // Send confirmation email
+    const user = await db.prepare('SELECT * FROM users WHERE user_id = ?').bind(pending.user_id).first()
+    const event = await db.prepare('SELECT * FROM events WHERE event_id = ?').bind(pending.event_id).first()
+    
+    if (user && event) {
+      const emailContent = getTicketConfirmationEmail(event, user, pending)
+      await sendEmail(env, { 
+        to: user.email, 
+        ...emailContent,
+        emailType: 'ticket_confirmation',
+        relatedId: pending.id,
+        relatedType: 'ticket',
+        metadata: { event_id: pending.event_id }
+      }).catch(err => {
+        console.error('Reconciliation ticket email failed:', err)
+      })
+    }
+    
+    // Update transaction status
+    await db.prepare('UPDATE transactions SET payment_status = "PAID", updated_at = ? WHERE id = ?')
+      .bind(new Date().toISOString(), transaction.id).run()
+    
+  } catch (error) {
+    console.error('Error processing ticket payment during reconciliation:', error)
+    throw error
+  }
+}
+
+async function logReconciliation(db, entityId, status, referenceId, errorMessage = null) {
+  await db.prepare(`
+    INSERT INTO reconciliation_log (
+      entity_id, entity_type, status, reference_id, error_message, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(
+    entityId,
+    status.includes('order') ? 'order' : 'transaction',
+    status,
+    referenceId,
+    errorMessage,
+    new Date().toISOString()
+  ).run()
+}
+
+// Event Reminder System
+async function sendEventReminders(db, env) {
+  const now = new Date()
+  const startTime = Date.now()
+  const maxDuration = 5 * 60 * 1000 // 5 minutes max
+  
+  try {
+    console.log('Starting event reminder processing...')
+    
+    // Ensure the event_reminders table exists
+    await ensureEventRemindersTable(db)
+    
+    // Find events happening tomorrow
+    const tomorrow = new Date(now)
+    tomorrow.setDate(now.getDate() + 1)
+    tomorrow.setHours(0, 0, 0, 0)
+    
+    const oneDayFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    
+    const upcomingEvents = await db.prepare(`
+      SELECT * FROM events 
+      WHERE event_datetime >= ? 
+      AND event_datetime < ?
+      AND is_active = 1
+      ORDER BY event_datetime ASC
+    `).bind(tomorrow.toISOString(), oneDayFromNow.toISOString()).all()
+    
+    console.log(`Found ${upcomingEvents.results?.length || 0} events happening tomorrow`)
+    
+    let totalRemindersSent = 0
+    let totalErrors = 0
+    
+    // Process each event
+    for (const event of upcomingEvents.results || []) {
+      if (Date.now() - startTime > maxDuration) {
+        console.log('Event reminder timeout reached')
+        break
+      }
+      
+      console.log(`Processing reminders for event ${event.event_name} (ID: ${event.event_id})`)
+      
+      // Find all confirmed tickets for this event
+      const tickets = await db.prepare(`
+        SELECT t.*, u.email, u.name 
+        FROM tickets t 
+        JOIN users u ON t.user_id = u.user_id
+        WHERE t.event_id = ? 
+        AND t.status = 'confirmed'
+        AND t.payment_status = 'PAID'
+      `).bind(event.event_id).all()
+      
+      console.log(`Found ${tickets.results?.length || 0} confirmed tickets for this event`)
+      
+      // Send reminder to each attendee
+      for (const ticket of tickets.results || []) {
+        if (Date.now() - startTime > maxDuration) {
+          console.log('Event reminder timeout reached')
+          break
+        }
+        
+        try {
+          const user = {
+            email: ticket.email,
+            name: ticket.name || 'Attendee'
+          }
+          
+          const emailContent = getEventReminderEmail(event, user, ticket)
+          
+          const result = await sendEmail(env, { 
+            to: user.email, 
+            ...emailContent,
+            emailType: 'event_reminder',
+            relatedId: ticket.id,
+            relatedType: 'ticket',
+            metadata: { event_id: event.event_id, event_name: event.event_name }
+          })
+          
+          if (result.success) {
+            totalRemindersSent++
+            console.log(`Sent reminder to ${user.email} for event ${event.event_name}`)
+            
+            // Log the reminder in database for tracking
+            await db.prepare(`
+              INSERT INTO event_reminders (
+                ticket_id, event_id, user_id, email, sent_at, status
+              ) VALUES (?, ?, ?, ?, ?, ?)
+            `).bind(
+              ticket.id, 
+              event.event_id, 
+              ticket.user_id, 
+              user.email, 
+              new Date().toISOString(),
+              'sent'
+            ).run().catch(() => {})
+            
+          } else {
+            totalErrors++
+            console.error(`Failed to send reminder to ${user.email}:`, result.error)
+            
+            // Log the failure
+            await db.prepare(`
+              INSERT INTO event_reminders (
+                ticket_id, event_id, user_id, email, sent_at, status, error_message
+              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+              ticket.id, 
+              event.event_id, 
+              ticket.user_id, 
+              user.email, 
+              new Date().toISOString(),
+              'failed',
+              result.error
+            ).run().catch(() => {})
+          }
+          
+          // Small delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+        } catch (error) {
+          totalErrors++
+          console.error(`Error sending reminder for ticket ${ticket.id}:`, error)
+        }
+      }
+    }
+    
+    console.log(`Event reminder completed: ${totalRemindersSent} sent, ${totalErrors} failed`)
+    return { 
+      success: true, 
+      remindersSent: totalRemindersSent, 
+      errors: totalErrors,
+      eventsProcessed: upcomingEvents.results?.length || 0
+    }
+    
+  } catch (error) {
+    console.error('Event reminder failed:', error)
+    return { success: false, error: String(error) }
+  }
+}
+
+// Create event_reminders table if it doesn't exist
+async function ensureEventRemindersTable(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS event_reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL,
+      event_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      email TEXT NOT NULL,
+      sent_at TEXT NOT NULL,
+      status TEXT NOT NULL, -- 'sent', 'failed', 'skipped'
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id),
+      FOREIGN KEY (event_id) REFERENCES events(event_id),
+      FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )
+  `).run().catch(() => {})
+}
 
 export default {
   fetch: app.fetch,
