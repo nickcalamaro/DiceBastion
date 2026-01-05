@@ -1552,10 +1552,10 @@ app.post('/membership/checkout', async (c) => {
     // Store payment details in transactions table
     await c.env.DB.prepare(`
       INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
-                                checkout_id, amount, currency, payment_status, idempotency_key, consent_at, marketing_consent)
-      VALUES ('membership', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                                checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
+      VALUES ('membership', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `).bind(membershipId, ident.id, email, clampStr(name,200), order_ref, checkout.id, 
-            String(amount), currency, idem || null, toIso(new Date()), marketingConsent ? 1 : 0).run()
+            String(amount), currency, idem || null, toIso(new Date()))
     
     // Only update email preferences if user is explicitly opting IN
     // Once consent is given, it can only be revoked through email preferences page
@@ -2128,10 +2128,10 @@ app.post('/events/:id/checkout', async c => {
     // Store payment details in transactions table
     await c.env.DB.prepare(`
       INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
-                                checkout_id, amount, currency, payment_status, idempotency_key, consent_at, marketing_consent)
-      VALUES ('ticket', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                                checkout_id, amount, currency, payment_status, idempotency_key)
+      VALUES ('ticket', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     `).bind(ticketId, ident.id, email, clampStr(name,200), order_ref, checkout.id,
-            String(amount), currency, idem || null, toIso(new Date()), marketingConsent ? 1 : 0).run()
+            String(amount), currency, idem || null).run()
     
     // Only update email preferences if user is explicitly opting IN
     // Once consent is given, it can only be revoked through email preferences page
