@@ -9,6 +9,16 @@ description: "Board games, miniatures, accessories, and more"
     <p>Browse our collection of board games, miniatures, and gaming accessories.</p>
   </div>
   
+  <!-- Search Bar -->
+  <div class="search-container">
+    <div class="search-input-wrapper">
+      <input type="text" id="search-input" placeholder="Search products by name..." 
+             oninput="handleSearch()" 
+             class="search-input">
+      <span class="search-icon">🔍</span>
+    </div>
+  </div>
+  
   <div id="category-filter" class="category-filter">
     <button class="category-btn active" onclick="filterByCategory(null)">All Products</button>
   </div>
@@ -29,7 +39,7 @@ description: "Board games, miniatures, accessories, and more"
 <style>
 .shop-header {
   text-align: center;
-  margin: 2rem 0 3rem;
+  margin: 2rem 0 2rem;
 }
 
 .shop-header h1 {
@@ -41,6 +51,48 @@ description: "Board games, miniatures, accessories, and more"
 .shop-header p {
   font-size: 1.125rem;
   color: rgb(var(--color-neutral-600));
+}
+
+/* Search Bar Styles */
+.search-container {
+  margin: 0 0 1.5rem;
+}
+
+.search-input-wrapper {
+  position: relative;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.search-input {
+  width: 100%;
+  padding: 1rem 1.5rem 1rem 2.5rem;
+  border: 2px solid rgb(var(--color-neutral-200));
+  border-radius: 12px;
+  font-size: 1rem;
+  background: rgb(var(--color-neutral));
+  color: rgb(var(--color-neutral-800));
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: rgb(var(--color-primary-400));
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+
+.search-icon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgb(var(--color-neutral-400));
+  font-size: 1.25rem;
+}
+
+.search-input::placeholder {
+  color: rgb(var(--color-neutral-400));
 }
 
 .category-filter {
@@ -336,6 +388,7 @@ const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
 
 let allProducts = [];
 let currentFilter = null;
+let currentSearchTerm = '';
 
 // Load cart from localStorage
 function loadCart() {
@@ -373,7 +426,8 @@ async function loadProducts() {
     // Build category filter
     buildCategoryFilter(allProducts);
     
-    renderProducts(allProducts);
+    // Apply filters (initially no search term, no category filter)
+    applyFilters();
   } catch (error) {
     console.error('Failed to load products:', error);
     document.getElementById('product-grid').innerHTML = 
@@ -412,6 +466,33 @@ function buildCategoryFilter(products) {
   filterContainer.innerHTML = buttons.join('');
 }
 
+// Handle search input
+function handleSearch() {
+  currentSearchTerm = document.getElementById('search-input').value.toLowerCase();
+  applyFilters();
+}
+
+// Apply both search and category filters
+function applyFilters() {
+  let filteredProducts = [...allProducts];
+  
+  // Apply search filter
+  if (currentSearchTerm) {
+    filteredProducts = filteredProducts.filter(product => 
+      product.name.toLowerCase().includes(currentSearchTerm)
+    );
+  }
+  
+  // Apply category filter
+  if (currentFilter) {
+    filteredProducts = filteredProducts.filter(product => 
+      product.category && product.category.split(',').map(c => c.trim()).includes(currentFilter)
+    );
+  }
+  
+  renderProducts(filteredProducts);
+}
+
 // Filter products by category
 function filterByCategory(category) {
   currentFilter = category;
@@ -422,12 +503,8 @@ function filterByCategory(category) {
   });
   event.target.classList.add('active');
   
-  // Filter and render products
-  const filtered = category 
-    ? allProducts.filter(p => p.category && p.category.split(',').map(c => c.trim()).includes(category))
-    : allProducts;
-  
-  renderProducts(filtered);
+  // Apply both filters
+  applyFilters();
 }
 
 // Render products

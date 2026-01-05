@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Search Functionality Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .search-container {
+            margin: 20px 0;
+        }
+        .search-input {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+        }
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        .product-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .product-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .results {
+            margin: 20px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Search Functionality Test</h1>
+    
+    <div class="search-container">
+        <input type="text" id="search-input" placeholder="Search products by name..." 
+               oninput="handleSearch()" 
+               class="search-input">
+    </div>
+    
+    <div class="results">
+        Search term: <span id="search-term">(none)</span>
+    </div>
+    
+    <div id="product-grid" class="product-grid">
+        <!-- Products will be displayed here -->
+    </div>
+
+    <script>
+        // Mock data
+        const allProducts = [
+            { id: 1, name: 'Dice Set - Red' },
+            { id: 2, name: 'Board Game - Chess' },
+            { id: 3, name: 'Miniature - Dragon' },
+            { id: 4, name: 'Dice Set - Blue' },
+            { id: 5, name: 'Card Game - Poker' },
+            { id: 6, name: 'Dice Tower' },
+            { id: 7, name: 'Board Game - Monopoly' }
+        ];
+
+        let currentSearchTerm = '';
+
+        // Handle search input
+        function handleSearch() {
+            currentSearchTerm = document.getElementById('search-input').value.toLowerCase();
+            document.getElementById('search-term').textContent = `'${currentSearchTerm}'`;
+            applyFilters();
+        }
+
+        // Apply filters
+        function applyFilters() {
+            let filteredProducts = [...allProducts];
+            
+            // Apply search filter
+            if (currentSearchTerm) {
+                filteredProducts = filteredProducts.filter(product => 
+                    product.name.toLowerCase().includes(currentSearchTerm)
+                );
+            }
+            
+            renderProducts(filteredProducts);
+        }
+
+        // Render products
+        function renderProducts(products) {
+            const grid = document.getElementById('product-grid');
+            
+            if (products.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 20px;">No products found</div>';
+                return;
+            }
+            
+            grid.innerHTML = products.map(product => {
+                return `
+                    <div class="product-card">
+                        <div class="product-name">${product.name}</div>
+                        <div>ID: ${product.id}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            renderProducts(allProducts);
+        });
+    </script>
+</body>
+</html>

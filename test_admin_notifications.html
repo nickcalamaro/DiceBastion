@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Notification Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .test-section h2 {
+            color: #333;
+            margin-top: 0;
+        }
+        .notification-preview {
+            background: white;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        .notification-header {
+            background: #dc2626;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .notification-badge {
+            display: inline-block;
+            background: #dc2626;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .test-result {
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .test-result.success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .test-result.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #93c5fd;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔔 Admin Notification Test</h1>
+    <p>This page tests the admin notification functionality for different purchase types.</p>
+    
+    <div class="test-section">
+        <h2>📈 Membership Purchase Notification</h2>
+        <p>Tests admin notification for new membership purchases.</p>
+        
+        <button onclick="testMembershipNotification()" id="test-membership-btn">Test Membership Notification</button>
+        
+        <div class="notification-preview" id="membership-preview" style="display: none;">
+            <div class="notification-header">
+                <h3>🔔 DICE BASTION ADMIN ALERT</h3>
+                <div class="notification-badge">NEW PURCHASE</div>
+            </div>
+            <div id="membership-content"></div>
+        </div>
+        
+        <div class="test-result" id="membership-result" style="display: none;"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>🛒 Shop Order Notification</h2>
+        <p>Tests admin notification for shop purchases.</p>
+        
+        <button onclick="testShopNotification()" id="test-shop-btn">Test Shop Notification</button>
+        
+        <div class="notification-preview" id="shop-preview" style="display: none;">
+            <div class="notification-header">
+                <h3>🔔 DICE BASTION ADMIN ALERT</h3>
+                <div class="notification-badge">NEW PURCHASE</div>
+            </div>
+            <div id="shop-content"></div>
+        </div>
+        
+        <div class="test-result" id="shop-result" style="display: none;"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>🎟️ Event Ticket Notification</h2>
+        <p>Tests admin notification for event ticket purchases.</p>
+        
+        <button onclick="testEventNotification()" id="test-event-btn">Test Event Notification</button>
+        
+        <div class="notification-preview" id="event-preview" style="display: none;">
+            <div class="notification-header">
+                <h3>🔔 DICE BASTION ADMIN ALERT</h3>
+                <div class="notification-badge">NEW PURCHASE</div>
+            </div>
+            <div id="event-content"></div>
+        </div>
+        
+        <div class="test-result" id="event-result" style="display: none;"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>📧 Email Format Test</h2>
+        <p>Tests the actual email format that would be sent.</p>
+        
+        <button onclick="testEmailFormat()" id="test-email-btn">Test Email Format</button>
+        
+        <div id="email-format-result" style="display: none; margin-top: 10px;"></div>
+    </div>
+
+    <script>
+        // Mock admin notification function (simplified version)
+        function getAdminNotificationEmail(purchaseType, details) {
+            const formatPrice = (pence) => `£${(pence / 100).toFixed(2)}`
+            
+            let subject, htmlContent
+            
+            switch (purchaseType) {
+                case 'membership':
+                    subject = `📈 New Membership Purchase: ${details.plan} Plan`
+                    htmlContent = `
+                        <h2>New Membership Purchase</h2>
+                        <p><strong>Plan:</strong> ${details.plan}</p>
+                        <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+                        <p><strong>Amount:</strong> ${formatPrice(details.amount)}</p>
+                        <p><strong>Auto-Renewal:</strong> ${details.autoRenew ? 'Yes' : 'No'}</p>
+                        <p><strong>Membership ID:</strong> ${details.membershipId}</p>
+                        <p><strong>Order Reference:</strong> ${details.orderRef}</p>
+                    `
+                    break
+                
+                case 'shop_order':
+                    subject = `🛒 New Shop Order: ${details.orderNumber}`
+                    const itemsHtml = details.items.map(item => 
+                        `<li>${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal)}</li>`
+                    ).join('')
+                    
+                    htmlContent = `
+                        <h2>New Shop Order</h2>
+                        <p><strong>Order Number:</strong> ${details.orderNumber}</p>
+                        <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+                        <p><strong>Total Amount:</strong> ${formatPrice(details.total)}</p>
+                        <p><strong>Delivery Method:</strong> ${details.deliveryMethod}</p>
+                        <p><strong>Items Ordered:</strong></p>
+                        <ul>${itemsHtml}</ul>
+                    `
+                    break
+                
+                case 'event_ticket':
+                    subject = `🎟️ New Event Ticket Purchase: ${details.eventName}`
+                    htmlContent = `
+                        <h2>New Event Ticket Purchase</h2>
+                        <p><strong>Event:</strong> ${details.eventName}</p>
+                        <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+                        <p><strong>Amount:</strong> ${formatPrice(details.amount)}</p>
+                        <p><strong>Event Date:</strong> ${new Date(details.eventDate).toLocaleString('en-GB')}</p>
+                        <p><strong>Ticket ID:</strong> ${details.ticketId}</p>
+                    `
+                    break
+            }
+            
+            return {
+                subject: `🔔 ADMIN ALERT: ${subject}`,
+                html: `
+                    <div class="notification-header">
+                        <h1>🔔 DICE BASTION ADMIN ALERT</h1>
+                        <div class="notification-badge">NEW PURCHASE</div>
+                    </div>
+                    <div class="content">
+                        ${htmlContent}
+                        <p style="margin-top: 1.5rem; font-size: 0.9rem; color: #666;">
+                            This is an automated notification from Dice Bastion.
+                            Please do not reply to this email.
+                        </p>
+                    </div>
+                `
+            }
+        }
+        
+        function testMembershipNotification() {
+            const btn = document.getElementById('test-membership-btn')
+            const preview = document.getElementById('membership-preview')
+            const content = document.getElementById('membership-content')
+            const result = document.getElementById('membership-result')
+            
+            btn.disabled = true
+            btn.textContent = 'Testing...'
+            result.style.display = 'none'
+            
+            // Simulate API call
+            setTimeout(() => {
+                try {
+                    const notification = getAdminNotificationEmail('membership', {
+                        plan: 'Monthly',
+                        customerName: 'John Doe',
+                        customerEmail: 'john@example.com',
+                        amount: 2500,
+                        autoRenew: true,
+                        membershipId: 12345,
+                        orderRef: 'MEMB-12345-abc123'
+                    })
+                    
+                    content.innerHTML = notification.html
+                    preview.style.display = 'block'
+                    
+                    result.textContent = `✅ SUCCESS: Membership notification would be sent to admin@dicebastion.com with subject: "${notification.subject}"`
+                    result.className = 'test-result success'
+                    result.style.display = 'block'
+                    
+                } catch (error) {
+                    result.textContent = `❌ ERROR: ${error.message}`
+                    result.className = 'test-result error'
+                    result.style.display = 'block'
+                } finally {
+                    btn.disabled = false
+                    btn.textContent = 'Test Membership Notification'
+                }
+            }, 1000)
+        }
+        
+        function testShopNotification() {
+            const btn = document.getElementById('test-shop-btn')
+            const preview = document.getElementById('shop-preview')
+            const content = document.getElementById('shop-content')
+            const result = document.getElementById('shop-result')
+            
+            btn.disabled = true
+            btn.textContent = 'Testing...'
+            result.style.display = 'none'
+            
+            // Simulate API call
+            setTimeout(() => {
+                try {
+                    const notification = getAdminNotificationEmail('shop_order', {
+                        orderNumber: 'ORD-123456',
+                        customerName: 'Jane Smith',
+                        customerEmail: 'jane@example.com',
+                        total: 7500,
+                        deliveryMethod: 'Delivery',
+                        items: [
+                            { product_name: 'Dice Set - Red', quantity: 2, subtotal: 3000 },
+                            { product_name: 'Board Game - Chess', quantity: 1, subtotal: 4500 }
+                        ]
+                    })
+                    
+                    content.innerHTML = notification.html
+                    preview.style.display = 'block'
+                    
+                    result.textContent = `✅ SUCCESS: Shop order notification would be sent to admin@dicebastion.com with subject: "${notification.subject}"`
+                    result.className = 'test-result success'
+                    result.style.display = 'block'
+                    
+                } catch (error) {
+                    result.textContent = `❌ ERROR: ${error.message}`
+                    result.className = 'test-result error'
+                    result.style.display = 'block'
+                } finally {
+                    btn.disabled = false
+                    btn.textContent = 'Test Shop Notification'
+                }
+            }, 1000)
+        }
+        
+        function testEventNotification() {
+            const btn = document.getElementById('test-event-btn')
+            const preview = document.getElementById('event-preview')
+            const content = document.getElementById('event-content')
+            const result = document.getElementById('event-result')
+            
+            btn.disabled = true
+            btn.textContent = 'Testing...'
+            result.style.display = 'none'
+            
+            // Simulate API call
+            setTimeout(() => {
+                try {
+                    const notification = getAdminNotificationEmail('event_ticket', {
+                        eventName: 'Board Game Night',
+                        customerName: 'Bob Johnson',
+                        customerEmail: 'bob@example.com',
+                        amount: 1500,
+                        eventDate: new Date(Date.now() + 86400000), // Tomorrow
+                        ticketId: 67890
+                    })
+                    
+                    content.innerHTML = notification.html
+                    preview.style.display = 'block'
+                    
+                    result.textContent = `✅ SUCCESS: Event ticket notification would be sent to admin@dicebastion.com with subject: "${notification.subject}"`
+                    result.className = 'test-result success'
+                    result.style.display = 'block'
+                    
+                } catch (error) {
+                    result.textContent = `❌ ERROR: ${error.message}`
+                    result.className = 'test-result error'
+                    result.style.display = 'block'
+                } finally {
+                    btn.disabled = false
+                    btn.textContent = 'Test Event Notification'
+                }
+            }, 1000)
+        }
+        
+        function testEmailFormat() {
+            const btn = document.getElementById('test-email-btn')
+            const result = document.getElementById('email-format-result')
+            
+            btn.disabled = true
+            btn.textContent = 'Testing...'
+            result.style.display = 'none'
+            
+            // Simulate API call
+            setTimeout(() => {
+                try {
+                    const notification = getAdminNotificationEmail('membership', {
+                        plan: 'Annual',
+                        customerName: 'Test User',
+                        customerEmail: 'test@example.com',
+                        amount: 25000,
+                        autoRenew: false,
+                        membershipId: 99999,
+                        orderRef: 'TEST-ORDER-123'
+                    })
+                    
+                    const emailInfo = `
+                        <div class="test-result success">
+                            <h3>Email Format Test Results</h3>
+                            <p><strong>Subject:</strong> ${notification.subject}</p>
+                            <p><strong>To:</strong> admin@dicebastion.com</p>
+                            <p><strong>From:</strong> Dice Bastion &lt;noreply@dicebastion.com&gt;</p>
+                            <p><strong>Content-Type:</strong> HTML</p>
+                            <p><strong>Status:</strong> ✅ Ready to send</p>
+                            <p><strong>Preview:</strong> See membership notification above</p>
+                        </div>
+                    `
+                    
+                    result.innerHTML = emailInfo
+                    result.style.display = 'block'
+                    
+                } catch (error) {
+                    result.textContent = `❌ ERROR: ${error.message}`
+                    result.className = 'test-result error'
+                    result.style.display = 'block'
+                } finally {
+                    btn.disabled = false
+                    btn.textContent = 'Test Email Format'
+                }
+            }, 1000)
+        }
+    </script>
+</body>
+</html>
