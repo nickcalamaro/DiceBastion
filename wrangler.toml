@@ -25,7 +25,11 @@ database_name = "dicebastion-d1"
 database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
 
 [observability]
-enabled = true
+[observability.logs]
+enabled = false
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
 
 # Cron trigger for membership renewals (runs daily at 2 AM UTC)
 [triggers]
