@@ -222,13 +222,20 @@ function initEventPurchase(event) {
       loadTurnstileSdk().catch(() => {});
     }
   }
-  
-  function closePurchaseModal() {
+    function closePurchaseModal() {
     if (modal) {
       modal.style.display = 'none';
       const d = modal.querySelector('.evt-details');
       if (d) d.style.display = 'block';
       if (cardEl) {
+        // Properly unmount SumUp widget if it exists
+        if (window.SumUpCard && window.SumUpCard.unmount) {
+          try {
+            window.SumUpCard.unmount({ id: 'evt-card-'+eventId });
+          } catch(e) {
+            console.log('SumUp unmount failed:', e);
+          }
+        }
         cardEl.innerHTML = '';
         cardEl.style.display = 'none';
       }
