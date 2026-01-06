@@ -3,8 +3,6 @@
  * Secure token generation, validation, and email preference management
  */
 
-import { generateSessionToken } from './index.js' // Reuse existing function
-
 /**
  * Generate a secure random token for email verification
  * @param {number} length - Token length (default: 32)

@@ -1,4 +1,6 @@
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+// Global API configuration
+window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = window.__DB_API_BASE;
 const TURNSTILE_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 
 function renderEventPurchase(event) {
@@ -55,7 +57,6 @@ function renderEventPurchase(event) {
 }
 
 function initEventPurchase(event) {
-  const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
   const eventId = String(event.id);
   const root = document.querySelector('.event-purchase[data-event-id="'+eventId+'"]');
   const modal = document.getElementById('evt-modal-'+eventId);

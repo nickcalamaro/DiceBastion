@@ -16,6 +16,8 @@ SUMUP_MERCHANT_CODE = "MUZHYEAH"
 TURNSTILE_SITE_KEY = "0x4AAAAAACAB4xlOnW3S8K0k"
 TURNSTILE_SECRET = "0x4AAAAAACAB41xceooY522cbKNKGVTP-iA"
 MAILERSEND_FROM_NAME = "Dice Bastion"
+MAILERSEND_FROM_EMAIL = "noreply@dicebastion.com"
+# Note: MAILERSEND_API_KEY must be set as a secret using: wrangler secret put MAILERSEND_API_KEY
 # The URL to redirect back to after SumUp checkout completes (success/cancel)
 
 [[d1_databases]]
