@@ -107,8 +107,7 @@ function initEventPurchase(event) {
       s.onerror = () => rej(new Error('Turnstile load failed'));
       document.head.appendChild(s);
     });
-  }
-  async function renderTurnstile() {
+  }  async function renderTurnstile() {
     await loadTurnstileSdk();
     const tsEl = document.getElementById('evt-ts-'+eventId);
     if (!tsEl || !window.turnstile) return;
@@ -130,8 +129,23 @@ function initEventPurchase(event) {
       turnstileWidgetId = null;
     }
     
-    // Clear the container completely
+    // Clear the container completely and reset any Turnstile state
     tsEl.innerHTML = '';
+    
+    // Remove any orphaned widgets by trying to get response from container
+    // This will fail if no widget exists, which is fine
+    try {
+      if (window.turnstile.getResponse) {
+        const existingResponse = window.turnstile.getResponse(tsEl);
+        if (existingResponse !== undefined) {
+          console.log('Found orphaned Turnstile widget, attempting cleanup');
+          // Widget exists but we don't have the ID - need to reset it
+          window.turnstile.reset(tsEl);
+        }
+      }
+    } catch(e) {
+      // Expected if no widget exists
+    }
     
     // Small delay to ensure DOM is ready
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -145,7 +159,20 @@ function initEventPurchase(event) {
       console.log('Turnstile widget rendered with ID:', turnstileWidgetId);
     } catch(e) {
       console.error('Turnstile render failed:', e);
-      turnstileWidgetId = null;
+      // If render fails, the container might still have remnants
+      // Try one more time with a fresh container
+      tsEl.innerHTML = '';
+      try {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        turnstileWidgetId = window.turnstile.render(tsEl, {
+          sitekey: TURNSTILE_SITE_KEY,
+          size: 'flexible'
+        });
+        console.log('Turnstile widget rendered with ID (retry):', turnstileWidgetId);
+      } catch(e2) {
+        console.error('Turnstile render failed again:', e2);
+        turnstileWidgetId = null;
+      }
     }
   }
   
@@ -305,8 +332,7 @@ function initEventPurchase(event) {
       }, 50);
     }
   }
-  
-  function closePurchaseModal() {
+    function closePurchaseModal() {
     if (modal) {
       // Cancel pending Turnstile render if modal closes before timeout fires
       if (turnstileRenderTimeout !== null) {
@@ -314,6 +340,9 @@ function initEventPurchase(event) {
         turnstileRenderTimeout = null;
         console.log('Cancelled pending Turnstile render');
       }
+      
+      // Get the container first
+      const tsEl = document.getElementById('evt-ts-'+eventId);
       
       // Remove Turnstile widget if it was rendered
       if (window.turnstile && turnstileWidgetId !== null) {
@@ -328,10 +357,25 @@ function initEventPurchase(event) {
         }
       }
       
+      // Additional cleanup: try to reset any widget that might be attached to the container
+      if (window.turnstile && tsEl) {
+        try {
+          // Try to reset using the container element
+          window.turnstile.reset(tsEl);
+          console.log('Reset Turnstile container as fallback');
+        } catch(e) {
+          // Silent fail - expected if no widget exists
+        }
+      }
+      
       // Clear the Turnstile container to remove any orphaned widgets
-      const tsEl = document.getElementById('evt-ts-'+eventId);
       if (tsEl) {
         tsEl.innerHTML = '';
+        // Remove and re-add to fully reset
+        const parent = tsEl.parentNode;
+        const newTsEl = tsEl.cloneNode(false);
+        parent.replaceChild(newTsEl, tsEl);
+        console.log('Turnstile container replaced with fresh clone');
       }
       
       // Use the unmount helper to properly clean up SumUp widget
