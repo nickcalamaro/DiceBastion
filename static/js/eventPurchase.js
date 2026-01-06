@@ -61,6 +61,7 @@ function initEventPurchase(event) {
   const root = document.querySelector('.event-purchase[data-event-id="'+eventId+'"]');
   const modal = document.getElementById('evt-modal-'+eventId);
   const cardEl = document.getElementById('evt-card-'+eventId);
+  let turnstileWidgetId = null; // Store the Turnstile widget ID
   
   if (!root || !modal) return;
   
@@ -95,8 +96,7 @@ function initEventPurchase(event) {
       document.head.appendChild(s);
     });
   }
-  
-  function loadTurnstileSdk() {
+    function loadTurnstileSdk() {
     if (window.turnstile) return Promise.resolve(true);
     return new Promise((res, rej) => {
       const s = document.createElement('script');
@@ -109,11 +109,45 @@ function initEventPurchase(event) {
     });
   }
   
+  async function renderTurnstile() {
+    await loadTurnstileSdk();
+    const tsEl = document.getElementById('evt-ts-'+eventId);
+    if (!tsEl || !window.turnstile) return;
+    
+    // Remove existing widget if present
+    if (turnstileWidgetId !== null) {
+      try {
+        window.turnstile.remove(turnstileWidgetId);
+      } catch(e) {
+        console.log('Turnstile remove failed:', e);
+      }
+      turnstileWidgetId = null;
+    }
+    
+    // Clear the container
+    tsEl.innerHTML = '';
+    
+    // Render new widget and store the ID
+    try {
+      turnstileWidgetId = window.turnstile.render('#evt-ts-'+eventId, {
+        sitekey: TURNSTILE_SITE_KEY,
+        size: 'flexible'
+      });
+    } catch(e) {
+      console.log('Turnstile render failed:', e);
+    }
+  }
+  
   async function getTurnstileToken() {
     await loadTurnstileSdk();
     const tsEl = document.getElementById('evt-ts-'+eventId);
     if (!tsEl || !window.turnstile) throw new Error('Turnstile not ready');
-    const token = window.turnstile.getResponse(tsEl);
+    
+    // Get token from the widget
+    const token = turnstileWidgetId !== null 
+      ? window.turnstile.getResponse(turnstileWidgetId)
+      : window.turnstile.getResponse(tsEl);
+      
     if (!token) throw new Error('Please complete the security check.');
     return token;
   }
@@ -242,16 +276,16 @@ function initEventPurchase(event) {
     
     showError('Missing checkout ID');
   }
-  
-  function openPurchaseModal() {
+    function openPurchaseModal() {
     if (modal) {
       modal.style.display = 'flex';
       const nameInput = modal.querySelector('.evt-name');
       if (nameInput) nameInput.focus();
-      loadTurnstileSdk().catch(() => {});
+      
+      // Render fresh Turnstile widget when opening
+      renderTurnstile().catch(() => {});
     }
-  }
-  function closePurchaseModal() {
+  }  function closePurchaseModal() {
     if (modal) {
       modal.style.display = 'none';
       const d = modal.querySelector('.evt-details');
@@ -266,10 +300,15 @@ function initEventPurchase(event) {
       modal.querySelector('.evt-name').value = '';
       modal.querySelector('.evt-email').value = '';
       modal.querySelector('.evt-privacy').checked = false;
-      if (window.turnstile) {
+      
+      // Remove Turnstile widget properly
+      if (window.turnstile && turnstileWidgetId !== null) {
         try {
-          window.turnstile.reset('#evt-ts-'+eventId);
-        } catch(_) {}
+          window.turnstile.remove(turnstileWidgetId);
+          turnstileWidgetId = null;
+        } catch(e) {
+          console.log('Turnstile cleanup failed:', e);
+        }
       }
     }
   }
