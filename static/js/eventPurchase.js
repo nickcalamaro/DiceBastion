@@ -41,10 +41,9 @@ function renderEventPurchase(event) {
           <div class="mt-3 flex gap-2 items-start text-sm leading-tight">
             <input type="checkbox" class="evt-privacy mt-1">
             <label class="text-neutral-700 dark:text-neutral-300">I agree to the <a href="/privacy-policy/" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 underline">Privacy Policy</a>.</label>
-          </div>
-          <div class="mt-3">
+          </div>          <div class="mt-3">
             <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2">Security check</div>
-            <div id="evt-ts-${eventId}" class="cf-turnstile" data-sitekey="${TURNSTILE_SITE_KEY}" data-size="flexible"></div>
+            <div id="evt-ts-${eventId}"></div>
           </div>
           <button type="button" class="evt-continue mt-4 w-full py-3 border-none rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 font-bold cursor-pointer hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Continue to Payment</button>
         </div>
@@ -108,8 +107,7 @@ function initEventPurchase(event) {
       document.head.appendChild(s);
     });
   }
-  
-  async function renderTurnstile() {
+    async function renderTurnstile() {
     await loadTurnstileSdk();
     const tsEl = document.getElementById('evt-ts-'+eventId);
     if (!tsEl || !window.turnstile) return;
@@ -118,23 +116,29 @@ function initEventPurchase(event) {
     if (turnstileWidgetId !== null) {
       try {
         window.turnstile.remove(turnstileWidgetId);
+        console.log('Turnstile widget removed:', turnstileWidgetId);
       } catch(e) {
         console.log('Turnstile remove failed:', e);
       }
       turnstileWidgetId = null;
     }
     
-    // Clear the container
+    // Clear the container completely
     tsEl.innerHTML = '';
+    
+    // Small delay to ensure DOM is ready
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     // Render new widget and store the ID
     try {
-      turnstileWidgetId = window.turnstile.render('#evt-ts-'+eventId, {
+      turnstileWidgetId = window.turnstile.render(tsEl, {
         sitekey: TURNSTILE_SITE_KEY,
         size: 'flexible'
       });
+      console.log('Turnstile widget rendered with ID:', turnstileWidgetId);
     } catch(e) {
-      console.log('Turnstile render failed:', e);
+      console.error('Turnstile render failed:', e);
+      turnstileWidgetId = null;
     }
   }
   
@@ -275,24 +279,47 @@ function initEventPurchase(event) {
     }
     
     showError('Missing checkout ID');
-  }
-    function openPurchaseModal() {
+  }  function openPurchaseModal() {
     if (modal) {
+      // Show modal FIRST so Turnstile can render properly
       modal.style.display = 'flex';
+      
+      // Focus name input
       const nameInput = modal.querySelector('.evt-name');
       if (nameInput) nameInput.focus();
       
-      // Render fresh Turnstile widget when opening
-      renderTurnstile().catch(() => {});
+      // Render fresh Turnstile widget after modal is visible
+      // Use setTimeout to ensure DOM has updated
+      setTimeout(() => {
+        renderTurnstile().catch((e) => {
+          console.error('Failed to render Turnstile:', e);
+        });
+      }, 50);
     }
-  }  function closePurchaseModal() {
+  }
+  
+  function closePurchaseModal() {
     if (modal) {
+      // Remove Turnstile widget FIRST before hiding modal
+      if (window.turnstile && turnstileWidgetId !== null) {
+        try {
+          console.log('Removing Turnstile widget:', turnstileWidgetId);
+          window.turnstile.remove(turnstileWidgetId);
+          turnstileWidgetId = null;
+          console.log('Turnstile widget removed successfully');
+        } catch(e) {
+          console.error('Turnstile cleanup failed:', e);
+          turnstileWidgetId = null; // Reset anyway
+        }
+      }
+      
+      // Use the unmount helper to properly clean up SumUp widget
+      unmountWidget();
+      
+      // Hide modal
       modal.style.display = 'none';
       const d = modal.querySelector('.evt-details');
       if (d) d.style.display = 'block';
-      
-      // Use the unmount helper to properly clean up widget
-      unmountWidget();
       
       clearError();
       const s = modal.querySelector('.evt-success');
@@ -300,16 +327,6 @@ function initEventPurchase(event) {
       modal.querySelector('.evt-name').value = '';
       modal.querySelector('.evt-email').value = '';
       modal.querySelector('.evt-privacy').checked = false;
-      
-      // Remove Turnstile widget properly
-      if (window.turnstile && turnstileWidgetId !== null) {
-        try {
-          window.turnstile.remove(turnstileWidgetId);
-          turnstileWidgetId = null;
-        } catch(e) {
-          console.log('Turnstile cleanup failed:', e);
-        }
-      }
     }
   }
   
