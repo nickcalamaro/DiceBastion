@@ -61,6 +61,7 @@ function initEventPurchase(event) {
   const modal = document.getElementById('evt-modal-'+eventId);
   const cardEl = document.getElementById('evt-card-'+eventId);
   let turnstileWidgetId = null; // Store the Turnstile widget ID
+  let turnstileRenderTimeout = null; // Store timeout ID to cancel if needed
   
   if (!root || !modal) return;
   
@@ -107,10 +108,16 @@ function initEventPurchase(event) {
       document.head.appendChild(s);
     });
   }
-    async function renderTurnstile() {
+  async function renderTurnstile() {
     await loadTurnstileSdk();
     const tsEl = document.getElementById('evt-ts-'+eventId);
     if (!tsEl || !window.turnstile) return;
+    
+    // Check if modal is still visible (in case it was closed while timeout was pending)
+    if (!modal || modal.style.display === 'none') {
+      console.log('Modal closed, skipping Turnstile render');
+      return;
+    }
     
     // Remove existing widget if present
     if (turnstileWidgetId !== null) {
@@ -289,8 +296,9 @@ function initEventPurchase(event) {
       if (nameInput) nameInput.focus();
       
       // Render fresh Turnstile widget after modal is visible
-      // Use setTimeout to ensure DOM has updated
-      setTimeout(() => {
+      // Store timeout ID so we can cancel it if modal closes early
+      turnstileRenderTimeout = setTimeout(() => {
+        turnstileRenderTimeout = null;
         renderTurnstile().catch((e) => {
           console.error('Failed to render Turnstile:', e);
         });
@@ -300,7 +308,14 @@ function initEventPurchase(event) {
   
   function closePurchaseModal() {
     if (modal) {
-      // Remove Turnstile widget FIRST before hiding modal
+      // Cancel pending Turnstile render if modal closes before timeout fires
+      if (turnstileRenderTimeout !== null) {
+        clearTimeout(turnstileRenderTimeout);
+        turnstileRenderTimeout = null;
+        console.log('Cancelled pending Turnstile render');
+      }
+      
+      // Remove Turnstile widget if it was rendered
       if (window.turnstile && turnstileWidgetId !== null) {
         try {
           console.log('Removing Turnstile widget:', turnstileWidgetId);
@@ -311,6 +326,12 @@ function initEventPurchase(event) {
           console.error('Turnstile cleanup failed:', e);
           turnstileWidgetId = null; // Reset anyway
         }
+      }
+      
+      // Clear the Turnstile container to remove any orphaned widgets
+      const tsEl = document.getElementById('evt-ts-'+eventId);
+      if (tsEl) {
+        tsEl.innerHTML = '';
       }
       
       // Use the unmount helper to properly clean up SumUp widget
