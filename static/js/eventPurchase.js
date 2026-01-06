@@ -138,6 +138,21 @@ function initEventPurchase(event) {
     showError('Payment still processing. Refresh soon.');
     return false;
   }
+    function unmountWidget() {
+    // Properly unmount SumUp widget if it exists
+    if (window.SumUpCard && window.SumUpCard.unmount) {
+      try {
+        window.SumUpCard.unmount({ id: 'evt-card-'+eventId });
+        console.log('SumUp widget unmounted');
+      } catch(e) {
+        console.log('SumUp unmount failed:', e);
+      }
+    }
+    if (cardEl) {
+      cardEl.innerHTML = '';
+      cardEl.style.display = 'none';
+    }
+  }
   
   async function mountWidget(checkoutId, orderRef) {
     try {
@@ -147,10 +162,17 @@ function initEventPurchase(event) {
       return;
     }
     
-    try {      clearError();
+    try {
+      clearError();
+      
+      // First unmount any existing widget to ensure clean state
+      unmountWidget();
+      
+      // Show payment section and hide details
       cardEl.style.display = 'block';
       modal.querySelector('.evt-details').style.display = 'none';
-      cardEl.innerHTML = '';
+      
+      // Mount fresh widget
       window.SumUpCard.mount({
         id: 'evt-card-'+eventId,
         checkoutId,
@@ -163,9 +185,16 @@ function initEventPurchase(event) {
             // Only show error if backend confirmation failed after polling
             showError('Payment verification failed. Please refresh the page to check your order status.');
           }
+        },
+        onBack: () => {
+          console.log('SumUp onBack triggered');
+          // User clicked back button in widget - return to details
+          unmountWidget();
+          modal.querySelector('.evt-details').style.display = 'block';
         }
       });
     } catch(e) {
+      console.error('SumUp mount error:', e);
       showError('Could not start payment');
     }
   }
@@ -222,23 +251,15 @@ function initEventPurchase(event) {
       loadTurnstileSdk().catch(() => {});
     }
   }
-    function closePurchaseModal() {
+  function closePurchaseModal() {
     if (modal) {
       modal.style.display = 'none';
       const d = modal.querySelector('.evt-details');
       if (d) d.style.display = 'block';
-      if (cardEl) {
-        // Properly unmount SumUp widget if it exists
-        if (window.SumUpCard && window.SumUpCard.unmount) {
-          try {
-            window.SumUpCard.unmount({ id: 'evt-card-'+eventId });
-          } catch(e) {
-            console.log('SumUp unmount failed:', e);
-          }
-        }
-        cardEl.innerHTML = '';
-        cardEl.style.display = 'none';
-      }
+      
+      // Use the unmount helper to properly clean up widget
+      unmountWidget();
+      
       clearError();
       const s = modal.querySelector('.evt-success');
       if (s) s.style.display = 'none';
