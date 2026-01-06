@@ -147,19 +147,21 @@ function initEventPurchase(event) {
       return;
     }
     
-    try {
-      clearError();
+    try {      clearError();
       cardEl.style.display = 'block';
       modal.querySelector('.evt-details').style.display = 'none';
       cardEl.innerHTML = '';
       window.SumUpCard.mount({
         id: 'evt-card-'+eventId,
         checkoutId,
-        onResponse: async (type) => {
-          if (type && String(type).toLowerCase() === 'success') {
-            await confirmPayment(orderRef);
-          } else {
-            showError('Payment failed');
+        onResponse: async (type, body) => {
+          console.log('SumUp onResponse:', type, body);
+          // Always attempt to confirm the payment by polling the backend
+          // The backend will check the actual SumUp payment status
+          const confirmed = await confirmPayment(orderRef);
+          if (!confirmed) {
+            // Only show error if backend confirmation failed after polling
+            showError('Payment verification failed. Please refresh the page to check your order status.');
           }
         }
       });

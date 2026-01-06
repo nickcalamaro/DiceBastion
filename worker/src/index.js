@@ -1860,7 +1860,146 @@ app.get('/events', async c => {
     return c.json(results || [])
   } catch (err) {
     console.error('Error fetching events:', err)
-    return c.json({ error: 'failed_to_fetch_events' }, 500)
+    return c.json({ error: 'failed_to_fetch_events' }, 500)  }
+})
+
+// Confirm ticket purchase - MUST come before /events/:slug route!
+app.get('/events/confirm', async c => {
+  try {
+    const orderRef = c.req.query('orderRef')
+    if (!orderRef || !EVT_UUID_RE.test(orderRef)) return c.json({ ok:false, error:'invalid_orderRef' },400)
+  
+    // Get transaction record
+    const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "ticket"').bind(orderRef).first()
+    if (!transaction) {
+      console.log('[events/confirm] Transaction not found for orderRef:', orderRef)
+      return c.json({ ok:false, error:'order_not_found' },404)
+    }
+    
+    console.log('[events/confirm] Transaction found:', { 
+      id: transaction.id, 
+      checkout_id: transaction.checkout_id, 
+      payment_status: transaction.payment_status,
+      reference_id: transaction.reference_id 
+    })
+    
+    // Get ticket record
+    const ticket = await c.env.DB.prepare('SELECT * FROM tickets WHERE id = ?').bind(transaction.reference_id).first()
+    if (!ticket) {
+      console.log('[events/confirm] Ticket not found for reference_id:', transaction.reference_id)
+      return c.json({ ok:false, error:'ticket_not_found' },404)
+    }
+    
+    console.log('[events/confirm] Ticket found:', { id: ticket.id, status: ticket.status, event_id: ticket.event_id })
+    
+    if (ticket.status === 'active') {
+      const ev = await c.env.DB.prepare('SELECT event_name, event_datetime FROM events WHERE event_id = ?').bind(ticket.event_id).first()
+      return c.json({ 
+        ok: true, 
+        status: 'already_active',
+        eventName: ev?.event_name,
+        eventDate: ev?.event_datetime,
+        ticketCount: 1,
+        amount: transaction.amount,
+        currency: transaction.currency || 'GBP'
+      })
+    }
+    
+    // Verify payment with SumUp
+    let payment
+    try { 
+      payment = await fetchPayment(c.env, transaction.checkout_id)
+      console.log('[events/confirm] SumUp payment status:', payment?.status, 'checkout_id:', transaction.checkout_id)
+    } 
+    catch (err) { 
+      console.error('[events/confirm] Failed to fetch payment from SumUp:', err)
+      return c.json({ ok:false, error:'verify_failed' },400) 
+    }
+    
+    const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
+    if (!paid) {
+      console.log('[events/confirm] Payment not yet paid, status:', payment?.status || 'PENDING')
+      return c.json({ ok:false, status: payment?.status || 'PENDING' })
+    }
+    
+    console.log('[events/confirm] Payment verified as PAID')
+    
+    // Verify amount/currency
+    if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
+      console.log('[events/confirm] Payment mismatch - payment:', payment.amount, payment.currency, 'transaction:', transaction.amount, transaction.currency)
+      return c.json({ ok:false, error:'payment_mismatch' },400)
+    }
+
+    // Get event details
+    console.log('[events/confirm] Looking up event with event_id:', ticket.event_id)
+    const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(ticket.event_id).first()
+    console.log('[events/confirm] Event lookup result:', ev ? `Found: ${ev.event_name}` : 'NOT FOUND')
+    if (!ev) return c.json({ ok:false, error:'event_not_found' },404)
+    
+    // Capacity check
+    if (ev.capacity && ev.tickets_sold >= ev.capacity) return c.json({ ok:false, error:'sold_out' },409)
+    
+    // Update ticket and transaction status
+    await c.env.DB.batch([
+      c.env.DB.prepare('UPDATE tickets SET status = "active" WHERE id = ?').bind(ticket.id),
+      c.env.DB.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
+        .bind(payment.id, toIso(new Date()), transaction.id),
+      // Increment if not exceeded capacity
+      c.env.DB.prepare('UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)')
+        .bind(ticket.event_id)
+    ])
+    
+    // Send confirmation email
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(transaction.user_id).first()
+    if (user) {
+      const emailContent = getTicketConfirmationEmail(ev, user, transaction)
+      await sendEmail(c.env, { 
+        to: user.email, 
+        ...emailContent,
+        emailType: 'event_ticket_confirmation',
+        relatedId: ticket.id,
+        relatedType: 'ticket',
+        metadata: { event_id: ev.id, event_name: ev.event_name }
+      })
+    }
+    
+    // Send admin notification for event tickets
+    try {
+      const adminEmailContent = getAdminNotificationEmail('event_ticket', {
+        eventName: ev.event_name,
+        customerName: user?.name || 'Customer',
+        customerEmail: user?.email || transaction.email,
+        amount: transaction.amount,
+        eventDate: ev.event_datetime,
+        ticketId: ticket.id,
+        orderRef: transaction.order_ref
+      })
+      
+      await sendEmail(c.env, { 
+        to: 'admin@dicebastion.com',
+        ...adminEmailContent,
+        emailType: 'admin_event_notification',
+        relatedId: ticket.id,
+        relatedType: 'ticket',
+        metadata: { event_id: ev.id, event_name: ev.event_name }
+      })
+    } catch (adminEmailError) {
+      console.error('Failed to send admin notification for event ticket:', adminEmailError)
+      // Don't fail the main transaction if admin email fails
+    }
+    
+    return c.json({ 
+      ok: true, 
+      status: 'active',
+      eventName: ev.event_name,
+      eventDate: ev.event_datetime,
+      ticketCount: 1,
+      amount: transaction.amount,
+      currency: transaction.currency || 'GBP'
+    })
+  } catch (error) {
+    console.error('[events/confirm] EXCEPTION:', error)
+    return c.json({ ok: false, error: 'internal_error', message: error.message, stack: error.stack }, 500)
   }
 })
 
@@ -2167,117 +2306,53 @@ app.post('/events/:id/checkout', async c => {
   }
 })
 
-// Confirm ticket purchase with payment verification + capacity race guard
-app.get('/events/confirm', async c => {
-  const orderRef = c.req.query('orderRef')
-  if (!orderRef || !EVT_UUID_RE.test(orderRef)) return c.json({ ok:false, error:'invalid_orderRef' },400)
-  
-  // Get transaction record
-  const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "ticket"').bind(orderRef).first()
-  if (!transaction) return c.json({ ok:false, error:'order_not_found' },404)
-  
-  // Get ticket record
-  const ticket = await c.env.DB.prepare('SELECT * FROM tickets WHERE id = ?').bind(transaction.reference_id).first()
-  if (!ticket) return c.json({ ok:false, error:'ticket_not_found' },404)
-  if (ticket.status === 'active') {
-    const ev = await c.env.DB.prepare('SELECT event_name, event_datetime FROM events WHERE event_id = ?').bind(ticket.event_id).first()
-    return c.json({ 
-      ok: true, 
-      status: 'already_active',
-      eventName: ev?.event_name,
-      eventDate: ev?.event_datetime,
-      ticketCount: 1,
-      amount: transaction.amount,
-      currency: transaction.currency || 'GBP'
-    })
-  }
-  
-  // Verify payment with SumUp
-  let payment
-  try { payment = await fetchPayment(c.env, transaction.checkout_id) } 
-  catch { return c.json({ ok:false, error:'verify_failed' },400) }
-  
-  const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
-  if (!paid) return c.json({ ok:false, status: payment?.status || 'PENDING' })
-  
-  // Verify amount/currency
-  if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
-    return c.json({ ok:false, error:'payment_mismatch' },400)
-  }
-
-  // Get event details
-  const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(ticket.event_id).first()
-  if (!ev) return c.json({ ok:false, error:'event_not_found' },404)
-  
-  // Capacity check
-  if (ev.capacity && ev.tickets_sold >= ev.capacity) return c.json({ ok:false, error:'sold_out' },409)
-  
-  // Update ticket and transaction status
-  await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE tickets SET status = "active" WHERE id = ?').bind(ticket.id),
-    c.env.DB.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
-      .bind(payment.id, toIso(new Date()), transaction.id),
-    // Increment if not exceeded capacity
-    c.env.DB.prepare('UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)')
-      .bind(ticket.event_id)
-  ])
-  
-  // Send confirmation email
-  const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(transaction.user_id).first()
-  if (user) {
-    const emailContent = getTicketConfirmationEmail(ev, user, transaction)
-    await sendEmail(c.env, { 
-      to: user.email, 
-      ...emailContent,
-      emailType: 'event_ticket_confirmation',
-      relatedId: ticket.id,
-      relatedType: 'ticket',
-      metadata: { event_id: ev.id, event_name: ev.event_name }
-    })
-  }
-  
-  // Send admin notification for event tickets
-  try {
-    const adminEmailContent = getAdminNotificationEmail('event_ticket', {
-      eventName: ev.event_name,
-      customerName: user?.name || 'Customer',
-      customerEmail: user?.email || transaction.email,
-      amount: transaction.amount,
-      eventDate: ev.event_datetime,
-      ticketId: ticket.id,
-      orderRef: transaction.order_ref
-    })
-    
-    await sendEmail(c.env, { 
-      to: 'admin@dicebastion.com',
-      ...adminEmailContent,
-      emailType: 'admin_event_notification',
-      relatedId: ticket.id,
-      relatedType: 'ticket',
-      metadata: { event_id: ev.id, event_name: ev.event_name }
-    })
-  } catch (adminEmailError) {
-    console.error('Failed to send admin notification for event ticket:', adminEmailError)
-    // Don't fail the main transaction if admin email fails
-  }
-  
-  return c.json({ 
-    ok: true, 
-    status: 'active',
-    eventName: ev.event_name,
-    eventDate: ev.event_datetime,
-    ticketCount: 1,
-    amount: transaction.amount,
-    currency: transaction.currency || 'GBP'
-  })
-})
-
 // Optional tiny debug endpoint
 app.get('/_debug/ping', c => {
   const origin = c.req.header('Origin') || ''
   const allowed = (c.env.ALLOWED_ORIGIN || '').split(',').map(s=>s.trim()).filter(Boolean)
   const allow = allowed.includes(origin) ? origin : (allowed[0] || '')
   return c.json({ ok:true, origin, allow, allowed })
+})
+
+// Debug endpoint to test event/transaction lookup
+app.get('/_debug/event-confirm/:orderRef', async c => {
+  const orderRef = c.req.param('orderRef')
+  
+  const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "ticket"').bind(orderRef).first()
+  if (!transaction) return c.json({ error: 'transaction_not_found' })
+  
+  const ticket = await c.env.DB.prepare('SELECT * FROM tickets WHERE id = ?').bind(transaction.reference_id).first()
+  if (!ticket) return c.json({ error: 'ticket_not_found' })
+  
+  const event = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(ticket.event_id).first()
+  
+  return c.json({
+    transaction,
+    ticket,
+    event: event || null,
+    event_found: !!event
+  })
+})
+
+// Debug endpoint to check SumUp payment status
+app.get('/_debug/sumup-payment/:checkoutId', async c => {
+  const checkoutId = c.req.param('checkoutId')
+  
+  try {
+    const payment = await fetchPayment(c.env, checkoutId)
+    return c.json({
+      checkout_id: checkoutId,
+      payment_status: payment?.status,
+      payment_amount: payment?.amount,
+      payment_currency: payment?.currency,
+      payment_full: payment
+    })
+  } catch (err) {
+    return c.json({
+      error: 'failed_to_fetch',
+      message: err.message
+    }, 500)
+  }
 })
 
 // Debug schema inspector
