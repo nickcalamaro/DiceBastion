@@ -3,11 +3,23 @@ main = "worker/src/index.js"
 compatibility_date = "2024-10-23"
 compatibility_flags = ["nodejs_compat"]
 
-# Change this to your real route once ready, e.g. your domain
-# routes = [ { pattern = "yourdomain.com/api/*", zone_name = "yourdomain.com" } ]
-# For local dev it will run at http://127.0.0.1:8787
+# Production routes (uncomment when ready)
+# routes = [ { pattern = "dicebastion.com/api/*", zone_name = "dicebastion.com" } ]
 
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "dicebastion"
+database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
+
+# R2 Object Storage (for future image uploads)
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "dicebastion-images"
+
+# Environment Variables
 [vars]
+DEBUG = "false"
 ALLOWED_ORIGIN = "http://localhost:1313,http://localhost:1314,http://localhost:8000,https://dicebastion.com,https://www.dicebastion.com,https://shop.dicebastion.com,https://dicebastion-shop.pages.dev"
 RETURN_URL = "https://dicebastion.com/thank-you"
 CURRENCY = "GBP"
@@ -18,21 +30,19 @@ TURNSTILE_SECRET = "0x4AAAAAACAB41xceooY522cbKNKGVTP-iA"
 MAILERSEND_FROM_NAME = "Dice Bastion"
 MAILERSEND_FROM_EMAIL = "noreply@dicebastion.com"
 ALLOW_TEST_BYPASS = "true"
-# Note: MAILERSEND_API_KEY must be set as a secret using: wrangler secret put MAILERSEND_API_KEY
-# The URL to redirect back to after SumUp checkout completes (success/cancel)
 
-[[d1_databases]]
-binding = "DB"
-database_name = "dicebastion-d1"
-# Use your real database UUID
-database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
+# Production secrets (set via: wrangler secret put SECRET_NAME)
+# - SUMUP_CLIENT_ID
+# - SUMUP_CLIENT_SECRET
+# - MAILERSEND_API_KEY
+# - ADMIN_KEY (for admin endpoints)
 
+# Observability & Logging
 [observability]
 [observability.logs]
 enabled = false
 head_sampling_rate = 1
 invocation_logs = true
-persist = true
 
 # Cron trigger for membership renewals (runs daily at 2 AM UTC)
 [triggers]
