@@ -1,0 +1,19 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "dicebastion-payments",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-01-07",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "dicebastion",
+			"database_id": "9abc9bae-236a-4237-aa88-78cf161ba9d1"
+		}
+	]
+}

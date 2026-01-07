@@ -17,6 +17,11 @@ database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
 binding = "IMAGES"
 bucket_name = "dicebastion-images"
 
+# Service Bindings (Worker-to-Worker Communication)
+[[services]]
+binding = "PAYMENTS"
+service = "dicebastion-payments"
+
 # Environment Variables
 [vars]
 DEBUG = "false"
@@ -30,12 +35,15 @@ TURNSTILE_SECRET = "0x4AAAAAACAB41xceooY522cbKNKGVTP-iA"
 MAILERSEND_FROM_NAME = "Dice Bastion"
 MAILERSEND_FROM_EMAIL = "noreply@dicebastion.com"
 ALLOW_TEST_BYPASS = "true"
+PAYMENTS_WORKER_URL = "https://dicebastion-payments.ncalamaro.workers.dev"
 
 # Production secrets (set via: wrangler secret put SECRET_NAME)
-# - SUMUP_CLIENT_ID
-# - SUMUP_CLIENT_SECRET
+# - INTERNAL_SECRET (must match payments worker)
 # - MAILERSEND_API_KEY
 # - ADMIN_KEY (for admin endpoints)
+# Legacy SumUp secrets (no longer used, calls go through payments worker):
+# - SUMUP_CLIENT_ID (can be deleted)
+# - SUMUP_CLIENT_SECRET (can be deleted)
 
 # Observability & Logging
 [observability]

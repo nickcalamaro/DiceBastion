@@ -12,6 +12,14 @@ import {
   checkEmailVerificationRateLimit,
   generateVerificationLink
 } from './auth-utils.js'
+import {
+  createCheckout,
+  getOrCreateSumUpCustomer,
+  fetchPayment,
+  savePaymentInstrument,
+  chargePaymentInstrument,
+  verifyWebhook
+} from './payments-client.js'
 
 // Replace generic cors with strict configurable CORS + debug logging
 const app = new Hono()
@@ -86,29 +94,10 @@ function checkRateLimit(ip, rateLimitMap, limit, windowMinutes) {
   return true
 }
 
-// Webhook signature verification helper
-function verifySumUpWebhookSignature(payload, signature, webhookSecret) {
-  if (!signature || !webhookSecret) {
-    console.warn('Missing signature or webhook secret for verification')
-    return false
-  }
-  
-  try {
-    const expectedSignature = createHmac('sha256', webhookSecret)
-      .update(payload)
-      .digest('hex')
-    
-    // SumUp sends signature in format: sha256=hexdigest
-    const actualSignature = signature.startsWith('sha256=') 
-      ? signature.substring(7) 
-      : signature
-      
-    return expectedSignature === actualSignature
-  } catch (error) {
-    console.error('Webhook signature verification error:', error)
-    return false
-  }
-}
+// ==================== WEBHOOK VERIFICATION MOVED TO PAYMENTS WORKER ====================
+// verifySumUpWebhookSignature() has been removed - webhooks are now verified via
+// the payments worker's /internal/verify-webhook endpoint
+// ==================== END ====================
 
 // Webhook duplicate prevention helper
 async function checkAndMarkWebhookProcessed(db, webhookId, entityType, entityId) {
@@ -558,206 +547,20 @@ async function getServiceForPlan(db, planCode) {
   return await db.prepare('SELECT * FROM services WHERE code = ? AND active = 1 LIMIT 1').bind(planCode).first()
 }
 
-// Obtain SumUp OAuth token to verify payments server-side
-async function sumupToken(env, scopes = 'payments') {
-  const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: env.SUMUP_CLIENT_ID, client_secret: env.SUMUP_CLIENT_SECRET, scope: scopes })
-  const res = await fetch('https://api.sumup.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
-  if (!res.ok) { const txt = await res.text().catch(()=>{}); throw new Error(`Failed to get SumUp token (${res.status}): ${txt}`) }
-  const json = await res.json(); 
-  const granted = (json.scope||'').split(/\s+/).filter(Boolean)
-  const required = scopes.split(/\s+/).filter(Boolean)
-  const missing = required.filter(s => !granted.includes(s))
-  if (missing.length > 0) { throw new Error(`SumUp OAuth token missing required scopes: ${missing.join(', ')} (granted: [${granted.join(', ')}])`) }
-  return json
-}
-
-// Create or get SumUp customer for a user
-async function getOrCreateSumUpCustomer(env, user) {
-  console.log('getOrCreateSumUpCustomer called with user:', JSON.stringify(user))
-  const { access_token } = await sumupToken(env, 'payments payment_instruments')
-  const userId = user.user_id || user.id
-  console.log('Resolved userId:', userId, 'from user.user_id:', user.user_id, 'or user.id:', user.id)
-  const customerId = `USER-${userId}`
-  console.log('Customer ID to use:', customerId)
-  
-  // Try to get existing customer first
-  const getRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}`, {
-    headers: { 
-      'Authorization': `Bearer ${access_token}`,
-      'Content-Type': 'application/json'
-    }
-  })
-  
-  if (getRes.ok) {
-    const customer = await getRes.json()
-    console.log('Found existing SumUp customer:', customerId)
-    return customer.customer_id
-  }
-  
-  // Customer doesn't exist, create new one
-  console.log('Creating new SumUp customer:', customerId)
-  const createRes = await fetch('https://api.sumup.com/v0.1/customers', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${access_token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      customer_id: customerId,
-      personal_details: {
-        email: user.email,
-        first_name: user.name ? user.name.split(' ')[0] : 'Customer',
-        last_name: user.name ? user.name.split(' ').slice(1).join(' ') || 'Member' : 'Member'
-      }
-    })
-  })
-  
-  if (!createRes.ok) {
-    const txt = await createRes.text()
-    console.error('Failed to create SumUp customer:', createRes.status, txt)
-    throw new Error(`Failed to create SumUp customer (${createRes.status}): ${txt}`)
-  }
-  
-  const customer = await createRes.json()
-  console.log('Created SumUp customer - Full response:', JSON.stringify(customer))
-  console.log('Returning customer_id:', customer.customer_id)
-  return customer.customer_id
-}
-
-async function createCheckout(env, { amount, currency, orderRef, title, description, savePaymentInstrument = false, customerId = null }) {
-  const { access_token } = await sumupToken(env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
-  const body = { 
-    amount: Number(amount), 
-    currency, 
-    checkout_reference: orderRef, 
-    merchant_code: env.SUMUP_MERCHANT_CODE, 
-    description: description || title
-  }
-  
-  // Add return_url if RETURN_URL is configured (for hosted checkout, not needed for widget)
-  if (env.RETURN_URL) {
-    try {
-      const returnUrl = new URL(env.RETURN_URL)
-      returnUrl.searchParams.set('orderRef', orderRef)
-      body.return_url = returnUrl.toString()
-    } catch (e) {
-      console.warn('Invalid RETURN_URL, skipping return_url in checkout:', e.message)
-    }
-  }
-  // Request card tokenization using SumUp's recurring payment flow
-  if (savePaymentInstrument && customerId) {
-    body.purpose = 'SETUP_RECURRING_PAYMENT'
-    body.customer_id = customerId
-  }
-  const res = await fetch('https://api.sumup.com/v0.1/checkouts', { method: 'POST', headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  if (!res.ok) { const txt = await res.text(); throw new Error(`Create checkout failed: ${txt}`) }
-  const json = await res.json()
-  if (!json || !json.id) throw new Error('missing_checkout_id')
-  return json
-}
-
-async function fetchPayment(env, paymentId) {
-  const { access_token } = await sumupToken(env, 'payments')
-  const res = await fetch(`https://api.sumup.com/v0.1/checkouts/${paymentId}`, { headers: { Authorization: `Bearer ${access_token}` } })
-  if (!res.ok) throw new Error('Failed to fetch payment')
-  return res.json()
-}
-
-// Save payment instrument from a successful payment
-async function savePaymentInstrument(db, userId, checkoutId, env) {
-  try {
-    const { access_token } = await sumupToken(env, 'payments payment_instruments')
-    
-    // Get the checkout details
-    const checkoutRes = await fetch(`https://api.sumup.com/v0.1/checkouts/${checkoutId}`, {
-      headers: { Authorization: `Bearer ${access_token}` }
-    })
-    if (!checkoutRes.ok) {
-      console.error('Failed to fetch checkout:', checkoutRes.status, await checkoutRes.text())
-      return null
-    }
-    const checkout = await checkoutRes.json()
-    console.log('Checkout response for tokenization:', JSON.stringify(checkout))      // With purpose=SETUP_RECURRING_PAYMENT, the payment_instrument should be in the response
-    if (checkout.payment_instrument) {
-      const instrument = checkout.payment_instrument
-      console.log('Found payment_instrument:', JSON.stringify(instrument))
-      
-      const now = toIso(new Date())
-      const instrumentId = instrument.token || instrument.id
-      
-      if (!instrumentId) {
-        console.error('Payment instrument missing token/id')
-        return null
-      }      // Fetch card details from Payment Instruments API
-      // Note: SumUp does NOT return expiry dates in this API for security reasons
-      // The full card details (including expiry) are stored securely by SumUp and used when charging the token
-      let cardType = null, last4 = null
-      try {
-        const customerId = `USER-${userId}`
-        console.log('Fetching payment instruments for customer:', customerId)
-        const instrumentsRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}/payment-instruments`, {
-          headers: { Authorization: `Bearer ${access_token}` }
-        })
-        
-        if (instrumentsRes.ok) {
-          const instrumentsData = await instrumentsRes.json()
-          console.log('Payment instruments response:', JSON.stringify(instrumentsData))
-          
-          // Find the instrument we just saved
-          const savedInstrument = instrumentsData.find(i => i.token === instrumentId)
-          if (savedInstrument && savedInstrument.card) {
-            cardType = savedInstrument.card.type || null
-            last4 = savedInstrument.card.last_4_digits || null
-            console.log('Found card details:', { cardType, last4 })
-          } else {
-            console.warn('Instrument not found in payment instruments list')
-          }
-        } else {
-          console.warn('Failed to fetch payment instruments:', instrumentsRes.status, await instrumentsRes.text())
-        }
-      } catch (e) {
-        console.warn('Error fetching payment instruments:', e.message)
-      }
-        // Deactivate old instruments
-      await db.prepare('UPDATE payment_instruments SET is_active = 0 WHERE user_id = ?').bind(userId).run()
-      
-      // Save new instrument with card details
-      // Note: expiry_month and expiry_year are set to NULL as SumUp doesn't expose them
-      // SumUp stores the full card details securely and uses them when charging the token
-      await db.prepare(`
-        INSERT INTO payment_instruments (user_id, instrument_id, card_type, last_4, created_at, updated_at, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-        ON CONFLICT(user_id, instrument_id) DO UPDATE SET 
-          card_type = COALESCE(?, card_type),
-          last_4 = COALESCE(?, last_4),
-          is_active = 1, 
-          updated_at = ?
-      `).bind(
-        userId,
-        instrumentId,
-        cardType,
-        last4,
-        now,
-        now,
-        cardType,
-        last4,
-        now
-      ).run()
-      
-      console.log('Successfully saved payment instrument:', instrumentId, 'with card details')
-      return instrumentId
-    }
-    
-    console.warn('No payment_instrument found in checkout response')
-    console.warn('Ensure purpose=SETUP_RECURRING_PAYMENT and customer_id were set in checkout creation')
-    return null
-  } catch (e) {
-    console.error('Failed to save payment instrument:', e)
-    return null
-  }
-}
+// ==================== PAYMENT FUNCTIONS MOVED TO PAYMENTS WORKER ====================
+// The following functions have been moved to payments-worker and are now called via
+// the payments-client.js module:
+// - sumupToken() → Removed, handled by payments worker
+// - getOrCreateSumUpCustomer() → Now imported from payments-client.js
+// - createCheckout() → Now imported from payments-client.js
+// - fetchPayment() → Now imported from payments-client.js
+// - savePaymentInstrument() → Now imported from payments-client.js
+// - chargePaymentInstrument() → Now imported from payments-client.js
+// ==================== END MOVED FUNCTIONS ====================
 
 // Update payment instrument card details from checkout transaction
+// Note: This function is kept for backwards compatibility but card details
+// are now primarily handled by the payments worker
 async function updatePaymentInstrumentCardDetails(db, instrumentId, checkout) {
   try {
     // Extract card details from the transaction
@@ -810,118 +613,10 @@ async function updatePaymentInstrumentCardDetails(db, instrumentId, checkout) {
   }
 }
 
-// Charge a saved payment instrument
-async function chargePaymentInstrument(env, userId, instrumentId, amount, currency, orderRef, description, db = null) {
-  try {
-    const { access_token } = await sumupToken(env, 'payments payment_instruments')
-    
-    // Verify customer exists in SumUp Customer API, create if missing
-    const customerId = `USER-${userId}`
-    const customerCheckRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}`, {
-      headers: {
-        'Authorization': `Bearer ${access_token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-    
-    if (!customerCheckRes.ok) {
-      console.log(`Customer ${customerId} not found in SumUp Customer API, attempting to create...`)
-      
-      // Get user details for customer creation
-      if (!db) {
-        throw new Error('Database connection required to create customer')
-      }
-      
-      const user = await db.prepare('SELECT email, name FROM users WHERE user_id = ?')
-        .bind(userId).first()
-      
-      if (!user) {
-        throw new Error(`User ${userId} not found in database`)
-      }
-      
-      // Create customer in SumUp
-      const nameParts = (user.name || 'Customer').split(' ')
-      const createCustomerRes = await fetch('https://api.sumup.com/v0.1/customers', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          customer_id: customerId,
-          personal_details: {
-            email: user.email,
-            first_name: nameParts[0] || 'Customer',
-            last_name: nameParts.slice(1).join(' ') || ''
-          }
-        })
-      })
-      
-      if (!createCustomerRes.ok) {
-        const txt = await createCustomerRes.text()
-        throw new Error(`Failed to create customer in SumUp: ${txt}`)
-      }
-      
-      console.log(`Successfully created customer ${customerId} in SumUp`)
-    }
-    
-    // Create checkout
-    const checkoutBody = {
-      amount: Number(amount),
-      currency,
-      checkout_reference: orderRef,
-      merchant_code: env.SUMUP_MERCHANT_CODE,
-      description
-    }
-    
-    const checkoutRes = await fetch('https://api.sumup.com/v0.1/checkouts', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${access_token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(checkoutBody)
-    })
-    
-    if (!checkoutRes.ok) {
-      const txt = await checkoutRes.text()
-      throw new Error(`Checkout creation failed: ${txt}`)
-    }
-    
-    const checkout = await checkoutRes.json()
-    console.log('Created checkout for renewal:', checkout.id)
-    
-    // Process payment with the saved token
-    // Per SumUp documentation: Both token and customer_id fields are required for recurring payments
-    // The customer_id must match the customer that was used during SETUP_RECURRING_PAYMENT
-    const paymentBody = {
-      payment_type: 'card',
-      token: instrumentId,
-      customer_id: customerId
-    }
-    
-    const paymentRes = await fetch(`https://api.sumup.com/v0.1/checkouts/${checkout.id}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${access_token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(paymentBody)
-    })
-    
-    if (!paymentRes.ok) {
-      const txt = await paymentRes.text()
-      throw new Error(`Payment processing failed: ${txt}`)
-    }
-    
-    const payment = await paymentRes.json()
-    console.log('Processed recurring payment:', payment.id, payment.status)
-    return payment
-  } catch (e) {
-    console.error('Charge payment instrument error:', e)
-    throw e
-  }
-}
+// ==================== REMOVED: chargePaymentInstrument ====================
+// This function has been moved to the payments worker and is now imported
+// from payments-client.js
+// ==================== END ====================
 
 // Get active payment instrument for user
 async function getActivePaymentInstrument(db, userId) {
@@ -953,8 +648,8 @@ async function processMembershipRenewal(db, membership, env) {
   const amount = Number(svc.amount)
   const currency = svc.currency || env.CURRENCY || 'GBP'
   const orderRef = `RENEWAL-${membership.id}-${crypto.randomUUID()}`
-    try {
-    // Charge the payment instrument
+  try {
+    // Charge the payment instrument via payments worker
     const payment = await chargePaymentInstrument(
       env,
       userId,
@@ -962,8 +657,7 @@ async function processMembershipRenewal(db, membership, env) {
       amount,
       currency,
       orderRef,
-      `Renewal: Dice Bastion ${membership.plan} membership`,
-      db  // Pass database connection for customer creation if needed
+      `Renewal: Dice Bastion ${membership.plan} membership`
     )
     
     // If successful, extend membership
@@ -2052,71 +1746,30 @@ app.get('/membership/confirm', async (c) => {
     // Save payment instrument for auto-renewal ONLY if auto_renew is enabled
   let instrumentId = null
   let actualPaymentId = payment.id // Default to the setup payment
-  
-  if (pending.auto_renew === 1) {
+    if (pending.auto_renew === 1) {
     instrumentId = await savePaymentInstrument(c.env.DB, identityId, transaction.checkout_id, c.env)
     
     // If we used SETUP_RECURRING_PAYMENT, SumUp will refund the initial charge
     // We need to make an actual charge using the saved payment instrument
     if (instrumentId && payment.purpose === 'SETUP_RECURRING_PAYMENT') {
       console.log('Setup payment detected - charging saved instrument for actual membership payment')
-      try {        const chargeResult = await chargePaymentInstrument(
+      try {
+        const chargeResult = await chargePaymentInstrument(
           c.env,
           identityId,
           instrumentId,
           transaction.amount,
           transaction.currency || 'GBP',
           `${transaction.order_ref}-charge`,
-          `Dice Bastion ${pending.plan} membership payment`,
-          c.env.DB
+          `Dice Bastion ${pending.plan} membership payment`
         )
-          if (chargeResult && chargeResult.id) {
+        
+        if (chargeResult && chargeResult.id) {
           actualPaymentId = chargeResult.id
           console.log('Successfully charged saved instrument:', actualPaymentId)
           
-          // Fetch full checkout details AND try to get customer's payment instruments
-          if (instrumentId) {
-            try {
-              // Try to fetch card details from customer's saved payment instruments
-              const { access_token } = await sumupToken(c.env, 'payment_instruments')
-              const customerId = `USER-${identityId}`
-              
-              console.log(`Fetching payment instruments for customer: ${customerId}`)
-              const instrumentsRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}/payment-instruments`, {
-                headers: { Authorization: `Bearer ${access_token}` }
-              })
-              
-              if (instrumentsRes.ok) {
-                const instruments = await instrumentsRes.json()
-                console.log('Customer payment instruments:', JSON.stringify(instruments))
-                
-                // Find our instrument and extract card details
-                const ourInstrument = instruments.find(i => i.token === instrumentId)
-                if (ourInstrument && ourInstrument.card) {
-                  await c.env.DB.prepare(`
-                    UPDATE payment_instruments 
-                    SET card_type = ?,
-                        last_4 = ?,
-                        updated_at = ?
-                    WHERE instrument_id = ?
-                  `).bind(
-                    ourInstrument.card.type || null,
-                    ourInstrument.card.last_4_digits || null,
-                    toIso(new Date()),
-                    instrumentId
-                  ).run()
-                  console.log('Updated card details from customer instruments:', {
-                    type: ourInstrument.card.type,
-                    last4: ourInstrument.card.last_4_digits
-                  })
-                }
-              } else {
-                console.warn('Failed to fetch customer payment instruments:', instrumentsRes.status, await instrumentsRes.text())
-              }
-            } catch (e) {
-              console.warn('Error fetching payment instruments:', e.message)
-            }
-          }
+          // Card details are already saved by the payments worker in savePaymentInstrument
+          // No need to fetch them again here
           
           // Create a transaction record for the actual charge
           await c.env.DB.prepare(`
@@ -2176,7 +1829,7 @@ app.get('/membership/confirm', async (c) => {
       metadata: { plan: pending.plan, auto_renew: pending.auto_renew }
     })
   }
-    // Send admin notification
+  // Send admin notification
   try {
     const adminEmailContent = getAdminNotificationEmail('membership', {
       plan: pending.plan,
@@ -2185,7 +1838,7 @@ app.get('/membership/confirm', async (c) => {
       amount: transaction.amount,
       autoRenew: pending.auto_renew === 1,
       membershipId: pending.id,
-      orderRef: orderRef
+      orderRef: transaction.order_ref
     })
     
     await sendEmail(c.env, { 
@@ -2222,14 +1875,19 @@ app.get('/membership/confirm', async (c) => {
 })
 
 app.post('/webhooks/sumup', async (c) => {
-  const signature = c.req.header('SumUp-Signature')
   const payload = await c.req.json()
   const { id: paymentId, checkout_reference: orderRef, currency } = payload
   
-  // Verify webhook signature
-  if (!verifySumUpWebhookSignature(JSON.stringify(payload), signature, c.env.SUMUP_WEBHOOK_SECRET)) {
-    console.warn('Invalid webhook signature for membership webhook')
-    return c.json({ error: 'invalid_signature' }, 401)
+  // Verify webhook via payments worker
+  try {
+    const isValid = await verifyWebhook(c.env, payload)
+    if (!isValid) {
+      console.warn('Invalid webhook payload')
+      return c.json({ error: 'invalid_webhook' }, 401)
+    }
+  } catch (e) {
+    console.error('Webhook verification error:', e)
+    return c.json({ error: 'verification_failed' }, 500)
   }
   
   if (!paymentId || !orderRef) return c.json({ ok: false }, 400)
@@ -2322,6 +1980,116 @@ app.post('/webhooks/sumup', async (c) => {
   
   return c.json({ ok: true })
 })
+
+// ==================== TEMPORARY OAUTH CALLBACK ====================
+// This endpoint is used to capture the OAuth authorization code from SumUp
+// After getting the refresh token, you can remove this endpoint
+
+app.get('/oauth/callback', async (c) => {
+  const code = c.req.query('code')
+  const state = c.req.query('state')
+  const error = c.req.query('error')
+  const errorDescription = c.req.query('error_description')
+
+  if (error) {
+    return c.html(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>OAuth Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+          .error { background: #fee; border: 2px solid #c00; border-radius: 8px; padding: 20px; }
+          h1 { color: #c00; }
+          code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
+        </style>
+      </head>
+      <body>
+        <div class="error">
+          <h1>❌ OAuth Authorization Failed</h1>
+          <p><strong>Error:</strong> ${error}</p>
+          <p><strong>Description:</strong> ${errorDescription || 'No description provided'}</p>
+          <p>Please check your SumUp app configuration and try again.</p>
+        </div>
+      </body>
+      </html>
+    `)
+  }
+
+  if (!code) {
+    return c.html(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>OAuth - No Code</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+          .warning { background: #ffc; border: 2px solid #fc0; border-radius: 8px; padding: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="warning">
+          <h1>⚠️ No Authorization Code</h1>
+          <p>No authorization code was received from SumUp.</p>
+        </div>
+      </body>
+      </html>
+    `)
+  }
+
+  // Success - show the code to the user
+  return c.html(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>OAuth Success</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        .success { background: #efe; border: 2px solid #0c0; border-radius: 8px; padding: 20px; }
+        h1 { color: #080; }
+        .code-box { background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 15px; margin: 15px 0; font-family: monospace; word-break: break-all; }
+        .copy-btn { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .copy-btn:hover { background: #45a049; }
+        ol { text-align: left; }
+        li { margin: 10px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="success">
+        <h1>✅ Authorization Successful!</h1>
+        <p><strong>Authorization Code:</strong></p>
+        <div class="code-box" id="code">${code}</div>
+        <button class="copy-btn" onclick="copyCode()">📋 Copy Code</button>
+        
+        <h2>Next Steps:</h2>
+        <ol>
+          <li>Copy the authorization code above</li>
+          <li>Run the PowerShell script: <code>.\get-sumup-token-manual.ps1</code></li>
+          <li>When prompted, paste the authorization code</li>
+          <li>The script will exchange it for a refresh token</li>
+          <li>Update the SUMUP_REFRESH_TOKEN secret in Cloudflare</li>
+        </ol>
+        
+        <p><strong>State:</strong> ${state || 'N/A'}</p>
+      </div>
+      
+      <script>
+        function copyCode() {
+          const codeText = document.getElementById('code').textContent;
+          navigator.clipboard.writeText(codeText).then(() => {
+            alert('✅ Code copied to clipboard!');
+          }).catch(err => {
+            console.error('Failed to copy:', err);
+            alert('❌ Failed to copy. Please select and copy manually.');
+          });
+        }
+      </script>
+    </body>
+    </html>
+  `)
+})
+
+// ==================== END TEMPORARY OAUTH CALLBACK ====================
 
 // ============================================================================
 // PUBLIC EVENT ENDPOINTS

@@ -1,0 +1,20 @@
+# Payments Worker - Environment Variables (Example)
+# Copy this file to .dev.vars and fill in your actual values
+# NEVER commit .dev.vars to version control!
+
+# SumUp API Credentials
+SUMUP_CLIENT_ID=your_client_id_here
+SUMUP_CLIENT_SECRET=your_client_secret_here
+SUMUP_MERCHANT_CODE=your_merchant_code_here
+SUMUP_WEBHOOK_SECRET=your_webhook_secret_here
+
+# SumUp OAuth Flow (OPTIONAL - only if your SumUp account requires authorization_code flow)
+# If you have a refresh token from SumUp's authorization flow, add it here
+# When present, the worker will use refresh_token grant instead of client_credentials
+# SUMUP_REFRESH_TOKEN=your_refresh_token_here
+
+# Internal Worker Communication
+INTERNAL_SECRET=generate_a_random_secret_here
+
+# Optional
+CURRENCY=GBP

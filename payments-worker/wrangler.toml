@@ -1,0 +1,32 @@
+name = "dicebastion-payments"
+main = "src/index.js"
+compatibility_date = "2024-10-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Shared D1 Database (same as main worker)
+[[d1_databases]]
+binding = "DB"
+database_name = "dicebastion"
+database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
+
+# Environment Variables
+[vars]
+DEBUG = "false"
+# Allow calls from main worker and direct testing
+ALLOWED_ORIGIN = "https://dicebastion-memberships.ncalamaro.workers.dev,http://localhost:8787,http://localhost:8000"
+CURRENCY = "GBP"
+SUMUP_REGION = "UK"
+SUMUP_MERCHANT_CODE = "MUZHYEAH"
+
+# Production secrets (set via: wrangler secret put SECRET_NAME)
+# - SUMUP_CLIENT_ID
+# - SUMUP_CLIENT_SECRET
+# - INTERNAL_SECRET (for worker-to-worker auth)
+# - SUMUP_WEBHOOK_SECRET (for webhook signature verification)
+
+# Observability & Logging
+[observability]
+[observability.logs]
+enabled = false
+head_sampling_rate = 1
+invocation_logs = true
