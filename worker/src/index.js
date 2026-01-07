@@ -677,9 +677,7 @@ async function savePaymentInstrument(db, userId, checkoutId, env) {
       return null
     }
     const checkout = await checkoutRes.json()
-    console.log('Checkout response for tokenization:', JSON.stringify(checkout))
-    
-    // With purpose=SETUP_RECURRING_PAYMENT, the payment_instrument should be in the response
+    console.log('Checkout response for tokenization:', JSON.stringify(checkout))      // With purpose=SETUP_RECURRING_PAYMENT, the payment_instrument should be in the response
     if (checkout.payment_instrument) {
       const instrument = checkout.payment_instrument
       console.log('Found payment_instrument:', JSON.stringify(instrument))
@@ -690,29 +688,63 @@ async function savePaymentInstrument(db, userId, checkoutId, env) {
       if (!instrumentId) {
         console.error('Payment instrument missing token/id')
         return null
+      }      // Fetch card details from Payment Instruments API
+      // Note: SumUp does NOT return expiry dates in this API for security reasons
+      // The full card details (including expiry) are stored securely by SumUp and used when charging the token
+      let cardType = null, last4 = null
+      try {
+        const customerId = `USER-${userId}`
+        console.log('Fetching payment instruments for customer:', customerId)
+        const instrumentsRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}/payment-instruments`, {
+          headers: { Authorization: `Bearer ${access_token}` }
+        })
+        
+        if (instrumentsRes.ok) {
+          const instrumentsData = await instrumentsRes.json()
+          console.log('Payment instruments response:', JSON.stringify(instrumentsData))
+          
+          // Find the instrument we just saved
+          const savedInstrument = instrumentsData.find(i => i.token === instrumentId)
+          if (savedInstrument && savedInstrument.card) {
+            cardType = savedInstrument.card.type || null
+            last4 = savedInstrument.card.last_4_digits || null
+            console.log('Found card details:', { cardType, last4 })
+          } else {
+            console.warn('Instrument not found in payment instruments list')
+          }
+        } else {
+          console.warn('Failed to fetch payment instruments:', instrumentsRes.status, await instrumentsRes.text())
+        }
+      } catch (e) {
+        console.warn('Error fetching payment instruments:', e.message)
       }
-      
-      // Deactivate old instruments
+        // Deactivate old instruments
       await db.prepare('UPDATE payment_instruments SET is_active = 0 WHERE user_id = ?').bind(userId).run()
       
-      // Save new instrument
+      // Save new instrument with card details
+      // Note: expiry_month and expiry_year are set to NULL as SumUp doesn't expose them
+      // SumUp stores the full card details securely and uses them when charging the token
       await db.prepare(`
-        INSERT INTO payment_instruments (user_id, instrument_id, card_type, last_4, expiry_month, expiry_year, created_at, updated_at, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-        ON CONFLICT(user_id, instrument_id) DO UPDATE SET is_active = 1, updated_at = ?
+        INSERT INTO payment_instruments (user_id, instrument_id, card_type, last_4, created_at, updated_at, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT(user_id, instrument_id) DO UPDATE SET 
+          card_type = COALESCE(?, card_type),
+          last_4 = COALESCE(?, last_4),
+          is_active = 1, 
+          updated_at = ?
       `).bind(
         userId,
         instrumentId,
-        instrument.type || instrument.card_type || null,
-        instrument.last_4_digits || instrument.last_4 || null,
-        instrument.expiry_month || null,
-        instrument.expiry_year || null,
+        cardType,
+        last4,
         now,
         now,
+        cardType,
+        last4,
         now
       ).run()
       
-      console.log('Successfully saved payment instrument:', instrumentId)
+      console.log('Successfully saved payment instrument:', instrumentId, 'with card details')
       return instrumentId
     }
     
@@ -722,6 +754,59 @@ async function savePaymentInstrument(db, userId, checkoutId, env) {
   } catch (e) {
     console.error('Failed to save payment instrument:', e)
     return null
+  }
+}
+
+// Update payment instrument card details from checkout transaction
+async function updatePaymentInstrumentCardDetails(db, instrumentId, checkout) {
+  try {
+    // Extract card details from the transaction
+    if (checkout.card && checkout.card.last_4_digits) {
+      // Card details directly in checkout
+      const card = checkout.card
+      await db.prepare(`
+        UPDATE payment_instruments 
+        SET card_type = COALESCE(?, card_type),
+            last_4 = COALESCE(?, last_4),
+            expiry_month = COALESCE(?, expiry_month),
+            expiry_year = COALESCE(?, expiry_year),
+            updated_at = ?
+        WHERE instrument_id = ?
+      `).bind(
+        card.type || null,
+        card.last_4_digits || null,
+        card.expiry_month || null,
+        card.expiry_year || null,
+        toIso(new Date()),
+        instrumentId
+      ).run()
+      console.log('Updated card details from checkout:', { type: card.type, last4: card.last_4_digits })
+      return true
+    } else if (checkout.transactions && checkout.transactions.length > 0) {
+      // Try to get card details from transaction
+      const txn = checkout.transactions[0]
+      if (txn.card) {
+        await db.prepare(`
+          UPDATE payment_instruments 
+          SET card_type = COALESCE(?, card_type),
+              last_4 = COALESCE(?, last_4),
+              updated_at = ?
+          WHERE instrument_id = ?
+        `).bind(
+          txn.card.type || null,
+          txn.card.last_4_digits || null,
+          toIso(new Date()),
+          instrumentId
+        ).run()
+        console.log('Updated card details from transaction:', { type: txn.card?.type, last4: txn.card?.last_4_digits })
+        return true
+      }
+    }
+    console.warn('No card details found in checkout response')
+    return false
+  } catch (e) {
+    console.error('Failed to update card details:', e)
+    return false
   }
 }
 
@@ -1964,11 +2049,99 @@ app.get('/membership/confirm', async (c) => {
   const months = Number(svc.months || 0)
   const baseStart = activeExisting ? new Date(activeExisting.end_date) : new Date()
   const end = addMonths(baseStart, months)
-  
-  // Save payment instrument for auto-renewal ONLY if auto_renew is enabled
+    // Save payment instrument for auto-renewal ONLY if auto_renew is enabled
   let instrumentId = null
+  let actualPaymentId = payment.id // Default to the setup payment
+  
   if (pending.auto_renew === 1) {
     instrumentId = await savePaymentInstrument(c.env.DB, identityId, transaction.checkout_id, c.env)
+    
+    // If we used SETUP_RECURRING_PAYMENT, SumUp will refund the initial charge
+    // We need to make an actual charge using the saved payment instrument
+    if (instrumentId && payment.purpose === 'SETUP_RECURRING_PAYMENT') {
+      console.log('Setup payment detected - charging saved instrument for actual membership payment')
+      try {        const chargeResult = await chargePaymentInstrument(
+          c.env,
+          identityId,
+          instrumentId,
+          transaction.amount,
+          transaction.currency || 'GBP',
+          `${transaction.order_ref}-charge`,
+          `Dice Bastion ${pending.plan} membership payment`,
+          c.env.DB
+        )
+          if (chargeResult && chargeResult.id) {
+          actualPaymentId = chargeResult.id
+          console.log('Successfully charged saved instrument:', actualPaymentId)
+          
+          // Fetch full checkout details AND try to get customer's payment instruments
+          if (instrumentId) {
+            try {
+              // Try to fetch card details from customer's saved payment instruments
+              const { access_token } = await sumupToken(c.env, 'payment_instruments')
+              const customerId = `USER-${identityId}`
+              
+              console.log(`Fetching payment instruments for customer: ${customerId}`)
+              const instrumentsRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}/payment-instruments`, {
+                headers: { Authorization: `Bearer ${access_token}` }
+              })
+              
+              if (instrumentsRes.ok) {
+                const instruments = await instrumentsRes.json()
+                console.log('Customer payment instruments:', JSON.stringify(instruments))
+                
+                // Find our instrument and extract card details
+                const ourInstrument = instruments.find(i => i.token === instrumentId)
+                if (ourInstrument && ourInstrument.card) {
+                  await c.env.DB.prepare(`
+                    UPDATE payment_instruments 
+                    SET card_type = ?,
+                        last_4 = ?,
+                        updated_at = ?
+                    WHERE instrument_id = ?
+                  `).bind(
+                    ourInstrument.card.type || null,
+                    ourInstrument.card.last_4_digits || null,
+                    toIso(new Date()),
+                    instrumentId
+                  ).run()
+                  console.log('Updated card details from customer instruments:', {
+                    type: ourInstrument.card.type,
+                    last4: ourInstrument.card.last_4_digits
+                  })
+                }
+              } else {
+                console.warn('Failed to fetch customer payment instruments:', instrumentsRes.status, await instrumentsRes.text())
+              }
+            } catch (e) {
+              console.warn('Error fetching payment instruments:', e.message)
+            }
+          }
+          
+          // Create a transaction record for the actual charge
+          await c.env.DB.prepare(`
+            INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
+                                      payment_id, amount, currency, payment_status, created_at)
+            VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
+          `).bind(
+            pending.id,
+            identityId,
+            transaction.email,
+            transaction.name,
+            `${transaction.order_ref}-charge`,
+            actualPaymentId,
+            transaction.amount,
+            transaction.currency || 'GBP',
+            toIso(new Date())
+          ).run()
+        } else {
+          console.error('Failed to charge saved instrument - membership will still activate but payment may be refunded')
+        }
+      } catch (chargeError) {
+        console.error('Error charging saved instrument:', chargeError)
+        // Continue with activation - the setup payment was successful even if actual charge failed
+      }
+    }
   }
   
   // Update membership status
@@ -1980,15 +2153,14 @@ app.get('/membership/confirm', async (c) => {
         payment_instrument_id = ?
     WHERE id = ?
   `).bind(toIso(baseStart), toIso(end), instrumentId, pending.id).run()
-  
-  // Update transaction status
+    // Update transaction status
   await c.env.DB.prepare(`
     UPDATE transactions 
     SET payment_status = "PAID",
         payment_id = ?,
         updated_at = ?
     WHERE id = ?
-  `).bind(payment.id, toIso(new Date()), transaction.id).run()
+  `).bind(actualPaymentId, toIso(new Date()), transaction.id).run()
   
   // Get user details and send welcome email
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()

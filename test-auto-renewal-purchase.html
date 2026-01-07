@@ -224,18 +224,13 @@
                 <h2>Payment Details</h2>
                 <div id="sumup-card"></div>
                 <button class="btn" id="payBtn" disabled>Initialize Payment Widget</button>
-            </div>
-
-            <div class="section" id="renewalSection" style="display: none;">
+            </div>            <div class="section" id="renewalSection" style="display: none;">
                 <h2>🔄 Test Renewal Now</h2>
                 <div class="highlight">
                     <strong>⚡ Instant Renewal Test</strong><br>
                     Once payment succeeds and your card is tokenized, click below to immediately test a renewal charge (£1.00).
-                </div>                <div class="form-group">
-                    <label for="adminKey">Admin Key (optional - only needed if we add an admin endpoint):</label>
-                    <input type="password" id="adminKey" placeholder="Enter your X-Admin-Key if required">
-                    <small style="color: #6b7280; font-size: 12px;">Note: Currently using /test/renew-user endpoint which doesn't require admin key</small>
                 </div>
+                
                 <button class="btn" id="renewBtn" style="background: #dc2626;">
                     🔄 Test Renewal Now (Will Charge £1.00)
                 </button>
@@ -473,9 +468,7 @@
                     verification: 'Check database for renewal_log and transactions entries'
                 });
 
-                showStatus('🎉 SUCCESS! Tokenization and recurring payment both working perfectly!', 'success');
-
-            } catch (error) {
+                showStatus('🎉 SUCCESS! Tokenization and recurring payment both working perfectly!', 'success');            } catch (error) {
                 log('❌ Renewal failed', error.message);
                 renewalStatusContainer.innerHTML = `
                     <div class="status error">
@@ -488,8 +481,10 @@
                         • Check Cloudflare logs for details
                     </div>
                 `;
+            } finally {
+                // Always re-enable the button
                 renewBtn.disabled = false;
-                renewBtn.textContent = '🔄 Retry Renewal Test';
+                renewBtn.textContent = '🔄 Test Renewal Now (Will Charge £1.00)';
             }
         });
 
