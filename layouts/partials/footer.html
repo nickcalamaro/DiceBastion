@@ -49,8 +49,13 @@
       {{ i18n "footer.powered_by" (dict "Hugo" $hugo "Theme" $blowfish) | safeHTML }}
     </p>
     {{ end }}
-
   </div>
+  
+  {{/* Login Status */}}
+  <div id="login-status-container" class="text-center mt-4">
+    <!-- Populated by loginStatus.js -->
+  </div>
+  
   <script>
     {{ if not .Site.Params.disableImageZoom | default true }}
     mediumZoom(document.querySelectorAll("img:not(.nozoom)"), {
@@ -63,6 +68,10 @@
   {{ $jsProcess := resources.Get "js/process.js" }}
   {{ $jsProcess = $jsProcess | resources.Minify | resources.Fingerprint "sha512" }}
   <script type="text/javascript" src="{{ $jsProcess.RelPermalink }}" integrity="{{ $jsProcess.Data.Integrity }}"></script>
+  
+  {{/* Login Status Script */}}
+  <script src="/js/loginStatus.js"></script>
+  
   {{/* Extend footer - eg. for extra scripts, etc. */}}
   {{ if templates.Exists "partials/extend-footer.html" }}
   {{ partialCached "extend-footer.html" . }}

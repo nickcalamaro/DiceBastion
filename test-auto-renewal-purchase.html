@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Auto-Renewal Purchase - Dice Bastion</title>
+    <script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .header {
+            background: #1f2937;
+            color: white;
+            padding: 24px;
+            text-align: center;
+        }
+        .header h1 { margin-bottom: 8px; font-size: 24px; }
+        .header p { color: #9ca3af; font-size: 14px; }
+        .content { padding: 24px; }
+        .section {
+            margin-bottom: 24px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .section:last-child { border-bottom: none; }
+        .section h2 {
+            font-size: 18px;
+            margin-bottom: 12px;
+            color: #1f2937;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #374151;
+            font-size: 14px;
+        }
+        input[type="email"],
+        input[type="text"],
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            margin-top: 3px;
+        }
+        .checkbox-group label {
+            margin-bottom: 0;
+            font-weight: 400;
+        }
+        .highlight {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 12px;
+            margin: 16px 0;
+            border-radius: 4px;
+        }
+        .highlight strong {
+            color: #92400e;
+        }
+        .plan-info {
+            background: #f3f4f6;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        .plan-info h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #1f2937;
+        }
+        .plan-info .price {
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 4px;
+        }
+        .plan-info .period {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #5568d3; }
+        .btn:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        #sumup-card { margin: 16px 0; }
+        .status {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .status.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+        }
+        .status.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+        .status.info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+        .logs {
+            background: #1f2937;
+            color: #e5e7eb;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 16px;
+        }
+        .logs div {
+            margin-bottom: 4px;
+            padding: 2px 0;
+        }
+        .logs .timestamp {
+            color: #9ca3af;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎲 Test Auto-Renewal Purchase</h1>
+            <p>Test the complete tokenization and renewal flow</p>
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <h2>Test Configuration</h2>                <div class="form-group">
+                    <label for="workerUrl">Worker URL:</label>
+                    <input type="text" id="workerUrl" value="https://dicebastion-memberships.ncalamaro.workers.dev" placeholder="https://your-worker.workers.dev">
+                </div>
+            </div>            <div class="section">
+                <h2>Selected Plan</h2>
+                <div class="plan-info">
+                    <h3>Test Membership (£1)</h3>
+                    <div class="price">£1.00</div>
+                    <div class="period">test payment only</div>
+                </div>
+                
+                <div class="highlight">
+                    <strong>⚡ Auto-Renewal Test Mode</strong><br>
+                    This will create a real payment with tokenization enabled. Your card will be charged £1.00 and saved for future renewals.
+                    <br><br>
+                    <strong>After payment succeeds, you can immediately test the renewal!</strong>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Customer Details</h2>
+                <div class="form-group">
+                    <label for="email">Email Address *</label>
+                    <input type="email" id="email" placeholder="test@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="name">Full Name *</label>
+                    <input type="text" id="name" placeholder="John Doe" required>
+                </div>                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="autoRenew" checked>
+                    <label for="autoRenew">
+                        <strong>Enable auto-renewal</strong> - Save my payment method and automatically renew my membership
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="terms" required>
+                    <label for="terms">I accept the terms and conditions *</label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="privacy" required>
+                    <label for="privacy">I consent to privacy policy *</label>
+                </div>
+            </div>            <div class="section">
+                <h2>Payment Details</h2>
+                <div id="sumup-card"></div>
+                <button class="btn" id="payBtn" disabled>Initialize Payment Widget</button>
+            </div>
+
+            <div class="section" id="renewalSection" style="display: none;">
+                <h2>🔄 Test Renewal Now</h2>
+                <div class="highlight">
+                    <strong>⚡ Instant Renewal Test</strong><br>
+                    Once payment succeeds and your card is tokenized, click below to immediately test a renewal charge (£1.00).
+                </div>                <div class="form-group">
+                    <label for="adminKey">Admin Key (optional - only needed if we add an admin endpoint):</label>
+                    <input type="password" id="adminKey" placeholder="Enter your X-Admin-Key if required">
+                    <small style="color: #6b7280; font-size: 12px;">Note: Currently using /test/renew-user endpoint which doesn't require admin key</small>
+                </div>
+                <button class="btn" id="renewBtn" style="background: #dc2626;">
+                    🔄 Test Renewal Now (Will Charge £1.00)
+                </button>
+                <div id="renewalStatus"></div>
+            </div>
+
+            <div id="statusContainer"></div>
+            
+            <div class="section">
+                <h2>Test Logs</h2>
+                <div class="logs" id="logs"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const logContainer = document.getElementById('logs');
+        const statusContainer = document.getElementById('statusContainer');
+        
+        function log(message, data = null) {
+            const timestamp = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.innerHTML = `<span class="timestamp">[${timestamp}]</span>${message}`;
+            if (data) {
+                div.innerHTML += `<br><pre>${JSON.stringify(data, null, 2)}</pre>`;
+            }
+            logContainer.appendChild(div);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            console.log(`[${timestamp}] ${message}`, data || '');
+        }
+
+        function showStatus(message, type = 'info') {
+            statusContainer.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }        let checkoutId = null;
+        let sumUpCard = null;
+        let membershipId = null;
+        let userId = null;        document.getElementById('payBtn').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const name = document.getElementById('name').value;
+            const autoRenew = document.getElementById('autoRenew').checked;
+            const terms = document.getElementById('terms').checked;
+            const privacy = document.getElementById('privacy').checked;
+            const workerUrl = document.getElementById('workerUrl').value;
+
+            if (!email || !name || !terms || !privacy) {
+                showStatus('❌ Please fill in all required fields and accept terms & privacy policy', 'error');
+                return;
+            }
+
+            if (!autoRenew) {
+                showStatus('⚠️ Auto-renewal is disabled - card will NOT be saved for future renewals', 'info');
+            }
+
+            const payBtn = document.getElementById('payBtn');
+            payBtn.disabled = true;
+            payBtn.textContent = 'Creating checkout...';
+
+            log('🚀 Starting checkout process...', { email, name, autoRenew });
+
+            try {
+                // Step 1: Create checkout
+                log('📡 Creating checkout session...');                const checkoutRes = await fetch(`${workerUrl}/membership/checkout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        name,
+                        plan: 'monthly',  // Use valid plan
+                        amount: '1.00',   // But override with £1 for testing
+                        autoRenew,
+                        privacyConsent: privacy,
+                        marketingConsent: false,
+                        turnstileToken: 'test-bypass'
+                    })
+                });
+
+                if (!checkoutRes.ok) {
+                    const errorText = await checkoutRes.text();
+                    throw new Error(`Checkout creation failed: ${errorText}`);
+                }                const checkoutData = await checkoutRes.json();
+                checkoutId = checkoutData.checkoutId;
+                membershipId = checkoutData.membershipId;
+                userId = checkoutData.userId;
+                const orderRef = checkoutData.orderRef; // Store orderRef for use in callback
+                
+                log('✅ Checkout created', {
+                    checkoutId,
+                    membershipId,
+                    userId,
+                    orderRef: checkoutData.orderRef,
+                    amount: checkoutData.amount,
+                    currency: checkoutData.currency,
+                    autoRenew,
+                    customerId: checkoutData.customerId || 'N/A'
+                });
+
+                showStatus(`✅ Checkout created: ${checkoutId}`, 'success');
+
+                // Step 2: Mount SumUp widget
+                log('💳 Mounting SumUp payment widget...');                sumUpCard = SumUpCard.mount({
+                    checkoutId: checkoutId,
+                    onResponse: async (type, body) => {
+                        log(`📨 SumUp response: ${type}`, body);
+                          if (type === 'success') {
+                            showStatus('✅ Payment successful! Verifying and activating...', 'success');
+                            log('✅ Payment successful! Calling confirm endpoint...');
+                            
+                            try {
+                                // Call the confirm endpoint to verify payment and save token
+                                const confirmUrl = `${workerUrl}/membership/confirm?orderRef=${encodeURIComponent(orderRef)}`;
+                                log(`📞 Calling: ${confirmUrl}`);
+                                
+                                const confirmRes = await fetch(confirmUrl);
+                                const confirmData = await confirmRes.json();
+                                
+                                if (!confirmRes.ok || !confirmData.ok) {
+                                    throw new Error(confirmData.error || 'Confirmation failed');
+                                }
+                                
+                                log('✅ Membership confirmed and activated!', confirmData);
+                                
+                                if (autoRenew && confirmData.cardLast4) {
+                                    showStatus(`✅ Payment successful! Card ending in ${confirmData.cardLast4} saved for auto-renewal.`, 'success');
+                                    log('🔑 PAYMENT INSTRUMENT SAVED:', {
+                                        cardLast4: confirmData.cardLast4,
+                                        plan: confirmData.plan,
+                                        endDate: confirmData.endDate,
+                                        autoRenew: confirmData.autoRenew
+                                    });
+                                    
+                                    // Show renewal test section
+                                    document.getElementById('renewalSection').style.display = 'block';
+                                    document.getElementById('renewalSection').scrollIntoView({ behavior: 'smooth' });
+                                    
+                                    log('🎯 READY FOR INSTANT RENEWAL TEST', {
+                                        message: 'Enter your Admin Key below and click "Test Renewal Now"',
+                                        membershipId,
+                                        userId
+                                    });
+                                } else if (autoRenew) {
+                                    showStatus('⚠️ Payment successful but token not saved. Check logs.', 'warning');
+                                    log('⚠️ Auto-renewal was enabled but no card details returned');
+                                } else {
+                                    showStatus('✅ Payment successful! (No auto-renewal)', 'success');
+                                }
+
+                                log('🎉 MEMBERSHIP ACTIVATED:', {
+                                    status: confirmData.status,
+                                    plan: confirmData.plan,
+                                    endDate: confirmData.endDate,
+                                    amount: confirmData.amount,
+                                    autoRenew: confirmData.autoRenew
+                                });
+                                
+                            } catch (confirmError) {
+                                log('❌ Confirmation error:', confirmError.message);
+                                showStatus(`❌ Payment succeeded but confirmation failed: ${confirmError.message}`, 'error');
+                            }
+
+                        } else if (type === 'error') {
+                            showStatus(`❌ Payment error: ${body.message || 'Unknown error'}`, 'error');
+                            log('❌ Payment error', body);
+                        }
+                    }
+                });
+
+                payBtn.textContent = 'Complete Payment Above';
+                log('✅ Payment widget ready - Enter your card details above');
+                showStatus('💳 Enter your card details in the SumUp widget above', 'info');
+
+            } catch (error) {
+                log('❌ Error', error.message);
+                showStatus(`❌ Error: ${error.message}`, 'error');
+                payBtn.disabled = false;
+                payBtn.textContent = 'Retry Payment';
+            }
+        });        // Enable button when form is filled
+        document.querySelectorAll('#email, #name, #terms, #privacy').forEach(el => {
+            el.addEventListener('input', () => {
+                const email = document.getElementById('email').value;
+                const name = document.getElementById('name').value;
+                const terms = document.getElementById('terms').checked;
+                const privacy = document.getElementById('privacy').checked;
+                document.getElementById('payBtn').disabled = !(email && name && terms && privacy);
+            });
+        });        // Test Renewal Button Handler
+        document.getElementById('renewBtn').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const workerUrl = document.getElementById('workerUrl').value;
+            const renewalStatusContainer = document.getElementById('renewalStatus');
+            
+            if (!email) {
+                renewalStatusContainer.innerHTML = '<div class="status error">❌ Email required for renewal test</div>';
+                return;
+            }
+            
+            if (!membershipId) {
+                renewalStatusContainer.innerHTML = '<div class="status error">❌ No membership found. Complete payment first.</div>';
+                return;
+            }
+
+            const renewBtn = document.getElementById('renewBtn');
+            renewBtn.disabled = true;
+            renewBtn.textContent = 'Testing Renewal...';
+            
+            log('🔄 Starting manual renewal test...', { membershipId, userId, email });
+            renewalStatusContainer.innerHTML = '<div class="status info">⏳ Processing renewal charge...</div>';
+
+            try {
+                // Use the /test/renew-user endpoint which triggers renewal for a specific user
+                const renewRes = await fetch(`${workerUrl}/test/renew-user?email=${encodeURIComponent(email)}`, {
+                    method: 'GET'
+                });
+
+                const renewData = await renewRes.json();
+
+                if (!renewRes.ok || !renewData.success) {
+                    throw new Error(renewData.error || renewData.message || 'Renewal failed');
+                }
+
+                log('✅ RENEWAL SUCCESSFUL!', renewData);
+                renewalStatusContainer.innerHTML = `
+                    <div class="status success">
+                        <strong>✅ Renewal Test SUCCESSFUL!</strong><br>
+                        Your card was charged £1.00 using the saved token.<br>
+                        Payment ID: ${renewData.paymentId || renewData.details?.paymentId || 'N/A'}<br>
+                        New End Date: ${renewData.newEndDate || renewData.details?.newEndDate ? new Date(renewData.newEndDate || renewData.details?.newEndDate).toLocaleString() : 'N/A'}
+                    </div>
+                `;
+
+                log('🎉 TOKENIZATION & RECURRING PAYMENT VERIFIED!', {
+                    message: 'Your card was successfully charged using the saved payment instrument',
+                    paymentId: renewData.paymentId || renewData.details?.paymentId,
+                    newEndDate: renewData.newEndDate || renewData.details?.newEndDate,
+                    verification: 'Check database for renewal_log and transactions entries'
+                });
+
+                showStatus('🎉 SUCCESS! Tokenization and recurring payment both working perfectly!', 'success');
+
+            } catch (error) {
+                log('❌ Renewal failed', error.message);
+                renewalStatusContainer.innerHTML = `
+                    <div class="status error">
+                        <strong>❌ Renewal Test Failed</strong><br>
+                        Error: ${error.message}<br><br>
+                        Common issues:<br>
+                        • Payment instrument not saved<br>
+                        • Card expired or declined<br>
+                        • Auto-renewal not enabled<br>
+                        • Check Cloudflare logs for details
+                    </div>
+                `;
+                renewBtn.disabled = false;
+                renewBtn.textContent = '🔄 Retry Renewal Test';
+            }
+        });
+
+        log('✅ Test page loaded - Configure settings and click "Initialize Payment Widget"');
+    </script>
+</body>
+</html>

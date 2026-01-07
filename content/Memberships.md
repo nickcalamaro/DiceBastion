@@ -175,11 +175,10 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   function showError(msg){ if (!sumupErr) return; sumupErr.textContent = msg || 'Payment error. Please try again.'; sumupErr.style.display='block'; }
 
   [modalNameEl, modalEmailEl, privacyEl, autoRenewEl].forEach(el=>{ if(!el) return; const ev = el.type==='checkbox' ? 'change' : 'input'; el.addEventListener(ev, clearError); });
-
   function loadTurnstileSdk(){ if (window.turnstile) return Promise.resolve(true); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s); }); }
   async function getTurnstileToken(){ await loadTurnstileSdk(); const el = document.getElementById('mship-ts'); if (!el || !window.turnstile) throw new Error('Security check not ready'); const t = window.turnstile.getResponse(el); if (!t) throw new Error('Please complete the security check.'); return t; }
 
-  async function confirmOrder(ref){ const maxAttempts=15; for(let i=0;i<maxAttempts;i++){ try { const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); const d=await r.json(); if(d.ok && d.status==='active'){ closeModal(); return true; } if(d.status && String(d.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e){} await new Promise(r=>setTimeout(r,1500)); } showError('Payment is still processing. Please refresh shortly.'); return false; }
+  async function confirmOrder(ref){ const maxAttempts=200; for(let i=0;i<maxAttempts;i++){ try { const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); const d=await r.json(); if(d.ok && d.status==='active'){ closeModal(); return true; } if(d.status && String(d.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e){} await new Promise(r=>setTimeout(r,1500)); } showError('Payment is still processing. Please refresh shortly.'); return false; }
 
   // New: check active membership by email before starting checkout
   async function checkActiveMembership(email){ try { const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}`); const d = await r.json(); if (d && d.active && d.endDate) { return { active:true, endDate:d.endDate, plan:d.plan }; } } catch(_){} return { active:false }; }

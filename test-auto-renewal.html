@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Renewal Testing</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .test-section {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-left: 4px solid #2196F3;
+            border-radius: 4px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #2196F3;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button.danger {
+            background: #f44336;
+        }
+        button.danger:hover {
+            background: #da190b;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        input[type="email"] {
+            padding: 10px;
+            width: 300px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 Auto-Renewal System Testing</h1>
+        <p>Worker Version: <strong id="worker-version">Loading...</strong></p>
+
+        <!-- Test 1: Check Auto-Renewal Status -->
+        <div class="test-section">
+            <h2>1. Check Auto-Renewal Status</h2>
+            <label for="email1">Email:</label>
+            <input type="email" id="email1" value="ncalamaro+247@gmail.com" placeholder="Enter email">
+            <button onclick="checkStatus()">Check Status</button>
+            <div id="status-result" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Test 2: Toggle Auto-Renewal -->
+        <div class="test-section">
+            <h2>2. Toggle Auto-Renewal</h2>
+            <label for="email2">Email:</label>
+            <input type="email" id="email2" value="ncalamaro+247@gmail.com" placeholder="Enter email">
+            <button onclick="toggleAutoRenewal(true)">Enable Auto-Renewal</button>
+            <button onclick="toggleAutoRenewal(false)" class="danger">Disable Auto-Renewal</button>
+            <div id="toggle-result" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Test 3: Manual Renewal Test -->
+        <div class="test-section">
+            <h2>3. Test Manual Renewal</h2>
+            <label for="email3">Email:</label>
+            <input type="email" id="email3" value="ncalamaro+447@gmail.com" placeholder="Enter email (expired membership)">
+            <button onclick="testRenewal()">Attempt Renewal</button>
+            <div id="renewal-result" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Test 4: Retry Failed Renewal -->
+        <div class="test-section">
+            <h2>4. Retry Failed Renewal</h2>
+            <label for="email4">Email:</label>
+            <input type="email" id="email4" value="ncalamaro+447@gmail.com" placeholder="Enter email">
+            <button onclick="retryRenewal()">Retry Renewal</button>
+            <div id="retry-result" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Test 5: Remove Payment Method -->
+        <div class="test-section">
+            <h2>5. Remove Payment Method</h2>
+            <label for="email5">Email:</label>
+            <input type="email" id="email5" value="ncalamaro+247@gmail.com" placeholder="Enter email">
+            <button onclick="removePaymentMethod()" class="danger">Remove Payment Method</button>
+            <div id="remove-result" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Test Admin Renewal Logs -->
+        <div class="test-section">
+            <h2>🔍 Test: Admin Renewal Logs</h2>
+            <p>Fetch renewal logs from the admin endpoint (requires admin session)</p>
+            <div style="margin: 15px 0;">
+                <label>Admin Session Token:</label><br>
+                <input type="text" id="admin-token" placeholder="Paste session token from admin login" style="width: 100%; padding: 8px; margin-top: 5px;">
+            </div>
+            <button onclick="testAdminLogs()">Fetch Renewal Logs</button>
+            <div id="admin-logs-result" class="result"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+
+        function showResult(elementId, data, isSuccess = true) {
+            const el = document.getElementById(elementId);
+            el.style.display = 'block';
+            el.className = 'result ' + (isSuccess ? 'success' : 'error');
+            el.textContent = JSON.stringify(data, null, 2);
+        }
+
+        async function checkStatus() {
+            const email = document.getElementById('email1').value;
+            try {
+                const response = await fetch(`${API_BASE}/membership/auto-renewal?email=${encodeURIComponent(email)}`);
+                const data = await response.json();
+                showResult('status-result', data, response.ok);
+            } catch (error) {
+                showResult('status-result', { error: error.message }, false);
+            }
+        }
+
+        async function toggleAutoRenewal(enabled) {
+            const email = document.getElementById('email2').value;
+            try {
+                const response = await fetch(`${API_BASE}/membership/auto-renewal/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, enabled })
+                });
+                const data = await response.json();
+                showResult('toggle-result', data, response.ok);
+            } catch (error) {
+                showResult('toggle-result', { error: error.message }, false);
+            }
+        }
+
+        async function testRenewal() {
+            const email = document.getElementById('email3').value;
+            try {
+                const response = await fetch(`${API_BASE}/test/renew-user?email=${encodeURIComponent(email)}`);
+                const data = await response.json();
+                showResult('renewal-result', data, data.success);
+            } catch (error) {
+                showResult('renewal-result', { error: error.message }, false);
+            }
+        }
+
+        async function retryRenewal() {
+            const email = document.getElementById('email4').value;
+            try {
+                const response = await fetch(`${API_BASE}/membership/retry-renewal`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await response.json();
+                showResult('retry-result', data, response.ok);
+            } catch (error) {
+                showResult('retry-result', { error: error.message }, false);
+            }
+        }
+
+        async function removePaymentMethod() {
+            const email = document.getElementById('email5').value;
+            if (!confirm(`Are you sure you want to remove the payment method for ${email}?`)) {
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE}/membership/payment-method/remove`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await response.json();
+                showResult('remove-result', data, response.ok);
+            } catch (error) {
+                showResult('remove-result', { error: error.message }, false);
+            }
+        }
+
+        async function testAdminLogs() {
+            const token = document.getElementById('admin-token').value;
+            if (!token) {
+                showResult('admin-logs-result', { error: 'Please enter an admin session token' }, false);
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE}/admin/renewal-logs`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                const data = await response.json();
+                showResult('admin-logs-result', data, response.ok);
+            } catch (error) {
+                showResult('admin-logs-result', { error: error.message }, false);
+            }
+        }
+    </script>
+</body>
+</html>

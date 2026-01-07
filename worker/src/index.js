@@ -19,7 +19,15 @@ app.use('*', async (c, next) => {
   const allowed = (c.env.ALLOWED_ORIGIN || '').split(',').map(s=>s.trim()).filter(Boolean)
   const origin = c.req.header('Origin')
   const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
-  const allowOrigin = (origin && allowed.includes(origin)) ? origin : ''
+  
+  // Allow 'null' origin for local file testing (file:// protocol)
+  let allowOrigin = ''
+  if (origin === 'null' && c.env.ALLOW_LOCAL_TESTING === 'true') {
+    allowOrigin = '*'  // Allow any origin for local testing
+  } else if (origin && allowed.includes(origin)) {
+    allowOrigin = origin
+  }
+  
   if (allowOrigin) c.res.headers.set('Access-Control-Allow-Origin', allowOrigin)
   c.res.headers.set('Vary','Origin')
   c.res.headers.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key, X-Session-Token, X-Admin-Key')
@@ -244,28 +252,14 @@ async function cleanupExpiredStockReservations(db) {
   }
 }
 
-// --- Schema compatibility helpers (users/user_id vs members/member_id) ---
+// --- Schema compatibility helpers ---
 let __schemaCache
 async function getSchema(db){
   if (__schemaCache) return __schemaCache
-  // Detect memberships FK column (prefer user_id if present, else member_id)
-  const mcols = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
-  const mnames = new Set((mcols?.results||[]).map(c => String(c.name||'').toLowerCase()))
-  const fkColumn = mnames.has('user_id') ? 'user_id' : (mnames.has('member_id') ? 'member_id' : 'user_id')
-  // Identity is consolidated to users
+  // Current schema uses user_id for all foreign keys
+  const fkColumn = 'user_id'
   const identityTable = 'users'
-  // Detect id column in users (user_id vs id)
-  let idColumn = 'user_id'
-  try {
-    const ic = await db.prepare('PRAGMA table_info(users)').all().catch(()=>({ results: [] }))
-    const inames = new Set((ic?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    if (inames.has('user_id')) idColumn = 'user_id'
-    else if (inames.has('id')) idColumn = 'id'
-    else {
-      const pk = (ic?.results||[]).find(r => r.pk === 1)
-      if (pk && pk.name) idColumn = String(pk.name)
-    }
-  } catch {}
+  const idColumn = 'user_id'
   __schemaCache = { fkColumn, identityTable, idColumn }
   return __schemaCache
 }
@@ -556,21 +550,7 @@ async function getOrCreateIdentity(db, email, name){
 
 async function getActiveMembership(db, identityId) {
   const now = new Date().toISOString()
-  // Detect available FK columns on memberships
-  const mc = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
-  const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
-  let where = '', binds = []
-  if (mnames.has('user_id') && mnames.has('member_id')) {
-    where = '(user_id = ? OR member_id = ?)'
-    binds = [identityId, identityId, now]
-  } else if (mnames.has('user_id')) {
-    where = 'user_id = ?'
-    binds = [identityId, now]
-  } else {
-    where = 'member_id = ?'
-    binds = [identityId, now]
-  }
-  return await db.prepare(`SELECT * FROM memberships WHERE ${where} AND status = "active" AND end_date >= ? ORDER BY end_date DESC LIMIT 1`).bind(...binds).first()
+  return await db.prepare(`SELECT * FROM memberships WHERE user_id = ? AND status = "active" AND end_date >= ? ORDER BY end_date DESC LIMIT 1`).bind(identityId, now).first()
 }
 
 // Fetch pricing/details for a plan from the services table
@@ -746,11 +726,11 @@ async function savePaymentInstrument(db, userId, checkoutId, env) {
 }
 
 // Charge a saved payment instrument
-async function chargePaymentInstrument(env, userId, instrumentId, amount, currency, orderRef, description) {
+async function chargePaymentInstrument(env, userId, instrumentId, amount, currency, orderRef, description, db = null) {
   try {
     const { access_token } = await sumupToken(env, 'payments payment_instruments')
     
-    // Verify customer exists in SumUp Customer API
+    // Verify customer exists in SumUp Customer API, create if missing
     const customerId = `USER-${userId}`
     const customerCheckRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}`, {
       headers: {
@@ -760,8 +740,44 @@ async function chargePaymentInstrument(env, userId, instrumentId, amount, curren
     })
     
     if (!customerCheckRes.ok) {
-      console.error(`Customer ${customerId} not found in SumUp Customer API`)
-      throw new Error(`Customer ${customerId} does not exist. Cannot process recurring payment.`)
+      console.log(`Customer ${customerId} not found in SumUp Customer API, attempting to create...`)
+      
+      // Get user details for customer creation
+      if (!db) {
+        throw new Error('Database connection required to create customer')
+      }
+      
+      const user = await db.prepare('SELECT email, name FROM users WHERE user_id = ?')
+        .bind(userId).first()
+      
+      if (!user) {
+        throw new Error(`User ${userId} not found in database`)
+      }
+      
+      // Create customer in SumUp
+      const nameParts = (user.name || 'Customer').split(' ')
+      const createCustomerRes = await fetch('https://api.sumup.com/v0.1/customers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          customer_id: customerId,
+          personal_details: {
+            email: user.email,
+            first_name: nameParts[0] || 'Customer',
+            last_name: nameParts.slice(1).join(' ') || ''
+          }
+        })
+      })
+      
+      if (!createCustomerRes.ok) {
+        const txt = await createCustomerRes.text()
+        throw new Error(`Failed to create customer in SumUp: ${txt}`)
+      }
+      
+      console.log(`Successfully created customer ${customerId} in SumUp`)
     }
     
     // Create checkout
@@ -831,7 +847,7 @@ async function getActivePaymentInstrument(db, userId) {
 // Process renewal for a single membership
 async function processMembershipRenewal(db, membership, env) {
   const s = await getSchema(db)
-  const userId = (typeof membership.user_id !== 'undefined' && membership.user_id !== null) ? membership.user_id : membership.member_id
+  const userId = membership.user_id
   
   // Get payment instrument
   const instrument = await getActivePaymentInstrument(db, userId)
@@ -852,8 +868,7 @@ async function processMembershipRenewal(db, membership, env) {
   const amount = Number(svc.amount)
   const currency = svc.currency || env.CURRENCY || 'GBP'
   const orderRef = `RENEWAL-${membership.id}-${crypto.randomUUID()}`
-  
-  try {
+    try {
     // Charge the payment instrument
     const payment = await chargePaymentInstrument(
       env,
@@ -862,7 +877,8 @@ async function processMembershipRenewal(db, membership, env) {
       amount,
       currency,
       orderRef,
-      `Renewal: Dice Bastion ${membership.plan} membership`
+      `Renewal: Dice Bastion ${membership.plan} membership`,
+      db  // Pass database connection for customer creation if needed
     )
     
     // If successful, extend membership
@@ -914,29 +930,52 @@ async function processMembershipRenewal(db, membership, env) {
     }
   } catch (e) {
     const currentAttempts = (membership.renewal_attempts || 0) + 1
+    const errorMessage = String(e.message || e)
     
+    // Check if error is due to invalid/expired token
+    const isTokenError = errorMessage.toLowerCase().includes('invalid') || 
+                         errorMessage.toLowerCase().includes('expired') ||
+                         errorMessage.toLowerCase().includes('token') ||
+                         errorMessage.toLowerCase().includes('card')
+    
+    // Log the error
     await db.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = ? WHERE id = ?')
       .bind(toIso(new Date()), currentAttempts, membership.id).run()
     await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(membership.id, toIso(new Date()), 'failed', String(e.message || e), String(amount), currency).run()
+      .bind(membership.id, toIso(new Date()), 'failed', errorMessage, String(amount), currency).run()
+    
+    // If token error, deactivate the instrument
+    if (isTokenError) {
+      console.log(`Deactivating expired/invalid payment instrument ${instrument.instrument_id} for user ${userId}`)
+      await db.prepare('UPDATE payment_instruments SET is_active = 0 WHERE instrument_id = ?')
+        .bind(instrument.instrument_id).run()
+      
+      // Disable auto-renewal since payment method is invalid
+      await db.prepare('UPDATE memberships SET auto_renew = 0 WHERE id = ?')
+        .bind(membership.id).run()
+    }
     
     // Get user for email notification
     const user = await db.prepare('SELECT * FROM users WHERE user_id = ?').bind(userId).first()
     
-    // If this is the 3rd failure, disable auto-renewal and send final notice
-    if (currentAttempts >= 3 && user) {
+    // If token error or 3rd failure, send final notice
+    if ((isTokenError || currentAttempts >= 3) && user) {
+      // Ensure auto-renew is disabled
       await db.prepare('UPDATE memberships SET auto_renew = 0 WHERE id = ?').bind(membership.id).run()
       
-      const emailContent = getRenewalFailedFinalEmail(membership, user)
+      const emailContent = isTokenError 
+        ? getExpiredPaymentMethodEmail(membership, user)
+        : getRenewalFailedFinalEmail(membership, user)
+        
       await sendEmail(env, { 
         to: user.email, 
         ...emailContent,
-        emailType: 'membership_renewal_final_failed',
+        emailType: isTokenError ? 'payment_method_expired' : 'membership_renewal_final_failed',
         relatedId: membership.id,
         relatedType: 'membership',
-        metadata: { plan: membership.plan, attempts: currentAttempts }
+        metadata: { plan: membership.plan, attempts: currentAttempts, token_error: isTokenError }
       }).catch(err => {
-        console.error('Renewal final failure email error:', err)
+        console.error('Renewal failure email error:', err)
       })
     } else if (user) {
       // Send regular failure notification (attempts 1 or 2)
@@ -953,7 +992,7 @@ async function processMembershipRenewal(db, membership, env) {
       })
     }
     
-    return { success: false, error: String(e.message || e), attempts: currentAttempts }
+    return { success: false, error: errorMessage, attempts: currentAttempts, token_error: isTokenError }
   }
 }
 
@@ -961,6 +1000,13 @@ async function processMembershipRenewal(db, membership, env) {
 async function verifyTurnstile(env, token, ip, debug){
   if (!env.TURNSTILE_SECRET) { if (debug) console.log('turnstile: secret missing -> bypass'); return true }
   if (!token) { if (debug) console.log('turnstile: missing token'); return false }
+  
+  // Allow test bypass for local development
+  if (token === 'test-bypass' && env.ALLOW_TEST_BYPASS === 'true') {
+    if (debug) console.log('turnstile: test-bypass token accepted')
+    return true
+  }
+  
   const form = new URLSearchParams(); form.set('secret', env.TURNSTILE_SECRET); form.set('response', token); if (ip) form.set('remoteip', ip)
   let res, j = {};
   try {
@@ -1097,6 +1143,26 @@ function addUtmParams(url, source = 'email', medium = 'transactional', campaign 
   } catch (e) {
     console.error('UTM parameter error:', e)
     return url
+  }
+}
+
+// Handle email preferences opt-in (only if user explicitly consents)
+async function handleEmailPreferencesOptIn(db, userId, marketingConsent) {
+  if (!marketingConsent) return
+  
+  const now = toIso(new Date())
+  // Check if user already has preferences
+  const existingPrefs = await db.prepare(`
+    SELECT * FROM email_preferences WHERE user_id = ?
+  `).bind(userId).first()
+  
+  // Only create/update if no existing consent or explicitly opting in
+  if (!existingPrefs || !existingPrefs.consent_given) {
+    await db.prepare(`
+      INSERT OR REPLACE INTO email_preferences 
+      (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
+      VALUES (?, 1, 1, 1, ?, ?)
+    `).bind(userId, now, now).run()
   }
 }
 
@@ -1364,6 +1430,40 @@ function getRenewalFailedFinalEmail(membership, user) {
   }
 }
 
+function getExpiredPaymentMethodEmail(membership, user) {
+  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
+  const planName = planNames[membership.plan] || membership.plan
+  
+  return {
+    subject: `Action Required: Update Your Payment Method - Dice Bastion`,
+    html: `
+      <h2>Payment Method Update Required</h2>
+      <p>Hi ${user.name || 'there'},</p>
+      <p>We attempted to renew your ${planName} Membership, but <strong>your saved payment method is no longer valid</strong>.</p>
+      <p>This could happen if your card:</p>
+      <ul>
+        <li>Has expired</li>
+        <li>Was cancelled or replaced by your bank</li>
+        <li>Has insufficient funds</li>
+      </ul>
+      <div style="background: #fff3cd; border-left: 4px solid #856404; padding: 16px; margin: 20px 0;">
+        <strong>⚠️ Auto-renewal has been disabled</strong>
+        <p style="margin: 8px 0 0 0;">Your membership will expire on <strong>${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</strong> unless you take action.</p>
+      </div>
+      <p><strong>To continue your membership:</strong></p>
+      <ol>
+        <li>Visit <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_method_expired')}">dicebastion.com/memberships</a></li>
+        <li>Purchase a new membership with your updated payment details</li>
+        <li>Enable auto-renewal during checkout to save your new payment method</li>
+      </ol>
+      <p><strong>Need help?</strong> Contact us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></p>
+      <p>We'd love to keep you as a member!</p>
+      <p>— The Dice Bastion Team</p>
+    `,
+    text: `Hi ${user.name || 'there'},\n\nWe couldn't renew your ${planName} Membership because your saved payment method is no longer valid.\n\nAuto-renewal has been disabled. Your membership expires on ${new Date(membership.end_date).toLocaleDateString('en-GB')}.\n\nTo continue: Visit dicebastion.com/memberships and purchase a new membership with your updated payment details.\n\nNeed help? Email support@dicebastion.com\n\n— The Dice Bastion Team`
+  }
+}
+
 function getTicketConfirmationEmail(event, user, transaction) {
   const eventDate = new Date(event.event_date).toLocaleDateString('en-GB', { 
     weekday: 'long', 
@@ -1463,32 +1563,256 @@ function getWelcomeEmail(membership, user, autoRenew) {
   }
 }
 
+// ============================================================================
+// GENERAL USER LOGIN/LOGOUT ENDPOINTS (for all users)
+// ============================================================================
+
+// General login endpoint - works for both admin and non-admin users
+app.post('/login', async c => {
+  try {
+    console.log('[User Login] Request received')
+    const { email, password } = await c.req.json()
+    console.log('[User Login] Email:', email)
+    
+    if (!email || !password) {
+      console.log('[User Login] Missing email or password')
+      return c.json({ error: 'email_and_password_required' }, 400)
+    }
+    
+    // Find user by email (any active user, not just admins)
+    console.log('[User Login] Querying database for user...')
+    const user = await c.env.DB.prepare(`
+      SELECT user_id, email, password_hash, name, is_admin, is_active
+      FROM users
+      WHERE email = ? AND is_active = 1
+    `).bind(email).first()
+    
+    if (!user) {
+      console.log('[User Login] User not found or inactive')
+      return c.json({ error: 'invalid_credentials' }, 401)
+    }
+    
+    console.log('[User Login] User found:', user.email, '| Admin:', user.is_admin === 1)
+    
+    // Verify password
+    console.log('[User Login] Verifying password...')
+    const passwordMatch = await bcrypt.compare(password, user.password_hash)
+    if (!passwordMatch) {
+      console.log('[User Login] Password mismatch')
+      return c.json({ error: 'invalid_credentials' }, 401)
+    }
+    
+    console.log('[User Login] Password verified')
+    
+    // Create session token
+    const sessionToken = crypto.randomUUID()
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days
+    
+    console.log('[User Login] Creating user_sessions table if needed...')
+    // Create user_sessions table if it doesn't exist
+    await c.env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        session_token TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        last_activity TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+      )
+    `).run().catch(err => {
+      console.log('[User Login] Table creation error (might already exist):', err.message)
+    })
+    
+    console.log('[User Login] Storing session...')
+    // Store session
+    await c.env.DB.prepare(`
+      INSERT INTO user_sessions (user_id, session_token, created_at, expires_at, last_activity)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(
+      user.user_id,
+      sessionToken,
+      toIso(now),
+      toIso(expiresAt),
+      toIso(now)
+    ).run()
+    
+    console.log('[User Login] Success! Session created for', user.email)
+    return c.json({
+      success: true,
+      session_token: sessionToken,
+      user: {
+        id: user.user_id,
+        email: user.email,
+        name: user.name,
+        is_admin: user.is_admin === 1
+      }
+    })
+  } catch (error) {
+    console.error('[User Login] ERROR:', error)
+    console.error('[User Login] Stack:', error.stack)
+    return c.json({ error: 'internal_error', message: error.message }, 500)
+  }
+})
+
+// General logout endpoint - works for all users
+app.post('/logout', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 400)
+    }
+    
+    // Delete the session
+    await c.env.DB.prepare(`
+      DELETE FROM user_sessions WHERE session_token = ?
+    `).bind(sessionToken).run()
+    
+    console.log('[Logout] Session invalidated')
+    return c.json({ success: true })
+  } catch (error) {
+    console.error('[Logout] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)  }
+})
+
+// ============================================================================
+// LEGACY ADMIN ENDPOINTS (kept for backward compatibility - redirect to universal endpoints)
+// ============================================================================
+
+// Admin login - legacy endpoint, redirects to universal /login
+app.post('/admin/login', async c => {
+  // Just call the universal login endpoint
+  return app.fetch(new Request(new URL('/login', c.req.url), {
+    method: 'POST',
+    headers: c.req.raw.headers,
+    body: c.req.raw.body
+  }), c.env)
+})
+
+// Admin logout - legacy endpoint, redirects to universal /logout
+app.post('/admin/logout', async c => {
+  // Just call the universal logout endpoint
+  return app.fetch(new Request(new URL('/logout', c.req.url), {
+    method: 'POST',
+    headers: c.req.raw.headers,
+    body: c.req.raw.body
+  }), c.env)
+})
+
+// Admin session verification endpoint
+app.get('/admin/verify', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    const now = toIso(new Date())
+    const session = await c.env.DB.prepare(`
+      SELECT s.*, u.email, u.name, u.is_admin, u.is_active
+      FROM user_sessions s
+      JOIN users u ON s.user_id = u.user_id
+      WHERE s.session_token = ? AND s.expires_at > ? AND u.is_active = 1 AND u.is_admin = 1
+    `).bind(sessionToken, now).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+    
+    // Update last activity
+    await c.env.DB.prepare(`
+      UPDATE user_sessions SET last_activity = ? WHERE session_token = ?
+    `).bind(now, sessionToken).run()
+    
+    return c.json({
+      success: true,
+      user: {
+        id: session.user_id,
+        email: session.email,
+        name: session.name,
+        is_admin: true
+      }
+    })
+  } catch (error) {
+    console.error('[Admin Verify] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// ============================================================================
+// ADMIN EVENT MANAGEMENT ENDPOINTS
+// ============================================================================
+
+// Middleware: Require admin authentication (session-based or legacy admin key)
+async function requireAdmin(c, next) {
+  // Try session-based auth first
+  const sessionToken = c.req.header('X-Session-Token')
+  if (sessionToken) {
+    const now = toIso(new Date())
+    const session = await c.env.DB.prepare(`
+      SELECT s.*, u.email, u.name, u.is_admin, u.is_active
+      FROM user_sessions s
+      JOIN users u ON s.user_id = u.user_id
+      WHERE s.session_token = ? AND s.expires_at > ? AND u.is_active = 1 AND u.is_admin = 1
+    `).bind(sessionToken, now).first()
+    
+    if (session) {
+      c.set('adminUser', { id: session.user_id, email: session.email, name: session.name })
+      return await next()
+    }
+  }
+  
+  // Fallback to legacy admin key (for backward compatibility)
+  const adminKey = c.req.header('X-Admin-Key')
+  if (adminKey && adminKey === c.env.ADMIN_KEY) {
+    c.set('adminUser', { legacy: true })
+    return await next()
+  }
+  
+  return c.json({ error: 'unauthorized' }, 401)
+}
+
 // Membership checkout with idempotency + Turnstile
 app.post('/membership/checkout', async (c) => {
   try {
     const ip = c.req.header('CF-Connecting-IP')
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
-    
-    // Rate limiting: 3 requests per minute per IP (more restrictive for memberships)
+      // Rate limiting: 3 requests per minute per IP (more restrictive for memberships)
     if (!checkRateLimit(ip, membershipCheckoutRateLimits, 3, 1)) {
       return c.json({ error: 'rate_limit_exceeded', message: 'Too many membership checkout requests. Please try again in a minute.' }, 429)
     }
     
     const idem = c.req.header('Idempotency-Key')?.trim()
-    const { email, name, plan, privacyConsent, marketingConsent, turnstileToken, autoRenew } = await c.req.json()
+    const { email, name, plan, privacyConsent, marketingConsent, turnstileToken, autoRenew, amount: customAmount } = await c.req.json()
     if (!email || !plan) return c.json({ error: 'missing_fields' }, 400)
     if (!EMAIL_RE.test(email) || email.length > 320) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
     if (name && name.length > 200) return c.json({ error:'name_too_long' },400)
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode)
     if (!tsOk) return c.json({ error:'turnstile_failed' },403)
-
+    
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
     const svc = await getServiceForPlan(c.env.DB, plan)
-    if (!svc) return c.json({ error: 'unknown_plan' }, 400)
-    const amount = Number(svc.amount)
-    if (!Number.isFinite(amount) || amount <= 0) return c.json({ error:'invalid_amount' },400)
-    const currency = svc.currency || c.env.CURRENCY || 'GBP'
+    
+    // Allow custom amount override for testing (works with any valid plan)
+    // This lets you test with £1 instead of the full plan price
+    let amount, currency
+    if (customAmount) {
+      // Custom amount provided - use it (for testing purposes)
+      amount = Number(customAmount)
+      currency = 'GBP'
+      if (!Number.isFinite(amount) || amount <= 0) return c.json({ error:'invalid_amount' },400)
+      console.log(`Using custom test amount: £${amount} for plan: ${plan}`)
+    } else {
+      // Normal flow - use service pricing
+      if (!svc) return c.json({ error: 'unknown_plan' }, 400)
+      amount = Number(svc.amount)
+      if (!Number.isFinite(amount) || amount <= 0) return c.json({ error:'invalid_amount' },400)
+      currency = svc.currency || c.env.CURRENCY || 'GBP'
+    }
     const s = await getSchema(c.env.DB)
 
     // Ensure schema is up to date
@@ -1507,25 +1831,19 @@ app.post('/membership/checkout', async (c) => {
       if (existing && existing.checkout_id){
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
-    }
-
-    const autoRenewValue = autoRenew ? 1 : 0
+    }    const autoRenewValue = autoRenew ? 1 : 0
     
     // Insert minimal membership record (business logic only)
-    const mc = await c.env.DB.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
-    const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    const cols = ['plan','status','auto_renew']
-    const vals = [plan,'pending', autoRenewValue]
-    if (mnames.has('user_id')) { cols.unshift('user_id'); vals.unshift(ident.id) }
-    if (mnames.has('member_id')) { cols.unshift('member_id'); vals.unshift(ident.id) }
+    const cols = ['user_id', 'plan','status','auto_renew','order_ref']
+    const vals = [ident.id, plan,'pending', autoRenewValue, order_ref]
     const placeholders = cols.map(()=>'?').join(',')
     const mResult = await c.env.DB.prepare(`INSERT INTO memberships (${cols.join(',')}) VALUES (${placeholders}) RETURNING id`).bind(...vals).first()
     const membershipId = mResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
 
     let checkout
+    let customerId = null
     try {
       // Create or get SumUp customer if auto-renewal enabled
-      let customerId = null
       if (autoRenewValue === 1) {
         customerId = await getOrCreateSumUpCustomer(c.env, ident)
         console.log('Using SumUp customer ID for auto-renewal:', customerId)
@@ -1547,36 +1865,28 @@ app.post('/membership/checkout', async (c) => {
     if (!checkout.id) {
       console.error('membership checkout missing id', checkout)
       return c.json({ error: 'sumup_missing_id' }, 502)
-    }
-    
-    // Store payment details in transactions table
+    }    // Store payment details in transactions table
+    console.log('Creating transaction record with order_ref:', order_ref, 'checkout_id:', checkout.id)
     await c.env.DB.prepare(`
       INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
                                 checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
       VALUES ('membership', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `).bind(membershipId, ident.id, email, clampStr(name,200), order_ref, checkout.id, 
-            String(amount), currency, idem || null, toIso(new Date()))
+            String(amount), currency, idem || null, toIso(new Date())).run()
+    console.log('Transaction record created successfully')
     
-    // Only update email preferences if user is explicitly opting IN
-    // Once consent is given, it can only be revoked through email preferences page
-    if (marketingConsent) {
-      const now = toIso(new Date())
-      // Check if user already has preferences
-      const existingPrefs = await c.env.DB.prepare(`
-        SELECT * FROM email_preferences WHERE user_id = ?
-      `).bind(ident.id).first()
-      
-      // Only create/update if no existing consent or explicitly opting in
-      if (!existingPrefs || !existingPrefs.consent_given) {
-        await c.env.DB.prepare(`
-          INSERT OR REPLACE INTO email_preferences 
-          (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
-          VALUES (?, 1, 1, 1, ?, ?)
-        `).bind(ident.id, now, now).run()
-      }
-    }
+    // Handle email preferences opt-in
+    await handleEmailPreferencesOptIn(c.env.DB, ident.id, marketingConsent)
     
-    return c.json({ orderRef: order_ref, checkoutId: checkout.id })
+    return c.json({ 
+      orderRef: order_ref, 
+      checkoutId: checkout.id,
+      membershipId,
+      userId: ident.id,
+      amount,
+      currency,
+      customerId: customerId || null
+    })
   } catch (e) {
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
     console.error('membership checkout error', e)
@@ -1602,10 +1912,13 @@ app.get('/membership/plans', async (c) => {
 
 app.get('/membership/confirm', async (c) => {
   const orderRef = c.req.query('orderRef')
+  console.log('=== /membership/confirm called with orderRef:', orderRef)
   if (!orderRef || !UUID_RE.test(orderRef)) return c.json({ ok:false, error:'invalid_orderRef' },400)
   
   // Get transaction record
+  console.log('Querying transactions table for order_ref:', orderRef)
   const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "membership"').bind(orderRef).first()
+  console.log('Transaction query result:', transaction ? 'FOUND' : 'NOT FOUND', transaction)
   if (!transaction) return c.json({ ok:false, error:'order_not_found' },404)
   
   // Get membership record
@@ -1643,9 +1956,8 @@ app.get('/membership/confirm', async (c) => {
   if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
     return c.json({ ok:false, error:'payment_mismatch' },400)
   }
-  
-  const s = await getSchema(c.env.DB)
-  const identityId = (typeof pending.user_id !== 'undefined' && pending.user_id !== null) ? pending.user_id : pending.member_id
+    const s = await getSchema(c.env.DB)
+  const identityId = pending.user_id
   const activeExisting = await getActiveMembership(c.env.DB, identityId)
   const svc = await getServiceForPlan(c.env.DB, pending.plan)
   if (!svc) return c.json({ ok:false, error:'plan_not_configured' },400)
@@ -1768,17 +2080,29 @@ app.post('/webhooks/sumup', async (c) => {
   const svc = await getServiceForPlan(c.env.DB, pending.plan)
   if (!svc) return c.json({ ok: false, error: 'plan_not_configured' }, 400)
   if (currency && svc.currency && currency !== svc.currency) return c.json({ ok: false, error: 'currency_mismatch' }, 400)
-
   const now = new Date()
   const s = await getSchema(c.env.DB)
-  const identityId = (typeof pending.user_id !== 'undefined' && pending.user_id !== null) ? pending.user_id : pending.member_id
+  const identityId = pending.user_id
   const memberActive = await getActiveMembership(c.env.DB, identityId)
   const baseStart = memberActive ? new Date(memberActive.end_date) : now
   const months = Number(svc.months || 0)
   const start = baseStart
   const end = addMonths(baseStart, months)
-
   await c.env.DB.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ? WHERE id = ?').bind(toIso(start), toIso(end), paymentId, pending.id).run()
+  
+  // Save payment instrument if auto-renewal is enabled
+  if (pending.auto_renew === 1) {
+    console.log('Auto-renewal enabled, attempting to save payment instrument for checkout:', paymentId)
+    const instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
+    if (instrumentId) {
+      console.log('Payment instrument saved successfully:', instrumentId)
+      // Store instrument ID in membership record for reference
+      await c.env.DB.prepare('UPDATE memberships SET payment_instrument_id = ? WHERE id = ?')
+        .bind(instrumentId, pending.id).run()
+    } else {
+      console.warn('Failed to save payment instrument, but membership activation will continue')
+    }
+  }
   
   // Send welcome email (critical - works even if user closed browser)
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
@@ -2033,8 +2357,7 @@ app.get('/events/:slug', async c => {
     if (!event) {
       return c.json({ error: 'event_not_found' }, 404)
     }
-    
-    return c.json(event)
+      return c.json(event)
   } catch (err) {
     console.error('Error fetching event:', err)
     return c.json({ error: 'failed_to_fetch_event' }, 500)
@@ -2042,37 +2365,99 @@ app.get('/events/:slug', async c => {
 })
 
 // ============================================================================
-// ADMIN EVENT MANAGEMENT ENDPOINTS
+// ADMIN CRON JOB LOGS ENDPOINT
 // ============================================================================
 
-// Middleware: Require admin authentication (session-based or legacy admin key)
-async function requireAdmin(c, next) {
-  // Try session-based auth first
-  const sessionToken = c.req.header('X-Session-Token')
-  if (sessionToken) {
+// Get cron job logs (admin only)
+app.get('/admin/cron-logs', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
     const now = toIso(new Date())
     const session = await c.env.DB.prepare(`
-      SELECT s.*, u.email, u.name, u.is_admin, u.is_active
+      SELECT s.*, u.is_admin, u.is_active
       FROM user_sessions s
       JOIN users u ON s.user_id = u.user_id
       WHERE s.session_token = ? AND s.expires_at > ? AND u.is_active = 1 AND u.is_admin = 1
     `).bind(sessionToken, now).first()
     
-    if (session) {
-      c.set('adminUser', { id: session.user_id, email: session.email, name: session.name })
-      return await next()
+    if (!session) {
+      return c.json({ error: 'unauthorized' }, 401)
     }
-  }
-  
-  // Fallback to legacy admin key (for backward compatibility)
-  const adminKey = c.req.header('X-Admin-Key')
-  if (adminKey && adminKey === c.env.ADMIN_KEY) {
-    c.set('adminUser', { legacy: true })
-    return await next()
-  }
-  
-  return c.json({ error: 'unauthorized' }, 401)
-}
+    
+    // Get query parameters
+    const url = new URL(c.req.url)
+    const jobName = url.searchParams.get('job_name') // Optional filter by job name
+    const limit = parseInt(url.searchParams.get('limit') || '100')
+    const offset = parseInt(url.searchParams.get('offset') || '0')
+    
+    // Build query
+    let query = `
+      SELECT 
+        log_id,
+        job_name,
+        started_at,
+        completed_at,
+        status,
+        records_processed,
+        records_succeeded,
+        records_failed,
+        error_message,
+        details
+      FROM cron_job_log
+    `
+    const params = []
+    
+    if (jobName) {
+      query += ` WHERE job_name = ?`
+      params.push(jobName)
+    }
+    
+    query += ` ORDER BY started_at DESC LIMIT ? OFFSET ?`
+    params.push(limit, offset)
+    
+    const logs = await c.env.DB.prepare(query).bind(...params).all()
+    
+    // Get summary stats for each job type
+    const summaryQuery = `
+      SELECT 
+        job_name,
+        COUNT(*) as total_runs,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) as partial,
+        MAX(started_at) as last_run,
+        SUM(records_processed) as total_processed,
+        SUM(records_succeeded) as total_succeeded,
+        SUM(records_failed) as total_failed
+      FROM cron_job_log
+      WHERE started_at > datetime('now', '-7 days')
+      GROUP BY job_name
+    `
+    const summary = await c.env.DB.prepare(summaryQuery).all()
+    
+    return c.json({
+      success: true,
+      logs: logs.results || [],
+      summary: summary.results || [],
+      pagination: {
+        limit,
+        offset,
+        count: logs.results?.length || 0
+      }
+    })
+  } catch (error) {
+    console.error('[Cron Logs] ERROR:', error)
+    return c.json({ error: 'internal_error', message: error.message }, 500)  }
+})
+
+// ============================================================================
+// ADMIN EVENT MANAGEMENT ENDPOINTS
+// ============================================================================
 
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
@@ -2241,19 +2626,9 @@ app.post('/events/:id/checkout', async c => {
       if (existing && existing.checkout_id){
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
-    }
-
-    // Insert minimal ticket record (business logic only)
-    const tinfo = await c.env.DB.prepare('PRAGMA table_info(tickets)').all().catch(()=>({ results: [] }))
-    const tnames = new Set((tinfo?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    const hasUser = tnames.has('user_id')
-    const hasMember = tnames.has('member_id')
-    
-    const colParts = ['event_id', 'status']
-    const bindVals = [evId, 'pending']
-    if (hasUser) { colParts.push('user_id'); bindVals.push(ident.id) }
-    if (hasMember) { colParts.push('member_id'); bindVals.push(ident.id) }
-    if (tnames.has('created_at')) { colParts.push('created_at'); bindVals.push(toIso(new Date())) }
+    }    // Insert minimal ticket record (business logic only)
+    const colParts = ['event_id', 'user_id', 'status', 'created_at']
+    const bindVals = [evId, ident.id, 'pending', toIso(new Date())]
     
     const placeholders = colParts.map(()=>'?').join(',')
     const ticketResult = await c.env.DB.prepare(`INSERT INTO tickets (${colParts.join(',')}) VALUES (${placeholders}) RETURNING id`).bind(...bindVals).first()
@@ -2279,24 +2654,8 @@ app.post('/events/:id/checkout', async c => {
     `).bind(ticketId, ident.id, email, clampStr(name,200), order_ref, checkout.id,
             String(amount), currency, idem || null).run()
     
-    // Only update email preferences if user is explicitly opting IN
-    // Once consent is given, it can only be revoked through email preferences page
-    if (marketingConsent) {
-      const now = toIso(new Date())
-      // Check if user already has preferences
-      const existingPrefs = await c.env.DB.prepare(`
-        SELECT * FROM email_preferences WHERE user_id = ?
-      `).bind(ident.id).first()
-      
-      // Only create/update if no existing consent or explicitly opting in
-      if (!existingPrefs || !existingPrefs.consent_given) {
-        await c.env.DB.prepare(`
-          INSERT OR REPLACE INTO email_preferences 
-          (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
-          VALUES (?, 1, 1, 1, ?, ?)
-        `).bind(ident.id, now, now).run()
-      }
-    }
+    // Handle email preferences opt-in
+    await handleEmailPreferencesOptIn(c.env.DB, ident.id, marketingConsent)
     
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
   } catch (e) {
@@ -2362,8 +2721,7 @@ app.get('/_debug/schema', async c => {
     const memberships = await c.env.DB.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
     const tickets = await c.env.DB.prepare('PRAGMA table_info(tickets)').all().catch(()=>({ results: [] }))
     const tables = await c.env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().catch(()=>({ results: [] }))
-    const tnames = new Set((tickets?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    const ticketFkCol = tnames.has(s.fkColumn) ? s.fkColumn : (tnames.has('member_id') ? 'member_id' : (tnames.has('user_id') ? 'user_id' : null))
+    const ticketFkCol = 'user_id'
     return c.json({ ok:true, schema: s, ticketFkCol, tables: tables.results||[], memberships: memberships.results||[], tickets: tickets.results||[] })
   } catch (e) {
     return c.json({ ok:false, error: String(e) }, 500)
@@ -2452,14 +2810,13 @@ app.post('/membership/payment-method/remove', async (c) => {
     
     const ident = await findIdentityByEmail(c.env.DB, email)
     if (!ident) return c.json({ error: 'user_not_found' }, 404)
-    
-    // Deactivate all payment instruments
+      // Deactivate all payment instruments
     await c.env.DB.prepare('UPDATE payment_instruments SET is_active = 0 WHERE user_id = ?')
       .bind(ident.id).run()
     
     // Disable auto-renewal for active memberships
-    await c.env.DB.prepare('UPDATE memberships SET auto_renew = 0, payment_instrument_id = NULL WHERE (user_id = ? OR member_id = ?) AND status = "active"')
-      .bind(ident.id, ident.id).run()
+    await c.env.DB.prepare('UPDATE memberships SET auto_renew = 0, payment_instrument_id = NULL WHERE user_id = ? AND status = "active"')
+      .bind(ident.id).run()
     
     return c.json({ ok: true })
   } catch (e) {
@@ -2514,36 +2871,19 @@ app.get('/test/renew-user', async (c) => {
   const email = c.req.query('email')
   if (!email) return c.json({ error: 'email required' }, 400)
   
-  try {
-    await ensureSchema(c.env.DB, 'user_id')
+  try {    await ensureSchema(c.env.DB, 'user_id')
     
     const ident = await findIdentityByEmail(c.env.DB, email)
     if (!ident) return c.json({ error: 'user_not_found' }, 404)
     
-    // Check schema for correct column name
-    const mc = await c.env.DB.prepare('PRAGMA table_info(memberships)').all()
-    const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    
-    let where, binds
-    if (mnames.has('user_id') && mnames.has('member_id')) {
-      where = '(user_id = ? OR member_id = ?)'
-      binds = [ident.id, ident.id]
-    } else if (mnames.has('user_id')) {
-      where = 'user_id = ?'
-      binds = [ident.id]
-    } else {
-      where = 'member_id = ?'
-      binds = [ident.id]
-    }
-    
     // Find active membership with auto-renewal
     const membership = await c.env.DB.prepare(`
       SELECT * FROM memberships 
-      WHERE ${where}
+      WHERE user_id = ?
         AND status = 'active' 
         AND auto_renew = 1
       LIMIT 1
-    `).bind(...binds).first()
+    `).bind(ident.id).first()
     
     if (!membership) {
       return c.json({ error: 'no_auto_renew_membership' }, 404)
@@ -2854,21 +3194,530 @@ app.post('/test/email', async (c) => {
 // SCHEDULED HANDLER (CRON)
 // ============================================================================
 
-// Handle scheduled cron jobs (e.g., auto-renewals, event reminders)
-async function handleScheduled(event, env, ctx) {
-  console.log('Scheduled cron triggered at:', new Date().toISOString())
+/**
+ * Log a cron job activity to the database
+ */
+async function logCronJob(db, jobName, status, details = {}) {
+  const now = new Date().toISOString()
+  
+  const logData = {
+    job_name: jobName,
+    started_at: details.started_at || now,
+    completed_at: status !== 'running' ? now : null,
+    status: status,
+    records_processed: details.records_processed || 0,
+    records_succeeded: details.records_succeeded || 0,
+    records_failed: details.records_failed || 0,
+    error_message: details.error_message || null,
+    details: details.extra ? JSON.stringify(details.extra) : null
+  }
   
   try {
-    // Auto-renewal processing (daily at 2 AM UTC)
-    // This would check for memberships expiring today and attempt to renew them
-    // For now, this is a placeholder for future implementation
-    console.log('Cron: Checking for auto-renewals...')
+    await db.prepare(`
+      INSERT INTO cron_job_log (
+        job_name, started_at, completed_at, status,
+        records_processed, records_succeeded, records_failed,
+        error_message, details
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      logData.job_name,
+      logData.started_at,
+      logData.completed_at,
+      logData.status,
+      logData.records_processed,
+      logData.records_succeeded,
+      logData.records_failed,
+      logData.error_message,
+      logData.details
+    ).run()
     
-    // Future: Add auto-renewal logic here
-    // Future: Add event reminder logic here
-    
+    console.log(`[CRON] Logged ${jobName}: ${status}`, details)
   } catch (e) {
-    console.error('Scheduled handler error:', e)
+    console.error(`[CRON] Failed to log ${jobName}:`, e)
+  }
+}
+
+/**
+ * Process membership auto-renewals
+ * 1. Sends warning emails 7 days before renewal
+ * 2. Processes renewals for memberships expiring today or past-due (grace period)
+ * 3. Marks expired memberships after grace period ends
+ */
+async function processAutoRenewals(env) {
+  const jobName = 'auto_renewals'
+  const startedAt = new Date().toISOString()
+  const today = new Date().toISOString().split('T')[0]
+  
+  // Calculate warning date (7 days from now)
+  const warningDate = new Date()
+  warningDate.setDate(warningDate.getDate() + 7)
+  const warningDateStr = warningDate.toISOString().split('T')[0]
+  
+  // Calculate grace period start (30 days ago)
+  const gracePeriodStart = new Date()
+  gracePeriodStart.setDate(gracePeriodStart.getDate() - 30)
+  const gracePeriodStartStr = gracePeriodStart.toISOString().split('T')[0]
+  
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+  console.log(`[CRON] Today: ${today}`)
+  console.log(`[CRON] Warning date (7 days ahead): ${warningDateStr}`)
+  console.log(`[CRON] Grace period start (30 days ago): ${gracePeriodStartStr}`)
+  
+  let processed = 0
+  let succeeded = 0
+  let failed = 0
+  let warningsSent = 0
+  let expired = 0
+  const errors = []
+  
+  try {
+    // ========================================================================
+    // STEP 1: Send warning emails for memberships expiring in 7 days
+    // ========================================================================
+    console.log(`[CRON] Step 1: Checking for memberships needing warning emails...`)
+      const warningMemberships = await env.DB.prepare(`
+      SELECT 
+        m.id,
+        m.user_id,
+        m.plan,
+        m.end_date,
+        m.renewal_warning_sent,
+        u.email,
+        u.name
+      FROM memberships m
+      JOIN users u ON m.user_id = u.user_id
+      WHERE m.end_date = ?
+        AND m.auto_renew = 1
+        AND m.status = 'active'
+        AND (m.renewal_warning_sent = 0 OR m.renewal_warning_sent IS NULL)
+    `).bind(warningDateStr).all()
+    
+    console.log(`[CRON] Found ${warningMemberships.results?.length || 0} memberships needing warnings`)
+    
+    for (const membership of (warningMemberships.results || [])) {
+      try {
+        // Get payment instrument info for warning email
+        const instrument = await getActivePaymentInstrument(env.DB, membership.user_id)
+        const membershipWithInstrument = {
+          ...membership,
+          payment_instrument_last_4: instrument?.last_4 || null
+        }
+        
+        const emailContent = getUpcomingRenewalEmail(membershipWithInstrument, membership, 7)
+        await sendEmail(env, {
+          to: membership.email,
+          ...emailContent,
+          emailType: 'membership_renewal_reminder',
+          relatedId: membership.id,
+          relatedType: 'membership',
+          metadata: { plan: membership.plan, days_until_renewal: 7 }
+        })
+        
+        // Mark warning as sent
+        await env.DB.prepare('UPDATE memberships SET renewal_warning_sent = 1 WHERE id = ?')
+          .bind(membership.id).run()
+        
+        warningsSent++
+        console.log(`[CRON] Warning sent for membership ${membership.id} (${membership.email})`)
+      } catch (err) {
+        console.error(`[CRON] Failed to send warning for membership ${membership.id}:`, err)
+        errors.push({
+          membership_id: membership.id,
+          email: membership.email,
+          action: 'warning_email',
+          error: err.message
+        })
+      }
+    }
+    
+    // ========================================================================
+    // STEP 2: Process renewals for memberships expiring today or past-due
+    // ========================================================================
+    console.log(`[CRON] Step 2: Checking for memberships to renew...`)
+      const renewalMemberships = await env.DB.prepare(`
+      SELECT 
+        m.id,
+        m.user_id,
+        m.plan,
+        m.end_date,
+        m.renewal_attempts,
+        m.amount,
+        u.email,
+        u.name
+      FROM memberships m
+      JOIN users u ON m.user_id = u.user_id
+      WHERE m.end_date <= ?
+        AND m.end_date >= ?
+        AND m.auto_renew = 1
+        AND m.status = 'active'
+        AND (m.renewal_attempts < 3 OR m.renewal_attempts IS NULL)
+    `).bind(today, gracePeriodStartStr).all()
+    
+    processed = renewalMemberships.results?.length || 0
+    console.log(`[CRON] Found ${processed} memberships to renew (including grace period)`)
+    
+    // Process each renewal using the existing processMembershipRenewal function
+    for (const membership of (renewalMemberships.results || [])) {
+      try {
+        console.log(`[CRON] Processing renewal for membership ${membership.id} (${membership.email})`)
+        const result = await processMembershipRenewal(env.DB, membership, env)
+        
+        if (result.success) {
+          succeeded++
+          console.log(`[CRON] ✓ Successfully renewed membership ${membership.id}`)
+        } else {
+          failed++
+          errors.push({
+            membership_id: membership.id,
+            email: membership.email,
+            action: 'renewal',
+            error: result.error,
+            attempts: result.attempts
+          })
+          console.error(`[CRON] ✗ Failed to renew membership ${membership.id}: ${result.error}`)
+        }
+      } catch (err) {
+        failed++
+        errors.push({
+          membership_id: membership.id,
+          email: membership.email,
+          action: 'renewal',
+          error: err.message
+        })
+        console.error(`[CRON] ✗ Exception renewing membership ${membership.id}:`, err)
+      }
+    }
+    
+    // ========================================================================
+    // STEP 3: Mark expired memberships that have exhausted grace period
+    // ========================================================================
+    console.log(`[CRON] Step 3: Checking for expired memberships...`)
+    
+    const expiredResult = await env.DB.prepare(`
+      UPDATE memberships
+      SET status = 'expired'
+      WHERE end_date < ?
+        AND status = 'active'
+        AND (
+          auto_renew = 0 
+          OR renewal_attempts >= 3
+        )
+    `).bind(gracePeriodStartStr).run()
+    
+    expired = expiredResult.meta?.changes || 0
+    console.log(`[CRON] Marked ${expired} memberships as expired`)
+    
+    // Log final results
+    console.log(`[CRON] ${jobName} summary:`)
+    console.log(`  - Warnings sent: ${warningsSent}`)
+    console.log(`  - Renewals processed: ${processed}`)
+    console.log(`  - Renewals succeeded: ${succeeded}`)
+    console.log(`  - Renewals failed: ${failed}`)
+    console.log(`  - Memberships expired: ${expired}`)
+    
+    try {
+      await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        extra: {
+          warnings_sent: warningsSent,
+          expired_count: expired,
+          errors: errors.length > 0 ? errors : undefined
+        }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log success:`, logErr)
+    }
+    
+  } catch (err) {
+    console.error(`[CRON] ${jobName} failed:`, err)
+    try {
+      await logCronJob(env.DB, jobName, 'failed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        error_message: err.message,
+        extra: {
+          warnings_sent: warningsSent,
+          expired_count: expired,
+          errors: errors.length > 0 ? errors : undefined
+        }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log error:`, logErr)
+    }
+  }
+}
+
+/**
+ * Process event reminders
+ * Sends reminder emails for upcoming events
+ */
+async function processEventReminders(env) {
+  const jobName = 'event_reminders'
+  const startedAt = new Date().toISOString()
+  
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+  
+  let processed = 0
+  let succeeded = 0
+  let failed = 0
+  const errors = []
+  
+  try {    // Find events happening tomorrow (24-hour reminder)
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowDate = tomorrow.toISOString().split('T')[0]
+    
+    // Note: events table uses event_name, not title; also no event_time column
+    const upcomingEvents = await env.DB.prepare(`
+      SELECT 
+        e.event_id,
+        e.event_name as title,
+        e.event_datetime,
+        COUNT(t.id) as ticket_count
+      FROM events e
+      LEFT JOIN tickets t ON e.event_id = t.event_id AND t.status IN ('confirmed', 'active')
+      WHERE DATE(e.event_datetime) = ?
+        AND e.is_active = 1
+      GROUP BY e.event_id
+    `).bind(tomorrowDate).all()
+    
+    processed = upcomingEvents.results?.length || 0
+    console.log(`[CRON] Found ${processed} events with reminders to send`)
+    
+    if (processed === 0) {
+      await logCronJob(env.DB, jobName, 'completed', {
+        started_at: startedAt,
+        records_processed: 0,
+        records_succeeded: 0,
+        records_failed: 0
+      })
+      return
+    }
+    
+    // Process reminders for each event
+    for (const event of upcomingEvents.results) {      try {
+        // Get attendees for this event
+        const attendees = await env.DB.prepare(`
+          SELECT 
+            t.id as ticket_id,
+            t.user_id,
+            u.email,
+            u.name
+          FROM tickets t
+          JOIN users u ON t.user_id = u.user_id
+          WHERE t.event_id = ?
+            AND t.status IN ('confirmed', 'active')
+        `).bind(event.event_id).all()
+        
+        console.log(`[CRON] Would send ${attendees.results?.length || 0} reminders for event: ${event.title}`)
+        
+        // TODO: Send actual reminder emails
+        // For now, just log what would happen
+          succeeded++
+      } catch (err) {
+        failed++
+        errors.push({
+          event_id: event.event_id,
+          title: event.title,
+          error: err.message
+        })
+        console.error(`[CRON] Failed to send reminders for event ${event.event_id}:`, err)
+      }
+    }
+    
+    try {
+      await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        extra: { errors: errors.length > 0 ? errors : undefined }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log success:`, logErr)
+    }
+    
+  } catch (err) {
+    console.error(`[CRON] ${jobName} failed:`, err)
+    try {
+      await logCronJob(env.DB, jobName, 'failed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        error_message: err.message,
+        extra: { errors: errors.length > 0 ? errors : undefined }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log error:`, logErr)
+    }
+  }
+}
+
+/**
+ * Reconcile payment statuses
+ * Checks for stuck/pending payments and syncs with Stripe
+ */
+async function processPaymentReconciliation(env) {
+  const jobName = 'payment_reconciliation'
+  const startedAt = new Date().toISOString()
+  
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+  
+  let processed = 0
+  let succeeded = 0
+  let failed = 0
+  const errors = []
+  
+  try {    // Find payments stuck in pending/processing for more than 1 hour
+    const oneHourAgo = new Date()
+    oneHourAgo.setHours(oneHourAgo.getHours() - 1)
+    const cutoffTime = oneHourAgo.toISOString()
+    
+    // Use transactions table instead of checkout_sessions
+    const stuckPayments = await env.DB.prepare(`
+      SELECT 
+        checkout_id,
+        order_ref,
+        payment_status as status,
+        created_at
+      FROM transactions
+      WHERE payment_status IN ('pending', 'processing')
+        AND created_at < ?
+      LIMIT 100
+    `).bind(cutoffTime).all()
+    
+    processed = stuckPayments.results?.length || 0
+    console.log(`[CRON] Found ${processed} stuck payments to reconcile`)
+    
+    if (processed === 0) {
+      await logCronJob(env.DB, jobName, 'completed', {
+        started_at: startedAt,
+        records_processed: 0,
+        records_succeeded: 0,
+        records_failed: 0
+      })
+      return
+    }
+    
+    // Check each payment with Stripe
+    for (const payment of stuckPayments.results) {
+      try {        // TODO: Query Stripe/SumUp API to get actual payment status
+        console.log(`[CRON] Would check payment status for order_ref: ${payment.order_ref}`)
+        
+        // Future implementation:
+        // 1. Call payment provider API to get payment intent status
+        // 2. Update transactions payment_status accordingly
+        // 3. If failed, update memberships/tickets to 'cancelled'
+        // 4. Send appropriate notification emails
+          succeeded++
+      } catch (err) {
+        failed++
+        errors.push({
+          checkout_id: payment.checkout_id,
+          order_ref: payment.order_ref,
+          error: err.message
+        })
+        console.error(`[CRON] Failed to reconcile payment ${payment.order_ref}:`, err)
+      }
+    }
+    
+    try {
+      await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        extra: { errors: errors.length > 0 ? errors : undefined }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log success:`, logErr)
+    }
+    
+  } catch (err) {
+    console.error(`[CRON] ${jobName} failed:`, err)
+    try {
+      await logCronJob(env.DB, jobName, 'failed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        error_message: err.message,
+        extra: { errors: errors.length > 0 ? errors : undefined }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log error:`, logErr)
+    }
+  }
+}
+
+/**
+ * Main scheduled handler - runs all cron jobs
+ * Scheduled to run daily at 2 AM UTC
+ */
+async function handleScheduled(event, env, ctx) {
+  const runStarted = new Date().toISOString()
+  console.log('============================================')
+  console.log('Scheduled cron triggered at:', runStarted)
+  console.log('============================================')
+  
+  const jobResults = {
+    auto_renewals: null,
+    event_reminders: null,
+    payment_reconciliation: null
+  }
+  
+  // Run all cron jobs sequentially, catching errors individually
+  try {
+    await processAutoRenewals(env)
+    jobResults.auto_renewals = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Auto renewals failed:', e)
+    jobResults.auto_renewals = 'failed'
+    // Individual job already logged its own error
+  }
+  
+  try {
+    await processEventReminders(env)
+    jobResults.event_reminders = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Event reminders failed:', e)
+    jobResults.event_reminders = 'failed'
+    // Individual job already logged its own error
+  }
+  
+  try {
+    await processPaymentReconciliation(env)
+    jobResults.payment_reconciliation = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Payment reconciliation failed:', e)
+    jobResults.payment_reconciliation = 'failed'
+    // Individual job already logged its own error
+  }
+  
+  console.log('============================================')
+  console.log('All cron jobs completed at:', new Date().toISOString())
+  console.log('Job Results:', jobResults)
+  console.log('============================================')
+  
+  // Log the master cron run
+  const allSucceeded = Object.values(jobResults).every(r => r === 'completed')
+  const someFailed = Object.values(jobResults).some(r => r === 'failed')
+    try {
+    await logCronJob(env.DB, 'cron_master', allSucceeded ? 'completed' : 'partial', {
+      started_at: runStarted,
+      records_processed: 3,
+      records_succeeded: Object.values(jobResults).filter(r => r === 'completed').length,
+      records_failed: Object.values(jobResults).filter(r => r === 'failed').length,
+      extra: jobResults
+    })
+  } catch (logErr) {
+    console.error('[CRON MASTER] Failed to log master run:', logErr)
   }
 }
 

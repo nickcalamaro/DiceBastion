@@ -29,6 +29,33 @@ Login
 </form>
 </div>
 
+<!-- Non-Admin Message -->
+<div id="non-admin-container" style="max-width: 600px; margin: 5rem auto; display: none;">
+<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; text-align: center;">
+<div style="font-size: 3rem; margin-bottom: 1rem;">🔒</div>
+<h2 style="margin-top: 0; margin-bottom: 1rem;">Admin Access Required</h2>
+<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
+You're logged in as <strong id="non-admin-email-display"></strong>, but you don't have admin privileges.
+</p>
+<div style="background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
+<p style="margin: 0; color: rgb(var(--color-neutral-700));">
+If you need to manage products, events, or orders, please contact our team to request admin access.
+</p>
+</div>
+<div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+<a href="/" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
+Go to Home
+</a>
+<a href="/events" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
+Browse Events
+</a>
+<button id="non-admin-logout-btn" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+Logout
+</button>
+</div>
+</div>
+</div>
+
 <!-- Admin Dashboard -->
 <div id="admin-dashboard" style="display: none;">
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">  <h1 style="margin: 0;">Admin Dashboard</h1>
@@ -47,6 +74,7 @@ Login
 <button class="tab-btn active" data-tab="products" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid rgb(var(--color-primary-600)); cursor: pointer; font-weight: 600; color: rgb(var(--color-primary-600));">Products</button>
 <button class="tab-btn" data-tab="events" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Events</button>
 <button class="tab-btn" data-tab="orders" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Orders</button>
+<button class="tab-btn" data-tab="cron" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Cron Jobs</button>
 </div>
 
 <!-- Products Tab -->
@@ -346,6 +374,64 @@ Login
 <h2>Recent Orders</h2>
 <div id="orders-list"></div>
 </div>
+
+<!-- Cron Jobs Tab -->
+<div id="cron-tab" class="tab-content" style="display: none;">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+<h2 style="margin: 0;">Automated Jobs</h2>
+<button id="refresh-cron-btn" onclick="loadCronLogs()" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+🔄 Refresh
+</button>
+</div>
+
+<!-- Job Filter -->
+<div style="margin-bottom: 1.5rem;">
+<label for="cron-job-filter" style="font-weight: 600; margin-right: 0.5rem;">Filter by Job:</label>
+<select id="cron-job-filter" onchange="loadCronLogs()" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<option value="">All Jobs</option>
+<option value="auto_renewals">Auto Renewals</option>
+<option value="event_reminders">Event Reminders</option>
+<option value="payment_reconciliation">Payment Reconciliation</option>
+</select>
+</div>
+
+<!-- Summary Cards -->
+<div id="cron-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+<!-- Will be populated by JavaScript -->
+</div>
+
+<!-- Cron Logs Table -->
+<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; overflow: hidden;">
+<div style="overflow-x: auto;">
+<table style="width: 100%; border-collapse: collapse;">
+<thead>
+<tr style="background: rgb(var(--color-neutral-100)); border-bottom: 2px solid rgb(var(--color-neutral-200));">
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Job Name</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Started</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Duration</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Status</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Processed</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Success</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Failed</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600;">Details</th>
+</tr>
+</thead>
+<tbody id="cron-logs-table">
+<tr>
+<td colspan="8" style="padding: 2rem; text-align: center; color: rgb(var(--color-neutral-500));">
+Loading cron job logs...
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<!-- Pagination -->
+<div id="cron-pagination" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+<!-- Will be populated by JavaScript -->
+</div>
+</div>
 </div>
 </div>
 
@@ -484,18 +570,35 @@ sessionToken = localStorage.getItem('admin_session');
 currentUser = JSON.parse(localStorage.getItem('admin_user') || 'null');
 
 if (sessionToken && currentUser) {
+// Check if user is admin
+if (currentUser.is_admin) {
 // Optimistically show dashboard while verifying
 document.getElementById('login-container').style.display = 'none';
+document.getElementById('non-admin-container').style.display = 'none';
 document.getElementById('admin-dashboard').style.display = 'block';
 loadProducts();
 loadEvents();
 loadOrders();
+loadCronLogs();
 // Verify session is still valid in background
 verifySession();
 } else {
+// User is logged in but not an admin - show message
+showNonAdminMessage(currentUser);
+}
+} else {
 // No session, show login
 document.getElementById('login-container').style.display = 'block';
+document.getElementById('non-admin-container').style.display = 'none';
+document.getElementById('admin-dashboard').style.display = 'none';
 }
+}
+
+function showNonAdminMessage(user) {
+document.getElementById('login-container').style.display = 'none';
+document.getElementById('admin-dashboard').style.display = 'none';
+document.getElementById('non-admin-container').style.display = 'block';
+document.getElementById('non-admin-email-display').textContent = user.email;
 }
 
 async function verifySession() {
@@ -542,12 +645,16 @@ localStorage.setItem('admin_session', sessionToken);
 localStorage.setItem('admin_user', JSON.stringify(currentUser));
 localStorage.setItem('admin_token', sessionToken); // For docs auth guard
 
-document.getElementById('login-container').style.display = 'none';
-document.getElementById('admin-dashboard').style.display = 'block';
-loadProducts();
-loadEvents();
-loadOrders();
-} else {
+      // Trigger login event for footer update
+      window.dispatchEvent(new Event('userLoggedIn'));
+      
+      document.getElementById('login-container').style.display = 'none';
+      document.getElementById('admin-dashboard').style.display = 'block';
+      loadProducts();
+      loadEvents();
+      loadOrders();
+      loadCronLogs();
+    } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
 errorEl.style.display = 'block';
 }
@@ -571,8 +678,35 @@ localStorage.removeItem('admin_user');
 localStorage.removeItem('admin_token');
 sessionToken = null;
 currentUser = null;
+
+// Trigger logout event for footer update
+window.dispatchEvent(new Event('userLoggedOut'));
+
 document.getElementById('login-container').style.display = 'block';
 document.getElementById('admin-dashboard').style.display = 'none';
+document.getElementById('non-admin-container').style.display = 'none';
+});
+
+// Non-admin logout button
+document.getElementById('non-admin-logout-btn')?.addEventListener('click', async () => {
+if (sessionToken) {
+await fetch(`${API_BASE}/logout`, {
+method: 'POST',
+headers: { 'X-Session-Token': sessionToken }
+});
+}
+
+localStorage.removeItem('admin_session');
+localStorage.removeItem('admin_user');
+localStorage.removeItem('admin_token');
+sessionToken = null;
+currentUser = null;
+
+// Trigger logout event for footer update
+window.dispatchEvent(new Event('userLoggedOut'));
+
+// Redirect to home
+window.location.href = '/';
 });
 
 // Rich Text Editor Functions
@@ -1446,6 +1580,189 @@ const list = document.getElementById('orders-list');
 list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">Order management coming soon. Use SQL queries for now.</p>';
 }
 
+// Cron Jobs
+let cronCurrentPage = 0;
+const cronPageSize = 20;
+
+async function loadCronLogs(page = 0) {
+  cronCurrentPage = page;
+  const tableBody = document.getElementById('cron-logs-table');
+  const summaryDiv = document.getElementById('cron-summary');
+  const paginationDiv = document.getElementById('cron-pagination');
+  const jobFilter = document.getElementById('cron-job-filter')?.value || '';
+  
+  try {
+    const offset = page * cronPageSize;
+    let url = `https://dicebastion-memberships.ncalamaro.workers.dev/admin/cron-logs?limit=${cronPageSize}&offset=${offset}`;
+    if (jobFilter) {
+      url += `&job_name=${encodeURIComponent(jobFilter)}`;
+    }
+
+    const res = await fetch(url, {
+      headers: {
+        'X-Session-Token': sessionToken
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error('Failed to fetch cron logs');
+    }
+
+    const data = await res.json();
+    
+    // Render summary cards
+    if (data.summary && data.summary.length > 0) {
+      summaryDiv.innerHTML = data.summary.map(job => {
+        const successRate = job.total_runs > 0 
+          ? Math.round(((job.completed || 0) / job.total_runs) * 100) 
+          : 0;
+        const lastRun = job.last_run ? new Date(job.last_run).toLocaleString() : 'Never';
+        
+        return `
+          <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 1.5rem;">
+            <h3 style="margin: 0 0 1rem 0; font-size: 1rem; color: rgb(var(--color-neutral-700));">
+              ${formatJobName(job.job_name)}
+            </h3>
+            <div style="display: grid; gap: 0.5rem; font-size: 0.875rem;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: rgb(var(--color-neutral-600));">Total Runs (7d):</span>
+                <strong>${job.total_runs}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: rgb(var(--color-neutral-600));">Success Rate:</span>
+                <strong style="color: ${successRate >= 90 ? '#4CAF50' : successRate >= 70 ? '#ff9800' : '#f44336'};">${successRate}%</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: rgb(var(--color-neutral-600));">Processed:</span>
+                <strong>${job.total_processed || 0}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: rgb(var(--color-neutral-600));">Last Run:</span>
+                <strong style="font-size: 0.75rem;">${lastRun}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      summaryDiv.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No job summary available</p>';
+    }
+    
+    // Render logs table
+    if (!data.logs || data.logs.length === 0) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="8" style="padding: 2rem; text-align: center; color: rgb(var(--color-neutral-500));">
+            No cron job logs found
+          </td>
+        </tr>
+      `;
+      paginationDiv.innerHTML = '';
+      return;
+    }
+
+    tableBody.innerHTML = data.logs.map(log => {
+      const startDate = new Date(log.started_at);
+      const duration = log.completed_at 
+        ? Math.round((new Date(log.completed_at) - startDate) / 1000) 
+        : null;
+      
+      const statusColors = {
+        completed: '#4CAF50',
+        failed: '#f44336',
+        partial: '#ff9800',
+        running: '#2196F3'
+      };
+      const statusColor = statusColors[log.status] || '#666';
+      
+      return `
+        <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
+          <td style="padding: 1rem;">
+            <strong>${formatJobName(log.job_name)}</strong>
+          </td>
+          <td style="padding: 1rem;">
+            <div style="font-weight: 500;">${startDate.toLocaleDateString()}</div>
+            <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-500));">${startDate.toLocaleTimeString()}</div>
+          </td>
+          <td style="padding: 1rem;">
+            ${duration !== null ? `${duration}s` : '-'}
+          </td>
+          <td style="padding: 1rem;">
+            <span style="padding: 0.25rem 0.75rem; background: ${statusColor}22; color: ${statusColor}; border-radius: 4px; font-weight: 500; font-size: 0.875rem; text-transform: uppercase;">
+              ${log.status}
+            </span>
+          </td>
+          <td style="padding: 1rem; text-align: center;">
+            ${log.records_processed || 0}
+          </td>
+          <td style="padding: 1rem; text-align: center; color: #4CAF50; font-weight: 500;">
+            ${log.records_succeeded || 0}
+          </td>
+          <td style="padding: 1rem; text-align: center; color: #f44336; font-weight: 500;">
+            ${log.records_failed || 0}
+          </td>
+          <td style="padding: 1rem; font-size: 0.875rem;">
+            ${log.error_message ? `<span style="color: #f44336;" title="${log.error_message}">⚠️ Error</span>` : ''}
+            ${log.details ? `<button onclick="showCronDetails(${log.log_id}, '${escapeHtml(log.details)}')" style="padding: 0.25rem 0.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">View</button>` : '-'}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Render pagination
+    const hasMore = data.logs.length === cronPageSize;
+    paginationDiv.innerHTML = `
+      <button 
+        onclick="loadCronLogs(${page - 1})" 
+        ${page === 0 ? 'disabled' : ''}
+        style="padding: 0.5rem 1rem; background: ${page === 0 ? 'rgb(var(--color-neutral-200))' : 'rgb(var(--color-primary-600))'}; color: ${page === 0 ? 'rgb(var(--color-neutral-500))' : 'white'}; border: none; border-radius: 6px; cursor: ${page === 0 ? 'not-allowed' : 'pointer'};">
+        ← Previous
+      </button>
+      <span>Page ${page + 1}</span>
+      <button 
+        onclick="loadCronLogs(${page + 1})" 
+        ${!hasMore ? 'disabled' : ''}
+        style="padding: 0.5rem 1rem; background: ${!hasMore ? 'rgb(var(--color-neutral-200))' : 'rgb(var(--color-primary-600))'}; color: ${!hasMore ? 'rgb(var(--color-neutral-500))' : 'white'}; border: none; border-radius: 6px; cursor: ${!hasMore ? 'not-allowed' : 'pointer'};">
+        Next →
+      </button>
+    `;
+
+  } catch (err) {
+    console.error('Error loading cron logs:', err);
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="8" style="padding: 2rem; text-align: center; color: #f44336;">
+          Error loading cron logs: ${err.message}
+        </td>
+      </tr>
+    `;
+  }
+}
+
+function formatJobName(jobName) {
+  const names = {
+    auto_renewals: '🔄 Auto Renewals',
+    event_reminders: '📧 Event Reminders',
+    payment_reconciliation: '💳 Payment Reconciliation'
+  };
+  return names[jobName] || jobName;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function showCronDetails(logId, details) {
+  try {
+    const parsed = JSON.parse(details);
+    alert(`Job Details (ID: ${logId}):\n\n${JSON.stringify(parsed, null, 2)}`);
+  } catch {
+    alert(`Job Details (ID: ${logId}):\n\n${details}`);
+  }
+}
+
 // Initialize
 checkAuth();
+
 </script>
