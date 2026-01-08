@@ -1244,13 +1244,14 @@ function getExpiredPaymentMethodEmail(membership, user) {
 }
 
 function getTicketConfirmationEmail(event, user, transaction) {
-  const eventDate = new Date(event.event_date).toLocaleDateString('en-GB', { 
+  const eventDateTime = new Date(event.event_datetime)
+  const eventDate = eventDateTime.toLocaleDateString('en-GB', { 
     weekday: 'long', 
     year: 'numeric', 
     month: 'long', 
     day: 'numeric' 
   })
-  const eventTime = event.event_time || 'TBC'
+  const eventTime = eventDateTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
   const amount = transaction.amount || '0.00'
   const currency = transaction.currency || 'GBP'
   const sym = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$'
@@ -2843,6 +2844,29 @@ app.get('/test/renew-user', async (c) => {
   }
 })
 
+// Test endpoint to manually trigger event reminders
+app.get('/test/event-reminders', async (c) => {
+  try {
+    console.log('[TEST] Manually triggering event reminders...')
+    
+    // Call the processEventReminders function
+    await processEventReminders(c.env)
+    
+    return c.json({ 
+      success: true, 
+      message: 'Event reminders processed. Check logs for details.',
+      timestamp: new Date().toISOString()
+    })
+  } catch (e) {
+    console.error('[TEST] Event reminder test error:', e)
+    return c.json({ 
+      success: false, 
+      error: String(e.message || e), 
+      stack: String(e.stack || '') 
+    }, 500)
+  }
+})
+
 // ============================================================================
 // PRODUCT & SHOP API ENDPOINTS
 // ============================================================================
@@ -3437,28 +3461,108 @@ async function processEventReminders(env) {
         records_failed: 0
       })
       return
-    }
-    
-    // Process reminders for each event
-    for (const event of upcomingEvents.results) {      try {
-        // Get attendees for this event
+    }      // Process reminders for each event
+    for (const event of upcomingEvents.results) {
+      try {        // Get attendees for this event
         const attendees = await env.DB.prepare(`
           SELECT 
             t.id as ticket_id,
             t.user_id,
+            t.status,
             u.email,
-            u.name
+            u.name,
+            tr.order_ref
           FROM tickets t
           JOIN users u ON t.user_id = u.user_id
+          LEFT JOIN transactions tr ON tr.reference_id = t.id AND tr.transaction_type = 'ticket'
           WHERE t.event_id = ?
             AND t.status IN ('confirmed', 'active')
         `).bind(event.event_id).all()
         
-        console.log(`[CRON] Would send ${attendees.results?.length || 0} reminders for event: ${event.title}`)
+        const attendeeCount = attendees.results?.length || 0
+        console.log(`[CRON] Sending ${attendeeCount} reminders for event: ${event.title}`)
         
-        // TODO: Send actual reminder emails
-        // For now, just log what would happen
+        if (attendeeCount === 0) {
+          console.log(`[CRON] No attendees found for event ${event.event_id}`)
           succeeded++
+          continue
+        }
+        
+        // Get full event details
+        const fullEvent = await env.DB.prepare(`
+          SELECT * FROM events WHERE event_id = ?
+        `).bind(event.event_id).first()
+        
+        if (!fullEvent) {
+          throw new Error(`Event ${event.event_id} not found`)
+        }
+        
+        // Check if we should send reminders (uses shouldSendEventReminder helper)
+        if (!shouldSendEventReminder(fullEvent.event_datetime)) {
+          console.log(`[CRON] Event ${event.event_id} is not within reminder window`)
+          succeeded++
+          continue
+        }
+        
+        // Send reminder email to each attendee
+        let emailsSent = 0
+        let emailsFailed = 0
+          for (const attendee of attendees.results) {
+          try {
+            console.log(`[CRON] Generating email for ${attendee.email}...`)
+            const emailContent = getEventReminderEmail(fullEvent, attendee, attendee)
+            console.log(`[CRON] Email content generated, subject: ${emailContent.subject}`)
+            
+            const emailResult = await sendEmail(env, {
+              to: attendee.email,
+              ...emailContent,
+              emailType: 'event_reminder',
+              relatedId: attendee.ticket_id,
+              relatedType: 'ticket',
+              metadata: { 
+                event_id: event.event_id, 
+                event_name: fullEvent.event_name,
+                event_date: fullEvent.event_datetime
+              }
+            })
+            
+            console.log(`[CRON] Email send result:`, emailResult)
+            
+            if (emailResult.success === false) {
+              throw new Error(emailResult.error || 'Email send failed')
+            }
+            
+            emailsSent++
+            console.log(`[CRON] ✓ Sent reminder to ${attendee.email} for event ${event.title}`)
+          } catch (emailErr) {
+            emailsFailed++
+            console.error(`[CRON] ✗ Failed to send reminder to ${attendee.email}:`, emailErr.message || emailErr)
+            console.error(`[CRON] Error stack:`, emailErr.stack)
+          }
+        }
+        
+        console.log(`[CRON] Event ${event.title}: ${emailsSent} sent, ${emailsFailed} failed`)
+        
+        if (emailsFailed === 0) {
+          succeeded++
+        } else if (emailsSent > 0) {
+          // Partial success
+          succeeded++
+          failed++
+          errors.push({
+            event_id: event.event_id,
+            title: event.title,
+            error: `${emailsFailed} of ${attendeeCount} emails failed`
+          })
+        } else {
+          // Total failure
+          failed++
+          errors.push({
+            event_id: event.event_id,
+            title: event.title,
+            error: `All ${attendeeCount} emails failed`
+          })
+        }
       } catch (err) {
         failed++
         errors.push({
@@ -3466,7 +3570,7 @@ async function processEventReminders(env) {
           title: event.title,
           error: err.message
         })
-        console.error(`[CRON] Failed to send reminders for event ${event.event_id}:`, err)
+        console.error(`[CRON] Failed to process reminders for event ${event.event_id}:`, err)
       }
     }
     

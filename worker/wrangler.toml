@@ -14,9 +14,15 @@ database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
 binding = "IMAGES"
 bucket_name = "dicebastion-images"
 
+# Service Bindings - Connect to payments worker
+[[services]]
+binding = "PAYMENTS"
+service = "dicebastion-payments"
+
 # Environment Variables (for local development)
 [vars]
 DEBUG = "false"
+PAYMENTS_WORKER_URL = "https://dicebastion-payments.ncalamaro.workers.dev"
 ALLOWED_ORIGIN = "http://localhost:1313,http://localhost:1314,http://localhost:8000,https://dicebastion.com,https://www.dicebastion.com,https://shop.dicebastion.com,https://dicebastion-shop.pages.dev"
 SUMUP_MERCHANT_CODE = "MUZHYEAH"
 ALLOW_TEST_BYPASS = "true"

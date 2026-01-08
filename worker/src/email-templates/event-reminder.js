@@ -141,7 +141,7 @@ The Dice Bastion Team
 Dice Bastion | Gibraltar's Premier Gaming Club
 dicebastion.com | info@dicebastion.com
 You're receiving this email because you registered for ${event.event_name}.
-```
+`
   
   return {
     subject: `⏰ Reminder: ${event.event_name} is tomorrow!`,
