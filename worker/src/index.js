@@ -2115,14 +2115,38 @@ app.get('/events', async c => {
         image_url,
         requires_purchase,
         is_recurring,
-        recurrence_pattern
+        recurrence_pattern,
+        recurrence_end_date
       FROM events 
       WHERE is_active = 1 
         AND (event_datetime >= datetime('now') OR is_recurring = 1)
       ORDER BY event_datetime ASC
     `).all()
     
-    return c.json(results || [])
+    // Calculate next occurrence for recurring events
+    const now = new Date()
+    const processedEvents = (results || []).map(event => {
+      if (event.is_recurring === 1) {
+        const nextOccurrence = calculateNextOccurrence(event, now)
+        if (!nextOccurrence) {
+          // Recurring event has ended
+          return null
+        }
+        return {
+          ...event,
+          event_datetime: nextOccurrence.toISOString(),
+          next_occurrence: nextOccurrence.toISOString()
+        }
+      }
+      return event
+    }).filter(e => e !== null)
+    
+    // Re-sort by calculated event_datetime
+    processedEvents.sort((a, b) => 
+      new Date(a.event_datetime) - new Date(b.event_datetime)
+    )
+    
+    return c.json(processedEvents)
   } catch (err) {
     console.error('Error fetching events:', err)
     return c.json({ error: 'failed_to_fetch_events' }, 500)  }
@@ -2294,11 +2318,21 @@ app.get('/events/:slug', async c => {
       FROM events 
       WHERE slug = ? AND is_active = 1
     `).bind(slug).first()
-    
-    if (!event) {
+      if (!event) {
       return c.json({ error: 'event_not_found' }, 404)
     }
-      return c.json(event)
+    
+    // Calculate next occurrence for recurring events
+    if (event.is_recurring === 1) {
+      const nextOccurrence = calculateNextOccurrence(event, new Date())
+      if (!nextOccurrence) {
+        return c.json({ error: 'event_ended' }, 404)
+      }
+      event.event_datetime = nextOccurrence.toISOString()
+      event.next_occurrence = nextOccurrence.toISOString()
+    }
+    
+    return c.json(event)
   } catch (err) {
     console.error('Error fetching event:', err)
     return c.json({ error: 'failed_to_fetch_event' }, 500)
