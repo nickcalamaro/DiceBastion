@@ -13,6 +13,28 @@ export default defineWorkersConfig({
         miniflare: {
           // Enable in-memory D1 database for testing
           d1Databases: ['DB'],
+          // Mock the PAYMENTS service binding for tests
+          serviceBindings: {
+            PAYMENTS: async (request) => {
+              // Simple mock payment service that returns success for tests
+              const url = new URL(request.url)
+              const path = url.pathname
+              
+              // Mock responses for common payment endpoints
+              if (path.includes('/checkout')) {
+                return new Response(JSON.stringify({
+                  checkoutId: 'test-checkout-id',
+                  orderRef: 'test-order-ref'
+                }), {
+                  headers: { 'Content-Type': 'application/json' }
+                })
+              }
+              
+              return new Response(JSON.stringify({ ok: true }), {
+                headers: { 'Content-Type': 'application/json' }
+              })
+            }
+          }
         },
       },
     },
