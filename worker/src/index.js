@@ -2715,6 +2715,109 @@ app.get('/events/:slug', async c => {
 })
 
 // ============================================================================
+// ADMIN MEMBERSHIP MANAGEMENT ENDPOINT
+// ============================================================================
+
+// Get memberships (admin only)
+app.get('/admin/memberships', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    const now = toIso(new Date())
+    const session = await c.env.DB.prepare(`
+      SELECT s.*, u.is_admin, u.is_active
+      FROM user_sessions s
+      JOIN users u ON s.user_id = u.user_id
+      WHERE s.session_token = ? AND s.expires_at > ? AND u.is_active = 1 AND u.is_admin = 1
+    `).bind(sessionToken, now).first()
+    
+    if (!session) {
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    
+    // Get filter parameter
+    const url = new URL(c.req.url)
+    const filter = url.searchParams.get('filter') || 'all'
+      // Build query based on filter
+    let whereClause = ''
+    const thirtyDaysFromNow = toIso(new Date(Date.now() + 1 * 24 * 60 * 60 * 1000))
+    
+    if (filter === 'active') {
+      whereClause = `WHERE m.status = 'active' AND m.end_date > '${now}'`
+    } else if (filter === 'expiring') {
+      whereClause = `WHERE m.status = 'active' AND m.end_date > '${now}' AND m.end_date <= '${thirtyDaysFromNow}'`
+    } else if (filter === 'expired') {
+      whereClause = `WHERE m.status = 'active' AND m.end_date <= '${now}'`
+    } else {
+      whereClause = `WHERE m.status IN ('active', 'pending')`
+    }
+    
+    // Get memberships with user details
+    const memberships = await c.env.DB.prepare(`
+      SELECT 
+        m.id,
+        m.user_id,
+        m.plan,
+        m.status,
+        m.start_date,
+        m.end_date,
+        m.auto_renew,
+        m.amount,
+        m.currency,
+        m.order_ref,
+        u.email,
+        u.name
+      FROM memberships m
+      JOIN users u ON m.user_id = u.user_id
+      ${whereClause}
+      ORDER BY m.end_date ASC
+    `).all()
+    
+    // Calculate stats
+    const statsData = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(CASE WHEN status = 'active' AND end_date > ? THEN 1 END) as total_active,
+        COUNT(CASE WHEN status = 'active' AND end_date > ? AND end_date <= ? THEN 1 END) as expiring_soon,
+        COUNT(CASE WHEN auto_renew = 1 AND status = 'active' AND end_date > ? THEN 1 END) as auto_renew_count,
+        SUM(CASE 
+          WHEN status = 'active' AND end_date > ? THEN 
+            CASE 
+              WHEN plan = 'monthly' THEN 10.00
+              WHEN plan = 'quarterly' THEN 8.33
+              WHEN plan = 'annual' THEN 7.50
+              ELSE 0 
+            END
+          ELSE 0 
+        END) as monthly_revenue
+      FROM memberships
+    `).bind(now, now, thirtyDaysFromNow, now, now).first()
+    
+    const stats = {
+      total_active: statsData.total_active || 0,
+      expiring_soon: statsData.expiring_soon || 0,
+      auto_renew_count: statsData.auto_renew_count || 0,
+      monthly_revenue: statsData.monthly_revenue ? Math.round(statsData.monthly_revenue * 100) / 100 : 0
+    }
+    
+    return c.json({
+      success: true,
+      memberships: memberships.results || [],
+      stats
+    })
+    
+  } catch (error) {
+    console.error('Error fetching memberships:', error)
+    return c.json({ 
+      success: false, 
+      error: error.message 
+    }, 500)  }
+})
+
+// ============================================================================
 // ADMIN CRON JOB LOGS ENDPOINT
 // ============================================================================
 
@@ -3625,16 +3728,15 @@ async function processAutoRenewals(env) {
   const warningDate = new Date()
   warningDate.setDate(warningDate.getDate() + 7)
   const warningDateStr = warningDate.toISOString().split('T')[0]
-  
-  // Calculate grace period start (30 days ago)
+    // Calculate grace period start (1 day ago)
   const gracePeriodStart = new Date()
-  gracePeriodStart.setDate(gracePeriodStart.getDate() - 30)
+  gracePeriodStart.setDate(gracePeriodStart.getDate() - 1)
   const gracePeriodStartStr = gracePeriodStart.toISOString().split('T')[0]
   
   console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
   console.log(`[CRON] Today: ${today}`)
   console.log(`[CRON] Warning date (7 days ahead): ${warningDateStr}`)
-  console.log(`[CRON] Grace period start (30 days ago): ${gracePeriodStartStr}`)
+  console.log(`[CRON] Grace period start (1 day ago): ${gracePeriodStartStr}`)
   
   let processed = 0
   let succeeded = 0
@@ -3760,25 +3862,38 @@ async function processAutoRenewals(env) {
         console.error(`[CRON] ✗ Exception renewing membership ${membership.id}:`, err)
       }
     }
-    
-    // ========================================================================
-    // STEP 3: Mark expired memberships that have exhausted grace period
+      // ========================================================================
+    // STEP 3: Mark expired memberships
     // ========================================================================
     console.log(`[CRON] Step 3: Checking for expired memberships...`)
     
-    const expiredResult = await env.DB.prepare(`
+    // First, expire memberships without auto-renewal that have passed their end_date
+    const expiredNoAutoRenewResult = await env.DB.prepare(`
       UPDATE memberships
       SET status = 'expired'
       WHERE end_date < ?
         AND status = 'active'
-        AND (
-          auto_renew = 0 
-          OR renewal_attempts >= 3
-        )
+        AND auto_renew = 0
+    `).bind(today).run()
+    
+    const expiredNoAutoRenew = expiredNoAutoRenewResult.meta?.changes || 0
+    console.log(`[CRON] Marked ${expiredNoAutoRenew} non-auto-renewing memberships as expired`)
+    
+    // Then, expire memberships with auto-renewal that have exhausted grace period (1 day)
+    const expiredGracePeriodResult = await env.DB.prepare(`
+      UPDATE memberships
+      SET status = 'expired'
+      WHERE end_date < ?
+        AND status = 'active'
+        AND auto_renew = 1
+        AND renewal_attempts >= 3
     `).bind(gracePeriodStartStr).run()
     
-    expired = expiredResult.meta?.changes || 0
-    console.log(`[CRON] Marked ${expired} memberships as expired`)
+    const expiredGracePeriod = expiredGracePeriodResult.meta?.changes || 0
+    console.log(`[CRON] Marked ${expiredGracePeriod} auto-renewal memberships as expired (grace period ended)`)
+    
+    expired = expiredNoAutoRenew + expiredGracePeriod
+    console.log(`[CRON] Total memberships marked as expired: ${expired}`)
     
     // Log final results
     console.log(`[CRON] ${jobName} summary:`)

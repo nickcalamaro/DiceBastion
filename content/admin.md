@@ -74,6 +74,7 @@ Logout
 <button class="tab-btn active" data-tab="products" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid rgb(var(--color-primary-600)); cursor: pointer; font-weight: 600; color: rgb(var(--color-primary-600));">Products</button>
 <button class="tab-btn" data-tab="events" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Events</button>
 <button class="tab-btn" data-tab="orders" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Orders</button>
+<button class="tab-btn" data-tab="memberships" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Memberships</button>
 <button class="tab-btn" data-tab="cron" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Cron Jobs</button>
 </div>
 
@@ -373,6 +374,71 @@ Logout
 <div id="orders-tab" class="tab-content" style="display: none;">
 <h2>Recent Orders</h2>
 <div id="orders-list"></div>
+</div>
+
+<!-- Memberships Tab -->
+<div id="memberships-tab" class="tab-content" style="display: none;">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+<h2 style="margin: 0;">Active Memberships</h2>
+<div style="display: flex; gap: 1rem; align-items: center;">
+<select id="membership-filter" onchange="loadMemberships()" style="padding: 0.5rem 1rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 0.875rem;">
+<option value="all">All Memberships</option>
+<option value="active">Active Only</option>
+<option value="expiring">Expiring Soon (30 days)</option>
+<option value="expired">Expired</option>
+</select>
+<button id="refresh-memberships-btn" onclick="loadMemberships()" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+🔄 Refresh
+</button>
+</div>
+</div>
+
+<!-- Membership Stats -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 1.5rem; color: white;">
+<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Total Active</div>
+<div style="font-size: 2rem; font-weight: 700;" id="stat-active">-</div>
+</div>
+<div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 12px; padding: 1.5rem; color: white;">
+<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Expiring Soon</div>
+<div style="font-size: 2rem; font-weight: 700;" id="stat-expiring">-</div>
+</div>
+<div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border-radius: 12px; padding: 1.5rem; color: white;">
+<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Monthly Revenue</div>
+<div style="font-size: 2rem; font-weight: 700;" id="stat-monthly-revenue">-</div>
+</div>
+<div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 12px; padding: 1.5rem; color: white;">
+<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Auto-Renewal</div>
+<div style="font-size: 2rem; font-weight: 700;" id="stat-auto-renew">-</div>
+</div>
+</div>
+
+<!-- Memberships Table -->
+<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; overflow: hidden;">
+<div style="overflow-x: auto;">
+<table style="width: 100%; border-collapse: collapse;">
+<thead style="background: rgb(var(--color-neutral-100));">
+<tr>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Member</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Email</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Plan</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Start Date</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Expiry Date</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Days Left</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Status</th>
+<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Auto-Renew</th>
+</tr>
+</thead>
+<tbody id="memberships-list">
+<tr>
+<td colspan="8" style="padding: 3rem; text-align: center; color: rgb(var(--color-neutral-500));">
+Loading memberships...
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
 </div>
 
 <!-- Cron Jobs Tab -->
@@ -1578,6 +1644,133 @@ async function deleteEvent(id, title) {
 async function loadOrders() {
 const list = document.getElementById('orders-list');
 list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">Order management coming soon. Use SQL queries for now.</p>';
+}
+
+// Memberships
+async function loadMemberships() {
+  const tableBody = document.getElementById('memberships-list');
+  const filter = document.getElementById('membership-filter')?.value || 'all';
+  
+  try {
+    const res = await fetch(`https://dicebastion-memberships.ncalamaro.workers.dev/admin/memberships?filter=${filter}`, {
+      headers: {
+        'X-Session-Token': sessionToken
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error('Failed to fetch memberships');
+    }
+
+    const data = await res.json();
+    
+    if (!data.success || !data.memberships || data.memberships.length === 0) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="8" style="padding: 3rem; text-align: center; color: rgb(var(--color-neutral-500));">
+            No memberships found
+          </td>
+        </tr>
+      `;
+      updateMembershipStats(data.stats || {});
+      return;
+    }
+
+    // Update stats
+    updateMembershipStats(data.stats || {});
+
+    // Render table rows
+    tableBody.innerHTML = data.memberships.map(membership => {
+      const startDate = new Date(membership.start_date);
+      const endDate = new Date(membership.end_date);
+      const today = new Date();
+      const daysLeft = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+      
+      let statusBadge, statusColor;
+      if (membership.status === 'active') {
+        if (daysLeft < 0) {
+          statusBadge = 'Expired';
+          statusColor = '#f44336';
+        } else if (daysLeft <= 7) {
+          statusBadge = 'Expiring';
+          statusColor = '#ff9800';
+        } else if (daysLeft <= 30) {
+          statusBadge = 'Active';
+          statusColor = '#ff9800';
+        } else {
+          statusBadge = 'Active';
+          statusColor = '#4CAF50';
+        }
+      } else {
+        statusBadge = membership.status.charAt(0).toUpperCase() + membership.status.slice(1);
+        statusColor = '#9e9e9e';
+      }
+
+      const planNames = {
+        monthly: 'Monthly',
+        quarterly: 'Quarterly',
+        annual: 'Annual'
+      };
+
+      return `
+        <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
+          <td style="padding: 1rem;">
+            <div style="font-weight: 600;">${escapeHtml(membership.name || 'N/A')}</div>
+          </td>
+          <td style="padding: 1rem;">
+            <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">${escapeHtml(membership.email)}</div>
+          </td>
+          <td style="padding: 1rem;">
+            <span style="padding: 0.25rem 0.75rem; background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-700)); border-radius: 4px; font-size: 0.875rem; font-weight: 600;">
+              ${planNames[membership.plan] || membership.plan}
+            </span>
+          </td>
+          <td style="padding: 1rem; font-size: 0.875rem;">
+            ${startDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </td>
+          <td style="padding: 1rem; font-size: 0.875rem;">
+            ${endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </td>
+          <td style="padding: 1rem;">
+            <div style="font-weight: 600; color: ${daysLeft < 0 ? '#f44336' : daysLeft <= 30 ? '#ff9800' : '#4CAF50'};">
+              ${daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Today' : daysLeft === 1 ? '1 day' : `${daysLeft} days`}
+            </div>
+          </td>
+          <td style="padding: 1rem;">
+            <span style="padding: 0.25rem 0.75rem; background: ${statusColor}; color: white; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">
+              ${statusBadge}
+            </span>
+          </td>
+          <td style="padding: 1rem; text-align: center;">
+            ${membership.auto_renew ? '✅' : '❌'}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (error) {
+    console.error('Error loading memberships:', error);
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="8" style="padding: 3rem; text-align: center; color: rgb(var(--color-neutral-500));">
+          Error loading memberships: ${error.message}
+        </td>
+      </tr>
+    `;
+  }
+}
+
+function updateMembershipStats(stats) {
+  document.getElementById('stat-active').textContent = stats.total_active || 0;
+  document.getElementById('stat-expiring').textContent = stats.expiring_soon || 0;
+  document.getElementById('stat-monthly-revenue').textContent = stats.monthly_revenue ? `£${stats.monthly_revenue}` : '£0';
+  document.getElementById('stat-auto-renew').textContent = stats.auto_renew_count || 0;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Cron Jobs

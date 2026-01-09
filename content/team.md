@@ -210,7 +210,7 @@ const teamMembers = [
   {
     name: "Nick Calamaro",
     role: "Founder",
-    bio: "Passionate about bringing the gaming community together. Running events since 2015.",
+    bio: "With a passion for board games, card games, and community organising, Nick founded Dice Bastion to give Gibraltar's tabletop gamers a welcoming space to play their favourite games.",
     image: "/img/team/nick.png",
     emailUser: "nick",
     emailDomain: "dicebastion.com"
@@ -218,7 +218,7 @@ const teamMembers = [
   {
     name: "Jen Luttig",
     role: "Founder",
-    bio: "Dedicated to creating a welcoming space for all gamers. Always ready to help new members feel at home.",
+    bio: "Dedicated to creating a welcoming space for all gamers. Always ready to help new members feel at home.<br><br><br><br>",
     image: "/img/team/jen.png",
     emailUser: "jen",
     emailDomain: "dicebastion.com"
