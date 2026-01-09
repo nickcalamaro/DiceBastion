@@ -1268,7 +1268,7 @@ function getTicketConfirmationEmail(event, user, transaction) {
         <li><strong>Event:</strong> ${event.event_name}</li>
         <li><strong>Date:</strong> ${eventDate}</li>
         <li><strong>Time:</strong> ${eventTime}</li>
-        <li><strong>Location:</strong> ${event.location || 'Dice Bastion'}</li>
+        <li><strong>Location:</strong> ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111" style="text-decoration: underline;">Gibraltar Warhammer Club</a>'}</li>
         ${event.description ? `<li><strong>Description:</strong> ${event.description}</li>` : ''}
       </ul>
       
@@ -1296,7 +1296,7 @@ EVENT DETAILS:
 - Event: ${event.event_name}
 - Date: ${eventDate}
 - Time: ${eventTime}
-- Location: ${event.location || 'Dice Bastion'}
+- Location: ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111" style="text-decoration: underline;">Gibraltar Warhammer Club</a>'}</li>
 ${event.description ? `- Description: ${event.description}` : ''}
 
 PAYMENT DETAILS:

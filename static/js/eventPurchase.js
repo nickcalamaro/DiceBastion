@@ -32,7 +32,22 @@ function renderEventPurchase(event) {
     <div class="evt-modal" id="evt-modal-${eventId}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:99999; align-items:center; justify-content:center;">
       <div class="evt-modal-inner bg-neutral dark:bg-neutral-800 rounded-xl p-5 relative shadow-2xl" style="width:min(520px,95vw);">
         <button type="button" class="evt-close bg-transparent border-none text-2xl cursor-pointer text-neutral-700 dark:text-neutral-300" aria-label="Close" style="position:absolute; top:10px; right:10px;">×</button>
-        <h3 class="mt-0 mb-3 text-lg font-bold text-neutral-800 dark:text-neutral-200">Ticket Checkout</h3>
+        <h3 class="mt-0 mb-3 text-lg font-bold text-neutral-800 dark:text-neutral-200">Ticket Checkout</h3>        <!-- Logged-in user confirmation screen -->
+        <div class="evt-step evt-confirm-logged-in" style="display:none;">
+          <p class="mt-0 mb-4 text-sm text-neutral-700 dark:text-neutral-300">
+            You're purchasing a ticket for <strong class="text-neutral-800 dark:text-neutral-200 evt-user-email"></strong>
+          </p>
+          <div class="mt-3">
+            <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2">Security check</div>
+            <div id="evt-ts-logged-${eventId}"></div>
+          </div>
+          <button type="button" class="evt-continue-logged mt-4 w-full py-3 border-none rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 font-bold cursor-pointer hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Continue to Payment</button>
+          <p class="mt-3 mb-0 text-center text-sm text-neutral-600 dark:text-neutral-400">
+            Not you? <button type="button" class="evt-switch-account bg-transparent border-none text-primary-600 dark:text-primary-400 underline cursor-pointer hover:text-primary-700 dark:hover:text-primary-500">Use a different email</button>
+          </p>
+        </div>
+        
+        <!-- Guest/non-logged-in user form -->
         <div class="evt-step evt-details" style="display:block;">
           <label class="block mt-2 mb-1 font-semibold text-neutral-700 dark:text-neutral-300">Full name</label>
           <input type="text" class="evt-name w-full p-2.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200" placeholder="Jane Doe">
@@ -41,12 +56,14 @@ function renderEventPurchase(event) {
           <div class="mt-3 flex gap-2 items-start text-sm leading-tight">
             <input type="checkbox" class="evt-privacy mt-1">
             <label class="text-neutral-700 dark:text-neutral-300">I agree to the <a href="/privacy-policy/" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 underline">Privacy Policy</a>.</label>
-          </div>          <div class="mt-3">
+          </div>
+          <div class="mt-3">
             <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2">Security check</div>
             <div id="evt-ts-${eventId}"></div>
           </div>
           <button type="button" class="evt-continue mt-4 w-full py-3 border-none rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 font-bold cursor-pointer hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Continue to Payment</button>
         </div>
+        
         <div id="evt-card-${eventId}" class="evt-card mt-2" style="display:none;"></div>
         <div class="evt-error mt-2.5 text-sm font-semibold" style="display:none; color:#b00020;"></div>
         <div class="evt-success mt-4 py-3 px-4 rounded-lg font-semibold" style="display:none; background:#e9fbe9; border:1px solid #b9e8b9; color:#1a5d1a;">Ticket confirmed! See you there.</div>
@@ -61,9 +78,27 @@ function initEventPurchase(event) {
   const modal = document.getElementById('evt-modal-'+eventId);
   const cardEl = document.getElementById('evt-card-'+eventId);
   let turnstileWidgetId = null; // Store the Turnstile widget ID
+  let turnstileLoggedWidgetId = null; // Store the Turnstile widget ID for logged-in flow
   let turnstileRenderTimeout = null; // Store timeout ID to cancel if needed
   
   if (!root || !modal) return;
+  
+  // Check if user is logged in
+  function getLoggedInUser() {
+    const sessionToken = localStorage.getItem('admin_session');
+    const userDataStr = localStorage.getItem('admin_user');
+    
+    if (!sessionToken || !userDataStr) {
+      return null;
+    }
+    
+    try {
+      return JSON.parse(userDataStr);
+    } catch (e) {
+      console.error('Failed to parse user data:', e);
+      return null;
+    }
+  }
   
   function showError(msg) {
     const el = modal.querySelector('.evt-error');
@@ -107,9 +142,12 @@ function initEventPurchase(event) {
       s.onerror = () => rej(new Error('Turnstile load failed'));
       document.head.appendChild(s);
     });
-  }  async function renderTurnstile() {
+  }  async function renderTurnstile(isLoggedIn = false) {
     await loadTurnstileSdk();
-    const tsEl = document.getElementById('evt-ts-'+eventId);
+    const tsElId = isLoggedIn ? 'evt-ts-logged-' + eventId : 'evt-ts-' + eventId;
+    const tsEl = document.getElementById(tsElId);
+    const widgetIdRef = isLoggedIn ? 'turnstileLoggedWidgetId' : 'turnstileWidgetId';
+    
     if (!tsEl || !window.turnstile) return;
     
     // Check if modal is still visible (in case it was closed while timeout was pending)
@@ -119,27 +157,30 @@ function initEventPurchase(event) {
     }
     
     // Remove existing widget if present
-    if (turnstileWidgetId !== null) {
+    const currentWidgetId = isLoggedIn ? turnstileLoggedWidgetId : turnstileWidgetId;
+    if (currentWidgetId !== null) {
       try {
-        window.turnstile.remove(turnstileWidgetId);
-        console.log('Turnstile widget removed:', turnstileWidgetId);
+        window.turnstile.remove(currentWidgetId);
+        console.log('Turnstile widget removed:', currentWidgetId);
       } catch(e) {
         console.log('Turnstile remove failed:', e);
       }
-      turnstileWidgetId = null;
+      if (isLoggedIn) {
+        turnstileLoggedWidgetId = null;
+      } else {
+        turnstileWidgetId = null;
+      }
     }
     
     // Clear the container completely and reset any Turnstile state
     tsEl.innerHTML = '';
     
     // Remove any orphaned widgets by trying to get response from container
-    // This will fail if no widget exists, which is fine
     try {
       if (window.turnstile.getResponse) {
         const existingResponse = window.turnstile.getResponse(tsEl);
         if (existingResponse !== undefined) {
           console.log('Found orphaned Turnstile widget, attempting cleanup');
-          // Widget exists but we don't have the ID - need to reset it
           window.turnstile.reset(tsEl);
         }
       }
@@ -152,38 +193,53 @@ function initEventPurchase(event) {
     
     // Render new widget and store the ID
     try {
-      turnstileWidgetId = window.turnstile.render(tsEl, {
+      const widgetId = window.turnstile.render(tsEl, {
         sitekey: TURNSTILE_SITE_KEY,
         size: 'flexible'
       });
-      console.log('Turnstile widget rendered with ID:', turnstileWidgetId);
+      if (isLoggedIn) {
+        turnstileLoggedWidgetId = widgetId;
+      } else {
+        turnstileWidgetId = widgetId;
+      }
+      console.log('Turnstile widget rendered with ID:', widgetId, 'isLoggedIn:', isLoggedIn);
     } catch(e) {
       console.error('Turnstile render failed:', e);
-      // If render fails, the container might still have remnants
-      // Try one more time with a fresh container
+      // If render fails, try one more time with a fresh container
       tsEl.innerHTML = '';
       try {
         await new Promise(resolve => setTimeout(resolve, 50));
-        turnstileWidgetId = window.turnstile.render(tsEl, {
+        const widgetId = window.turnstile.render(tsEl, {
           sitekey: TURNSTILE_SITE_KEY,
           size: 'flexible'
         });
-        console.log('Turnstile widget rendered with ID (retry):', turnstileWidgetId);
+        if (isLoggedIn) {
+          turnstileLoggedWidgetId = widgetId;
+        } else {
+          turnstileWidgetId = widgetId;
+        }
+        console.log('Turnstile widget rendered with ID (retry):', widgetId, 'isLoggedIn:', isLoggedIn);
       } catch(e2) {
         console.error('Turnstile render failed again:', e2);
-        turnstileWidgetId = null;
+        if (isLoggedIn) {
+          turnstileLoggedWidgetId = null;
+        } else {
+          turnstileWidgetId = null;
+        }
       }
     }
   }
-  
-  async function getTurnstileToken() {
+    async function getTurnstileToken(isLoggedIn = false) {
     await loadTurnstileSdk();
-    const tsEl = document.getElementById('evt-ts-'+eventId);
+    const tsElId = isLoggedIn ? 'evt-ts-logged-' + eventId : 'evt-ts-' + eventId;
+    const tsEl = document.getElementById(tsElId);
+    const currentWidgetId = isLoggedIn ? turnstileLoggedWidgetId : turnstileWidgetId;
+    
     if (!tsEl || !window.turnstile) throw new Error('Turnstile not ready');
     
     // Get token from the widget
-    const token = turnstileWidgetId !== null 
-      ? window.turnstile.getResponse(turnstileWidgetId)
+    const token = currentWidgetId !== null 
+      ? window.turnstile.getResponse(currentWidgetId)
       : window.turnstile.getResponse(tsEl);
       
     if (!token) throw new Error('Please complete the security check.');
@@ -315,24 +371,55 @@ function initEventPurchase(event) {
     showError('Missing checkout ID');
   }  function openPurchaseModal() {
     if (modal) {
+      // Check if user is logged in
+      const user = getLoggedInUser();
+      const isLoggedIn = user && user.email;
+      
       // Show modal FIRST so Turnstile can render properly
       modal.style.display = 'flex';
       
-      // Focus name input
-      const nameInput = modal.querySelector('.evt-name');
-      if (nameInput) nameInput.focus();
+      // Show appropriate screen based on login status
+      const detailsScreen = modal.querySelector('.evt-details');
+      const loggedInScreen = modal.querySelector('.evt-confirm-logged-in');
       
-      // Render fresh Turnstile widget after modal is visible
-      // Store timeout ID so we can cancel it if modal closes early
-      turnstileRenderTimeout = setTimeout(() => {
-        turnstileRenderTimeout = null;
-        renderTurnstile().catch((e) => {
-          console.error('Failed to render Turnstile:', e);
-        });
-      }, 50);
+      if (isLoggedIn) {
+        // Show logged-in confirmation screen
+        detailsScreen.style.display = 'none';
+        loggedInScreen.style.display = 'block';
+        
+        // Populate user email
+        const emailDisplay = modal.querySelector('.evt-user-email');
+        if (emailDisplay) {
+          emailDisplay.textContent = user.email;
+        }
+        
+        // Render Turnstile for logged-in flow
+        turnstileRenderTimeout = setTimeout(() => {
+          turnstileRenderTimeout = null;
+          renderTurnstile(true).catch((e) => {
+            console.error('Failed to render Turnstile:', e);
+          });
+        }, 50);
+      } else {
+        // Show guest form
+        detailsScreen.style.display = 'block';
+        loggedInScreen.style.display = 'none';
+        
+        // Focus name input
+        const nameInput = modal.querySelector('.evt-name');
+        if (nameInput) nameInput.focus();
+        
+        // Render Turnstile for guest flow
+        turnstileRenderTimeout = setTimeout(() => {
+          turnstileRenderTimeout = null;
+          renderTurnstile(false).catch((e) => {
+            console.error('Failed to render Turnstile:', e);
+          });
+        }, 50);
+      }
     }
   }
-    function closePurchaseModal() {
+  function closePurchaseModal() {
     if (modal) {
       // Cancel pending Turnstile render if modal closes before timeout fires
       if (turnstileRenderTimeout !== null) {
@@ -341,50 +428,55 @@ function initEventPurchase(event) {
         console.log('Cancelled pending Turnstile render');
       }
       
-      // Get the container first
-      const tsEl = document.getElementById('evt-ts-'+eventId);
-      
-      // Remove Turnstile widget if it was rendered
-      if (window.turnstile && turnstileWidgetId !== null) {
-        try {
-          console.log('Removing Turnstile widget:', turnstileWidgetId);
-          window.turnstile.remove(turnstileWidgetId);
-          turnstileWidgetId = null;
-          console.log('Turnstile widget removed successfully');
-        } catch(e) {
-          console.error('Turnstile cleanup failed:', e);
-          turnstileWidgetId = null; // Reset anyway
+      // Clean up both Turnstile widgets
+      const cleanupTurnstile = (widgetId, elementId) => {
+        const tsEl = document.getElementById(elementId);
+        
+        if (window.turnstile && widgetId !== null) {
+          try {
+            console.log('Removing Turnstile widget:', widgetId);
+            window.turnstile.remove(widgetId);
+            console.log('Turnstile widget removed successfully');
+          } catch(e) {
+            console.error('Turnstile cleanup failed:', e);
+          }
         }
-      }
-      
-      // Additional cleanup: try to reset any widget that might be attached to the container
-      if (window.turnstile && tsEl) {
-        try {
-          // Try to reset using the container element
-          window.turnstile.reset(tsEl);
-          console.log('Reset Turnstile container as fallback');
-        } catch(e) {
-          // Silent fail - expected if no widget exists
+        
+        if (window.turnstile && tsEl) {
+          try {
+            window.turnstile.reset(tsEl);
+            console.log('Reset Turnstile container as fallback');
+          } catch(e) {
+            // Silent fail - expected if no widget exists
+          }
         }
-      }
+        
+        if (tsEl) {
+          tsEl.innerHTML = '';
+          const parent = tsEl.parentNode;
+          const newTsEl = tsEl.cloneNode(false);
+          parent.replaceChild(newTsEl, tsEl);
+          console.log('Turnstile container replaced with fresh clone');
+        }
+      };
       
-      // Clear the Turnstile container to remove any orphaned widgets
-      if (tsEl) {
-        tsEl.innerHTML = '';
-        // Remove and re-add to fully reset
-        const parent = tsEl.parentNode;
-        const newTsEl = tsEl.cloneNode(false);
-        parent.replaceChild(newTsEl, tsEl);
-        console.log('Turnstile container replaced with fresh clone');
-      }
+      // Clean up guest flow Turnstile
+      cleanupTurnstile(turnstileWidgetId, 'evt-ts-' + eventId);
+      turnstileWidgetId = null;
+      
+      // Clean up logged-in flow Turnstile
+      cleanupTurnstile(turnstileLoggedWidgetId, 'evt-ts-logged-' + eventId);
+      turnstileLoggedWidgetId = null;
       
       // Use the unmount helper to properly clean up SumUp widget
       unmountWidget();
       
       // Hide modal
       modal.style.display = 'none';
-      const d = modal.querySelector('.evt-details');
-      if (d) d.style.display = 'block';
+      const detailsScreen = modal.querySelector('.evt-details');
+      const loggedInScreen = modal.querySelector('.evt-confirm-logged-in');
+      if (detailsScreen) detailsScreen.style.display = 'block';
+      if (loggedInScreen) loggedInScreen.style.display = 'none';
       
       clearError();
       const s = modal.querySelector('.evt-success');
@@ -400,8 +492,7 @@ function initEventPurchase(event) {
   });
   
   modal.querySelector('.evt-close')?.addEventListener('click', closePurchaseModal);
-  
-  const contBtn = modal.querySelector('.evt-continue');
+    const contBtn = modal.querySelector('.evt-continue');
   contBtn && contBtn.addEventListener('click', async () => {
     const name = modal.querySelector('.evt-name').value.trim();
     const email = modal.querySelector('.evt-email').value.trim();
@@ -425,7 +516,7 @@ function initEventPurchase(event) {
     
     let token;
     try {
-      token = await getTurnstileToken();
+      token = await getTurnstileToken(false);
     } catch(e) {
       showError(e.message || 'Security check failed.');
       contBtn.disabled = false;
@@ -434,6 +525,54 @@ function initEventPurchase(event) {
     
     contBtn.disabled = false;
     startCheckout(email, name, privacy, token);
+  });
+  
+  // Logged-in flow: Continue to payment button
+  const contLoggedBtn = modal.querySelector('.evt-continue-logged');
+  contLoggedBtn && contLoggedBtn.addEventListener('click', async () => {
+    const user = getLoggedInUser();
+    if (!user || !user.email) {
+      showError('Session expired. Please refresh and try again.');
+      return;
+    }
+    
+    clearError();
+    contLoggedBtn.disabled = true;
+    
+    let token;
+    try {
+      token = await getTurnstileToken(true);
+    } catch(e) {
+      showError(e.message || 'Security check failed.');
+      contLoggedBtn.disabled = false;
+      return;
+    }
+    
+    contLoggedBtn.disabled = false;
+    // Use user's name from session if available, otherwise use email
+    const name = user.name || user.email;
+    startCheckout(user.email, name, true, token);
+  });
+  
+  // Switch account button (show guest form)
+  const switchAccountBtn = modal.querySelector('.evt-switch-account');
+  switchAccountBtn && switchAccountBtn.addEventListener('click', () => {
+    const detailsScreen = modal.querySelector('.evt-details');
+    const loggedInScreen = modal.querySelector('.evt-confirm-logged-in');
+    
+    // Hide logged-in screen, show guest form
+    if (loggedInScreen) loggedInScreen.style.display = 'none';
+    if (detailsScreen) {
+      detailsScreen.style.display = 'block';
+      // Focus name input
+      const nameInput = modal.querySelector('.evt-name');
+      if (nameInput) nameInput.focus();
+    }
+    
+    // Render Turnstile for guest flow
+    renderTurnstile(false).catch((e) => {
+      console.error('Failed to render Turnstile:', e);
+    });
   });
   
   ['input', 'change'].forEach(ev => {
