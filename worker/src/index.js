@@ -1243,6 +1243,102 @@ function getExpiredPaymentMethodEmail(membership, user) {
   }
 }
 
+function getPasswordResetEmail(userName, resetLink) {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        .header {
+          background: linear-gradient(135deg, #b2c6df 0%, #5374a5 100%);
+          color: white;
+          padding: 30px 20px;
+          text-align: center;
+          border-radius: 8px 8px 0 0;
+        }
+        .content {
+          background: #ffffff;
+          padding: 30px;
+          border: 1px solid #e5e7eb;
+          border-top: none;
+        }
+        .button {
+          display: inline-block;
+          padding: 12px 30px;
+          background: #5374a5;
+          color: white !important;
+          text-decoration: none;
+          border-radius: 6px;
+          font-weight: 600;
+          margin: 20px 0;
+        }
+        .warning {
+          background: #fef3c7;
+          border-left: 4px solid #f59e0b;
+          padding: 15px;
+          margin: 20px 0;
+          border-radius: 4px;
+        }
+        .footer {
+          text-align: center;
+          color: #6b7280;
+          font-size: 14px;
+          margin-top: 30px;
+          padding-top: 20px;
+          border-top: 1px solid #e5e7eb;
+        }
+        .link-text {
+          word-break: break-all;
+          color: #6b7280;
+          font-size: 12px;
+          margin-top: 10px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1 style="margin: 0;">Reset Your Password</h1>
+      </div>
+      <div class="content">
+        <p>Hi ${userName},</p>
+        
+        <p>We received a request to reset your password for your Dice Bastion account.</p>
+        
+        <p>Click the button below to choose a new password:</p>
+        
+        <div style="text-align: center;">
+          <a href="${resetLink}" class="button">Reset Password</a>
+        </div>
+        
+        <p class="link-text">Or copy and paste this link into your browser:<br>${resetLink}</p>
+        
+        <div class="warning">
+          <strong>⏰ This link will expire in 1 hour</strong> for security reasons.
+        </div>
+        
+        <p><strong>Didn't request a password reset?</strong><br>
+        If you didn't request this, you can safely ignore this email. Your password will not be changed.</p>
+        
+        <div class="footer">
+          <p>This is an automated email from Dice Bastion.<br>
+          If you need help, contact us at admin@dicebastion.com</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+}
+
 function getTicketConfirmationEmail(event, user, transaction) {
   const eventDateTime = new Date(event.event_datetime)
   const eventDate = eventDateTime.toLocaleDateString('en-GB', { 
@@ -1433,6 +1529,149 @@ app.post('/login', async c => {
     console.error('[User Login] ERROR:', error)
     console.error('[User Login] Stack:', error.stack)
     return c.json({ error: 'internal_error', message: error.message }, 500)
+  }
+})
+
+// Password reset request endpoint
+app.post('/password-reset/request', async c => {
+  try {
+    console.log('[Password Reset] Request received')
+    const { email } = await c.req.json()
+    
+    if (!email) {
+      return c.json({ error: 'email_required' }, 400)
+    }
+    
+    console.log('[Password Reset] Email:', email)
+    
+    // Find user by email
+    const user = await c.env.DB.prepare(`
+      SELECT user_id, email, name
+      FROM users
+      WHERE email = ? AND is_active = 1
+    `).bind(email).first()
+    
+    // Always return success for security (don't reveal if user exists)
+    // But only send email if user actually exists
+    if (user) {
+      console.log('[Password Reset] User found, generating reset token')
+      
+      // Generate a secure reset token
+      const resetToken = crypto.randomUUID() + '-' + crypto.randomUUID()
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour expiry
+      
+      // Create password_reset_tokens table if it doesn't exist
+      await c.env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          token TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          used INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+      `).run()
+      
+      // Store the reset token
+      await c.env.DB.prepare(`
+        INSERT INTO password_reset_tokens (user_id, token, expires_at)
+        VALUES (?, ?, ?)
+      `).bind(user.user_id, resetToken, expiresAt.toISOString()).run()
+      
+      // Generate reset link
+      const resetLink = `https://dicebastion.com/reset-password?token=${resetToken}`
+      
+      // Send password reset email
+      const emailHtml = getPasswordResetEmail(user.name || user.email, resetLink)
+      
+      await sendEmail(c.env, {
+        to: user.email,
+        subject: 'Reset Your Dice Bastion Password',
+        html: emailHtml,
+        emailType: 'password_reset',
+        relatedId: user.user_id,
+        relatedType: 'user'
+      })
+      
+      console.log('[Password Reset] Reset email sent to', user.email)
+    } else {
+      console.log('[Password Reset] User not found, but returning success for security')
+    }
+    
+    return c.json({ success: true })
+  } catch (error) {
+    console.error('[Password Reset] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Password reset confirmation endpoint
+app.post('/password-reset/confirm', async c => {
+  try {
+    console.log('[Password Reset Confirm] Request received')
+    const { token, newPassword } = await c.req.json()
+    
+    if (!token || !newPassword) {
+      return c.json({ error: 'token_and_password_required' }, 400)
+    }
+    
+    if (newPassword.length < 8) {
+      return c.json({ error: 'password_too_short' }, 400)
+    }
+    
+    console.log('[Password Reset Confirm] Validating token')
+    
+    // Find valid reset token
+    const resetRecord = await c.env.DB.prepare(`
+      SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email
+      FROM password_reset_tokens prt
+      JOIN users u ON prt.user_id = u.user_id
+      WHERE prt.token = ? AND prt.used = 0
+    `).bind(token).first()
+    
+    if (!resetRecord) {
+      console.log('[Password Reset Confirm] Invalid or already used token')
+      return c.json({ error: 'invalid_token' }, 404)
+    }
+    
+    // Check if token has expired
+    const expiresAt = new Date(resetRecord.expires_at)
+    if (expiresAt < new Date()) {
+      console.log('[Password Reset Confirm] Token has expired')
+      return c.json({ error: 'token_expired' }, 400)
+    }
+    
+    console.log('[Password Reset Confirm] Token valid, hashing new password')
+    
+    // Hash the new password
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    
+    // Update user's password
+    await c.env.DB.prepare(`
+      UPDATE users
+      SET password_hash = ?, updated_at = ?
+      WHERE user_id = ?
+    `).bind(passwordHash, new Date().toISOString(), resetRecord.user_id).run()
+    
+    // Mark token as used
+    await c.env.DB.prepare(`
+      UPDATE password_reset_tokens
+      SET used = 1
+      WHERE id = ?
+    `).bind(resetRecord.id).run()
+    
+    // Invalidate all existing sessions for this user (for security)
+    await c.env.DB.prepare(`
+      DELETE FROM user_sessions WHERE user_id = ?
+    `).bind(resetRecord.user_id).run()
+    
+    console.log('[Password Reset Confirm] Password reset successful for', resetRecord.email)
+    
+    return c.json({ success: true })
+  } catch (error) {
+    console.error('[Password Reset Confirm] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
   }
 })
 

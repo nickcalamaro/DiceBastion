@@ -22,6 +22,10 @@ showReadingTime: false
 <input type="password" id="user-password" required autocomplete="current-password" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 1rem;">
 </div>
 
+<div style="text-align: right; margin-bottom: 1rem;">
+<a href="/forgot-password" style="color: rgb(var(--color-primary-600)); font-size: 0.875rem; text-decoration: none;">Forgot password?</a>
+</div>
+
 <button type="submit" style="width: 100%; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer;">
 Login
 </button>
