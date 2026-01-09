@@ -37,33 +37,6 @@ Login
 Don't have an account? <a href="/memberships" style="color: rgb(var(--color-primary-600)); font-weight: 600; text-decoration: none; hover: underline;">Become a member</a>
 </p>
 </div>
-
-<!-- Non-Admin Message -->
-<div id="non-admin-message" style="display: none;">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; text-align: center;">
-<div style="font-size: 3rem; margin-bottom: 1rem;">👋</div>
-<h2 style="margin-top: 0; margin-bottom: 1rem;">Welcome back!</h2>
-<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
-You're logged in as <strong id="user-email-display"></strong>
-</p>
-<div style="background: rgb(var(--color-neutral-100)); dark:bg-neutral-700; padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
-<p style="margin: 0; color: rgb(var(--color-neutral-700)); dark:color-neutral-300;">
-    You don't currently have admin access. If you need to manage products, events, or orders, please contact our team.
-</p>
-</div>
-<div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-<a href="/" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
-    Go to Home
-</a>
-<a href="/events" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
-    Browse Events
-</a>
-<button id="logout-btn" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
-    Logout
-</button>
-</div>
-</div>
-</div>
 </div>
 
 <script>
@@ -76,26 +49,17 @@ const userDataStr = localStorage.getItem('admin_user');
 
 if (sessionToken && userDataStr) {
 try {
-const userData = JSON.parse(userDataStr);
+const userData = JSON.parse(userDataStr);    // If user is admin, redirect to admin dashboard
+    if (userData.is_admin) {
+      window.location.href = '/admin';
+      return;
+    }
 
-// If user is admin, redirect to admin dashboard
-if (userData.is_admin) {
-window.location.href = '/admin';
-return;
-}
-
-// If non-admin, show welcome message
-showNonAdminMessage(userData);
+    // If non-admin, redirect to account page
+    window.location.href = '/account';
 } catch (e) {
 console.error('Failed to parse user data:', e);
-}
-}
-}
-
-function showNonAdminMessage(user) {
-document.getElementById('login-form-container').style.display = 'none';
-document.getElementById('non-admin-message').style.display = 'block';
-document.getElementById('user-email-display').textContent = user.email;
+}  }
 }
 
 // Handle login form submission
@@ -125,14 +89,12 @@ localStorage.setItem('admin_user', JSON.stringify(data.user));
 localStorage.setItem('admin_token', data.session_token);
 
 // Trigger login status update
-window.dispatchEvent(new Event('userLoggedIn'));
-
-// Redirect based on user role
-if (data.user.is_admin) {
-window.location.href = '/admin';
-} else {
-showNonAdminMessage(data.user);
-}
+window.dispatchEvent(new Event('userLoggedIn'));      // Redirect based on user role
+      if (data.user.is_admin) {
+        window.location.href = '/admin';
+      } else {
+        window.location.href = '/account';
+      }
 } else {
 errorEl.textContent = data.error === 'invalid_credentials' 
 ? 'Invalid email or password' 
@@ -142,38 +104,7 @@ errorEl.style.display = 'block';
 } catch (err) {
 console.error('Login error:', err);
 errorEl.textContent = 'Login failed. Please try again.';
-errorEl.style.display = 'block';
-}
-});
-
-// Handle logout
-document.getElementById('logout-btn')?.addEventListener('click', async () => {
-const sessionToken = localStorage.getItem('admin_session');
-
-if (sessionToken) {
-try {
-await fetch(`${API_BASE}/logout`, {
-method: 'POST',
-headers: {
-    'Content-Type': 'application/json',
-    'X-Session-Token': sessionToken
-}
-});
-} catch (err) {
-console.error('Logout error:', err);
-}
-}
-
-// Clear local storage
-localStorage.removeItem('admin_session');
-localStorage.removeItem('admin_user');
-localStorage.removeItem('admin_token');
-
-// Trigger UI update
-window.dispatchEvent(new Event('userLoggedIn'));
-
-// Reload page
-window.location.reload();
+errorEl.style.display = 'block';  }
 });
 
 // Check on page load

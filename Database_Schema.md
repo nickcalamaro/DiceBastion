@@ -197,6 +197,15 @@ CREATE TABLE email_preferences (
   last_updated TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
+CREATE TABLE password_reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
 CREATE TABLE cron_job_log (
   log_id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_name TEXT NOT NULL,              -- e.g., 'auto_renewals', 'event_reminders', 'payment_reconciliation'

@@ -1543,8 +1543,7 @@ app.post('/password-reset/request', async c => {
     }
     
     console.log('[Password Reset] Email:', email)
-    
-    // Find user by email
+      // Find user by email
     const user = await c.env.DB.prepare(`
       SELECT user_id, email, name
       FROM users
@@ -1560,24 +1559,29 @@ app.post('/password-reset/request', async c => {
       const resetToken = crypto.randomUUID() + '-' + crypto.randomUUID()
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour expiry
       
-      // Create password_reset_tokens table if it doesn't exist
-      await c.env.DB.prepare(`
-        CREATE TABLE IF NOT EXISTS password_reset_tokens (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER NOT NULL,
-          token TEXT NOT NULL UNIQUE,
-          expires_at TEXT NOT NULL,
-          used INTEGER DEFAULT 0,
-          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-          FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-        )
-      `).run()
+      // Ensure users table has reset columns
+      try {
+        await c.env.DB.prepare(`
+          ALTER TABLE users ADD COLUMN reset_token TEXT;
+        `).run()
+      } catch (e) {
+        // Column might already exist
+      }
       
-      // Store the reset token
+      try {
+        await c.env.DB.prepare(`
+          ALTER TABLE users ADD COLUMN reset_token_expires TEXT;
+        `).run()
+      } catch (e) {
+        // Column might already exist
+      }
+      
+      // Store the reset token in users table
       await c.env.DB.prepare(`
-        INSERT INTO password_reset_tokens (user_id, token, expires_at)
-        VALUES (?, ?, ?)
-      `).bind(user.user_id, resetToken, expiresAt.toISOString()).run()
+        UPDATE users 
+        SET reset_token = ?, reset_token_expires = ?, updated_at = ?
+        WHERE user_id = ?
+      `).bind(resetToken, expiresAt.toISOString(), new Date().toISOString(), user.user_id).run()
       
       // Generate reset link
       const resetLink = `https://dicebastion.com/reset-password?token=${resetToken}`
@@ -1694,6 +1698,138 @@ app.post('/logout', async c => {
   } catch (error) {
     console.error('[Logout] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)  }
+})
+
+// Get user account information
+app.get('/account/info', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    // Get session and user
+    const session = await c.env.DB.prepare(`
+      SELECT us.*, u.user_id, u.email, u.name, u.is_admin, u.created_at as user_created_at
+      FROM user_sessions us
+      JOIN users u ON us.user_id = u.user_id
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+    
+    const userId = session.user_id
+    
+    // Get active membership
+    const now = new Date().toISOString()
+    const membership = await c.env.DB.prepare(`
+      SELECT * FROM memberships 
+      WHERE user_id = ? AND status = 'active' AND end_date >= ?
+      ORDER BY end_date DESC LIMIT 1
+    `).bind(userId, now).first()
+    
+    // Get all memberships history
+    const membershipsHistory = await c.env.DB.prepare(`
+      SELECT * FROM memberships 
+      WHERE user_id = ? 
+      ORDER BY created_at DESC
+      LIMIT 10
+    `).bind(userId).all()
+    
+    // Get event tickets
+    const tickets = await c.env.DB.prepare(`
+      SELECT t.*, e.event_name, e.event_datetime, e.location, e.slug
+      FROM tickets t
+      JOIN events e ON t.event_id = e.event_id
+      WHERE t.user_id = ?
+      ORDER BY e.event_datetime DESC
+      LIMIT 20
+    `).bind(userId).all()
+    
+    // Get shop orders
+    const orders = await c.env.DB.prepare(`
+      SELECT * FROM orders 
+      WHERE user_id = ? 
+      ORDER BY created_at DESC
+      LIMIT 10
+    `).bind(userId).all()
+    
+    // Get email preferences
+    let emailPrefs = await c.env.DB.prepare(`
+      SELECT * FROM email_preferences WHERE user_id = ?
+    `).bind(userId).first()
+    
+    // If no preferences exist, create default ones
+    if (!emailPrefs) {
+      emailPrefs = {
+        essential_emails: 1,
+        marketing_emails: 0,
+        consent_given: 0
+      }
+    }
+    
+    return c.json({
+      success: true,
+      user: {
+        id: session.user_id,
+        email: session.email,
+        name: session.name,
+        is_admin: session.is_admin === 1,
+        member_since: session.user_created_at
+      },
+      membership: membership || null,
+      memberships_history: membershipsHistory.results || [],
+      tickets: tickets.results || [],
+      orders: orders.results || [],
+      email_preferences: emailPrefs
+    })
+  } catch (error) {
+    console.error('[Account Info] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Update email preferences
+app.post('/account/email-preferences', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    // Get session
+    const session = await c.env.DB.prepare(`
+      SELECT user_id FROM user_sessions 
+      WHERE session_token = ? AND expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+    
+    const { marketing_emails } = await c.req.json()
+    const now = new Date().toISOString()
+    
+    // Upsert email preferences
+    await c.env.DB.prepare(`
+      INSERT INTO email_preferences (user_id, marketing_emails, consent_given, consent_date, last_updated)
+      VALUES (?, ?, 1, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        marketing_emails = excluded.marketing_emails,
+        consent_given = 1,
+        consent_date = COALESCE(consent_date, excluded.consent_date),
+        last_updated = excluded.last_updated
+    `).bind(session.user_id, marketing_emails ? 1 : 0, now, now).run()
+    
+    return c.json({ success: true })
+  } catch (error) {
+    console.error('[Email Preferences] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
 })
 
 // ============================================================================
