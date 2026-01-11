@@ -1720,16 +1720,14 @@ app.get('/account/info', async c => {
     if (!session) {
       return c.json({ error: 'invalid_session' }, 401)
     }
+      const userId = session.user_id
     
-    const userId = session.user_id
-    
-    // Get active membership
-    const now = new Date().toISOString()
+    // Get active membership (based on status column, not date)
     const membership = await c.env.DB.prepare(`
       SELECT * FROM memberships 
-      WHERE user_id = ? AND status = 'active' AND end_date >= ?
+      WHERE user_id = ? AND status = 'active'
       ORDER BY end_date DESC LIMIT 1
-    `).bind(userId, now).first()
+    `).bind(userId).first()
     
     // Get all memberships history
     const membershipsHistory = await c.env.DB.prepare(`
@@ -1828,6 +1826,391 @@ app.post('/account/email-preferences', async c => {
     return c.json({ success: true })
   } catch (error) {
     console.error('[Email Preferences] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Enable auto-renewal for user's active membership
+app.post('/account/enable-auto-renewal', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    // Get session
+    const session = await c.env.DB.prepare(`
+      SELECT us.user_id, u.email, u.name 
+      FROM user_sessions us
+      JOIN users u ON us.user_id = u.user_id
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+    
+    // Get active membership (check status column only, not date)
+    const membership = await c.env.DB.prepare(`
+      SELECT * FROM memberships 
+      WHERE user_id = ? AND status = 'active'
+      ORDER BY end_date DESC LIMIT 1
+    `).bind(session.user_id).first()
+    
+    if (!membership) {
+      return c.json({ error: 'no_active_membership' }, 404)
+    }
+    
+    if (membership.auto_renew === 1) {
+      return c.json({ error: 'auto_renewal_already_enabled' }, 400)
+    }
+      // Check if user has a saved payment method
+    const paymentInstrument = await c.env.DB.prepare(`
+      SELECT * FROM payment_instruments      WHERE user_id = ? AND is_active = 1
+      ORDER BY created_at DESC LIMIT 1
+    `).bind(session.user_id).first()
+    
+    if (!paymentInstrument) {
+      // Create a card tokenization checkout (no charge, just saves the card)
+      const orderRef = `AUTO-RENEWAL-SETUP-${session.user_id}-${Date.now()}`
+      const customerId = `USER-${session.user_id}`
+        try {
+        // First, ensure the customer exists in SumUp
+        const customerResponse = await c.env.PAYMENTS.fetch('https://payments/internal/customer', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Internal-Secret': c.env.INTERNAL_SECRET
+          },
+          body: JSON.stringify({
+            user_id: session.user_id,
+            email: session.email,
+            name: session.name
+          })
+        })
+        
+        if (!customerResponse.ok) {
+          const error = await customerResponse.text()
+          console.error('[Enable Auto-Renewal] Customer creation failed:', error)
+          throw new Error('Failed to create customer')
+        }
+        
+        // Now create the checkout for card tokenization
+        // Use service binding instead of HTTP URL for better performance and reliability
+        const checkoutResponse = await c.env.PAYMENTS.fetch('https://payments/internal/checkout', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Internal-Secret': c.env.INTERNAL_SECRET
+          },
+          body: JSON.stringify({
+            amount: 0, // No charge for card tokenization
+            currency: 'GBP',
+            orderRef,
+            description: 'Setup payment method for auto-renewal',
+            savePaymentInstrument: true,
+            customerId
+          })
+        })
+        
+        if (!checkoutResponse.ok) {
+          const error = await checkoutResponse.text()
+          console.error('[Enable Auto-Renewal] Checkout creation failed - Status:', checkoutResponse.status)
+          console.error('[Enable Auto-Renewal] Checkout creation failed - Response:', error)
+          throw new Error('Failed to create checkout')
+        }
+        
+        const checkout = await checkoutResponse.json()
+        
+        // Store the setup intent
+        const now = new Date().toISOString()
+        await c.env.DB.prepare(`
+          INSERT INTO payment_setups (user_id, checkout_id, order_ref, status, created_at)
+          VALUES (?, ?, ?, 'pending', ?)
+        `).bind(session.user_id, checkout.id, orderRef, now).run()
+        
+        return c.json({
+          success: false,
+          requires_payment_setup: true,
+          checkout_id: checkout.id,
+          order_ref: orderRef,
+          message: 'Please add a payment method to enable auto-renewal'
+        })
+      } catch (error) {
+        console.error('[Enable Auto-Renewal] Checkout error:', error)
+        throw error
+      }
+    }
+    
+    // User has a payment method - enable auto-renewal
+    await c.env.DB.prepare(`
+      UPDATE memberships 
+      SET auto_renew = 1, renewal_attempts = 0, payment_instrument_id = ?
+      WHERE id = ?
+    `).bind(paymentInstrument.instrument_id, membership.id).run()
+    
+    console.log(`[Auto-Renewal] Enabled for user ${session.user_id}, membership ${membership.id}`)
+    
+    const endDate = new Date(membership.end_date)
+    const formattedEndDate = endDate.toLocaleDateString('en-GB', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+    
+    return c.json({ 
+      success: true,
+      message: `Auto-renewal enabled successfully. Your card ending in ${paymentInstrument.last_4} will not be charged until ${formattedEndDate}.`,
+      end_date: membership.end_date,
+      card_last_4: paymentInstrument.last_4
+    })
+  } catch (error) {
+    console.error('[Enable Auto-Renewal] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Setup payment method for auto-renewal
+app.post('/account/setup-payment-method', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    // Get session
+    const session = await c.env.DB.prepare(`
+      SELECT us.user_id, u.email, u.name 
+      FROM user_sessions us
+      JOIN users u ON us.user_id = u.user_id
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+      // Get active membership (check status column only, not date)
+    const membership = await c.env.DB.prepare(`
+      SELECT * FROM memberships 
+      WHERE user_id = ? AND status = 'active'
+      ORDER BY end_date DESC LIMIT 1
+    `).bind(session.user_id).first()
+    
+    if (!membership) {
+      return c.json({ error: 'no_active_membership' }, 404)
+    }
+    
+    // Create a verification checkout for £0.01 to save the card
+    const orderRef = `CARD-SETUP-${session.user_id}-${Date.now()}`
+    const customerId = `USER-${session.user_id}`
+    
+    try {
+      const checkoutResponse = await fetch(`${c.env.PAYMENTS_WORKER_URL}/internal/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: 0.01, // £0.01 verification charge
+          currency: 'GBP',
+          orderRef,
+          description: 'Payment method setup for auto-renewal',
+          savePaymentInstrument: true,
+          customerId
+        })
+      })
+      
+      if (!checkoutResponse.ok) {
+        const error = await checkoutResponse.text()
+        console.error('Checkout creation failed:', error)
+        throw new Error('Failed to create checkout')
+      }
+      
+      const checkout = await checkoutResponse.json()
+      
+      // Store the setup intent
+      await c.env.DB.prepare(`
+        INSERT INTO payment_setups (user_id, checkout_id, order_ref, status, created_at)
+        VALUES (?, ?, ?, 'pending', ?)
+      `).bind(session.user_id, checkout.id, orderRef, now).run()
+      
+      return c.json({
+        success: true,
+        checkout_id: checkout.id,
+        order_ref: orderRef
+      })
+    } catch (error) {
+      console.error('[Setup Payment Method] Checkout error:', error)
+      throw error
+    }
+  } catch (error) {
+    console.error('[Setup Payment Method] ERROR:', error)
+    return c.json({ error: 'internal_error', message: error.message }, 500)
+  }
+})
+
+// Confirm payment method setup
+app.get('/account/confirm-payment-setup', async c => {
+  try {
+    const orderRef = c.req.query('orderRef')
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    if (!orderRef) {
+      return c.json({ error: 'order_ref_required' }, 400)
+    }
+    
+    // Get session
+    const session = await c.env.DB.prepare(`
+      SELECT us.user_id FROM user_sessions us
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+    
+    // Get the payment setup record
+    const setup = await c.env.DB.prepare(`
+      SELECT * FROM payment_setups 
+      WHERE order_ref = ? AND user_id = ?
+    `).bind(orderRef, session.user_id).first()
+    
+    if (!setup) {
+      return c.json({ error: 'setup_not_found' }, 404)
+    }
+    
+    if (setup.status === 'completed') {
+      return c.json({ success: true, status: 'completed' })
+    }
+    
+    // Verify the payment with SumUp
+    const paymentResponse = await fetch(`${c.env.PAYMENTS_WORKER_URL}/internal/payment/${setup.checkout_id}`)
+    
+    if (!paymentResponse.ok) {
+      return c.json({ error: 'payment_verification_failed' }, 500)
+    }
+    
+    const payment = await paymentResponse.json()
+    
+    if (payment.status !== 'PAID' && payment.status !== 'SUCCESSFUL') {
+      return c.json({ success: false, status: 'pending' })
+    }
+    
+    // Save the payment instrument
+    const instrumentResponse = await fetch(`${c.env.PAYMENTS_WORKER_URL}/internal/payment-instrument`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: session.user_id,
+        checkoutId: setup.checkout_id
+      })
+    })
+    
+    if (!instrumentResponse.ok) {
+      const error = await instrumentResponse.text()
+      console.error('Failed to save payment instrument:', error)
+      return c.json({ error: 'failed_to_save_instrument' }, 500)
+    }
+    
+    const instrument = await instrumentResponse.json()
+    
+    // Mark setup as completed
+    await c.env.DB.prepare(`
+      UPDATE payment_setups 
+      SET status = 'completed', completed_at = ?
+      WHERE id = ?
+    `).bind(new Date().toISOString(), setup.id).run()
+      // Get active membership and enable auto-renewal (check status column only, not date)
+    const membership = await c.env.DB.prepare(`
+      SELECT * FROM memberships 
+      WHERE user_id = ? AND status = 'active'
+      ORDER BY end_date DESC LIMIT 1
+    `).bind(session.user_id).first()
+    
+    if (membership) {
+      await c.env.DB.prepare(`
+        UPDATE memberships 
+        SET auto_renew = 1, renewal_attempts = 0, payment_instrument_id = ?
+        WHERE id = ?
+      `).bind(instrument.instrument_id, membership.id).run()
+    }
+    
+    return c.json({
+      success: true,
+      status: 'completed',
+      card_last_4: instrument.last_4,
+      card_type: instrument.card_type
+    })
+  } catch (error) {
+    console.error('[Confirm Payment Setup] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Cancel auto-renewal (disable for user's active membership)
+app.post('/account/cancel-auto-renewal', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    // Get session
+    const session = await c.env.DB.prepare(`
+      SELECT us.user_id, u.email, u.name 
+      FROM user_sessions us
+      JOIN users u ON us.user_id = u.user_id
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+    
+    // Get active membership (check status column only, not date)
+    const membership = await c.env.DB.prepare(`
+      SELECT * FROM memberships 
+      WHERE user_id = ? AND status = 'active'
+      ORDER BY end_date DESC LIMIT 1
+    `).bind(session.user_id).first()
+    
+    if (!membership) {
+      return c.json({ error: 'no_active_membership' }, 404)
+    }
+    
+    if (membership.auto_renew === 0) {
+      return c.json({ error: 'auto_renewal_not_enabled' }, 400)
+    }
+    
+    // Disable auto-renewal
+    await c.env.DB.prepare(`
+      UPDATE memberships 
+      SET auto_renew = 0 
+      WHERE id = ?
+    `).bind(membership.id).run()
+    
+    console.log(`[Auto-Renewal] Cancelled for user ${session.user_id}, membership ${membership.id}`)
+    
+    // Format the end date for the response
+    const endDate = new Date(membership.end_date)
+    const formattedEndDate = endDate.toLocaleDateString('en-GB', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+    
+    return c.json({ 
+      success: true,
+      message: `Auto-renewal cancelled. Your membership will remain active until ${formattedEndDate}.`,
+      end_date: membership.end_date
+    })
+  } catch (error) {
+    console.error('[Cancel Auto-Renewal] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
   }
 })

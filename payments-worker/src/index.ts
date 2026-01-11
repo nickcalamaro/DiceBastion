@@ -257,23 +257,37 @@ app.post('/internal/checkout', async (c) => {
 			savePaymentInstrument?: boolean
 			customerId?: string
 		}>()
-
+		
 		const { amount, currency, orderRef, description, savePaymentInstrument, customerId } = body
 
 		const { access_token } = await sumupToken(c.env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
-
+		
 		const checkoutBody: any = {
-			amount: Number(amount),
-			currency,
 			checkout_reference: orderRef,
 			merchant_code: c.env.SUMUP_MERCHANT_CODE,
 			description
 		}
 
-		// Request card tokenization using SumUp's recurring payment flow
-		if (savePaymentInstrument && customerId) {
+		// For card tokenization, use minimal amount with SETUP_RECURRING_PAYMENT purpose
+		if (savePaymentInstrument && customerId && amount === 0) {
+			// SumUp requires amount and currency even for tokenization
+			// Use minimal amount (0.01) for verification
+			checkoutBody.amount = 0.01
+			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
 			checkoutBody.customer_id = customerId
+			console.log('[Checkout] Creating tokenization checkout with minimal amount:', JSON.stringify(checkoutBody))
+		} else {
+			// For regular payments, use the provided amount
+			checkoutBody.amount = Number(amount)
+			checkoutBody.currency = currency
+			
+			// If saving payment instrument with a payment, add the customer info
+			if (savePaymentInstrument && customerId) {
+				checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
+				checkoutBody.customer_id = customerId
+				console.log('[Checkout] Creating payment checkout:', JSON.stringify(checkoutBody))
+			}
 		}
 
 		const res = await fetch('https://api.sumup.com/v0.1/checkouts', {
@@ -287,10 +301,11 @@ app.post('/internal/checkout', async (c) => {
 
 		if (!res.ok) {
 			const txt = await res.text()
+			console.error('[Checkout] SumUp error:', txt)
 			throw new Error(`Create checkout failed: ${txt}`)
 		}
 
-		const json = await res.json()
+		const json: any = await res.json()
 		if (!json || !json.id) {
 			throw new Error('missing_checkout_id')
 		}
@@ -368,10 +383,9 @@ app.post('/internal/payment-instrument', async (c) => {
 
 		if (!checkoutRes.ok) {
 			console.error('Failed to fetch checkout:', checkoutRes.status, await checkoutRes.text())
-			return c.json({ error: 'Failed to fetch checkout' }, 500)
-		}
+			return c.json({ error: 'Failed to fetch checkout' }, 500)		}
 
-		const checkout = await checkoutRes.json()
+		const checkout: any = await checkoutRes.json()
 		console.log('Checkout response for tokenization:', JSON.stringify(checkout))
 
 		// With purpose=SETUP_RECURRING_PAYMENT, the payment_instrument should be in the response
@@ -391,15 +405,14 @@ app.post('/internal/payment-instrument', async (c) => {
 		// Fetch card details from Payment Instruments API
 		let cardType: string | null = null
 		let last4: string | null = null
-
 		try {
 			const customerId = `USER-${userId}`
 			const instrumentsRes = await fetch(`https://api.sumup.com/v0.1/customers/${customerId}/payment-instruments`, {
 				headers: { Authorization: `Bearer ${access_token}` }
 			})
-
+			
 			if (instrumentsRes.ok) {
-				const instrumentsData = await instrumentsRes.json()
+				const instrumentsData: any = await instrumentsRes.json()
 				const savedInstrument = instrumentsData.find((i: any) => i.token === instrumentId)
 
 				if (savedInstrument && savedInstrument.card) {
@@ -505,10 +518,9 @@ app.post('/internal/charge', async (c) => {
 
 		if (!checkoutRes.ok) {
 			const txt = await checkoutRes.text()
-			throw new Error(`Checkout creation failed: ${txt}`)
-		}
+			throw new Error(`Checkout creation failed: ${txt}`)		}
 
-		const checkout = await checkoutRes.json()
+		const checkout: any = await checkoutRes.json()
 		console.log('Created checkout for recurring charge:', checkout.id)
 
 		// Process payment with saved token
@@ -529,10 +541,9 @@ app.post('/internal/charge', async (c) => {
 
 		if (!paymentRes.ok) {
 			const txt = await paymentRes.text()
-			throw new Error(`Payment processing failed: ${txt}`)
-		}
+			throw new Error(`Payment processing failed: ${txt}`)		}
 
-		const payment = await paymentRes.json()
+		const payment: any = await paymentRes.json()
 		console.log('Processed recurring payment:', payment.id, payment.status)
 		return c.json(payment)
 	} catch (error: any) {
