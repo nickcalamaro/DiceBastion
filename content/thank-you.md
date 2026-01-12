@@ -353,7 +353,8 @@ if (type === 'membership') {
     eventDate: data.eventDate,
     ticketCount: data.ticketCount,
     amount: data.amount,
-    currency: data.currency
+    currency: data.currency,
+    isFree: data.isFree
   });
 }
 return; // Success - stop polling
