@@ -32,7 +32,8 @@ app.use('*', async (c, next) => {
   let allowOrigin = ''
   if (origin === 'null' && c.env.ALLOW_LOCAL_TESTING === 'true') {
     allowOrigin = '*'  // Allow any origin for local testing
-  } else if (origin && allowed.includes(origin)) {
+  } else if (origin && (allowed.includes(origin) || (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')))) {
+    // Allow configured origins OR any localhost/127.0.0.1 origin for development
     allowOrigin = origin
   }
   
@@ -3053,6 +3054,130 @@ app.get('/events/:slug', async c => {
   }
 })
 
+// Create free event registration (no payment required)
+app.post('/events/:id/register', async c => {
+  try {
+    const id = c.req.param('id')
+    if (!id || isNaN(Number(id))) return c.json({ error:'invalid_event_id' },400)
+    const evId = Number(id)
+    const ip = c.req.header('CF-Connecting-IP')
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    
+    // Rate limiting: 5 requests per minute per IP
+    if (!checkRateLimit(ip, eventCheckoutRateLimits, 5, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many registration requests. Please try again in a minute.' }, 429)
+    }
+    
+    const { email, name, turnstileToken } = await c.req.json()
+    if (!email) return c.json({ error:'email_required' },400)
+    if (!EMAIL_RE.test(email)) return c.json({ error:'invalid_email' },400)
+    if (!name || name.trim().length === 0) return c.json({ error:'name_required' },400)
+    if (name && name.length > 200) return c.json({ error:'name_too_long' },400)
+    
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode)
+    if (!tsOk) return c.json({ error:'turnstile_failed' },403)
+
+    const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
+    if (!ev) return c.json({ error:'event_not_found' },404)
+    
+    // Ensure this is a free event
+    if (ev.requires_purchase === 1) {
+      return c.json({ error:'event_requires_payment' },400)
+    }
+    
+    if (ev.capacity && ev.tickets_sold >= ev.capacity) {
+      return c.json({ error:'event_full' },409)
+    }
+
+    const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
+    if (!ident || typeof ident.id === 'undefined' || ident.id === null) {
+      console.error('identity missing id', ident)
+      return c.json({ error:'identity_error' },500)
+    }
+
+    const s = await getSchema(c.env.DB)
+    await ensureSchema(c.env.DB, s.fkColumn)
+    await migrateToTransactions(c.env.DB)
+
+    // Check for duplicate registration
+    const existing = await c.env.DB.prepare(`
+      SELECT * FROM tickets WHERE event_id = ? AND user_id = ? AND status = 'active'
+    `).bind(evId, ident.id).first()
+    
+    if (existing) {
+      return c.json({ 
+        success: true, 
+        already_registered: true,
+        message: 'You are already registered for this event',
+        eventName: ev.event_name,
+        eventDate: ev.event_datetime
+      })
+    }
+
+    // Create ticket record with status 'active' (no payment needed)
+    const colParts = ['event_id', 'user_id', 'status', 'created_at']
+    const bindVals = [evId, ident.id, 'active', toIso(new Date())]
+    
+    const placeholders = colParts.map(()=>'?').join(',')
+    const ticketResult = await c.env.DB.prepare(
+      `INSERT INTO tickets (${colParts.join(',')}) VALUES (${placeholders}) RETURNING id`
+    ).bind(...bindVals).first()
+    const ticketId = ticketResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
+
+    // Increment tickets_sold count
+    await c.env.DB.prepare(
+      'UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)'
+    ).bind(evId).run()
+    
+    // Send confirmation email
+    const emailContent = getTicketConfirmationEmail(ev, ident, { email, name: ident.name })
+    await sendEmail(c.env, { 
+      to: email, 
+      ...emailContent,
+      emailType: 'event_registration_confirmation',
+      relatedId: ticketId,
+      relatedType: 'ticket',
+      metadata: { event_id: evId, event_name: ev.event_name }
+    })
+    
+    // Send admin notification
+    try {
+      const adminEmailContent = getAdminNotificationEmail('event_registration', {
+        eventName: ev.event_name,
+        customerName: ident.name || 'Customer',
+        customerEmail: email,
+        eventDate: ev.event_datetime,
+        ticketId: ticketId,
+        isFree: true
+      })
+      
+      await sendEmail(c.env, { 
+        to: 'admin@dicebastion.com',
+        ...adminEmailContent,
+        emailType: 'admin_event_notification',
+        relatedId: ticketId,
+        relatedType: 'ticket',
+        metadata: { event_id: evId, event_name: ev.event_name }
+      })
+    } catch (adminEmailError) {
+      console.error('Failed to send admin notification for event registration:', adminEmailError)
+      // Don't fail the main registration if admin email fails
+    }
+    
+    return c.json({ 
+      success: true,
+      registered: true,
+      eventName: ev.event_name,
+      eventDate: ev.event_datetime,
+      ticketId: ticketId
+    })
+  } catch (e) {
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    console.error('event registration error', e)
+    return c.json(debugMode ? { error:'internal_error', detail: String(e), stack: String(e?.stack||'') } : { error:'internal_error' },500)
+  }
+})
+
 // ============================================================================
 // ADMIN MEMBERSHIP MANAGEMENT ENDPOINT
 // ============================================================================
@@ -3360,6 +3485,91 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     return c.json({ success: true })
   } catch (e) {
     console.error('Delete event error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Get event registrations (admin only)
+app.get('/admin/events/:id/registrations', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    if (!id || isNaN(Number(id))) return c.json({ error:'invalid_event_id' },400)
+    const evId = Number(id)
+    
+    // Get event details
+    const event = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
+    if (!event) {
+      return c.json({ error: 'event_not_found' }, 404)
+    }
+    
+    // Get all tickets/registrations for this event
+    const registrations = await c.env.DB.prepare(`
+      SELECT 
+        t.id,
+        t.user_id,
+        t.status,
+        t.amount,
+        t.currency,
+        t.payment_status,
+        t.created_at,
+        u.email,
+        u.name,
+        tr.order_ref,
+        tr.payment_id
+      FROM tickets t
+      LEFT JOIN users u ON t.user_id = u.user_id
+      LEFT JOIN transactions tr ON tr.reference_id = t.id AND tr.transaction_type = 'ticket'
+      WHERE t.event_id = ?
+      ORDER BY t.created_at DESC
+    `).bind(evId).all()
+    
+    return c.json({ 
+      success: true,
+      event: {
+        id: event.event_id,
+        name: event.event_name,
+        date: event.event_datetime,
+        capacity: event.capacity,
+        tickets_sold: event.tickets_sold,
+        requires_purchase: event.requires_purchase
+      },
+      registrations: registrations.results || []
+    })
+  } catch (e) {
+    console.error('Get event registrations error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Get all event registrations summary (admin only)
+app.get('/admin/registrations', requireAdmin, async c => {
+  try {
+    // Get all events with registration counts
+    const events = await c.env.DB.prepare(`
+      SELECT 
+        e.event_id,
+        e.event_name,
+        e.event_datetime,
+        e.capacity,
+        e.tickets_sold,
+        e.requires_purchase,
+        e.is_active,
+        COUNT(t.id) as total_registrations,
+        SUM(CASE WHEN t.status = 'active' THEN 1 ELSE 0 END) as confirmed_registrations,
+        SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending_registrations
+      FROM events e
+      LEFT JOIN tickets t ON e.event_id = t.event_id
+      WHERE e.event_datetime >= datetime('now', '-7 days')
+      GROUP BY e.event_id
+      ORDER BY e.event_datetime ASC
+    `).all()
+    
+    return c.json({ 
+      success: true,
+      events: events.results || []
+    })
+  } catch (e) {
+    console.error('Get registrations summary error:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })

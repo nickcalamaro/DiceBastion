@@ -73,6 +73,7 @@ Logout
 <div style="border-bottom: 2px solid rgb(var(--color-neutral-200)); margin-bottom: 2rem;">
 <button class="tab-btn active" data-tab="products" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid rgb(var(--color-primary-600)); cursor: pointer; font-weight: 600; color: rgb(var(--color-primary-600));">Products</button>
 <button class="tab-btn" data-tab="events" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Events</button>
+<button class="tab-btn" data-tab="registrations" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Registrations</button>
 <button class="tab-btn" data-tab="orders" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Orders</button>
 <button class="tab-btn" data-tab="memberships" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Memberships</button>
 <button class="tab-btn" data-tab="cron" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Cron Jobs</button>
@@ -370,6 +371,13 @@ Logout
 <div id="events-list"></div>
 </div>
 
+<!-- Registrations Tab -->
+<div id="registrations-tab" class="tab-content" style="display: none;">
+<h2>Event Registrations</h2>
+<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 2rem;">View and manage event registrations and ticket purchases</p>
+<div id="registrations-list"></div>
+</div>
+
 <!-- Orders Tab -->
 <div id="orders-tab" class="tab-content" style="display: none;">
 <h2>Recent Orders</h2>
@@ -645,6 +653,7 @@ document.getElementById('admin-dashboard').style.display = 'block';
 loadProducts();
 loadEvents();
 loadOrders();
+loadRegistrations();
 loadCronLogs();
 // Verify session is still valid in background
 verifySession();
@@ -719,6 +728,7 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       loadProducts();
       loadEvents();
       loadOrders();
+      loadRegistrations();
       loadCronLogs();
     } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
@@ -1642,8 +1652,218 @@ async function deleteEvent(id, title) {
 
 // Orders
 async function loadOrders() {
-const list = document.getElementById('orders-list');
-list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">Order management coming soon. Use SQL queries for now.</p>';
+  const list = document.getElementById('orders-list');
+  list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">Order management coming soon. Use SQL queries for now.</p>';
+}
+
+// Registrations
+async function loadRegistrations() {
+  const list = document.getElementById('registrations-list');
+  list.innerHTML = '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">Loading...</p>';
+  
+  try {
+    const res = await fetch(`https://dicebastion-memberships.ncalamaro.workers.dev/admin/registrations`, {
+      headers: {
+        'X-Session-Token': sessionToken
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error('Failed to fetch registrations');
+    }
+
+    const data = await res.json();
+    
+    if (!data.success || !data.events || data.events.length === 0) {
+      list.innerHTML = '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">No upcoming events with registrations</p>';
+      return;
+    }
+
+    // Group events by type
+    const freeEvents = data.events.filter(e => e.requires_purchase === 0);
+    const paidEvents = data.events.filter(e => e.requires_purchase === 1);
+
+    let html = '';
+    
+    if (freeEvents.length > 0) {
+      html += '<h3 style="margin-top: 0;">Free Events (Registrations)</h3>';
+      html += renderEventRegistrations(freeEvents, true);
+    }
+    
+    if (paidEvents.length > 0) {
+      html += '<h3 style="margin-top: 2rem;">Paid Events (Ticket Sales)</h3>';
+      html += renderEventRegistrations(paidEvents, false);
+    }
+
+    list.innerHTML = html;
+    
+    // Add event listeners for view details buttons
+    document.querySelectorAll('.view-registrations-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const eventId = btn.dataset.eventId;
+        const eventName = btn.dataset.eventName;
+        viewEventRegistrations(eventId, eventName);
+      });
+    });
+  } catch (err) {
+    console.error('Error loading registrations:', err);
+    list.innerHTML = '<p style="color: #c00;">Failed to load registrations. Please refresh the page.</p>';
+  }
+}
+
+function renderEventRegistrations(events, isFree) {
+  return events.map(event => {
+    const eventDate = new Date(event.event_datetime);
+    const isPast = eventDate < new Date();
+    const capacity = event.capacity || '∞';
+    const percentage = event.capacity ? Math.round((event.tickets_sold / event.capacity) * 100) : 0;
+    
+    return `
+      <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 200px;">
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">${event.event_name}</h4>
+            <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem; margin-bottom: 0.5rem;">
+              📅 ${eventDate.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </div>
+            ${isPast ? '<span style="background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">PAST EVENT</span>' : ''}
+            ${!event.is_active ? '<span style="background: #fee2e2; color: #991b1b; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-left: 0.5rem;">INACTIVE</span>' : ''}
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 2rem; font-weight: bold; color: rgb(var(--color-primary-600));">
+              ${event.confirmed_registrations || 0}
+            </div>
+            <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
+              ${isFree ? 'Registered' : 'Tickets Sold'}
+            </div>
+            ${event.capacity ? `
+              <div style="margin-top: 0.5rem;">
+                <div style="background: rgb(var(--color-neutral-200)); height: 6px; border-radius: 3px; overflow: hidden;">
+                  <div style="background: rgb(var(--color-primary-600)); height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
+                </div>
+                <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-top: 0.25rem;">
+                  ${event.tickets_sold} / ${capacity}
+                </div>
+              </div>
+            ` : ''}
+            ${event.pending_registrations > 0 ? `
+              <div style="font-size: 0.75rem; color: #f59e0b; margin-top: 0.5rem;">
+                ⏳ ${event.pending_registrations} pending
+              </div>
+            ` : ''}
+          </div>
+        </div>
+        <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+          <button 
+            class="view-registrations-btn" 
+            data-event-id="${event.event_id}"
+            data-event-name="${event.event_name}"
+            style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.875rem;">
+            View Details
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function viewEventRegistrations(eventId, eventName) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 1rem;';
+  
+  modal.innerHTML = `
+    <div style="background: rgb(var(--color-neutral)); border-radius: 12px; max-width: 800px; width: 100%; max-height: 90vh; overflow: auto; padding: 2rem; position: relative;">
+      <button onclick="this.closest('div[style*=fixed]').remove()" style="position: absolute; top: 1rem; right: 1rem; background: transparent; border: none; font-size: 1.5rem; cursor: pointer; color: rgb(var(--color-neutral-600));">×</button>
+      <h3 style="margin-top: 0;">${eventName} - Registrations</h3>
+      <div id="modal-registrations-content" style="margin-top: 1.5rem;">
+        <p style="text-align: center; color: rgb(var(--color-neutral-500));">Loading...</p>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  try {
+    const res = await fetch(`https://dicebastion-memberships.ncalamaro.workers.dev/admin/events/${eventId}/registrations`, {
+      headers: {
+        'X-Session-Token': sessionToken
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error('Failed to fetch event registrations');
+    }
+
+    const data = await res.json();
+    const content = document.getElementById('modal-registrations-content');
+    
+    if (!data.registrations || data.registrations.length === 0) {
+      content.innerHTML = '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">No registrations yet</p>';
+      return;
+    }
+
+    const isFree = data.event.requires_purchase === 0;
+    
+    content.innerHTML = `
+      <div style="margin-bottom: 1.5rem; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+          <div>
+            <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Total ${isFree ? 'Registrations' : 'Tickets'}</div>
+            <div style="font-size: 1.5rem; font-weight: bold;">${data.registrations.length}</div>
+          </div>
+          ${data.event.capacity ? `
+          <div>
+            <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Capacity</div>
+            <div style="font-size: 1.5rem; font-weight: bold;">${data.event.capacity}</div>
+          </div>
+          <div>
+            <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Remaining</div>
+            <div style="font-size: 1.5rem; font-weight: bold;">${data.event.capacity - data.event.tickets_sold}</div>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+      
+      <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+          <tr style="border-bottom: 2px solid rgb(var(--color-neutral-200));">
+            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Name</th>
+            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Email</th>
+            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Status</th>
+            ${!isFree ? '<th style="text-align: left; padding: 0.75rem; font-weight: 600;">Amount</th>' : ''}
+            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.registrations.map(reg => {
+            const statusColors = {
+              active: 'background: #d1fae5; color: #065f46;',
+              pending: 'background: #fef3c7; color: #92400e;',
+              cancelled: 'background: #fee2e2; color: #991b1b;'
+            };
+            const regDate = new Date(reg.created_at);
+            
+            return `
+              <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
+                <td style="padding: 0.75rem;">${reg.name || 'N/A'}</td>
+                <td style="padding: 0.75rem;">${reg.email}</td>
+                <td style="padding: 0.75rem;">
+                  <span style="padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; ${statusColors[reg.status] || statusColors.pending}">
+                    ${reg.status.toUpperCase()}
+                  </span>
+                </td>
+                ${!isFree ? `<td style="padding: 0.75rem;">${reg.amount ? `£${reg.amount}` : 'FREE'}</td>` : ''}
+                <td style="padding: 0.75rem; font-size: 0.875rem;">${regDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    console.error('Error loading event registrations:', err);
+    document.getElementById('modal-registrations-content').innerHTML = '<p style="color: #c00;">Failed to load registrations</p>';
+  }
 }
 
 // Memberships

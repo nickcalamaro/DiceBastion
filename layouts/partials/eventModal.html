@@ -352,26 +352,27 @@ function openEventModal(eventId, allEvents) {
     html += `<div class="event-detail-meta-item"><strong>🎫 Spots:</strong> ${available} / ${event.capacity}</div>`;
   }
   html += '</div>';
-  
-  if (event.full_description) {
+    if (event.full_description) {
     html += `<div class="event-detail-description">${event.full_description}</div>`;
   } else if (event.description) {
     html += `<div class="event-detail-description"><p>${event.description}</p></div>`;
   }
   
-  if (!isFree && typeof renderEventPurchase === 'function') {
+  if (typeof renderEventPurchase === 'function') {
     html += renderEventPurchase(event);
   }
   
   html += '</div>';
-  
-  document.getElementById('event-modal-body').innerHTML = html;
+    document.getElementById('event-modal-body').innerHTML = html;
   document.getElementById('event-modal').classList.add('is-open');
   document.body.style.overflow = 'hidden';
   
-  if (!isFree && typeof initEventPurchase === 'function') {
-    initEventPurchase(event);
-  }
+  // Use setTimeout to ensure DOM has fully updated before attaching event listeners
+  setTimeout(() => {
+    if (typeof initEventPurchase === 'function') {
+      initEventPurchase(event);
+    }
+  }, 0);
 }
 
 function closeEventModal() {
