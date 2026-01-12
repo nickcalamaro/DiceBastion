@@ -12,73 +12,24 @@ window.renderEventPurchase = function renderEventPurchase(event) {
   const requiresPurchase = event.requires_purchase === 1 || event.requires_purchase === true;
   const memberPrice = parseFloat(event.membership_price || 0);
   const nonMemberPrice = parseFloat(event.non_membership_price || 0);
-  const isFree = !requiresPurchase || (memberPrice === 0 && nonMemberPrice === 0);
-  
-  console.log('renderEventPurchase called:', {
-    eventId,
-    requires_purchase: event.requires_purchase,
-    requiresPurchase,
-    memberPrice,
-    nonMemberPrice,
-    isFree
-  });
-    if (isFree) {
-    // Free event registration
+  const isFree = !requiresPurchase || (memberPrice === 0 && nonMemberPrice === 0);  if (isFree) {
+    // Free event registration - simplified UI
     return `
       <div class="event-purchase my-6" data-event-id="${eventId}" style="margin-top: 2rem;">
         <div class="event-ticket-box border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 bg-neutral dark:bg-neutral-800 shadow-lg max-w-xl">
-          <h3 class="mt-0 mb-2 text-xl font-bold text-primary-700 dark:text-primary-400">Register for Free</h3>
+          <h3 class="mt-0 mb-2 text-xl font-bold text-primary-700 dark:text-primary-400">Register Now</h3>
           <div class="mb-3">
             <div class="text-3xl font-extrabold text-primary-600 dark:text-primary-400">FREE</div>
-            <p class="mt-2 mb-0 text-sm text-neutral-700 dark:text-neutral-300">This event is free to attend. Register to secure your spot!</p>
+            <p class="mt-2 mb-0 text-sm text-neutral-700 dark:text-neutral-300">This is a free event. You can get access to free drinks, local discounts, and help us keep these events going by becoming a <a href="/memberships/" class="text-primary-600 dark:text-primary-400 underline font-semibold hover:text-primary-700 dark:hover:text-primary-500">member</a>.</p>
           </div>
-          <button type="button" class="evt-register-btn w-full py-3 px-6 border-0 rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 text-base font-bold cursor-pointer shadow-md hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Register Now</button>
+          <button type="button" class="evt-register-btn w-full py-3 px-6 border-0 rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 text-base font-bold cursor-pointer shadow-md hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Sign Up</button>
         </div>
       </div>
-      <div class="evt-modal" id="evt-modal-${eventId}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:99999; align-items:center; justify-content:center;">
-        <div class="evt-modal-inner bg-neutral dark:bg-neutral-800 rounded-xl p-5 relative shadow-2xl" style="width:min(520px,95vw);">
-          <button type="button" class="evt-close bg-transparent border-none text-2xl cursor-pointer text-neutral-700 dark:text-neutral-300" aria-label="Close" style="position:absolute; top:10px; right:10px;">×</button>
-          <h3 class="mt-0 mb-3 text-lg font-bold text-neutral-800 dark:text-neutral-200 evt-modal-title">Event Registration</h3>
-          
-          <!-- Logged-in user confirmation screen -->
-          <div class="evt-step evt-confirm-logged-in" style="display:none;">
-            <p class="mt-0 mb-4 text-sm text-neutral-700 dark:text-neutral-300">
-              <span class="evt-logged-message">Registering as</span> <strong class="text-neutral-800 dark:text-neutral-200 evt-user-email"></strong>
-            </p>
-            <div class="mt-3">
-              <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2">Security check</div>
-              <div id="evt-ts-logged-${eventId}"></div>
-            </div>
-            <button type="button" class="evt-continue-logged mt-4 w-full py-3 border-none rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 font-bold cursor-pointer hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Complete Registration</button>
-            <p class="mt-3 mb-0 text-center text-sm text-neutral-600 dark:text-neutral-400">
-              Not you? <button type="button" class="evt-switch-account bg-transparent border-none text-primary-600 dark:text-primary-400 underline cursor-pointer hover:text-primary-700 dark:hover:text-primary-500">Use a different email</button>
-            </p>
-          </div>
-          
-          <!-- Guest/non-logged-in user form -->
-          <div class="evt-step evt-details" style="display:block;">
-            <label class="block mt-2 mb-1 font-semibold text-neutral-700 dark:text-neutral-300">Full name *</label>
-            <input type="text" class="evt-name w-full p-2.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200" placeholder="Jane Doe" required>
-            <label class="block mt-3 mb-1 font-semibold text-neutral-700 dark:text-neutral-300">Email *</label>
-            <input type="email" class="evt-email w-full p-2.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200" placeholder="you@example.com" required>
-            <div class="mt-3">
-              <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2">Security check</div>
-              <div id="evt-ts-${eventId}"></div>
-            </div>
-            <button type="button" class="evt-continue mt-4 w-full py-3 border-none rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 font-bold cursor-pointer hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Complete Registration</button>
-            <p class="mt-3 mb-0 text-center text-sm text-neutral-600 dark:text-neutral-400">
-              Already have an account? <a href="/login" class="text-primary-600 dark:text-primary-400 underline">Sign in</a>
-            </p>
-          </div>
-          
-          <div class="evt-error mt-2.5 text-sm font-semibold" style="display:none; color:#b00020;"></div>
-          <div class="evt-success mt-4 py-3 px-4 rounded-lg font-semibold" style="display:none; background:#e9fbe9; border:1px solid #b9e8b9; color:#1a5d1a;">Registration confirmed! See you there.</div>
-        </div>
-      </div>
+      ${generateModal(eventId, true)}
     `;
   }
   
-  // Paid event (existing logic)
+  // Paid event
   return `
     <div class="event-purchase my-6" data-event-id="${eventId}" style="margin-top: 2rem;">
       <div class="event-ticket-box border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 bg-neutral dark:bg-neutral-800 shadow-lg max-w-xl">
@@ -102,6 +53,13 @@ window.renderEventPurchase = function renderEventPurchase(event) {
         <a href="/memberships/" class="inline-block mt-2 py-1.5 px-4 font-semibold text-primary-700 dark:text-primary-400 bg-primary-50 dark:bg-primary-800/50 border border-primary-300 dark:border-primary-600 rounded-md hover:bg-primary-100 dark:hover:bg-primary-700/60 transition-colors">Become a member!</a>
       </div>
     </div>    
+    ${generateModal(eventId, false)}
+  `;
+}
+
+// Generate modal HTML (shared between free and paid events)
+function generateModal(eventId, isFree) {
+  return `
     <div class="evt-modal" id="evt-modal-${eventId}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:99999; align-items:center; justify-content:center;">
       <div class="evt-modal-inner bg-neutral dark:bg-neutral-800 rounded-xl p-5 relative shadow-2xl" style="width:min(520px,95vw);">
         <button type="button" class="evt-close bg-transparent border-none text-2xl cursor-pointer text-neutral-700 dark:text-neutral-300" aria-label="Close" style="position:absolute; top:10px; right:10px;">×</button>
@@ -139,14 +97,12 @@ window.renderEventPurchase = function renderEventPurchase(event) {
             <div id="evt-ts-${eventId}"></div>
           </div>
           <button type="button" class="evt-continue mt-4 w-full py-3 border-none rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 font-bold cursor-pointer hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">${isFree ? 'Complete Registration' : 'Continue to Payment'}</button>
-          ${isFree ? `
           <p class="mt-3 mb-0 text-center text-sm text-neutral-600 dark:text-neutral-400">
             Already have an account? <a href="/login" class="text-primary-600 dark:text-primary-400 underline">Sign in</a>
           </p>
-          ` : ''}
         </div>
         
-        <div id="evt-card-${eventId}" class="evt-card mt-2" style="display:none;"></div>
+        ${!isFree ? `<div id="evt-card-${eventId}" class="evt-card mt-2" style="display:none;"></div>` : ''}
         <div class="evt-error mt-2.5 text-sm font-semibold" style="display:none; color:#b00020;"></div>
         <div class="evt-success mt-4 py-3 px-4 rounded-lg font-semibold" style="display:none; background:#e9fbe9; border:1px solid #b9e8b9; color:#1a5d1a;">${isFree ? 'Registration confirmed! See you there.' : 'Ticket confirmed! See you there.'}</div>
       </div>
@@ -162,14 +118,6 @@ window.initEventPurchase = function initEventPurchase(event) {
   let turnstileWidgetId = null; // Store the Turnstile widget ID
   let turnstileLoggedWidgetId = null; // Store the Turnstile widget ID for logged-in flow
   let turnstileRenderTimeout = null; // Store timeout ID to cancel if needed
-  
-  console.log('initEventPurchase called:', {
-    eventId,
-    rootFound: !!root,
-    modalFound: !!modal,
-    registerBtnFound: !!root?.querySelector('.evt-register-btn'),
-    buyBtnFound: !!root?.querySelector('.evt-buy-btn')
-  });
   
   if (!root || !modal) return;
   
@@ -618,8 +566,7 @@ window.initEventPurchase = function initEventPurchase(event) {
       
       // Use the unmount helper to properly clean up SumUp widget
       unmountWidget();
-      
-      // Hide modal
+        // Hide modal and reset state
       modal.style.display = 'none';
       const detailsScreen = modal.querySelector('.evt-details');
       const loggedInScreen = modal.querySelector('.evt-confirm-logged-in');
@@ -629,27 +576,17 @@ window.initEventPurchase = function initEventPurchase(event) {
       clearError();
       const s = modal.querySelector('.evt-success');
       if (s) s.style.display = 'none';
-      modal.querySelector('.evt-name').value = '';
-      modal.querySelector('.evt-email').value = '';
-      modal.querySelector('.evt-privacy').checked = false;
+      
+      // Reset form fields
+      const nameField = modal.querySelector('.evt-name');
+      const emailField = modal.querySelector('.evt-email');
+      const privacyField = modal.querySelector('.evt-privacy');
+      if (nameField) nameField.value = '';
+      if (emailField) emailField.value = '';
+      if (privacyField) privacyField.checked = false;
     }
-  }
-  root.querySelector('.evt-buy-btn')?.addEventListener('click', () => {
-    console.log('Buy button clicked for event:', eventId);
-    openPurchaseModal();
-  });
-  
-  // Register button for free events
-  const registerBtn = root.querySelector('.evt-register-btn');
-  if (registerBtn) {
-    console.log('Attaching click listener to register button for event:', eventId);
-    registerBtn.addEventListener('click', () => {
-      console.log('Register button clicked for event:', eventId);
-      openPurchaseModal();
-    });
-  } else {
-    console.log('No register button found for event:', eventId);
-  }
+  }root.querySelector('.evt-buy-btn')?.addEventListener('click', openPurchaseModal);
+  root.querySelector('.evt-register-btn')?.addEventListener('click', openPurchaseModal);
   
   modal.querySelector('.evt-close')?.addEventListener('click', closePurchaseModal);
   
