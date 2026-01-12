@@ -6,6 +6,8 @@ showDate: false
 showReadingTime: false
 ---
 
+<script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
+
 <div id="account-page" style="max-width: 900px; margin: 3rem auto; padding: 0 1rem;">
 <!-- Loading State -->
 <div id="loading-state" style="text-align: center; padding: 4rem 0;">
@@ -64,10 +66,14 @@ Go to Login
         <div style="flex: 1;">        <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 600;">Enable Auto-Renewal</h3>
         <p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
             Set up automatic renewal to ensure uninterrupted access. <strong>You'll be asked to save your payment details.</strong> Your card will not be charged until <span id="renewal-date-enable"></span>. You can cancel anytime before then.
-        </p>
-        <button id="enable-auto-renewal-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
+        </p>        <button id="enable-auto-renewal-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
             Enable Auto-Renewal
         </button>
+        <!-- SumUp Payment Widget Container -->
+        <div id="sumup-payment-container" style="display: none; margin-top: 1.5rem;">
+            <h4 style="margin: 0 0 1rem 0; font-size: 0.875rem; font-weight: 600;">Add Payment Method</h4>
+            <div id="sumup-card-widget"></div>
+        </div>
         </div>
     </div>
     </div>
@@ -495,64 +501,149 @@ try {
     // Reload account data to update UI
     setTimeout(() => {
         loadAccountData();
-    }, 1500);
-    } else if (data.requires_payment_setup) {
-    // User needs to add a payment method - redirect to SumUp checkout
-    messageEl.textContent = 'Redirecting to payment setup...';
+    }, 1500);    } else if (data.requires_payment_setup) {
+    // User needs to add a payment method - show SumUp widget
+    messageEl.textContent = 'Please add your payment method below...';
     messageEl.style.background = '#dbeafe';
     messageEl.style.color = '#1e40af';
     messageEl.style.display = 'block';
     
-    // Open SumUp checkout in a popup
-    const checkoutUrl = `https://api.sumup.com/v0.1/checkouts/${data.checkout_id}`;
-    const popup = window.open(checkoutUrl, 'SumUpCheckout', 'width=600,height=800');
+    // Show SumUp payment container
+    const sumupContainer = document.getElementById('sumup-payment-container');
+    if (sumupContainer) {
+        sumupContainer.style.display = 'block';
+    }
     
-    // Poll for completion
-    const pollInterval = setInterval(async () => {
-        try {
-        const confirmResponse = await fetch(
-            `${API_BASE}/account/confirm-payment-setup?orderRef=${data.order_ref}`,
-            {
-            headers: { 'X-Session-Token': sessionToken }
-            }
-        );
-        
-        const confirmData = await confirmResponse.json();
-        
-        if (confirmData.success && confirmData.status === 'completed') {
-            clearInterval(pollInterval);
-            if (popup && !popup.closed) {
-            popup.close();
+    // Hide the enable button
+    enableBtn.style.display = 'none';
+    
+    // Mount SumUp card widget
+    try {
+        if (typeof SumUpCard === 'undefined') {
+        throw new Error('SumUp SDK not loaded');
+        }        window.sumUpCardInstance = SumUpCard.mount({
+        id: 'sumup-card-widget',
+        checkoutId: data.checkout_id,
+        onResponse: async (type, body) => {
+            console.log('SumUp response:', type, body);
+            
+            // Handle final states only - keep widget visible for intermediate states
+            if (type === 'success') {
+            messageEl.textContent = 'Verifying payment method...';
+            messageEl.style.background = '#dbeafe';
+            messageEl.style.color = '#1e40af';
+            
+            // Hide the widget
+            if (sumupContainer) {
+                sumupContainer.style.display = 'none';
             }
             
-            messageEl.textContent = 'Payment method saved! Enabling auto-renewal...';
-            messageEl.style.background = '#d1fae5';
-            messageEl.style.color = '#065f46';
-            
-            // Reload to show updated state
-            setTimeout(() => {
-            loadAccountData();
+            // Poll for confirmation
+            let attempts = 0;
+            const maxAttempts = 30; // 30 seconds
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                
+                try {
+                const confirmResponse = await fetch(
+                    `${API_BASE}/account/confirm-payment-setup?orderRef=${data.order_ref}`,
+                    {
+                    headers: { 'X-Session-Token': sessionToken }
+                    }
+                );
+                
+                const confirmData = await confirmResponse.json();
+                
+                if (confirmData.success && confirmData.status === 'completed') {
+                    clearInterval(pollInterval);
+                    
+                    messageEl.textContent = 'Auto-renewal enabled successfully!';
+                    messageEl.style.background = '#d1fae5';
+                    messageEl.style.color = '#065f46';
+                    
+                    // Reload to show updated state
+                    setTimeout(() => {
+                    loadAccountData();
+                    }, 1500);
+                } else if (confirmData.success === false || confirmData.status === 'failed') {
+                    clearInterval(pollInterval);
+                    messageEl.textContent = confirmData.message || 'Payment verification failed. Please try again.';
+                    messageEl.style.background = '#fee2e2';
+                    messageEl.style.color = '#991b1b';
+                    
+                    enableBtn.disabled = false;
+                    enableBtn.textContent = originalText;
+                    enableBtn.style.display = 'block';
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(pollInterval);
+                    messageEl.textContent = 'Setup timed out. Please refresh and try again.';
+                    messageEl.style.background = '#fee2e2';
+                    messageEl.style.color = '#991b1b';
+                    
+                    enableBtn.disabled = false;
+                    enableBtn.textContent = originalText;
+                    enableBtn.style.display = 'block';
+                }
+                } catch (e) {
+                console.error('Error polling payment setup:', e);
+                if (attempts >= maxAttempts) {
+                    clearInterval(pollInterval);
+                    messageEl.textContent = 'Error verifying payment. Please refresh and try again.';
+                    messageEl.style.background = '#fee2e2';
+                    messageEl.style.color = '#991b1b';
+                    
+                    enableBtn.disabled = false;
+                    enableBtn.textContent = originalText;
+                    enableBtn.style.display = 'block';
+                }
+                }
             }, 1000);
+            } else if (type === 'error' || type === 'fail') {
+            // Payment failed - hide widget and show error
+            messageEl.textContent = `Payment error: ${body.message || 'Unknown error'}`;
+            messageEl.style.background = '#fee2e2';
+            messageEl.style.color = '#991b1b';
+            
+            enableBtn.disabled = false;
+            enableBtn.textContent = originalText;
+            enableBtn.style.display = 'block';
+            
+            if (sumupContainer) {
+                sumupContainer.style.display = 'none';
+            }
+            } else if (type === 'cancel') {
+            // User cancelled the payment - hide widget and allow retry
+            messageEl.textContent = 'Payment cancelled. Please try again when ready.';
+            messageEl.style.background = '#fef3c7';
+            messageEl.style.color = '#92400e';
+            
+            enableBtn.disabled = false;
+            enableBtn.textContent = originalText;
+            enableBtn.style.display = 'block';
+            
+            if (sumupContainer) {
+                sumupContainer.style.display = 'none';
+            }
+            } else {
+            // Intermediate state (e.g., verification check) - keep widget visible
+            console.log('SumUp intermediate state:', type, body);
+            messageEl.textContent = 'Please complete the verification above...';
+            messageEl.style.background = '#dbeafe';
+            messageEl.style.color = '#1e40af';
+            messageEl.style.display = 'block';
+            // Keep widget visible - don't hide sumupContainer
+            }
         }
-        } catch (e) {
-        console.error('Error polling payment setup:', e);
-        }
-    }, 2000);
-    
-    // Stop polling after 5 minutes
-    setTimeout(() => {
-        clearInterval(pollInterval);
-        if (popup && !popup.closed) {
-        popup.close();
-        }
-        
-        messageEl.textContent = 'Setup timed out. Please try again.';
+        });
+    } catch (sdkError) {
+        console.error('SumUp SDK error:', sdkError);
+        messageEl.textContent = 'Failed to load payment form. Please refresh and try again.';
         messageEl.style.background = '#fee2e2';
         messageEl.style.color = '#991b1b';
         
         enableBtn.disabled = false;
         enableBtn.textContent = originalText;
-    }, 300000); // 5 minutes
+    }
     } else {
     throw new Error(data.message || data.error || 'Failed to enable auto-renewal');
     }

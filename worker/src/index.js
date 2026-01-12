@@ -1919,17 +1919,12 @@ app.post('/account/enable-auto-renewal', async c => {
           console.error('[Enable Auto-Renewal] Checkout creation failed - Status:', checkoutResponse.status)
           console.error('[Enable Auto-Renewal] Checkout creation failed - Response:', error)
           throw new Error('Failed to create checkout')
-        }
+        }        const checkout = await checkoutResponse.json()
         
-        const checkout = await checkoutResponse.json()
+        // No need to store payment_setups record - the webhook will handle saving 
+        // the payment instrument when payment completes
         
-        // Store the setup intent
-        const now = new Date().toISOString()
-        await c.env.DB.prepare(`
-          INSERT INTO payment_setups (user_id, checkout_id, order_ref, status, created_at)
-          VALUES (?, ?, ?, 'pending', ?)
-        `).bind(session.user_id, checkout.id, orderRef, now).run()
-        
+        // Return checkout details for frontend to open payment popup
         return c.json({
           success: false,
           requires_payment_setup: true,
@@ -2062,8 +2057,7 @@ app.get('/account/confirm-payment-setup', async c => {
     if (!orderRef) {
       return c.json({ error: 'order_ref_required' }, 400)
     }
-    
-    // Get session
+      // Get session
     const session = await c.env.DB.prepare(`
       SELECT us.user_id FROM user_sessions us
       WHERE us.session_token = ? AND us.expires_at > datetime('now')
@@ -2073,78 +2067,40 @@ app.get('/account/confirm-payment-setup', async c => {
       return c.json({ error: 'invalid_session' }, 401)
     }
     
-    // Get the payment setup record
-    const setup = await c.env.DB.prepare(`
-      SELECT * FROM payment_setups 
-      WHERE order_ref = ? AND user_id = ?
-    `).bind(orderRef, session.user_id).first()
-    
-    if (!setup) {
-      return c.json({ error: 'setup_not_found' }, 404)
-    }
-    
-    if (setup.status === 'completed') {
-      return c.json({ success: true, status: 'completed' })
-    }
-    
-    // Verify the payment with SumUp
-    const paymentResponse = await fetch(`${c.env.PAYMENTS_WORKER_URL}/internal/payment/${setup.checkout_id}`)
-    
-    if (!paymentResponse.ok) {
-      return c.json({ error: 'payment_verification_failed' }, 500)
-    }
-    
-    const payment = await paymentResponse.json()
-    
-    if (payment.status !== 'PAID' && payment.status !== 'SUCCESSFUL') {
-      return c.json({ success: false, status: 'pending' })
-    }
-    
-    // Save the payment instrument
-    const instrumentResponse = await fetch(`${c.env.PAYMENTS_WORKER_URL}/internal/payment-instrument`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: session.user_id,
-        checkoutId: setup.checkout_id
-      })
-    })
-    
-    if (!instrumentResponse.ok) {
-      const error = await instrumentResponse.text()
-      console.error('Failed to save payment instrument:', error)
-      return c.json({ error: 'failed_to_save_instrument' }, 500)
-    }
-    
-    const instrument = await instrumentResponse.json()
-    
-    // Mark setup as completed
-    await c.env.DB.prepare(`
-      UPDATE payment_setups 
-      SET status = 'completed', completed_at = ?
-      WHERE id = ?
-    `).bind(new Date().toISOString(), setup.id).run()
-      // Get active membership and enable auto-renewal (check status column only, not date)
-    const membership = await c.env.DB.prepare(`
-      SELECT * FROM memberships 
-      WHERE user_id = ? AND status = 'active'
-      ORDER BY end_date DESC LIMIT 1
+    // Check if a payment instrument was saved for this user
+    // The webhook should have already saved it after payment completed
+    const instrument = await c.env.DB.prepare(`
+      SELECT * FROM payment_instruments 
+      WHERE user_id = ? AND is_active = 1
+      ORDER BY created_at DESC LIMIT 1
     `).bind(session.user_id).first()
     
-    if (membership) {
-      await c.env.DB.prepare(`
-        UPDATE memberships 
-        SET auto_renew = 1, renewal_attempts = 0, payment_instrument_id = ?
-        WHERE id = ?
-      `).bind(instrument.instrument_id, membership.id).run()
+    if (instrument) {
+      // Payment instrument exists - enable auto-renewal
+      const membership = await c.env.DB.prepare(`
+        SELECT * FROM memberships 
+        WHERE user_id = ? AND status = 'active'
+        ORDER BY end_date DESC LIMIT 1
+      `).bind(session.user_id).first()
+      
+      if (membership && membership.auto_renew === 0) {
+        await c.env.DB.prepare(`
+          UPDATE memberships 
+          SET auto_renew = 1, renewal_attempts = 0, payment_instrument_id = ?
+          WHERE id = ?
+        `).bind(instrument.instrument_id, membership.id).run()
+      }
+      
+      return c.json({
+        success: true,
+        status: 'completed',
+        card_last_4: instrument.last_4,
+        card_type: instrument.card_type
+      })
     }
     
-    return c.json({
-      success: true,
-      status: 'completed',
-      card_last_4: instrument.last_4,
-      card_type: instrument.card_type
-    })
+    // No payment instrument found yet - payment might still be pending
+    return c.json({ success: false, status: 'pending' })
   } catch (error) {
     console.error('[Confirm Payment Setup] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
