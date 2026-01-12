@@ -948,7 +948,11 @@ async function handleEmailPreferencesOptIn(db, userId, marketingConsent) {
 
 // Generate admin notification email
 function getAdminNotificationEmail(purchaseType, details) {
-  const formatPrice = (pence) => `£${(pence / 100).toFixed(2)}`
+  // Format price - amounts are stored as strings in pounds (e.g., "30.00")
+  const formatPrice = (amount) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) : amount
+    return `£${num.toFixed(2)}`
+  }
   
   let subject, htmlContent, textContent
   
@@ -1007,8 +1011,7 @@ Items Ordered:
 ${details.items.map(item => `• ${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal)}`).join('\n')}
       `.trim()
       break
-    
-    case 'event_ticket':
+      case 'event_ticket':
       subject = `🎟️ New Event Ticket Purchase: ${details.eventName}`
       htmlContent = `
         <h2>New Event Ticket Purchase</h2>
@@ -1030,6 +1033,29 @@ Event Date: ${new Date(details.eventDate).toLocaleString('en-GB')}
 Purchase Date: ${new Date().toLocaleString('en-GB')}
 Ticket ID: ${details.ticketId}
 Order Reference: ${details.orderRef}
+      `.trim()
+      break
+    
+    case 'event_registration':
+      subject = `📝 New Event Registration: ${details.eventName}`
+      htmlContent = `
+        <h2>New Event Registration</h2>
+        <p><strong>Event:</strong> ${details.eventName}</p>
+        <p><strong>Attendee:</strong> ${details.customerName} (${details.customerEmail})</p>
+        <p><strong>Event Type:</strong> Free Event</p>
+        <p><strong>Event Date:</strong> ${new Date(details.eventDate).toLocaleString('en-GB')}</p>
+        <p><strong>Registration Date:</strong> ${new Date().toLocaleString('en-GB')}</p>
+        <p><strong>Ticket ID:</strong> ${details.ticketId}</p>
+      `
+      textContent = `
+New Event Registration
+
+Event: ${details.eventName}
+Attendee: ${details.customerName} (${details.customerEmail})
+Event Type: Free Event
+Event Date: ${new Date(details.eventDate).toLocaleString('en-GB')}
+Registration Date: ${new Date().toLocaleString('en-GB')}
+Ticket ID: ${details.ticketId}
       `.trim()
       break
     
@@ -1340,6 +1366,65 @@ function getPasswordResetEmail(userName, resetLink) {
   `
 }
 
+// Generate .ics calendar file content with Gibraltar timezone (Europe/Gibraltar)
+function generateIcsCalendar(event) {
+  const eventDateTime = new Date(event.event_datetime)
+  
+  // Format datetime for ICS with timezone (YYYYMMDDTHHMMSS)
+  // Gibraltar uses Europe/Gibraltar timezone (CET/CEST)
+  const formatIcsDateWithTz = (date) => {
+    const year = date.getUTCFullYear()
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+    const day = String(date.getUTCDate()).padStart(2, '0')
+    const hours = String(date.getUTCHours()).padStart(2, '0')
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0')
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0')
+    return `${year}${month}${day}T${hours}${minutes}${seconds}`
+  }
+  
+  // Assume event is 2 hours long if no end time specified
+  const endDateTime = new Date(eventDateTime.getTime() + (2 * 60 * 60 * 1000))
+  
+  const location = event.location || 'Gibraltar Warhammer Club, Gibraltar'
+  const description = event.description ? event.description.replace(/\n/g, '\\n').replace(/,/g, '\\,') : `Join us for ${event.event_name}`
+  
+  // Include timezone information in the calendar
+  return `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Dice Bastion//Events Calendar//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VTIMEZONE
+TZID:Europe/Gibraltar
+BEGIN:DAYLIGHT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+DTSTART:19700329T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+TZNAME:CEST
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+DTSTART:19701025T030000
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+TZNAME:CET
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:event-${event.event_id}@dicebastion.com
+DTSTAMP:${formatIcsDateWithTz(new Date())}Z
+DTSTART;TZID=Europe/Gibraltar:${formatIcsDateWithTz(eventDateTime)}
+DTEND;TZID=Europe/Gibraltar:${formatIcsDateWithTz(endDateTime)}
+SUMMARY:${event.event_name}
+DESCRIPTION:${description}
+LOCATION:${location}
+STATUS:CONFIRMED
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR`
+}
+
 function getTicketConfirmationEmail(event, user, transaction) {
   const eventDateTime = new Date(event.event_datetime)
   const eventDate = eventDateTime.toLocaleDateString('en-GB', { 
@@ -1352,7 +1437,65 @@ function getTicketConfirmationEmail(event, user, transaction) {
   const amount = transaction.amount || '0.00'
   const currency = transaction.currency || 'GBP'
   const sym = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$'
+  const isFree = !transaction.order_ref || amount === '0.00'
   
+  // Generate calendar attachment
+  const icsContent = generateIcsCalendar(event)
+  const icsBase64 = btoa(icsContent)
+  
+  if (isFree) {
+    // Free event registration email
+    return {
+      subject: `Registration Confirmed: ${event.event_name}`,
+      html: `
+        <h2>You're Registered!</h2>
+        <p>Hi ${user.name || 'there'},</p>
+        <p>Thank you for registering for <strong>${event.event_name}</strong>!</p>
+        
+        <h3>Event Details:</h3>
+        <ul>
+          <li><strong>Event:</strong> ${event.event_name}</li>
+          <li><strong>Date:</strong> ${eventDate}</li>
+          <li><strong>Time:</strong> ${eventTime}</li>
+          <li><strong>Location:</strong> ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111" style="text-decoration: underline;">Gibraltar Warhammer Club</a>'}</li>
+          ${event.description ? `<li><strong>Description:</strong> ${event.description}</li>` : ''}
+        </ul>
+        
+        ${event.additional_info ? `<p><strong>Important Information:</strong><br>${event.additional_info}</p>` : ''}
+        
+        <p>We've attached a calendar invite for your convenience. See you there!</p>
+        <p>— The Dice Bastion Team</p>
+      `,
+      text: `
+You're Registered!
+
+Hi ${user.name || 'there'},
+
+Thank you for registering for ${event.event_name}!
+
+EVENT DETAILS:
+- Event: ${event.event_name}
+- Date: ${eventDate}
+- Time: ${eventTime}
+- Location: ${event.location || 'Gibraltar Warhammer Club'}
+${event.description ? `- Description: ${event.description}` : ''}
+
+${event.additional_info ? `Important Information: ${event.additional_info}` : ''}
+
+See you there!
+
+— The Dice Bastion Team
+      `,
+      attachments: [{
+        filename: `${event.event_name.replace(/[^a-z0-9]/gi, '_')}.ics`,
+        content: icsBase64,
+        encoding: 'base64',
+        contentType: 'text/calendar'
+      }]
+    }
+  }
+  
+  // Paid event ticket confirmation email
   return {
     subject: `Ticket Confirmed: ${event.event_name}`,
     html: `
@@ -1379,7 +1522,7 @@ function getTicketConfirmationEmail(event, user, transaction) {
       
       ${event.additional_info ? `<p><strong>Important Information:</strong><br>${event.additional_info}</p>` : ''}
       
-      <p>Looking forward to seeing you there!</p>
+      <p>We've attached a calendar invite for your convenience. Looking forward to seeing you there!</p>
       <p>— The Dice Bastion Team</p>
     `,
     text: `
@@ -1393,7 +1536,7 @@ EVENT DETAILS:
 - Event: ${event.event_name}
 - Date: ${eventDate}
 - Time: ${eventTime}
-- Location: ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111" style="text-decoration: underline;">Gibraltar Warhammer Club</a>'}</li>
+- Location: ${event.location || 'Gibraltar Warhammer Club'}
 ${event.description ? `- Description: ${event.description}` : ''}
 
 PAYMENT DETAILS:
@@ -1407,7 +1550,13 @@ ${event.additional_info ? `Important Information: ${event.additional_info}` : ''
 Looking forward to seeing you there!
 
 — The Dice Bastion Team
-    `
+    `,
+    attachments: [{
+      filename: `${event.event_name.replace(/[^a-z0-9]/gi, '_')}.ics`,
+      content: icsBase64,
+      encoding: 'base64',
+      contentType: 'text/calendar'
+    }]
   }
 }
 
@@ -2871,7 +3020,47 @@ app.get('/events', async c => {
 app.get('/events/confirm', async c => {
   try {
     const orderRef = c.req.query('orderRef')
-    if (!orderRef || !EVT_UUID_RE.test(orderRef)) return c.json({ ok:false, error:'invalid_orderRef' },400)
+    if (!orderRef) return c.json({ ok:false, error:'invalid_orderRef' },400)
+    
+    // Check if this is a free event registration (REG-{eventId}-{ticketId}) or paid ticket (EVT-{eventId}-{uuid})
+    const isRegistration = orderRef.startsWith('REG-')
+    
+    if (isRegistration) {
+      // Handle free event registration confirmation
+      // Format: REG-{eventId}-{ticketId}
+      const parts = orderRef.split('-')
+      if (parts.length !== 3) return c.json({ ok:false, error:'invalid_orderRef' },400)
+      
+      const ticketId = parseInt(parts[2], 10)
+      if (isNaN(ticketId)) return c.json({ ok:false, error:'invalid_orderRef' },400)
+      
+      // Get ticket record
+      const ticket = await c.env.DB.prepare('SELECT * FROM tickets WHERE id = ?').bind(ticketId).first()
+      if (!ticket) {
+        console.log('[events/confirm] Registration ticket not found for id:', ticketId)
+        return c.json({ ok:false, error:'ticket_not_found' },404)
+      }
+      
+      console.log('[events/confirm] Registration ticket found:', { id: ticket.id, status: ticket.status, event_id: ticket.event_id })
+      
+      // Get event details
+      const ev = await c.env.DB.prepare('SELECT event_name, event_datetime FROM events WHERE event_id = ?').bind(ticket.event_id).first()
+      if (!ev) return c.json({ ok:false, error:'event_not_found' },404)
+      
+      return c.json({ 
+        ok: true, 
+        status: 'active',
+        eventName: ev.event_name,
+        eventDate: ev.event_datetime,
+        ticketCount: 1,
+        amount: '0.00',
+        currency: 'GBP',
+        isFree: true
+      })
+    }
+    
+    // Handle paid ticket confirmation
+    if (!EVT_UUID_RE.test(orderRef)) return c.json({ ok:false, error:'invalid_orderRef' },400)
   
     // Get transaction record
     const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "ticket"').bind(orderRef).first()

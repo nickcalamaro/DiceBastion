@@ -450,15 +450,17 @@ window.initEventPurchase = function initEventPurchase(event) {
       showError('Network error');
       return;
     }
-    
-    const data = await resp.json();
+      const data = await resp.json();
     if (!resp.ok) {
       showError(data?.message || data?.error || 'Registration failed');
       return;
     }
-    
-    if (data.success || data.registered || data.already_registered) {
-      showSuccess();
+      if (data.success || data.registered || data.already_registered) {
+      // Redirect to thank you page with registration reference
+      // Format: REG-{eventId}-{ticketId}
+      const ticketId = data.ticketId || Date.now();
+      const regRef = `REG-${eventId}-${ticketId}`;
+      window.location.href = '/thank-you?orderRef=' + encodeURIComponent(regRef);
       return;
     }
     

@@ -161,15 +161,20 @@ ${autoRenew ? 'Your membership will automatically renew before expiration.' : ''
 
 // Render success state for event ticket
 const renderEventSuccess = (data) => {
-const { eventName, eventDate, ticketCount, amount, currency } = data;
+const { eventName, eventDate, ticketCount, amount, currency, isFree } = data;
+const amountNum = parseFloat(amount) || 0;
+const isActuallyFree = isFree || amountNum === 0;
 
 container.innerHTML = `
-<h1>🎟️ Ticket Confirmed!</h1>
-<div class="status-badge status-success">Payment Confirmed</div>
+<h1>${isActuallyFree ? '✅ Registration Confirmed!' : '🎟️ Ticket Confirmed!'}</h1>
+<div class="status-badge status-success">${isActuallyFree ? 'Registration' : 'Payment'} Confirmed</div>
 
 <div class="info-box">
 <h3>${eventName || 'Event Ticket'}</h3>
-<p>Your ticket${ticketCount > 1 ? 's have' : ' has'} been confirmed and reserved.</p>
+<p>${isActuallyFree 
+  ? 'Your registration has been confirmed. We look forward to seeing you there!' 
+  : `Your ticket${ticketCount > 1 ? 's have' : ' has'} been confirmed and reserved.`}
+</p>
 </div>
 
 <div class="details-grid">
@@ -186,13 +191,15 @@ ${eventDate ? `
 </div>
 ` : ''}
 <div class="detail-row">
-<span class="detail-label">Ticket${ticketCount > 1 ? 's' : ''}:</span>
+<span class="detail-label">${isActuallyFree ? 'Registration' : 'Ticket'}${ticketCount > 1 ? 's' : ''}:</span>
 <span class="detail-value">${ticketCount || 1}</span>
 </div>
+${!isActuallyFree ? `
 <div class="detail-row">
 <span class="detail-label">Amount Paid:</span>
 <span class="detail-value">${formatCurrency(amount, currency)}</span>
 </div>
+` : ''}
 </div>
 
 <div style="margin-top: 24px;">
@@ -200,7 +207,7 @@ ${eventDate ? `
 </div>
 
 <p style="margin-top: 24px; color: #666;">
-A confirmation email with event details has been sent to your registered email address.
+A confirmation email with ${isActuallyFree ? 'event details and a calendar attachment' : 'your ticket and event details'} has been sent to your registered email address.
 </p>
 `;
 };
@@ -300,9 +307,14 @@ renderNoOrder();
 return;
 }
 
+// Detect order type:
+// - EVT-{eventId}-{uuid} = paid event ticket
+// - REG-{eventId}-{ticketId} = free event registration
+// - MEM-... = membership
 const isEvent = /^EVT-\d+-[0-9a-f\-]{36}$/i.test(orderRef);
-const type = isEvent ? 'event' : 'membership';
-const endpoint = isEvent 
+const isRegistration = /^REG-\d+-\d+$/i.test(orderRef);
+const type = (isEvent || isRegistration) ? 'event' : 'membership';
+const endpoint = (isEvent || isRegistration)
 ? `/events/confirm?orderRef=${encodeURIComponent(orderRef)}`
 : `/membership/confirm?orderRef=${encodeURIComponent(orderRef)}`;
 
