@@ -245,25 +245,36 @@ function initEventPurchase(event) {
     if (!token) throw new Error('Please complete the security check.');
     return token;
   }
-  
-  async function confirmPayment(ref) {
+    async function confirmPayment(ref) {
     const attempts = 15;
     for (let i = 0; i < attempts; i++) {
       try {
         const r = await fetch(API_BASE + '/events/confirm?orderRef=' + encodeURIComponent(ref));
         const j = await r.json();
-        if (j.ok && j.status === 'active') {
+        
+        // Success cases: ticket is active or already_active
+        if (j.ok && (j.status === 'active' || j.status === 'already_active')) {
           showSuccess();
           return true;
         }
+        
+        // Still pending - keep polling
         if (j.status && String(j.status).toUpperCase() === 'PENDING') {
           await new Promise(r => setTimeout(r, 1500));
           continue;
         }
-      } catch(e) {}
+        
+        // If we get ok: false with a specific error, stop polling
+        if (!j.ok && j.error && j.error !== 'verify_failed') {
+          showError(j.message || 'Payment failed: ' + j.error);
+          return false;
+        }
+      } catch(e) {
+        console.error('Polling error:', e);
+      }
       await new Promise(r => setTimeout(r, 1500));
     }
-    showError('Payment still processing. Refresh soon.');
+    showError('Payment verification timed out. Please check your email or refresh the page.');
     return false;
   }
     function unmountWidget() {
@@ -299,19 +310,30 @@ function initEventPurchase(event) {
       // Show payment section and hide details
       cardEl.style.display = 'block';
       modal.querySelector('.evt-details').style.display = 'none';
-      
-      // Mount fresh widget
+        // Mount fresh widget
       window.SumUpCard.mount({
         id: 'evt-card-'+eventId,
         checkoutId,
         onResponse: async (type, body) => {
           console.log('SumUp onResponse:', type, body);
-          // Always attempt to confirm the payment by polling the backend
-          // The backend will check the actual SumUp payment status
-          const confirmed = await confirmPayment(orderRef);
-          if (!confirmed) {
-            // Only show error if backend confirmation failed after polling
-            showError('Payment verification failed. Please refresh the page to check your order status.');
+          
+          // Handle final states only - intermediate states like verification should not trigger actions
+          if (type === 'success') {
+            // Payment succeeded - verify with backend
+            const confirmed = await confirmPayment(orderRef);
+            if (!confirmed) {
+              // Only show error if backend confirmation failed after polling
+              showError('Payment verification failed. Please check your email or refresh the page.');
+            }
+          } else if (type === 'error' || type === 'fail') {
+            // Payment failed
+            showError(body.message || 'Payment failed. Please try again.');
+          } else if (type === 'cancel') {
+            // User cancelled the payment
+            showError('Payment cancelled. You can try again when ready.');
+          } else {
+            // Intermediate state (e.g., verification check) - don't do anything, let user complete it
+            console.log('SumUp intermediate state:', type, body);
           }
         },
         onBack: () => {
