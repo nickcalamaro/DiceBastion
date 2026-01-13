@@ -75,7 +75,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
 <!-- Simple footer with member login placeholder -->
 <div id="membership-cta-footer" style="text-align:center; margin: 1.5rem auto;">
-  <a href="#" style="color: rgb(var(--color-primary-600)); text-decoration: underline;">Already a member? Log in here.</a>
+  <a href="/login" style="color: rgb(var(--color-primary-600)); text-decoration: underline;">Already a member? Log in here.</a>
 </div>
 </section>
 
@@ -137,6 +137,11 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 (function(){
   const API_BASE = (window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev').replace(/\/+$/,'');
   const TS_SITE_KEY = (window.__DB_TS_SITE_KEY || '{{ with site.Params.turnstile_site_key }}{{ . }}{{ end }}' || (window.TURNSTILE_SITE_KEY || '0x4AAAAAACAB4xlOnW3S8K0k'));
+  
+  // Detect if we're running on localhost
+  const IS_LOCALHOST = window.location.hostname === 'localhost' || 
+                       window.location.hostname === '127.0.0.1' ||
+                       window.location.hostname === '0.0.0.0';
 
   const qs = new URLSearchParams(window.location.search);
   const orderRef = qs.get('orderRef');
@@ -175,8 +180,8 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   function showError(msg){ if (!sumupErr) return; sumupErr.textContent = msg || 'Payment error. Please try again.'; sumupErr.style.display='block'; }
 
   [modalNameEl, modalEmailEl, privacyEl, autoRenewEl].forEach(el=>{ if(!el) return; const ev = el.type==='checkbox' ? 'change' : 'input'; el.addEventListener(ev, clearError); });
-  function loadTurnstileSdk(){ if (window.turnstile) return Promise.resolve(true); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s); }); }
-  async function getTurnstileToken(){ await loadTurnstileSdk(); const el = document.getElementById('mship-ts'); if (!el || !window.turnstile) throw new Error('Security check not ready'); const t = window.turnstile.getResponse(el); if (!t) throw new Error('Please complete the security check.'); return t; }
+  function loadTurnstileSdk(){ if (IS_LOCALHOST || window.turnstile) return Promise.resolve(true); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s); }); }
+  async function getTurnstileToken(){ if (IS_LOCALHOST) { console.log('Localhost detected - using test-bypass token'); return 'test-bypass'; } await loadTurnstileSdk(); const el = document.getElementById('mship-ts'); if (!el || !window.turnstile) throw new Error('Security check not ready'); const t = window.turnstile.getResponse(el); if (!t) throw new Error('Please complete the security check.'); return t; }
 
   async function confirmOrder(ref){ const maxAttempts=200; for(let i=0;i<maxAttempts;i++){ try { const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); const d=await r.json(); if(d.ok && d.status==='active'){ closeModal(); return true; } if(d.status && String(d.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e){} await new Promise(r=>setTimeout(r,1500)); } showError('Payment is still processing. Please refresh shortly.'); return false; }
 

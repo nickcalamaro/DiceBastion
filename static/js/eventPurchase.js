@@ -3,6 +3,11 @@ window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.
 const API_BASE = window.__DB_API_BASE;
 const TURNSTILE_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 
+// Detect if we're running on localhost
+const IS_LOCALHOST = window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1' ||
+                     window.location.hostname === '0.0.0.0';
+
 // Make functions globally accessible
 window.renderEventPurchase = function renderEventPurchase(event) {
   const eventId = event.id || event.event_id;
@@ -181,6 +186,12 @@ window.initEventPurchase = function initEventPurchase(event) {
       document.head.appendChild(s);
     });
   }  async function renderTurnstile(isLoggedIn = false) {
+    // Skip Turnstile rendering on localhost
+    if (IS_LOCALHOST) {
+      console.log('Localhost detected - skipping Turnstile render');
+      return;
+    }
+    
     await loadTurnstileSdk();
     const tsElId = isLoggedIn ? 'evt-ts-logged-' + eventId : 'evt-ts-' + eventId;
     const tsEl = document.getElementById(tsElId);
@@ -268,6 +279,12 @@ window.initEventPurchase = function initEventPurchase(event) {
     }
   }
     async function getTurnstileToken(isLoggedIn = false) {
+    // Bypass Turnstile on localhost
+    if (IS_LOCALHOST) {
+      console.log('Localhost detected - using test-bypass token');
+      return 'test-bypass';
+    }
+    
     await loadTurnstileSdk();
     const tsElId = isLoggedIn ? 'evt-ts-logged-' + eventId : 'evt-ts-' + eventId;
     const tsEl = document.getElementById(tsElId);
@@ -283,7 +300,7 @@ window.initEventPurchase = function initEventPurchase(event) {
     if (!token) throw new Error('Please complete the security check.');
     return token;
   }
-    async function confirmPayment(ref) {
+  async function confirmPayment(ref) {
     const attempts = 15;
     for (let i = 0; i < attempts; i++) {
       try {
@@ -292,6 +309,14 @@ window.initEventPurchase = function initEventPurchase(event) {
         
         // Success cases: ticket is active or already_active
         if (j.ok && (j.status === 'active' || j.status === 'already_active')) {
+          // Check if user needs account setup and store data in sessionStorage
+          if (j.needsAccountSetup && j.userEmail) {
+            sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+              email: j.userEmail,
+              eventName: j.eventName || 'this event'
+            }));
+          }
+          
           showSuccess();
           return true;
         }
@@ -450,12 +475,20 @@ window.initEventPurchase = function initEventPurchase(event) {
       showError('Network error');
       return;
     }
-      const data = await resp.json();
+    const data = await resp.json();
     if (!resp.ok) {
       showError(data?.message || data?.error || 'Registration failed');
       return;
     }
       if (data.success || data.registered || data.already_registered) {
+      // Check if user needs account setup and store data in sessionStorage
+      if (data.needsAccountSetup && data.userEmail) {
+        sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+          email: data.userEmail,
+          eventName: data.eventName || 'this event'
+        }));
+      }
+      
       // Redirect to thank you page with registration reference
       // Format: REG-{eventId}-{ticketId}
       const ticketId = data.ticketId || Date.now();

@@ -5,6 +5,10 @@ url: "/thank-you"
 layout: "simple"
 ---
 
+<!-- Load account setup scripts -->
+<script src="/js/accountSetupShared.js"></script>
+<script src="/js/accountSetup.js"></script>
+
 <div id="thank-you-content">
 <div id="loading-state">
 <h1>Processing Your Payment...</h1>
@@ -111,6 +115,26 @@ year: 'numeric',
 month: 'long', 
 day: 'numeric' 
 });
+};
+
+// Check for pending account setup and show prompt
+const checkPendingAccountSetup = () => {
+  try {
+    const pending = sessionStorage.getItem('pendingAccountSetup');
+    if (pending) {
+      const data = JSON.parse(pending);
+      // Clear the pending flag
+      sessionStorage.removeItem('pendingAccountSetup');
+      // Show the prompt (delay to let success message render)
+      if (window.showAccountSetupPrompt) {
+        setTimeout(() => {
+          window.showAccountSetupPrompt(data.email, data.eventName, true);
+        }, 1500);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to check pending account setup:', err);
+  }
 };
 
 // Render success state for membership
@@ -347,8 +371,10 @@ if (type === 'membership') {
     autoRenew: data.autoRenew,
     cardLast4: data.cardLast4
   });
-} else {
-  renderEventSuccess({
+  
+  // Check for pending account setup (from membership purchase)
+  checkPendingAccountSetup();
+} else {      renderEventSuccess({
     eventName: data.eventName,
     eventDate: data.eventDate,
     ticketCount: data.ticketCount,
@@ -356,6 +382,9 @@ if (type === 'membership') {
     currency: data.currency,
     isFree: data.isFree
   });
+  
+  // Check for pending account setup (from event registration)
+  checkPendingAccountSetup();
 }
 return; // Success - stop polling
 }

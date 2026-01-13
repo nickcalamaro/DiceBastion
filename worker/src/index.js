@@ -255,6 +255,16 @@ async function getSchema(db){
 }
 
 async function ensureSchema(db, fkColumn){
+  // password_reset_tokens columns for email sending tracking
+  try {
+    const prt = await db.prepare('PRAGMA table_info(password_reset_tokens)').all().catch(()=>({ results: [] }))
+    const prtnames = new Set((prt?.results||[]).map(r => String(r.name||'').toLowerCase()))
+    const prtalter = []
+    if (!prtnames.has('email_sent')) prtalter.push('ALTER TABLE password_reset_tokens ADD COLUMN email_sent INTEGER DEFAULT 1')
+    if (!prtnames.has('source')) prtalter.push('ALTER TABLE password_reset_tokens ADD COLUMN source TEXT')
+    for (const sql of prtalter) { await db.prepare(sql).run().catch(()=>{}) }
+  } catch {}
+  
   // memberships columns only (assume tickets already has user_id from migrations)
   try {
     const mc = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
@@ -776,10 +786,37 @@ async function processMembershipRenewal(db, membership, env) {
   }
 }
 
+// Helper to detect if request is coming from local development (localhost frontend)
+function isLocalDevelopment(c) {
+  const origin = c.req.header('Origin') || ''
+  const referer = c.req.header('Referer') || ''
+  
+  // Check if request is coming from localhost frontend
+  return origin.includes('localhost') || 
+         origin.includes('127.0.0.1') ||
+         referer.includes('localhost') || 
+         referer.includes('127.0.0.1') ||
+         c.env.ENVIRONMENT === 'development' ||
+         c.env.ENVIRONMENT === 'local'
+}
+
 // Turnstile verification with optional debug logging
-async function verifyTurnstile(env, token, ip, debug){
+async function verifyTurnstile(env, token, ip, debug, context = null){
   if (!env.TURNSTILE_SECRET) { if (debug) console.log('turnstile: secret missing -> bypass'); return true }
+  
+  // Auto-bypass for local development
+  if (context && isLocalDevelopment(context)) {
+    if (debug) console.log('turnstile: local development detected -> bypass')
+    return true
+  }
+  
   if (!token) { if (debug) console.log('turnstile: missing token'); return false }
+  
+  // Auto-bypass for localhost/127.0.0.1 (local development)
+  if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
+    if (debug) console.log('turnstile: localhost detected -> bypass')
+    return true
+  }
   
   // Allow test bypass for local development
   if (token === 'test-bypass' && env.ALLOW_TEST_BYPASS === 'true') {
@@ -835,7 +872,7 @@ async function logEmailHistory(db, emailData) {
 }
 
 // MailerSend email helper
-async function sendEmail(env, { to, subject, html, text, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null }) {
+async function sendEmail(env, { to, subject, html, text, attachments = null, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null }) {
   if (!env.MAILERSEND_API_KEY) {
     console.warn('MAILERSEND_API_KEY not configured, skipping email')
     return { skipped: true }
@@ -848,6 +885,11 @@ async function sendEmail(env, { to, subject, html, text, emailType = 'transactio
       subject,
       html,
       text: text || html.replace(/<[^>]*>/g, '')
+    }
+    
+    // Add attachments if provided
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      body.attachments = attachments
     }
     
     const res = await fetch('https://api.mailersend.com/v1/email', {
@@ -1366,6 +1408,218 @@ function getPasswordResetEmail(userName, resetLink) {
   `
 }
 
+// Account creation invitation email (sent after event purchase/registration)
+function getAccountCreationInviteEmail(userName, userEmail, setupLink) {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        .header {
+          background: linear-gradient(135deg, #b2c6df 0%, #5374a5 100%);
+          color: white;
+          padding: 30px 20px;
+          text-align: center;
+          border-radius: 8px 8px 0 0;
+        }
+        .content {
+          background: #ffffff;
+          padding: 30px;
+          border: 1px solid #e5e7eb;
+          border-top: none;
+        }
+        .button {
+          display: inline-block;
+          padding: 12px 30px;
+          background: #5374a5;
+          color: white !important;
+          text-decoration: none;
+          border-radius: 6px;
+          font-weight: 600;
+          margin: 20px 0;
+        }
+        .highlight {
+          background: #e0f2fe;
+          border-left: 4px solid #0284c7;
+          padding: 15px;
+          margin: 20px 0;
+          border-radius: 4px;
+        }
+        .footer {
+          text-align: center;
+          color: #6b7280;
+          font-size: 14px;
+          margin-top: 30px;
+          padding-top: 20px;
+          border-top: 1px solid #e5e7eb;
+        }
+        .link-text {
+          word-break: break-all;
+          color: #6b7280;
+          font-size: 12px;
+          margin-top: 10px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1 style="margin: 0;">🎉 One More Step!</h1>
+      </div>
+      <div class="content">
+        <p>Hi ${userName},</p>
+        
+        <p>Thanks for registering for our event! We'd love to make your experience even better by creating a Dice Bastion account for you.</p>
+        
+        <div class="highlight">
+          <strong>✨ With a Dice Bastion account, you can:</strong>
+          <ul style="margin: 10px 0;">
+            <li>View all your event registrations in one place</li>
+            <li>Access exclusive member benefits and discounts</li>
+            <li>Manage your profile and preferences</li>
+            <li>Get early access to new events</li>
+          </ul>
+        </div>
+        
+        <p><strong>Create your account in seconds:</strong></p>
+        <p>Just click the button below and choose a password for your account (${userEmail}).</p>
+        
+        <div style="text-align: center;">
+          <a href="${setupLink}" class="button">Create My Account</a>
+        </div>
+        
+        <p class="link-text">Or copy and paste this link into your browser:<br>${setupLink}</p>
+        
+        <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+          <strong>Not interested?</strong> No worries! You can still attend the event. This is completely optional.
+        </p>
+        
+        <div class="footer">
+          <p>This is an automated email from Dice Bastion.<br>
+          If you need help, contact us at admin@dicebastion.com</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+}
+
+// New account welcome email (sent after account creation)
+function getNewAccountWelcomeEmail(userName) {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        .header {
+          background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+          color: white;
+          padding: 30px 20px;
+          text-align: center;
+          border-radius: 8px 8px 0 0;
+        }
+        .content {
+          background: #ffffff;
+          padding: 30px;
+          border: 1px solid #e5e7eb;
+          border-top: none;
+        }
+        .button {
+          display: inline-block;
+          padding: 12px 30px;
+          background: #10b981;
+          color: white !important;
+          text-decoration: none;
+          border-radius: 6px;
+          font-weight: 600;
+          margin: 10px 5px;
+        }
+        .highlight {
+          background: #d1fae5;
+          border-left: 4px solid #10b981;
+          padding: 15px;
+          margin: 20px 0;
+          border-radius: 4px;
+        }
+        .footer {
+          text-align: center;
+          color: #6b7280;
+          font-size: 14px;
+          margin-top: 30px;
+          padding-top: 20px;
+          border-top: 1px solid #e5e7eb;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1 style="margin: 0;">🎉 Welcome to Dice Bastion!</h1>
+      </div>
+      <div class="content">
+        <p>Hi ${userName},</p>
+        
+        <p><strong>Your account has been created successfully!</strong></p>
+        
+        <p>We're excited to have you as part of our gaming community. Your account gives you access to exclusive benefits and makes managing your events a breeze.</p>
+        
+        <div class="highlight">
+          <strong>🎲 What's Next?</strong>
+          <ul style="margin: 10px 0;">
+            <li><strong>Explore Events:</strong> Browse upcoming gaming sessions and tournaments</li>
+            <li><strong>Join as a Member:</strong> Get exclusive discounts and early access</li>
+            <li><strong>Connect:</strong> Meet fellow gamers and join our community</li>
+          </ul>
+        </div>
+        
+        <p><strong>Quick Links:</strong></p>
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'welcome', 'new_account')}" class="button">My Account</a>
+          <a href="${addUtmParams('https://dicebastion.com/events', 'email', 'welcome', 'new_account')}" class="button">Browse Events</a>
+          <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}" class="button">View Memberships</a>
+        </div>
+        
+        <div class="highlight" style="background: #fef3c7; border-left-color: #f59e0b;">
+          <strong>💎 Consider Becoming a Member!</strong>
+          <p style="margin: 10px 0;">
+            Our memberships offer incredible value with discounts on events, priority booking, and exclusive perks. 
+            Check out our <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}">membership options</a> to save on future events!
+          </p>
+        </div>
+        
+        <p>If you have any questions or need help getting started, don't hesitate to reach out to us at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+        
+        <p>Welcome to the adventure!</p>
+        <p><strong>— The Dice Bastion Team</strong></p>
+        
+        <div class="footer">
+          <p>This is an automated email from Dice Bastion.<br>
+          You can manage your email preferences in your <a href="https://dicebastion.com/account">account settings</a>.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+}
+
 // Generate .ics calendar file content with Gibraltar timezone (Europe/Gibraltar)
 function generateIcsCalendar(event) {
   const eventDateTime = new Date(event.event_datetime)
@@ -1699,8 +1953,7 @@ app.post('/password-reset/request', async c => {
       FROM users
       WHERE email = ? AND is_active = 1
     `).bind(email).first()
-    
-    // Always return success for security (don't reveal if user exists)
+      // Always return success for security (don't reveal if user exists)
     // But only send email if user actually exists
     if (user) {
       console.log('[Password Reset] User found, generating reset token')
@@ -1709,29 +1962,11 @@ app.post('/password-reset/request', async c => {
       const resetToken = crypto.randomUUID() + '-' + crypto.randomUUID()
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour expiry
       
-      // Ensure users table has reset columns
-      try {
-        await c.env.DB.prepare(`
-          ALTER TABLE users ADD COLUMN reset_token TEXT;
-        `).run()
-      } catch (e) {
-        // Column might already exist
-      }
-      
-      try {
-        await c.env.DB.prepare(`
-          ALTER TABLE users ADD COLUMN reset_token_expires TEXT;
-        `).run()
-      } catch (e) {
-        // Column might already exist
-      }
-      
-      // Store the reset token in users table
+      // Store the reset token in password_reset_tokens table
       await c.env.DB.prepare(`
-        UPDATE users 
-        SET reset_token = ?, reset_token_expires = ?, updated_at = ?
-        WHERE user_id = ?
-      `).bind(resetToken, expiresAt.toISOString(), new Date().toISOString(), user.user_id).run()
+        INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at)
+        VALUES (?, ?, ?, 0, ?)
+      `).bind(user.user_id, resetToken, expiresAt.toISOString(), new Date().toISOString()).run()
       
       // Generate reset link
       const resetLink = `https://dicebastion.com/reset-password?token=${resetToken}`
@@ -1825,6 +2060,197 @@ app.post('/password-reset/confirm', async c => {
     return c.json({ success: true })
   } catch (error) {
     console.error('[Password Reset Confirm] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// ============================================================================
+// ACCOUNT SETUP AFTER EVENT REGISTRATION (for users without passwords)
+// ============================================================================
+
+// Check if user needs account setup (called after event registration/purchase)
+app.get('/account-setup/check', async c => {
+  try {
+    const email = c.req.query('email')
+    
+    if (!email) {
+      return c.json({ error: 'email_required' }, 400)
+    }
+    
+    // Find user by email
+    const user = await c.env.DB.prepare(`
+      SELECT user_id, email, name, password_hash
+      FROM users
+      WHERE email = ? AND is_active = 1
+    `).bind(email).first()
+    
+    if (!user) {
+      return c.json({ needsSetup: false, reason: 'user_not_found' })
+    }
+    
+    // Check if user already has a password
+    const needsSetup = !user.password_hash || user.password_hash === null || user.password_hash.trim() === ''
+    
+    return c.json({ 
+      needsSetup,
+      email: user.email,
+      name: user.name
+    })
+  } catch (error) {
+    console.error('[Account Setup Check] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Request account setup (generates token and sends email)
+app.post('/account-setup/request', async c => {
+  try {
+    const { email, source } = await c.req.json()
+    
+    if (!email) {
+      return c.json({ error: 'email_required' }, 400)
+    }
+    
+    // Find user by email
+    const user = await c.env.DB.prepare(`
+      SELECT user_id, email, name, password_hash
+      FROM users
+      WHERE email = ? AND is_active = 1
+    `).bind(email).first()
+    
+    // Always return success for security (don't reveal if user exists)
+    if (user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')) {
+      console.log('[Account Setup Request] User found without password, generating setup token')
+      
+      // Generate a secure setup token (similar to password reset)
+      const setupToken = crypto.randomUUID() + '-' + crypto.randomUUID()
+      const expiresAt = new Date(Date.now() + 30* 24 * 60 * 60 * 1000) // 30 days expiry (longer than password reset)
+      
+      // Store the setup token in password_reset_tokens table (reusing for account setup)
+      // If source is 'modal', don't send email immediately (email_sent = 0)
+      const sendEmailNow = source !== 'modal'
+      await c.env.DB.prepare(`
+        INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at, email_sent, source)
+        VALUES (?, ?, ?, 0, ?, ?, ?)
+      `).bind(user.user_id, setupToken, expiresAt.toISOString(), new Date().toISOString(), sendEmailNow ? 1 : 0, source || 'direct').run()
+      
+      // Generate setup link
+      const setupLink = `https://dicebastion.com/account-setup?token=${setupToken}`
+      
+      // Only send email immediately if not from modal
+      if (sendEmailNow) {
+        const emailHtml = getAccountCreationInviteEmail(user.name || user.email, user.email, setupLink)
+        
+        await sendEmail(c.env, {
+          to: user.email,
+          subject: '🎉 One More Step - Create Your Dice Bastion Account',
+          html: emailHtml,
+          emailType: 'account_setup_invite',
+          relatedId: user.user_id,
+          relatedType: 'user'
+        })
+        
+        console.log('[Account Setup Request] Setup email sent to', user.email)
+      } else {
+        console.log('[Account Setup Request] Email sending delayed for modal flow')
+      }
+      
+      // Return the token so frontend can display password form immediately
+      return c.json({ success: true, token: setupToken, email: user.email, name: user.name })
+    } else {
+      console.log('[Account Setup Request] User not found or already has password, but returning success for security')
+    }
+    
+    return c.json({ success: true })
+  } catch (error) {
+    console.error('[Account Setup Request] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Complete account setup (set password)
+app.post('/account-setup/complete', async c => {
+  try {
+    const { token, password, consent_essential, consent_marketing } = await c.req.json()
+    
+    if (!token || !password) {
+      return c.json({ error: 'token_and_password_required' }, 400)
+    }
+    
+    if (password.length < 8) {
+      return c.json({ error: 'password_too_short' }, 400)
+    }
+    
+    // Find valid setup token
+    const setupRecord = await c.env.DB.prepare(`
+      SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.name, u.password_hash
+      FROM password_reset_tokens prt
+      JOIN users u ON prt.user_id = u.user_id
+      WHERE prt.token = ? AND prt.used = 0
+    `).bind(token).first()
+    
+    if (!setupRecord) {
+      console.log('[Account Setup Complete] Invalid or already used token')
+      return c.json({ error: 'invalid_token' }, 404)
+    }
+    
+    // Check if token has expired
+    const expiresAt = new Date(setupRecord.expires_at)
+    if (expiresAt < new Date()) {
+      console.log('[Account Setup Complete] Token has expired')
+      return c.json({ error: 'token_expired' }, 400)
+    }
+    
+    // Check if user already has a password (shouldn't happen, but just in case)
+    if (setupRecord.password_hash && setupRecord.password_hash.trim() !== '') {
+      console.log('[Account Setup Complete] User already has a password')
+      return c.json({ error: 'already_has_password' }, 400)
+    }
+    
+    console.log('[Account Setup Complete] Token valid, hashing password')
+    
+    // Hash the password
+    const passwordHash = await bcrypt.hash(password, 10)
+    
+    // Update user's password
+    await c.env.DB.prepare(`
+      UPDATE users
+      SET password_hash = ?, updated_at = ?
+      WHERE user_id = ?
+    `).bind(passwordHash, new Date().toISOString(), setupRecord.user_id).run()
+
+    // Store email consent preferences
+    // Always store essential consent as true
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(`
+      INSERT OR REPLACE INTO email_preferences 
+      (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
+      VALUES (?, 1, ?, 1, ?, ?)
+    `).bind(setupRecord.user_id, consent_marketing ? 1 : 0, now, now).run()
+    
+    // Mark token as used
+    await c.env.DB.prepare(`
+      UPDATE password_reset_tokens
+      SET used = 1
+      WHERE id = ?
+    `).bind(setupRecord.id).run()
+    
+    // Send welcome email
+    const welcomeHtml = getNewAccountWelcomeEmail(setupRecord.name || setupRecord.email)
+    await sendEmail(c.env, {
+      to: setupRecord.email,
+      subject: '🎉 Welcome to Dice Bastion!',
+      html: welcomeHtml,
+      emailType: 'new_account_welcome',
+      relatedId: setupRecord.user_id,
+      relatedType: 'user'
+    })
+    
+    console.log('[Account Setup Complete] Account setup successful for', setupRecord.email)
+    
+    return c.json({ success: true, email: setupRecord.email })
+  } catch (error) {
+    console.error('[Account Setup Complete] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
@@ -2435,7 +2861,7 @@ app.post('/membership/checkout', async (c) => {
     if (!EMAIL_RE.test(email) || email.length > 320) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
     if (name && name.length > 200) return c.json({ error:'name_too_long' },400)
-    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode)
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error:'turnstile_failed' },403)
     
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
@@ -3175,11 +3601,13 @@ app.get('/events/confirm', async c => {
         relatedId: ticket.id,
         relatedType: 'ticket',
         metadata: { event_id: ev.id, event_name: ev.event_name }
-      })
-    } catch (adminEmailError) {
+      })    } catch (adminEmailError) {
       console.error('Failed to send admin notification for event ticket:', adminEmailError)
       // Don't fail the main transaction if admin email fails
     }
+    
+    // Check if user needs account setup (no password set)
+    const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
     
     return c.json({ 
       ok: true, 
@@ -3188,7 +3616,9 @@ app.get('/events/confirm', async c => {
       eventDate: ev.event_datetime,
       ticketCount: 1,
       amount: transaction.amount,
-      currency: transaction.currency || 'GBP'
+      currency: transaction.currency || 'GBP',
+      needsAccountSetup: needsAccountSetup,
+      userEmail: user?.email || transaction.email
     })
   } catch (error) {
     console.error('[events/confirm] EXCEPTION:', error)
@@ -3263,7 +3693,7 @@ app.post('/events/:id/register', async c => {
     if (!name || name.trim().length === 0) return c.json({ error:'name_required' },400)
     if (name && name.length > 200) return c.json({ error:'name_too_long' },400)
     
-    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode)
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error:'turnstile_failed' },403)
 
     const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
@@ -3282,28 +3712,11 @@ app.post('/events/:id/register', async c => {
     if (!ident || typeof ident.id === 'undefined' || ident.id === null) {
       console.error('identity missing id', ident)
       return c.json({ error:'identity_error' },500)
-    }
-
-    const s = await getSchema(c.env.DB)
+    }    const s = await getSchema(c.env.DB)
     await ensureSchema(c.env.DB, s.fkColumn)
     await migrateToTransactions(c.env.DB)
-
-    // Check for duplicate registration
-    const existing = await c.env.DB.prepare(`
-      SELECT * FROM tickets WHERE event_id = ? AND user_id = ? AND status = 'active'
-    `).bind(evId, ident.id).first()
     
-    if (existing) {
-      return c.json({ 
-        success: true, 
-        already_registered: true,
-        message: 'You are already registered for this event',
-        eventName: ev.event_name,
-        eventDate: ev.event_datetime
-      })
-    }
-
-    // Create ticket record with status 'active' (no payment needed)
+    // Multiple registrations are now allowed - duplicate check removed// Create ticket record with status 'active' (no payment needed)
     const colParts = ['event_id', 'user_id', 'status', 'created_at']
     const bindVals = [evId, ident.id, 'active', toIso(new Date())]
     
@@ -3313,14 +3726,25 @@ app.post('/events/:id/register', async c => {
     ).bind(...bindVals).first()
     const ticketId = ticketResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
 
+    console.log('[FREE EVENT REGISTRATION] Ticket created with ID:', ticketId)
+
     // Increment tickets_sold count
     await c.env.DB.prepare(
       'UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)'
     ).bind(evId).run()
     
     // Send confirmation email
-    const emailContent = getTicketConfirmationEmail(ev, ident, { email, name: ident.name })
-    await sendEmail(c.env, { 
+    const emailContent = getTicketConfirmationEmail(ev, ident, { 
+      email, 
+      name: ident.name || name,
+      amount: '0.00',
+      currency: 'GBP',
+      order_ref: null  // No order ref for free registrations
+    })
+    
+    console.log('[FREE EVENT REGISTRATION] Sending email to:', email)
+    
+    await sendEmail(c.env, {
       to: email, 
       ...emailContent,
       emailType: 'event_registration_confirmation',
@@ -3328,8 +3752,7 @@ app.post('/events/:id/register', async c => {
       relatedType: 'ticket',
       metadata: { event_id: evId, event_name: ev.event_name }
     })
-    
-    // Send admin notification
+      // Send admin notification
     try {
       const adminEmailContent = getAdminNotificationEmail('event_registration', {
         eventName: ev.event_name,
@@ -3339,6 +3762,8 @@ app.post('/events/:id/register', async c => {
         ticketId: ticketId,
         isFree: true
       })
+      
+      console.log('[FREE EVENT REGISTRATION] Sending admin notification')
       
       await sendEmail(c.env, { 
         to: 'admin@dicebastion.com',
@@ -3352,13 +3777,19 @@ app.post('/events/:id/register', async c => {
       console.error('Failed to send admin notification for event registration:', adminEmailError)
       // Don't fail the main registration if admin email fails
     }
+      console.log('[FREE EVENT REGISTRATION] Registration complete, returning ticketId:', ticketId)
+    
+    // Check if user needs account setup (no password set)
+    const needsAccountSetup = !ident.password_hash || ident.password_hash === null || ident.password_hash.trim() === ''
     
     return c.json({ 
       success: true,
       registered: true,
       eventName: ev.event_name,
       eventDate: ev.event_datetime,
-      ticketId: ticketId
+      ticketId: ticketId,
+      needsAccountSetup: needsAccountSetup,
+      userEmail: email
     })
   } catch (e) {
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
@@ -3783,7 +4214,7 @@ app.post('/events/:id/checkout', async c => {
     if (!EMAIL_RE.test(email)) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error:'privacy_consent_required' },400)
     if (name && name.length > 200) return c.json({ error:'name_too_long' },400)
-    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode)
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error:'turnstile_failed' },403)
 
     const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
@@ -4030,10 +4461,6 @@ app.post('/membership/retry-renewal', async (c) => {
     // Find membership with failed renewal
     const membership = await getActiveMembership(c.env.DB, ident.id)
     if (!membership) return c.json({ error: 'no_active_membership' }, 404)
-    
-    if (!membership.auto_renew) {
-      return c.json({ error: 'auto_renew_disabled', message: 'Auto-renewal is not enabled for this membership' }, 400)
-    }
     
     if (!membership.renewal_failed_at && membership.renewal_attempts === 0) {
       return c.json({ error: 'no_failed_renewal', message: 'No failed renewal attempts found' }, 400)
@@ -4317,164 +4744,31 @@ app.get('/admin/orders', async (c) => {
     const orders = await c.env.DB.prepare(`
       SELECT * FROM orders 
       ORDER BY created_at DESC
-      LIMIT 100
     `).all()
     
-    return c.json(orders.results || [])
+    return c.json({ orders: orders.results || [] })
   } catch (e) {
     console.error('Get orders error:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
 
-// Get order details with items (admin only or order owner)
-app.get('/orders/:orderNumber', async (c) => {
-  try {
-    await ensureSchema(c.env.DB, 'user_id')
-    
-    const orderNumber = c.req.param('orderNumber')
-    const email = c.req.query('email')
-    
-    const order = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
-      .bind(orderNumber)
-      .first()
-    
-    if (!order) {
-      return c.json({ error: 'order_not_found' }, 404)
-    }
-    
-    // Check authorization (admin or order owner)
-    const adminKey = c.req.header('X-Admin-Key')
-    if (adminKey !== c.env.ADMIN_KEY && order.email !== email) {
-      return c.json({ error: 'unauthorized' }, 401)
-    }
-    
-    // Get order items
-    const items = await c.env.DB.prepare('SELECT * FROM order_items WHERE order_id = ?')
-      .bind(order.id)
-      .all()
-    
-    return c.json({
-      ...order,
-      items: items.results || []
-    })
-  } catch (e) {
-    console.error('Get order error:', e)
-    return c.json({ error: 'internal_error' }, 500)
-  }
-})
-
 // ============================================================================
-// SHOP CHECKOUT ENDPOINTS
-// ============================================================================
-
-// Test endpoint to verify email configuration
-app.post('/test/email', async (c) => {
-  try {
-    const { email } = await c.req.json()
-    if (!email || !EMAIL_RE.test(email)) {
-      return c.json({ error: 'Invalid email address' }, 400)
-    }
-    
-    const result = await sendEmail(c.env, {
-      to: email,
-      subject: '🧪 Test Email from Dice Bastion Worker',
-      html: `
-        <h1>Test Email Successful!</h1>
-        <p>Hi there,</p>
-        <p>This is a test email from your Dice Bastion Cloudflare Worker.</p>
-        <p><strong>✅ Your email system is working correctly!</strong></p>
-        <ul>
-          <li>MailerSend API key is configured</li>
-          <li>Email sending is functional</li>
-          <li>DNS records are properly set up</li>
-        </ul>
-        <p>You can now process payments with confidence that confirmation emails will be sent.</p>
-        <hr>
-        <p style="color: #666; font-size: 0.9rem;">Sent at: ${new Date().toISOString()}</p>
-      `,
-      emailType: 'test',
-      relatedType: 'test'
-    })
-    
-  return c.json(result)
-  } catch (e) {
-    console.error('Test email error:', e)
-    return c.json({ success: false, error: String(e) }, 500)
-  }
-})
-
-// ============================================================================
-// SCHEDULED HANDLER (CRON)
+// CRON JOB: Auto-renewal processing
 // ============================================================================
 
 /**
- * Log a cron job activity to the database
- */
-async function logCronJob(db, jobName, status, details = {}) {
-  const now = new Date().toISOString()
-  
-  const logData = {
-    job_name: jobName,
-    started_at: details.started_at || now,
-    completed_at: status !== 'running' ? now : null,
-    status: status,
-    records_processed: details.records_processed || 0,
-    records_succeeded: details.records_succeeded || 0,
-    records_failed: details.records_failed || 0,
-    error_message: details.error_message || null,
-    details: details.extra ? JSON.stringify(details.extra) : null
-  }
-  
-  try {
-    await db.prepare(`
-      INSERT INTO cron_job_log (
-        job_name, started_at, completed_at, status,
-        records_processed, records_succeeded, records_failed,
-        error_message, details
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      logData.job_name,
-      logData.started_at,
-      logData.completed_at,
-      logData.status,
-      logData.records_processed,
-      logData.records_succeeded,
-      logData.records_failed,
-      logData.error_message,
-      logData.details
-    ).run()
-    
-    console.log(`[CRON] Logged ${jobName}: ${status}`, details)
-  } catch (e) {
-    console.error(`[CRON] Failed to log ${jobName}:`, e)
-  }
-}
-
-/**
- * Process membership auto-renewals
- * 1. Sends warning emails 7 days before renewal
- * 2. Processes renewals for memberships expiring today or past-due (grace period)
- * 3. Marks expired memberships after grace period ends
+ * Process auto-renewals and membership warnings
+ * This function handles:
+ * 1. Sending renewal warnings (7 days before)
+ * 2. Processing renewals for expiring memberships
+ * 3. Marking expired memberships
  */
 async function processAutoRenewals(env) {
   const jobName = 'auto_renewals'
   const startedAt = new Date().toISOString()
-  const today = new Date().toISOString().split('T')[0]
-  
-  // Calculate warning date (7 days from now)
-  const warningDate = new Date()
-  warningDate.setDate(warningDate.getDate() + 7)
-  const warningDateStr = warningDate.toISOString().split('T')[0]
-    // Calculate grace period start (1 day ago)
-  const gracePeriodStart = new Date()
-  gracePeriodStart.setDate(gracePeriodStart.getDate() - 1)
-  const gracePeriodStartStr = gracePeriodStart.toISOString().split('T')[0]
   
   console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
-  console.log(`[CRON] Today: ${today}`)
-  console.log(`[CRON] Warning date (7 days ahead): ${warningDateStr}`)
-  console.log(`[CRON] Grace period start (1 day ago): ${gracePeriodStartStr}`)
   
   let processed = 0
   let succeeded = 0
@@ -4484,22 +4778,33 @@ async function processAutoRenewals(env) {
   const errors = []
   
   try {
+    const now = new Date()
+    const today = toIso(now)
+    
+    // Calculate dates for warnings (7 days from now)
+    const warningDate = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000))
+    const warningDateStr = toIso(warningDate)
+    
+    // Grace period: allow renewals for memberships that expired in the last 1 day
+    const gracePeriodStart = new Date(now.getTime() - (1 * 24 * 60 * 60 * 1000))
+    const gracePeriodStartStr = toIso(gracePeriodStart)
+    
     // ========================================================================
-    // STEP 1: Send warning emails for memberships expiring in 7 days
+    // STEP 1: Send renewal warnings (7 days before expiry)
     // ========================================================================
-    console.log(`[CRON] Step 1: Checking for memberships needing warning emails...`)
-      const warningMemberships = await env.DB.prepare(`
+    console.log(`[CRON] Step 1: Checking for memberships needing renewal warnings...`)
+    
+    const warningMemberships = await env.DB.prepare(`
       SELECT 
         m.id,
         m.user_id,
         m.plan,
         m.end_date,
-        m.renewal_warning_sent,
         u.email,
         u.name
       FROM memberships m
       JOIN users u ON m.user_id = u.user_id
-      WHERE m.end_date = ?
+      WHERE DATE(m.end_date) = DATE(?)
         AND m.auto_renew = 1
         AND m.status = 'active'
         AND (m.renewal_warning_sent = 0 OR m.renewal_warning_sent IS NULL)
@@ -4866,6 +5171,118 @@ async function processEventReminders(env) {
 }
 
 /**
+ * Process delayed account setup emails
+ * Sends account setup invitation emails for tokens that were created
+ * from the modal flow but the user never completed account setup.
+ * Runs daily at 2 AM as part of the scheduled cron jobs.
+ */
+async function processDelayedAccountSetupEmails(env) {
+  const jobName = 'delayed_account_setup_emails'
+  const startedAt = new Date().toISOString()
+  
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+  
+  let processed = 0
+  let succeeded = 0
+  let failed = 0
+  const errors = []
+  
+  try {
+    // Find tokens that:
+    // 1. Haven't been used (used = 0) - user didn't complete account setup
+    // 2. Email hasn't been sent yet (email_sent = 0)
+    // 3. Haven't expired yet
+    // 4. Source is 'modal' (only send delayed emails for modal flow)
+    const now = new Date().toISOString()
+    
+    const pendingTokens = await env.DB.prepare(`
+      SELECT prt.id, prt.token, prt.user_id, u.email, u.name
+      FROM password_reset_tokens prt
+      JOIN users u ON prt.user_id = u.user_id
+      WHERE prt.used = 0
+        AND prt.email_sent = 0
+        AND prt.expires_at > ?
+        AND prt.source = 'modal'
+    `).bind(now).all()
+    
+    processed = pendingTokens.results?.length || 0
+    console.log(`[CRON] Found ${processed} account setup emails to send`)
+    
+    if (processed === 0) {
+      await logCronJob(env.DB, jobName, 'completed', {
+        started_at: startedAt,
+        records_processed: 0,
+        records_succeeded: 0,
+        records_failed: 0
+      })
+      return
+    }
+    
+    // Send email for each pending token
+    for (const tokenRecord of pendingTokens.results) {
+      try {
+        const setupLink = `https://dicebastion.com/account-setup?token=${tokenRecord.token}`
+        const emailHtml = getAccountCreationInviteEmail(tokenRecord.name || tokenRecord.email, tokenRecord.email, setupLink)
+        
+        await sendEmail(env, {
+          to: tokenRecord.email,
+          subject: '🎉 One More Step - Create Your Dice Bastion Account',
+          html: emailHtml,
+          emailType: 'account_setup_invite',
+          relatedId: tokenRecord.user_id,
+          relatedType: 'user'
+        })
+        
+        // Mark email as sent
+        await env.DB.prepare(`
+          UPDATE password_reset_tokens
+          SET email_sent = 1
+          WHERE id = ?
+        `).bind(tokenRecord.id).run()
+        
+        succeeded++
+        console.log(`[CRON] ✓ Sent delayed account setup email to ${tokenRecord.email}`)
+      } catch (err) {
+        failed++
+        errors.push({
+          user_id: tokenRecord.user_id,
+          email: tokenRecord.email,
+          error: err.message
+        })
+        console.error(`[CRON] ✗ Failed to send delayed email to ${tokenRecord.email}:`, err)
+      }
+    }
+    
+    try {
+      await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        extra: { errors: errors.length > 0 ? errors : undefined }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log success:`, logErr)
+    }
+    
+  } catch (err) {
+    console.error(`[CRON] ${jobName} failed:`, err)
+    try {
+      await logCronJob(env.DB, jobName, 'failed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        error_message: err.message,
+        extra: { errors: errors.length > 0 ? errors : undefined }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log error:`, logErr)
+    }
+  }
+}
+
+/**
  * Reconcile payment statuses
  * Checks for stuck/pending payments and syncs with Stripe
  */
@@ -4975,6 +5392,7 @@ async function handleScheduled(event, env, ctx) {
   const jobResults = {
     auto_renewals: null,
     event_reminders: null,
+    delayed_account_setup_emails: null,
     payment_reconciliation: null
   }
   
@@ -4998,6 +5416,15 @@ async function handleScheduled(event, env, ctx) {
   }
   
   try {
+    await processDelayedAccountSetupEmails(env)
+    jobResults.delayed_account_setup_emails = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Delayed account setup emails failed:', e)
+    jobResults.delayed_account_setup_emails = 'failed'
+    // Individual job already logged its own error
+  }
+  
+  try {
     await processPaymentReconciliation(env)
     jobResults.payment_reconciliation = 'completed'
   } catch (e) {
@@ -5017,7 +5444,7 @@ async function handleScheduled(event, env, ctx) {
     try {
     await logCronJob(env.DB, 'cron_master', allSucceeded ? 'completed' : 'partial', {
       started_at: runStarted,
-      records_processed: 3,
+      records_processed: 4,
       records_succeeded: Object.values(jobResults).filter(r => r === 'completed').length,
       records_failed: Object.values(jobResults).filter(r => r === 'failed').length,
       extra: jobResults

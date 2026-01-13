@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account Setup Flow - Visual Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 40px;
+    }
+    
+    .header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 8px;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+    
+    .header p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+    
+    .flow-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+    
+    .flow-step {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      position: relative;
+      transition: transform 0.2s;
+    }
+    
+    .flow-step:hover {
+      transform: translateY(-4px);
+    }
+    
+    .flow-step.active {
+      border: 3px solid #10b981;
+      box-shadow: 0 10px 40px rgba(16, 185, 129, 0.4);
+    }
+    
+    .step-number {
+      position: absolute;
+      top: -12px;
+      left: 24px;
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+    }
+    
+    .step-title {
+      margin-top: 12px;
+      margin-bottom: 12px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #1f2937;
+    }
+    
+    .step-description {
+      color: #6b7280;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+    
+    .step-action {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: all 0.2s;
+      font-size: 0.95rem;
+    }
+    
+    .step-action:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+    
+    .step-action:disabled {
+      background: #d1d5db;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .step-status {
+      margin-top: 12px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      text-align: center;
+    }
+    
+    .status-pending {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    
+    .status-success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .status-error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .controls {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      margin-bottom: 24px;
+    }
+    
+    .controls h3 {
+      color: #1f2937;
+      margin-bottom: 16px;
+    }
+    
+    .control-group {
+      margin-bottom: 16px;
+    }
+    
+    .control-group label {
+      display: block;
+      color: #374151;
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 0.9rem;
+    }
+    
+    .control-group input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 2px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.95rem;
+    }
+    
+    .control-group input:focus {
+      outline: none;
+      border-color: #10b981;
+    }
+    
+    .reset-btn {
+      background: #6b7280;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .reset-btn:hover {
+      background: #4b5563;
+    }
+    
+    .info-panel {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    
+    .info-panel h3 {
+      color: #1f2937;
+      margin-bottom: 12px;
+    }
+    
+    .info-list {
+      list-style: none;
+      padding: 0;
+    }
+    
+    .info-list li {
+      padding: 8px 0;
+      color: #4b5563;
+      display: flex;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    
+    .info-list li::before {
+      content: "✓";
+      color: #10b981;
+      font-weight: 700;
+      margin-right: 12px;
+      font-size: 1.2rem;
+    }
+    
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+    
+    .pulse {
+      animation: pulse 2s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎮 Account Setup Flow Demo</h1>
+      <p>Interactive demonstration of the post-event account creation experience</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <h3>⚙️ Configuration</h3>
+      <div class="control-group">
+        <label for="demo-email">Test Email Address</label>
+        <input type="email" id="demo-email" value="demo@dicebastion.com" placeholder="Enter email address">
+      </div>
+      <div class="control-group">
+        <label for="demo-event">Event Name</label>
+        <input type="text" id="demo-event" value="Board Game Night" placeholder="Enter event name">
+      </div>
+      <button class="reset-btn" onclick="resetFlow()">🔄 Reset Flow</button>
+    </div>
+
+    <!-- Flow Steps -->
+    <div class="flow-container">
+      <!-- Step 1: Event Registration -->
+      <div class="flow-step active" id="step1">
+        <div class="step-number">1</div>
+        <div class="step-title">Event Registration</div>
+        <div class="step-description">
+          User registers for an event as a guest (not logged in). Backend creates user record without password.
+        </div>
+        <button class="step-action pulse" onclick="completeStep1()">Register for Event</button>
+        <div class="step-status status-pending" id="status1">Ready to start</div>
+      </div>
+
+      <!-- Step 2: Thank You Page -->
+      <div class="flow-step" id="step2">
+        <div class="step-number">2</div>
+        <div class="step-title">Thank You Page</div>
+        <div class="step-description">
+          User lands on confirmation page. After 1.5s, the account setup modal appears automatically.
+        </div>
+        <button class="step-action" onclick="completeStep2()" disabled>Load Thank You Page</button>
+        <div class="step-status status-pending" id="status2">Waiting...</div>
+      </div>
+
+      <!-- Step 3: Account Setup Modal -->
+      <div class="flow-step" id="step3">
+        <div class="step-number">3</div>
+        <div class="step-title">Setup Prompt</div>
+        <div class="step-description">
+          Beautiful modal shows benefits of creating an account. User clicks "Create My Account".
+        </div>
+        <button class="step-action" onclick="completeStep3()" disabled>Show Modal</button>
+        <div class="step-status status-pending" id="status3">Waiting...</div>
+      </div>
+
+      <!-- Step 4: Send Email -->
+      <div class="flow-step" id="step4">
+        <div class="step-number">4</div>
+        <div class="step-title">Send Invitation</div>
+        <div class="step-description">
+          Backend generates token, sends magic link email. Modal shows "Check Your Email!" success.
+        </div>
+        <button class="step-action" onclick="completeStep4()" disabled>Request Account Setup</button>
+        <div class="step-status status-pending" id="status4">Waiting...</div>
+      </div>
+
+      <!-- Step 5: Password Page -->
+      <div class="flow-step" id="step5">
+        <div class="step-number">5</div>
+        <div class="step-title">Set Password</div>
+        <div class="step-description">
+          User clicks email link, lands on password page. Enters password with real-time strength indicator.
+        </div>
+        <button class="step-action" onclick="completeStep5()" disabled>Open Setup Page</button>
+        <div class="step-status status-pending" id="status5">Waiting...</div>
+      </div>
+
+      <!-- Step 6: Account Created -->
+      <div class="flow-step" id="step6">
+        <div class="step-number">6</div>
+        <div class="step-title">Success!</div>
+        <div class="step-description">
+          Account created! Welcome email sent. User can now log in and access member benefits.
+        </div>
+        <button class="step-action" onclick="completeStep6()" disabled>Complete Setup</button>
+        <div class="step-status status-pending" id="status6">Waiting...</div>
+      </div>
+    </div>
+
+    <!-- Info Panel -->
+    <div class="info-panel">
+      <h3>✨ Implementation Highlights</h3>
+      <ul class="info-list">
+        <li>Beautiful, modern UI with gradient design</li>
+        <li>Seamless integration into event flow</li>
+        <li>Real-time password strength indicator</li>
+        <li>Session-based dismissal (won't spam users)</li>
+        <li>24-hour token expiry for security</li>
+        <li>Mobile-responsive and dark mode support</li>
+        <li>Comprehensive error handling</li>
+        <li>Welcome email after account creation</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    let currentStep = 1;
+
+    function completeStep1() {
+      const email = document.getElementById('demo-email').value;
+      const event = document.getElementById('demo-event').value;
+      
+      // Update status
+      updateStatus(1, 'success', `✓ Registered as ${email}`);
+      
+      // Activate next step
+      setTimeout(() => {
+        activateStep(2);
+        updateStatus(2, 'pending', 'Redirecting...');
+        document.querySelector('#step2 .step-action').disabled = false;
+        document.querySelector('#step2 .step-action').classList.add('pulse');
+      }, 500);
+    }
+
+    function completeStep2() {
+      updateStatus(2, 'success', '✓ Loaded confirmation page');
+      
+      setTimeout(() => {
+        activateStep(3);
+        updateStatus(3, 'pending', 'Showing modal in 1.5s...');
+        document.querySelector('#step3 .step-action').disabled = false;
+        
+        // Actually show the modal if the script is loaded
+        setTimeout(() => {
+          document.querySelector('#step3 .step-action').classList.add('pulse');
+        }, 1500);
+      }, 500);
+    }
+
+    function completeStep3() {
+      const email = document.getElementById('demo-email').value;
+      const event = document.getElementById('demo-event').value;
+      
+      // Show the actual modal
+      if (window.showAccountSetupPrompt) {
+        sessionStorage.removeItem(`account-setup-dismissed-${email}`);
+        window.showAccountSetupPrompt(email, event, false);
+      }
+      
+      updateStatus(3, 'success', '✓ Modal displayed');
+      
+      setTimeout(() => {
+        activateStep(4);
+        updateStatus(4, 'pending', 'Waiting for user...');
+        document.querySelector('#step4 .step-action').disabled = false;
+        document.querySelector('#step4 .step-action').classList.add('pulse');
+      }, 500);
+    }
+
+    function completeStep4() {
+      const email = document.getElementById('demo-email').value;
+      
+      updateStatus(4, 'pending', 'Sending email...');
+      
+      // Simulate API call
+      setTimeout(() => {
+        updateStatus(4, 'success', '✓ Invitation email sent');
+        
+        setTimeout(() => {
+          activateStep(5);
+          updateStatus(5, 'pending', 'Email link clicked');
+          document.querySelector('#step5 .step-action').disabled = false;
+          document.querySelector('#step5 .step-action').classList.add('pulse');
+        }, 500);
+      }, 1000);
+    }
+
+    function completeStep5() {
+      // Open the account setup page in a new tab
+      window.open('/account-setup?token=demo-token-test', '_blank');
+      
+      updateStatus(5, 'success', '✓ Password page opened');
+      
+      setTimeout(() => {
+        activateStep(6);
+        updateStatus(6, 'pending', 'Waiting for password...');
+        document.querySelector('#step6 .step-action').disabled = false;
+        document.querySelector('#step6 .step-action').classList.add('pulse');
+      }, 500);
+    }
+
+    function completeStep6() {
+      updateStatus(6, 'success', '🎉 Account created! Welcome email sent');
+      
+      // Confetti effect (simple)
+      setTimeout(() => {
+        alert('🎉 Flow Complete!\n\nThe user now has:\n✓ A Dice Bastion account\n✓ Login credentials\n✓ Access to member benefits\n✓ Ticket management');
+      }, 500);
+    }
+
+    function updateStatus(step, type, message) {
+      const status = document.getElementById(`status${step}`);
+      status.className = `step-status status-${type}`;
+      status.textContent = message;
+    }
+
+    function activateStep(step) {
+      // Remove active class from all steps
+      document.querySelectorAll('.flow-step').forEach(s => s.classList.remove('active'));
+      
+      // Add active class to current step
+      document.getElementById(`step${step}`).classList.add('active');
+      
+      currentStep = step;
+    }
+
+    function resetFlow() {
+      currentStep = 1;
+      
+      // Reset all steps
+      for (let i = 1; i <= 6; i++) {
+        const step = document.getElementById(`step${i}`);
+        const button = step.querySelector('.step-action');
+        const status = document.getElementById(`status${i}`);
+        
+        step.classList.remove('active');
+        button.disabled = i !== 1;
+        button.classList.remove('pulse');
+        status.className = 'step-status status-pending';
+        status.textContent = i === 1 ? 'Ready to start' : 'Waiting...';
+      }
+      
+      // Activate first step
+      document.getElementById('step1').classList.add('active');
+      document.querySelector('#step1 .step-action').classList.add('pulse');
+    }
+  </script>
+
+  <!-- Load the actual account setup script -->
+  <script src="/js/accountSetup.js"></script>
+</body>
+</html>
