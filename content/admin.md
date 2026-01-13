@@ -1860,7 +1860,8 @@ async function loadRegistrations() {
 function renderEventRegistrations(events, isFree) {
   return events.map(event => {
     const eventDate = new Date(event.event_datetime);
-    const isPast = eventDate < new Date();
+    // Don't mark recurring events as past (they continue indefinitely)
+    const isPast = event.is_recurring !== 1 && eventDate < new Date();
     const capacity = event.capacity || '∞';
     const percentage = event.capacity ? Math.round((event.tickets_sold / event.capacity) * 100) : 0;
     
@@ -1868,7 +1869,7 @@ function renderEventRegistrations(events, isFree) {
       <div class="admin-card" style="margin-bottom: 1rem;">
         <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 200px;">
-            <h4 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">${event.event_name}</h4>
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">${event.event_name}${event.is_recurring === 1 ? ' 🔄' : ''}</h4>
             <div class="admin-text-sm admin-text-muted" style="margin-bottom: 0.5rem;">
               📅 ${eventDate.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </div>

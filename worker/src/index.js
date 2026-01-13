@@ -3313,14 +3313,23 @@ app.get('/events/confirm', async c => {
       console.log('[events/confirm] Registration ticket found:', { id: ticket.id, status: ticket.status, event_id: ticket.event_id })
       
       // Get event details
-      const ev = await c.env.DB.prepare('SELECT event_name, event_datetime FROM events WHERE event_id = ?').bind(ticket.event_id).first()
+      const ev = await c.env.DB.prepare('SELECT event_name, event_datetime, is_recurring, recurrence_pattern FROM events WHERE event_id = ?').bind(ticket.event_id).first()
       if (!ev) return c.json({ ok:false, error:'event_not_found' },404)
+      
+      // For recurring events, calculate and return the next occurrence date
+      let displayDate = ev.event_datetime
+      if (ev.is_recurring === 1) {
+        const nextOccurrence = calculateNextOccurrence(ev, new Date())
+        if (nextOccurrence) {
+          displayDate = nextOccurrence.toISOString()
+        }
+      }
       
       return c.json({ 
         ok: true, 
         status: 'active',
         eventName: ev.event_name,
-        eventDate: ev.event_datetime,
+        eventDate: displayDate,
         ticketCount: 1,
         amount: '0.00',
         currency: 'GBP',
@@ -3461,11 +3470,20 @@ app.get('/events/confirm', async c => {
     // Check if user needs account setup (no password set)
     const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
     
+    // For recurring events, calculate and return the next occurrence date
+    let displayDate = ev.event_datetime
+    if (ev.is_recurring === 1) {
+      const nextOccurrence = calculateNextOccurrence(ev, new Date())
+      if (nextOccurrence) {
+        displayDate = nextOccurrence.toISOString()
+      }
+    }
+    
     return c.json({ 
       ok: true, 
       status: 'active',
       eventName: ev.event_name,
-      eventDate: ev.event_datetime,
+      eventDate: displayDate,
       ticketCount: 1,
       amount: transaction.amount,
       currency: transaction.currency || 'GBP',
@@ -4056,19 +4074,36 @@ app.get('/admin/registrations', requireAdmin, async c => {
         e.tickets_sold,
         e.requires_purchase,
         e.is_active,
+        e.is_recurring,
+        e.recurrence_pattern,
         COUNT(t.id) as total_registrations,
         SUM(CASE WHEN t.status = 'active' THEN 1 ELSE 0 END) as confirmed_registrations,
         SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending_registrations
       FROM events e
       LEFT JOIN tickets t ON e.event_id = t.event_id
-      WHERE e.event_datetime >= datetime('now', '-7 days')
+      WHERE (e.event_datetime >= datetime('now', '-7 days') OR e.is_recurring = 1)
+        AND e.is_active = 1
       GROUP BY e.event_id
       ORDER BY e.event_datetime ASC
     `).all()
     
+    // For recurring events, calculate the next occurrence
+    const processedEvents = (events.results || []).map(event => {
+      if (event.is_recurring === 1) {
+        const nextOccurrence = calculateNextOccurrence(event, new Date())
+        if (nextOccurrence) {
+          return {
+            ...event,
+            event_datetime: nextOccurrence.toISOString()
+          }
+        }
+      }
+      return event
+    })
+    
     return c.json({ 
       success: true,
-      events: events.results || []
+      events: processedEvents
     })
   } catch (e) {
     console.error('Get registrations summary error:', e)
