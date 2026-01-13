@@ -6,6 +6,8 @@ showDate: false
 showReadingTime: false
 ---
 
+<script src="/js/utils.js"></script>
+
 <div id="login-page" style="max-width: 450px; margin: 5rem auto;">
 <h1 style="text-align: center; margin-bottom: 2rem;">Login to Dice Bastion</h1>
 
@@ -40,16 +42,15 @@ Don't have an account? <a href="/memberships" style="color: rgb(var(--color-prim
 </div>
 
 <script>
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = utils.getApiBase();
 
 // Check if already logged in
 function checkExistingLogin() {
-const sessionToken = localStorage.getItem('admin_session');
-const userDataStr = localStorage.getItem('admin_user');
+const sessionToken = utils.session.get();
+const userData = utils.session.getUser();
 
-if (sessionToken && userDataStr) {
-try {
-const userData = JSON.parse(userDataStr);    // If user is admin, redirect to admin dashboard
+if (sessionToken && userData) {
+    // If user is admin, redirect to admin dashboard
     if (userData.is_admin) {
       window.location.href = '/admin';
       return;
@@ -57,9 +58,7 @@ const userData = JSON.parse(userDataStr);    // If user is admin, redirect to ad
 
     // If non-admin, redirect to account page
     window.location.href = '/account';
-} catch (e) {
-console.error('Failed to parse user data:', e);
-}  }
+  }
 }
 
 // Handle login form submission
@@ -84,12 +83,12 @@ const data = await res.json();
 
 if (res.ok && data.success) {
 // Store session data
-localStorage.setItem('admin_session', data.session_token);
-localStorage.setItem('admin_user', JSON.stringify(data.user));
-localStorage.setItem('admin_token', data.session_token);
+utils.session.set(data.session_token, data.user);
 
 // Trigger login status update
-window.dispatchEvent(new Event('userLoggedIn'));      // Redirect based on user role
+window.dispatchEvent(new Event('userLoggedIn'));
+
+// Redirect based on user role
       if (data.user.is_admin) {
         window.location.href = '/admin';
       } else {
@@ -104,7 +103,8 @@ errorEl.style.display = 'block';
 } catch (err) {
 console.error('Login error:', err);
 errorEl.textContent = 'Login failed. Please try again.';
-errorEl.style.display = 'block';  }
+errorEl.style.display = 'block';
+}
 });
 
 // Check on page load

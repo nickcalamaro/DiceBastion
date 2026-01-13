@@ -1,7 +1,68 @@
 // Shared utilities for account setup (used by both modal and standalone page)
+// Depends on: utils.js
 
-window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
-const API_BASE = window.__DB_API_BASE;
+const API_BASE = utils.getApiBase();
+
+/**
+ * HTML Template Builders - Generate common modal patterns
+ */
+
+// Create icon header section
+window.createModalHeader = function(icon, heading, text) {
+  return `
+    <div class="modal-icon-container">
+      <div class="modal-icon">${icon}</div>
+    </div>
+    <h2 class="modal-heading">${heading}</h2>
+    ${text ? `<p class="modal-text">${text}</p>` : ''}
+  `;
+};
+
+// Create large icon header (for success states)
+window.createModalHeaderLarge = function(icon, heading, text) {
+  return `
+    <div class="modal-text-center">
+      <div class="modal-icon-container">
+        <div class="modal-icon modal-icon-lg modal-icon-success">${icon}</div>
+      </div>
+      <h2 class="modal-subheading">${heading}</h2>
+      ${text ? `<p class="modal-text">${text}</p>` : ''}
+    </div>
+  `;
+};
+
+// Create benefits list
+window.createBenefitsList = function(benefits) {
+  const items = benefits.map(benefit => 
+    `<div class="modal-benefit-item">
+      <span class="modal-benefit-icon">✓</span>
+      <span class="modal-benefit-text">${benefit}</span>
+    </div>`
+  ).join('');
+  
+  return `<div class="modal-benefits">${items}</div>`;
+};
+
+// Create email display box
+window.createEmailBox = function(email) {
+  return `
+    <div class="modal-email-box">
+      <div class="modal-email-label">YOUR EMAIL</div>
+      <div class="modal-email-value">${email}</div>
+    </div>
+  `;
+};
+
+// Create button group
+window.createButtonGroup = function(buttons) {
+  const buttonHTML = buttons.map(btn => {
+    const btnClass = btn.secondary ? 'modal-btn modal-btn-secondary' : 'modal-btn modal-btn-primary';
+    const type = btn.type || 'button';
+    return `<button id="${btn.id}" class="${btnClass}" type="${type}">${btn.text}</button>`;
+  }).join('\n');
+  
+  return `<div class="modal-actions">${buttonHTML}</div>`;
+};
 
 /**
  * Calculate password strength (0-4)
@@ -121,15 +182,15 @@ window.getConsentCheckboxesHTML = function(idPrefix = '') {
   const marketingId = idPrefix ? `${idPrefix}-consent-marketing` : 'consent-marketing';
   
   return `
-    <div style="margin-bottom: 20px;">
-      <label style="display: block; font-weight: 600; color: #374151; font-size: 14px; margin-bottom: 8px;">Agreements</label>
-      <div style="margin-bottom: 8px;">
-        <input type="checkbox" id="${privacyId}" style="margin-right: 8px;" />
-        <label for="${privacyId}" style="font-size: 14px; color: #374151;">I agree to the <a href="/privacy-policy" target="_blank" style="color: #5374a5; text-decoration: underline;">privacy policy</a> (required)</label>
+    <div class="mb-3">
+      <label class="form-label">Agreements</label>
+      <div class="checkbox-group mb-1">
+        <input type="checkbox" id="${privacyId}" class="checkbox-input" />
+        <label for="${privacyId}" class="checkbox-label text-sm">I agree to the <a href="/privacy-policy" target="_blank" class="link">privacy policy</a> (required)</label>
       </div>
-      <div>
-        <input type="checkbox" id="${marketingId}" style="margin-right: 8px;" />
-        <label for="${marketingId}" style="font-size: 14px; color: #374151;">I agree to receive marketing emails (discounts, news, and event announcements)</label>
+      <div class="checkbox-group">
+        <input type="checkbox" id="${marketingId}" class="checkbox-input" />
+        <label for="${marketingId}" class="checkbox-label text-sm">I agree to receive marketing emails (discounts, news, and event announcements)</label>
       </div>
     </div>
   `;
@@ -143,14 +204,14 @@ window.getPasswordStrengthHTML = function(idPrefix = '') {
   const strengthTextId = idPrefix ? `${idPrefix}-strength-text` : 'strength-text';
   
   return `
-    <div id="${strengthId}" style="display: none; margin-bottom: 20px;">
-      <div style="display: flex; gap: 4px; margin-bottom: 8px;">
-        <div class="strength-bar" style="flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px;"></div>
-        <div class="strength-bar" style="flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px;"></div>
-        <div class="strength-bar" style="flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px;"></div>
-        <div class="strength-bar" style="flex: 1; height: 4px; background: #e5e7eb; border-radius: 2px;"></div>
+    <div id="${strengthId}" class="modal-strength-container">
+      <div class="modal-strength-bars">
+        <div class="modal-strength-bar"></div>
+        <div class="modal-strength-bar"></div>
+        <div class="modal-strength-bar"></div>
+        <div class="modal-strength-bar"></div>
       </div>
-      <p id="${strengthTextId}" style="margin: 0; font-size: 12px; color: #6b7280;"></p>
+      <p id="${strengthTextId}" class="modal-strength-text"></p>
     </div>
   `;
 };

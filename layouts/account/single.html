@@ -1,0 +1,12 @@
+{{ define "main" }}
+{{ .Scratch.Set "scope" "single" }}
+
+<article>
+  <div class="mt-5 max-w-full">
+    {{ .Content }}
+  </div>
+</article>
+
+{{ partial "eventModal.html" . }}
+
+{{ end }}

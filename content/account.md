@@ -1,10 +1,15 @@
 ---
 title: "My Account"
-layout: "single"
+layout: "account"
+type: "account"
 showHero: false
 showDate: false
 showReadingTime: false
 ---
+
+<!-- Shared Utilities -->
+<script src="/js/utils.js"></script>
+<script src="/js/modal.js"></script>
 
 <script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
 
@@ -151,14 +156,14 @@ Go to Login
 
 <script>
 (function() {
-const API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = utils.getApiBase();
 
 const loadingState = document.getElementById('loading-state');
 const notLoggedInState = document.getElementById('not-logged-in-state');
 const accountContent = document.getElementById('account-content');
 
 async function loadAccountData() {
-const sessionToken = localStorage.getItem('admin_session');
+const sessionToken = utils.session.get();
 
 if (!sessionToken) {
 loadingState.style.display = 'none';
@@ -348,7 +353,7 @@ return `
     <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem;">
     <div style="flex: 1;">
         <h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">
-        <a href="/events/${ticket.slug}" style="color: rgb(var(--color-primary-600)); text-decoration: none;">${ticket.event_name}</a>
+        <a href="#" onclick="openAccountEventModal('${ticket.slug}'); return false;" style="color: rgb(var(--color-primary-600)); text-decoration: none; cursor: pointer;">${ticket.event_name}</a>
         </h3>
         <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
         📅 ${eventDate.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} 
@@ -664,7 +669,13 @@ try {
 if (cancelBtn) {
 cancelBtn.addEventListener('click', async () => {
 // Confirm cancellation
-if (!confirm('Are you sure you want to cancel auto-renewal? Your membership will remain active until it expires, but will not renew automatically.')) {
+const confirmed = await Modal.confirm({
+    title: 'Cancel Auto-Renewal',
+    message: 'Are you sure you want to cancel auto-renewal? Your membership will remain active until it expires, but will not renew automatically.',
+    confirmText: 'Cancel Auto-Renewal',
+    cancelText: 'Keep Auto-Renewal'
+});
+if (!confirmed) {
     return;
 }
 
@@ -712,5 +723,41 @@ try {
 });
 }
 }
+
+// Event modal functions - reuse existing modal with modifications
+window.openAccountEventModal = async function(eventSlug) {
+  try {
+    // Fetch event details from API using slug
+    const response = await fetch(`${API_BASE}/events/${eventSlug}`);
+    if (!response.ok) throw new Error('Failed to load event');
+    
+    const event = await response.json();
+    if (!event) return;
+    
+    // Use the existing openEventModal function
+    if (typeof openEventModal === 'function') {
+      openEventModal(event.id, [event]);
+      
+      // After modal opens, hide the purchase section and add registration badge
+      setTimeout(() => {
+        const purchaseSection = document.querySelector('.event-purchase');
+        if (purchaseSection) {
+          purchaseSection.innerHTML = `
+            <div style="padding: 1rem; background: rgb(var(--color-primary-50)); border: 1px solid rgb(var(--color-primary-200)); border-radius: 8px; text-align: center;">
+              <div style="font-size: 1.25rem; font-weight: 700; color: rgb(var(--color-primary-700)); margin-bottom: 0.5rem;">✓ You're Registered!</div>
+              <p style="margin: 0; color: rgb(var(--color-neutral-600));">We'll send you a reminder before the event.</p>
+            </div>
+          `;
+        }
+      }, 0);
+    }
+  } catch (error) {
+    console.error('Error loading event:', error);
+    Modal.alert({ title: 'Error', message: 'Failed to load event details. Please try again.' });
+  }
+};
+
+// formatEventDate is already defined in eventModal.html, no need to redefine
+
 })();
 </script>

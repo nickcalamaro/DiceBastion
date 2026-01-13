@@ -69,6 +69,9 @@
   {{ $jsProcess = $jsProcess | resources.Minify | resources.Fingerprint "sha512" }}
   <script type="text/javascript" src="{{ $jsProcess.RelPermalink }}" integrity="{{ $jsProcess.Data.Integrity }}"></script>
   
+  {{/* Shared Utilities */}}
+  <script src="/js/utils.js"></script>
+  
   {{/* Login Status Script */}}
   <script src="/js/loginStatus.js"></script>
   

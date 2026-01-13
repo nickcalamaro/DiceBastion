@@ -3571,7 +3571,16 @@ app.get('/events/confirm', async c => {
     // Send confirmation email
     const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(transaction.user_id).first()
     if (user) {
-      const emailContent = getTicketConfirmationEmail(ev, user, transaction)
+      // For recurring events, calculate next occurrence for calendar invite
+      const eventForEmail = { ...ev }
+      if (ev.is_recurring === 1) {
+        const nextOccurrence = calculateNextOccurrence(ev, new Date())
+        if (nextOccurrence) {
+          eventForEmail.event_datetime = nextOccurrence.toISOString()
+        }
+      }
+      
+      const emailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
       await sendEmail(c.env, { 
         to: user.email, 
         ...emailContent,
@@ -3734,7 +3743,16 @@ app.post('/events/:id/register', async c => {
     ).bind(evId).run()
     
     // Send confirmation email
-    const emailContent = getTicketConfirmationEmail(ev, ident, { 
+    // For recurring events, calculate next occurrence for calendar invite
+    const eventForEmail = { ...ev }
+    if (ev.is_recurring === 1) {
+      const nextOccurrence = calculateNextOccurrence(ev, new Date())
+      if (nextOccurrence) {
+        eventForEmail.event_datetime = nextOccurrence.toISOString()
+      }
+    }
+    
+    const emailContent = getTicketConfirmationEmail(eventForEmail, ident, { 
       email, 
       name: ident.name || name,
       amount: '0.00',

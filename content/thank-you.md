@@ -5,7 +5,9 @@ url: "/thank-you"
 layout: "simple"
 ---
 
-<!-- Load account setup scripts -->
+<!-- Load utilities and account setup scripts -->
+<script src="/js/utils.js"></script>
+<script src="/js/modal.js"></script>
 <script src="/js/accountSetupShared.js"></script>
 <script src="/js/accountSetup.js"></script>
 

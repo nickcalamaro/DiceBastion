@@ -1,6 +1,7 @@
 /**
  * Login Status Manager
  * Shared across main site and shop to display login state
+ * Depends on: utils.js
  */
 
 (function() {
@@ -8,21 +9,10 @@
 
   // Check if user is logged in by checking localStorage
   function checkLoginStatus() {
-    const sessionToken = localStorage.getItem('admin_session');
-    const userDataStr = localStorage.getItem('admin_user');
-    
-    if (!sessionToken || !userDataStr) {
-      return null;
-    }
-    
-    try {
-      const userData = JSON.parse(userDataStr);
-      return userData;
-    } catch (e) {
-      console.error('Failed to parse user data:', e);
-      return null;
-    }
-  }  // Update login status in the UI
+    return utils.session.getUser();
+  }
+
+  // Update login status in the UI
   function updateLoginUI() {
     const loginContainer = document.getElementById('login-status-container');
     const user = checkLoginStatus();
@@ -35,7 +25,7 @@
           <span class="text-sm text-neutral-600 dark:text-neutral-400">
             <span class="hidden sm:inline">Logged in as </span>
             <a href="${user.is_admin ? '/admin' : '/account'}" class="font-medium hover:text-primary-600 dark:hover:text-primary-400 hover:underline" title="${user.is_admin ? 'Go to Admin Dashboard' : 'Go to Account'}">
-              ${escapeHtml(user.email)}
+              ${utils.escapeHtml(user.email)}
             </a>
             <span class="mx-2">|</span>
             <button 
@@ -112,19 +102,14 @@
   }
 
   // Escape HTML to prevent XSS
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
   // Logout function
   window.logoutUser = async function() {
-    const sessionToken = localStorage.getItem('admin_session');
+    const sessionToken = utils.session.get();
     
     if (sessionToken) {
       // Call logout endpoint
       try {
-        const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+        const API_BASE = utils.getApiBase();
         await fetch(`${API_BASE}/logout`, {
           method: 'POST',
           headers: {
@@ -138,9 +123,7 @@
     }
     
     // Clear local storage
-    localStorage.removeItem('admin_session');
-    localStorage.removeItem('admin_user');
-    localStorage.removeItem('admin_token');
+    utils.session.clear();
     
     // Update UI
     updateLoginUI();

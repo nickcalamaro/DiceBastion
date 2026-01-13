@@ -5,6 +5,11 @@ showHero: false
 showDate: false
 ---
 
+<!-- Shared Utilities -->
+<script src="/js/utils.js"></script>
+<script src="/js/modal.js"></script>
+<script src="/js/richTextEditor.js"></script>
+
 <!-- Cropper.js for image cropping -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
@@ -632,7 +637,7 @@ justify-content: flex-end;
 </div>
 
 <script>
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = utils.getApiBase();
 let sessionToken = null;
 let currentUser = null;
 let uploadedProductImage = null;
@@ -640,8 +645,8 @@ let uploadedEventImage = null;
 
 // Auth
 function checkAuth() {
-sessionToken = localStorage.getItem('admin_session');
-currentUser = JSON.parse(localStorage.getItem('admin_user') || 'null');
+sessionToken = utils.session.get();
+currentUser = utils.session.getUser();
 
 if (sessionToken && currentUser) {
 // Check if user is admin
@@ -1108,11 +1113,11 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       }
       currentCropCallback = null;
     } else {
-      alert('Failed to upload image');
+      Modal.alert({ title: 'Upload Failed', message: 'Failed to upload image. Please try again.' });
       console.error('Upload error:', uploadData);
     }
   } catch (err) {
-    alert('Error uploading image');
+    Modal.alert({ title: 'Error', message: 'Error uploading image. Please try again.' });
     console.error('Upload error:', err);
   }
 });
@@ -1632,56 +1637,88 @@ async function editEvent(id) {
 }
 
 async function deleteEvent(id, title) {
-  if (!confirm(`Delete event "${title}"?`)) return;
-
-  try {
-    const res = await fetch(`${API_BASE}/admin/events/${id}`, {
-      method: 'DELETE',
-      headers: { 'X-Session-Token': sessionToken }
-    });
-
-    if (res.ok) {
-      loadEvents();
-    } else {
-      const data = await res.json();
-      
-      // Event has tickets - show warning with ticket holders
-      if (data.error === 'has_tickets') {
-        const ticketHolders = data.ticket_holders || [];
-        const ticketCount = data.tickets_sold || 0;
-        
-        let message = `⚠️ WARNING: "${data.event_name}" has ${ticketCount} ticket(s) sold.\n\n`;
-        message += `The following users have purchased tickets:\n\n`;
-        
-        ticketHolders.forEach(holder => {
-          message += `• ${holder.name} (${holder.email}) - ${holder.ticket_count} ticket(s)\n`;
+  // First confirmation
+  Modal.confirm({
+    title: 'Delete Event',
+    message: `Are you sure you want to delete "${utils.escapeHtml(title)}"?`,
+    confirmText: 'Delete',
+    confirmStyle: 'danger',
+    onConfirm: async () => {
+      try {
+        const res = await fetch(`${API_BASE}/admin/events/${id}`, {
+          method: 'DELETE',
+          headers: { 'X-Session-Token': sessionToken }
         });
-        
-        message += `\n🗑️ If you delete this event, ALL ${ticketCount} ticket(s) will be permanently deleted.\n\n`;
-        message += `Do you want to proceed?`;
-        
-        if (confirm(message)) {
-          // Force delete with all tickets
-          const forceRes = await fetch(`${API_BASE}/admin/events/${id}?force=true`, {
-            method: 'DELETE',
-            headers: { 'X-Session-Token': sessionToken }
-          });
+
+        if (res.ok) {
+          loadEvents();
+        } else {
+          const data = await res.json();
           
-          if (forceRes.ok) {
-            alert('Event and all associated tickets deleted successfully');
-            loadEvents();
+          // Event has tickets - show warning with ticket holders
+          if (data.error === 'has_tickets') {
+            const ticketHolders = data.ticket_holders || [];
+            const ticketCount = data.tickets_sold || 0;
+            
+            let message = `<div style="margin-bottom: 1rem;">
+              <p style="color: #dc2626; font-weight: 600; margin-bottom: 0.75rem;">
+                ⚠️ WARNING: "${utils.escapeHtml(data.event_name)}" has ${ticketCount} ticket(s) sold.
+              </p>
+              <p style="margin-bottom: 0.75rem;">The following users have purchased tickets:</p>
+              <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                ${ticketHolders.map(holder => 
+                  `<li>${utils.escapeHtml(holder.name)} (${utils.escapeHtml(holder.email)}) - ${holder.ticket_count} ticket(s)</li>`
+                ).join('')}
+              </ul>
+              <p style="color: #dc2626; margin-top: 1rem;">
+                🗑️ If you delete this event, ALL ${ticketCount} ticket(s) will be permanently deleted.
+              </p>
+            </div>`;
+            
+            Modal.confirm({
+              title: 'Confirm Deletion',
+              message: message,
+              confirmText: 'Delete Event & Tickets',
+              cancelText: 'Cancel',
+              confirmStyle: 'danger',
+              size: 'md',
+              onConfirm: async () => {
+                // Force delete with all tickets
+                const forceRes = await fetch(`${API_BASE}/admin/events/${id}?force=true`, {
+                  method: 'DELETE',
+                  headers: { 'X-Session-Token': sessionToken }
+                });
+                
+                if (forceRes.ok) {
+                  Modal.alert({
+                    title: 'Success',
+                    message: 'Event and all associated tickets deleted successfully'
+                  });
+                  loadEvents();
+                } else {
+                  Modal.alert({
+                    title: 'Error',
+                    message: 'Failed to delete event'
+                  });
+                }
+              }
+            });
           } else {
-            alert('Failed to delete event');
+            Modal.alert({
+              title: 'Error',
+              message: 'Failed to delete event'
+            });
           }
         }
-      } else {
-        alert('Failed to delete event');
+      } catch (err) {
+        console.error('Delete event error:', err);
+        Modal.alert({
+          title: 'Error',
+          message: 'Error deleting event'
+        });
       }
     }
-  } catch (err) {
-    console.error('Delete event error:', err);
-    alert('Error deleting event');
-  }
+  });
 }
 
 // Orders
@@ -1802,23 +1839,17 @@ function renderEventRegistrations(events, isFree) {
 }
 
 async function viewEventRegistrations(eventId, eventName) {
-  const modal = document.createElement('div');
-  modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 1rem;';
+  // Create modal with loading state
+  const modal = new Modal({
+    title: `${eventName} - Registrations`,
+    size: 'lg',
+    content: '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">Loading...</p>'
+  });
   
-  modal.innerHTML = `
-    <div style="background: rgb(var(--color-neutral)); border-radius: 12px; max-width: 800px; width: 100%; max-height: 90vh; overflow: auto; padding: 2rem; position: relative;">
-      <button onclick="this.closest('div[style*=fixed]').remove()" style="position: absolute; top: 1rem; right: 1rem; background: transparent; border: none; font-size: 1.5rem; cursor: pointer; color: rgb(var(--color-neutral-600));">×</button>
-      <h3 style="margin-top: 0;">${eventName} - Registrations</h3>
-      <div id="modal-registrations-content" style="margin-top: 1.5rem;">
-        <p style="text-align: center; color: rgb(var(--color-neutral-500));">Loading...</p>
-      </div>
-    </div>
-  `;
-  
-  document.body.appendChild(modal);
+  modal.open();
   
   try {
-    const res = await fetch(`https://dicebastion-memberships.ncalamaro.workers.dev/admin/events/${eventId}/registrations`, {
+    const res = await fetch(`${API_BASE}/admin/events/${eventId}/registrations`, {
       headers: {
         'X-Session-Token': sessionToken
       }
@@ -1829,16 +1860,15 @@ async function viewEventRegistrations(eventId, eventName) {
     }
 
     const data = await res.json();
-    const content = document.getElementById('modal-registrations-content');
     
     if (!data.registrations || data.registrations.length === 0) {
-      content.innerHTML = '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">No registrations yet</p>';
+      modal.setContent('<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">No registrations yet</p>');
       return;
     }
 
     const isFree = data.event.requires_purchase === 0;
     
-    content.innerHTML = `
+    modal.setContent(`
       <div style="margin-bottom: 1.5rem; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 8px;">
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
           <div>
@@ -1879,8 +1909,8 @@ async function viewEventRegistrations(eventId, eventName) {
             
             return `
               <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
-                <td style="padding: 0.75rem;">${reg.name || 'N/A'}</td>
-                <td style="padding: 0.75rem;">${reg.email}</td>
+                <td style="padding: 0.75rem;">${utils.escapeHtml(reg.name || 'N/A')}</td>
+                <td style="padding: 0.75rem;">${utils.escapeHtml(reg.email)}</td>
                 <td style="padding: 0.75rem;">
                   <span style="padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; ${statusColors[reg.status] || statusColors.pending}">
                     ${reg.status.toUpperCase()}
@@ -1893,10 +1923,10 @@ async function viewEventRegistrations(eventId, eventName) {
           }).join('')}
         </tbody>
       </table>
-    `;
+    `);
   } catch (err) {
     console.error('Error loading event registrations:', err);
-    document.getElementById('modal-registrations-content').innerHTML = '<p style="color: #c00;">Failed to load registrations</p>';
+    modal.showError('Failed to load registrations');
   }
 }
 
@@ -2019,12 +2049,6 @@ function updateMembershipStats(stats) {
   document.getElementById('stat-expiring').textContent = stats.expiring_soon || 0;
   document.getElementById('stat-monthly-revenue').textContent = stats.monthly_revenue ? `£${stats.monthly_revenue}` : '£0';
   document.getElementById('stat-auto-renew').textContent = stats.auto_renew_count || 0;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 // Cron Jobs
@@ -2193,11 +2217,6 @@ function formatJobName(jobName) {
     payment_reconciliation: '💳 Payment Reconciliation'
   };
   return names[jobName] || jobName;
-}
-
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function showCronDetails(logId, details) {

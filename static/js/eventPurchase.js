@@ -1,6 +1,6 @@
-// Global API configuration
-window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
-const API_BASE = window.__DB_API_BASE;
+// Event Purchase Flow
+// Depends on: utils.js (loaded globally via footer)
+const API_BASE = utils.getApiBase();
 const TURNSTILE_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 
 // Detect if we're running on localhost
@@ -128,19 +128,7 @@ window.initEventPurchase = function initEventPurchase(event) {
   
   // Check if user is logged in
   function getLoggedInUser() {
-    const sessionToken = localStorage.getItem('admin_session');
-    const userDataStr = localStorage.getItem('admin_user');
-    
-    if (!sessionToken || !userDataStr) {
-      return null;
-    }
-    
-    try {
-      return JSON.parse(userDataStr);
-    } catch (e) {
-      console.error('Failed to parse user data:', e);
-      return null;
-    }
+    return utils.session.getUser();
   }
   
   function showError(msg) {
