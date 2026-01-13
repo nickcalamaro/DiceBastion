@@ -1427,12 +1427,9 @@ function getNewAccountWelcomeEmail(userName) {
     <p><strong>— The Dice Bastion Team</strong></p>
   `
   
-  const footer = 'This is an automated email from Dice Bastion.<br>You can manage your email preferences in your <a href="https://dicebastion.com/account">account settings</a>.'
-  
   return createEmailTemplate({ 
     headerTitle: '🎉 Welcome to Dice Bastion!', 
-    content,
-    footerText: footer
+    content
   })
 }
 
@@ -3960,12 +3957,12 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
       return c.json({ error: 'not_found' }, 404)
     }
     
-    // Check if event has tickets sold (only count paid/confirmed tickets)
+    // Check if event has tickets sold (only count active/confirmed tickets)
     const ticketHolders = await c.env.DB.prepare(`
       SELECT DISTINCT u.user_id, u.name, u.email, COUNT(*) as ticket_count
       FROM tickets t
       JOIN users u ON t.user_id = u.user_id
-      WHERE t.event_id = ? AND (t.payment_status = 'PAID' OR t.payment_status IS NULL)
+      WHERE t.event_id = ? AND t.status = 'active'
       GROUP BY u.user_id, u.name, u.email
     `).bind(id).all()
     
@@ -4013,9 +4010,9 @@ app.get('/admin/events/:id/registrations', requireAdmin, async c => {
         t.id,
         t.user_id,
         t.status,
-        t.amount,
-        t.currency,
-        t.payment_status,
+        tr.amount,
+        tr.currency,
+        tr.payment_status,
         t.created_at,
         u.email,
         u.name,

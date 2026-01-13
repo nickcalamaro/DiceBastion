@@ -14,47 +14,121 @@ showDate: false
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
 
+<style>
+/* Admin Dashboard Standardized Styles */
+
+/* Containers */
+.admin-container { max-width: 400px; margin: 5rem auto; }
+.admin-wide-container { max-width: 600px; margin: 5rem auto; }
+.admin-card { background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; }
+.admin-card-sm { background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem; }
+
+/* Form Groups */
+.admin-form-group { margin-bottom: 1.5rem; }
+.admin-form-group-mb { margin-bottom: 1rem; }
+
+/* Labels */
+.admin-label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+.admin-label-inline { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+
+/* Inputs */
+.admin-input { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; }
+.admin-input-text { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 1rem; }
+.admin-textarea { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit; }
+.admin-select { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; }
+
+/* Buttons */
+.admin-btn-primary { padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+.admin-btn-primary-full { width: 100%; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+.admin-btn-secondary { padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.admin-btn-secondary-sm { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
+.admin-btn-link { padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block; }
+
+/* Rich Text Editor */
+.admin-editor { border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; min-height: 200px; }
+.admin-editor-toolbar { border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 0.5rem; background: rgb(var(--color-neutral-50)); display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.admin-editor-btn { padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; }
+.admin-editor-content { padding: 1rem; min-height: 150px; outline: none; font-family: inherit; }
+
+/* Grid Layouts */
+.admin-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.admin-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+
+/* Flex Layouts */
+.admin-flex { display: flex; gap: 1rem; }
+.admin-flex-center { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+.admin-flex-between { display: flex; justify-content: space-between; align-items: center; }
+
+/* Typography */
+.admin-text-center { text-align: center; }
+.admin-text-small { color: rgb(var(--color-neutral-500)); font-size: 0.875rem; }
+.admin-text-mono { font-family: monospace; }
+
+/* Spacing */
+.admin-mb-1 { margin-bottom: 1rem; }
+.admin-mb-2 { margin-bottom: 2rem; }
+.admin-mt-0 { margin-top: 0; }
+.admin-m-0 { margin: 0; }
+
+/* Tabs */
+.admin-tab-bar { border-bottom: 2px solid rgb(var(--color-neutral-200)); margin-bottom: 2rem; }
+.admin-tab-btn { padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600)); }
+.admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-600)); color: rgb(var(--color-primary-600)); }
+
+/* Alerts */
+.admin-error { display: none; margin-top: 1rem; padding: 0.75rem; background: #fee; color: #c00; border-radius: 6px; font-size: 0.875rem; }
+.admin-info-box { background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
+.admin-info-highlight { background: rgb(var(--color-neutral-50)); padding: 1rem; border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200)); }
+
+/* Category Tags */
+.admin-category-container { display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 2rem; padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral-50)); }
+
+/* Misc */
+.admin-icon-lg { font-size: 3rem; margin-bottom: 1rem; }
+.admin-link { color: rgb(var(--color-primary-600)); text-decoration: none; font-weight: 500; display: flex; align-items: center; gap: 0.5rem; }
+</style>
+
 <div id="admin-page">
 <!-- Login Form -->
-<div id="login-container" style="max-width: 400px; margin: 5rem auto;">
-<h1 style="text-align: center; margin-bottom: 2rem;">Admin Login</h1>
-<form id="login-form" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
-<div style="margin-bottom: 1.5rem;">
-<label for="admin-email" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Email</label>
-<input type="email" id="admin-email" required autocomplete="email" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 1rem;">
+<div id="login-container" class="admin-container">
+<h1 class="admin-text-center admin-mb-2">Admin Login</h1>
+<form id="login-form" class="admin-card">
+<div class="admin-form-group">
+<label for="admin-email" class="admin-label">Email</label>
+<input type="email" id="admin-email" required autocomplete="email" class="admin-input-text">
 </div>
-<div style="margin-bottom: 1.5rem;">
-<label for="admin-password" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Password</label>
-<input type="password" id="admin-password" required autocomplete="current-password" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 1rem;">
+<div class="admin-form-group">
+<label for="admin-password" class="admin-label">Password</label>
+<input type="password" id="admin-password" required autocomplete="current-password" class="admin-input-text">
 </div>
-<button type="submit" style="width: 100%; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer;">
+<button type="submit" class="admin-btn-primary-full">
 Login
 </button>
-<div id="login-error" style="display: none; margin-top: 1rem; padding: 0.75rem; background: #fee; color: #c00; border-radius: 6px; font-size: 0.875rem;"></div>
+<div id="login-error" class="admin-error"></div>
 </form>
 </div>
 
 <!-- Non-Admin Message -->
-<div id="non-admin-container" style="max-width: 600px; margin: 5rem auto; display: none;">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; text-align: center;">
-<div style="font-size: 3rem; margin-bottom: 1rem;">🔒</div>
-<h2 style="margin-top: 0; margin-bottom: 1rem;">Admin Access Required</h2>
+<div id="non-admin-container" class="admin-wide-container" style="display: none;">
+<div class="admin-card admin-text-center">
+<div class="admin-icon-lg">🔒</div>
+<h2 class="admin-mt-0 admin-mb-1">Admin Access Required</h2>
 <p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
 You're logged in as <strong id="non-admin-email-display"></strong>, but you don't have admin privileges.
 </p>
-<div style="background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
-<p style="margin: 0; color: rgb(var(--color-neutral-700));">
+<div class="admin-info-box">
+<p class="admin-m-0" style="color: rgb(var(--color-neutral-700));">
 If you need to manage products, events, or orders, please contact our team to request admin access.
 </p>
 </div>
-<div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-<a href="/" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
+<div class="admin-flex-center">
+<a href="/" class="admin-btn-link">
 Go to Home
 </a>
-<a href="/events" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
+<a href="/events" class="admin-btn-secondary">
 Browse Events
 </a>
-<button id="non-admin-logout-btn" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+<button id="non-admin-logout-btn" class="admin-btn-secondary">
 Logout
 </button>
 </div>
@@ -63,125 +137,126 @@ Logout
 
 <!-- Admin Dashboard -->
 <div id="admin-dashboard" style="display: none;">
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">  <h1 style="margin: 0;">Admin Dashboard</h1>
-  <div style="display: flex; gap: 1rem; align-items: center;">
-    <a href="/admin/docs/" style="color: rgb(var(--color-primary-600)); text-decoration: none; font-weight: 500; display: flex; align-items: center; gap: 0.5rem;">
+<div class="admin-flex-between admin-mb-2">
+  <h1 class="admin-m-0">Admin Dashboard</h1>
+  <div class="admin-flex">
+    <a href="/admin/docs/" class="admin-link">
       📚 <span>Developer Docs</span>
     </a>
-    <button id="logout-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+    <button id="logout-btn" class="admin-btn-secondary-sm">
       Logout
     </button>
   </div>
 </div>
 
 <!-- Tabs -->
-<div style="border-bottom: 2px solid rgb(var(--color-neutral-200)); margin-bottom: 2rem;">
-<button class="tab-btn active" data-tab="products" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid rgb(var(--color-primary-600)); cursor: pointer; font-weight: 600; color: rgb(var(--color-primary-600));">Products</button>
-<button class="tab-btn" data-tab="events" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Events</button>
-<button class="tab-btn" data-tab="registrations" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Registrations</button>
-<button class="tab-btn" data-tab="orders" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Orders</button>
-<button class="tab-btn" data-tab="memberships" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Memberships</button>
-<button class="tab-btn" data-tab="cron" style="padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600));">Cron Jobs</button>
+<div class="admin-tab-bar">
+<button class="admin-tab-btn tab-btn active" data-tab="products">Products</button>
+<button class="admin-tab-btn tab-btn" data-tab="events">Events</button>
+<button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
+<button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
+<button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
+<button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 </div>
 
 <!-- Products Tab -->
 <div id="products-tab" class="tab-content">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
+<div class="admin-card-sm">
 <h2 id="product-form-title">Add New Product</h2>
 <form id="product-form">
 <input type="hidden" id="product-id">
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+<div class="admin-grid-2 admin-mb-1">
 <div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Product Name *</label>
-<input type="text" id="product-name" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-</div>
-<div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
-<input type="text" id="product-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Auto-generated from name</small>
-</div>
-</div>
-
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Summary</label>
-<textarea id="product-summary" rows="2" placeholder="Brief description shown on product cards" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;"></textarea>
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Short text displayed on product cards</small>
-</div>
-
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Full Description</label>
-<div id="product-description-editor" style="border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; min-height: 200px;">
-<div style="border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 0.5rem; background: rgb(var(--color-neutral-50)); display: flex; gap: 0.5rem; flex-wrap: wrap;">
-<button type="button" onclick="formatText('bold')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; font-weight: bold;">B</button>
-<button type="button" onclick="formatText('italic')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; font-style: italic;">I</button>
-<button type="button" onclick="formatText('underline')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; text-decoration: underline;">U</button>
-<button type="button" onclick="formatText('insertUnorderedList')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer;">• List</button>
-<button type="button" onclick="insertLink()" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer;">🔗 Link</button>
-</div>
-<div id="description-content" contenteditable="true" style="padding: 1rem; min-height: 150px; outline: none; font-family: inherit;" placeholder="Detailed product description with formatting..."></div>
-</div>
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Rich text shown in product details modal</small>
-</div>
-
-<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-<div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Price (£) *</label>
-<input type="number" id="product-price" step="0.01" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<label class="admin-label">Product Name *</label>
+<input type="text" id="product-name" required class="admin-input">
 </div>
 <div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Stock Quantity *</label>
-<input type="number" id="product-stock" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<label class="admin-label">URL Slug *</label>
+<input type="text" id="product-slug" required class="admin-input">
+<small class="admin-text-small">Auto-generated from name</small>
 </div>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Categories (up to 3)</label>
-<div id="category-tags" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; min-height: 2rem; padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral-50));"></div>
-<div style="display: flex; gap: 0.5rem;">
-<input type="text" id="category-input" placeholder="Type category name..." style="flex: 1; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-<button type="button" onclick="addCategory()" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Add</button>
-</div>
-<div id="existing-categories" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Click existing categories below to add them, or type a new one</small>
+<div class="admin-mb-1">
+<label class="admin-label">Summary</label>
+<textarea id="product-summary" rows="2" placeholder="Brief description shown on product cards" class="admin-textarea"></textarea>
+<small class="admin-text-small">Short text displayed on product cards</small>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Image URL</label>
-<input type="url" id="product-image" placeholder="https://..." style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Or upload an image below</small>
+<div class="admin-mb-1">
+<label class="admin-label">Full Description</label>
+<div class="admin-editor">
+<div class="admin-editor-toolbar">
+<button type="button" onclick="formatText('bold')" class="admin-editor-btn" style="font-weight: bold;">B</button>
+<button type="button" onclick="formatText('italic')" class="admin-editor-btn" style="font-style: italic;">I</button>
+<button type="button" onclick="formatText('underline')" class="admin-editor-btn" style="text-decoration: underline;">U</button>
+<button type="button" onclick="formatText('insertUnorderedList')" class="admin-editor-btn">• List</button>
+<button type="button" onclick="insertLink()" class="admin-editor-btn">🔗 Link</button>
+</div>
+<div id="description-content" contenteditable="true" class="admin-editor-content" placeholder="Detailed product description with formatting..."></div>
+</div>
+<small class="admin-text-small">Rich text shown in product details modal</small>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Upload Image</label>
-<input type="file" id="product-image-upload" accept="image/*" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<div class="admin-grid-3 admin-mb-1">
+<div>
+<label class="admin-label">Price (£) *</label>
+<input type="number" id="product-price" step="0.01" required class="admin-input">
+</div>
+<div>
+<label class="admin-label">Stock Quantity *</label>
+<input type="number" id="product-stock" required class="admin-input">
+</div>
+</div>
+
+<div class="admin-mb-1">
+<label class="admin-label">Categories (up to 3)</label>
+<div id="category-tags" class="admin-category-container"></div>
+<div class="admin-flex">
+<input type="text" id="category-input" placeholder="Type category name..." class="admin-input" style="flex: 1;">
+<button type="button" onclick="addCategory()" class="admin-btn-primary" style="padding: 0.75rem 1.5rem;">Add</button>
+</div>
+<div id="existing-categories" class="admin-flex" style="margin-top: 0.5rem;"></div>
+<small class="admin-text-small">Click existing categories below to add them, or type a new one</small>
+</div>
+
+<div class="admin-mb-1">
+<label class="admin-label">Image URL</label>
+<input type="url" id="product-image" placeholder="https://..." class="admin-input">
+<small class="admin-text-small">Or upload an image below</small>
+</div>
+
+<div class="admin-mb-1">
+<label class="admin-label">Upload Image</label>
+<input type="file" id="product-image-upload" accept="image/*" class="admin-input">
 <div id="product-image-preview" style="margin-top: 0.5rem;"></div>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+<div class="admin-mb-1">
+<label class="admin-label-inline">
 <input type="checkbox" id="product-active" checked>
 <span>Active (visible in shop)</span>
 </label>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+<div class="admin-mb-1">
+<label class="admin-label-inline">
 <input type="checkbox" id="product-preorder" onchange="togglePreorderDate()">
 <span>This is a pre-order item</span>
 </label>
 </div>
 
-<div id="preorder-date-container" style="display: none; margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Expected Release Date</label>
-<input type="date" id="product-release-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral)); color: rgb(var(--color-neutral-900));">
+<div id="preorder-date-container" class="admin-mb-1" style="display: none;">
+<label class="admin-label">Expected Release Date</label>
+<input type="date" id="product-release-date" class="admin-input" style="background: rgb(var(--color-neutral)); color: rgb(var(--color-neutral-900));">
 </div>
 
-<div style="display: flex; gap: 1rem;">
-<button type="submit" style="flex: 1; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+<div class="admin-flex">
+<button type="submit" class="admin-btn-primary" style="flex: 1;">
 <span id="product-submit-text">Add Product</span>
 </button>
-<button type="button" id="cancel-product-edit" style="display: none; padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">Cancel</button>
+<button type="button" id="cancel-product-edit" class="admin-btn-secondary" style="display: none;">Cancel</button>
 </div>
 </form>
 </div>
@@ -1724,13 +1799,13 @@ async function deleteEvent(id, title) {
 // Orders
 async function loadOrders() {
   const list = document.getElementById('orders-list');
-  list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">Order management coming soon. Use SQL queries for now.</p>';
+  list.innerHTML = '<p class="admin-text-muted">Order management coming soon. Use SQL queries for now.</p>';
 }
 
 // Registrations
 async function loadRegistrations() {
   const list = document.getElementById('registrations-list');
-  list.innerHTML = '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">Loading...</p>';
+  list.innerHTML = '<p class="admin-text-center admin-text-muted" style="padding: 2rem;">Loading...</p>';
   
   try {
     const res = await fetch(`https://dicebastion-memberships.ncalamaro.workers.dev/admin/registrations`, {
@@ -1746,7 +1821,7 @@ async function loadRegistrations() {
     const data = await res.json();
     
     if (!data.success || !data.events || data.events.length === 0) {
-      list.innerHTML = '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">No upcoming events with registrations</p>';
+      list.innerHTML = '<p class="admin-text-center admin-text-muted" style="padding: 2rem;">No upcoming events with registrations</p>';
       return;
     }
 
@@ -1757,12 +1832,12 @@ async function loadRegistrations() {
     let html = '';
     
     if (freeEvents.length > 0) {
-      html += '<h3 style="margin-top: 0;">Free Events (Registrations)</h3>';
+      html += '<h3 class="admin-mt-0">Free Events (Registrations)</h3>';
       html += renderEventRegistrations(freeEvents, true);
     }
     
     if (paidEvents.length > 0) {
-      html += '<h3 style="margin-top: 2rem;">Paid Events (Ticket Sales)</h3>';
+      html += '<h3 class="admin-mt-3">Paid Events (Ticket Sales)</h3>';
       html += renderEventRegistrations(paidEvents, false);
     }
 
@@ -1790,11 +1865,11 @@ function renderEventRegistrations(events, isFree) {
     const percentage = event.capacity ? Math.round((event.tickets_sold / event.capacity) * 100) : 0;
     
     return `
-      <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem;">
+      <div class="admin-card" style="margin-bottom: 1rem;">
         <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 200px;">
             <h4 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">${event.event_name}</h4>
-            <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem; margin-bottom: 0.5rem;">
+            <div class="admin-text-sm admin-text-muted" style="margin-bottom: 0.5rem;">
               📅 ${eventDate.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </div>
             ${isPast ? '<span style="background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">PAST EVENT</span>' : ''}
@@ -1804,32 +1879,31 @@ function renderEventRegistrations(events, isFree) {
             <div style="font-size: 2rem; font-weight: bold; color: rgb(var(--color-primary-600));">
               ${event.confirmed_registrations || 0}
             </div>
-            <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
+            <div class="admin-text-sm admin-text-muted">
               ${isFree ? 'Registered' : 'Tickets Sold'}
             </div>
             ${event.capacity ? `
-              <div style="margin-top: 0.5rem;">
+              <div class="admin-mt-2">
                 <div style="background: rgb(var(--color-neutral-200)); height: 6px; border-radius: 3px; overflow: hidden;">
                   <div style="background: rgb(var(--color-primary-600)); height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
                 </div>
-                <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-top: 0.25rem;">
+                <div class="admin-text-xs admin-text-muted admin-mt-1">
                   ${event.tickets_sold} / ${capacity}
                 </div>
               </div>
             ` : ''}
             ${event.pending_registrations > 0 ? `
-              <div style="font-size: 0.75rem; color: #f59e0b; margin-top: 0.5rem;">
+              <div class="admin-text-xs admin-mt-2" style="color: #f59e0b;">
                 ⏳ ${event.pending_registrations} pending
               </div>
             ` : ''}
           </div>
         </div>
-        <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <div class="admin-flex admin-mt-3" style="gap: 0.5rem;">
           <button 
-            class="view-registrations-btn" 
+            class="view-registrations-btn admin-btn-primary" 
             data-event-id="${event.event_id}"
-            data-event-name="${event.event_name}"
-            style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.875rem;">
+            data-event-name="${event.event_name}">
             View Details
           </button>
         </div>
@@ -1843,7 +1917,7 @@ async function viewEventRegistrations(eventId, eventName) {
   const modal = new Modal({
     title: `${eventName} - Registrations`,
     size: 'lg',
-    content: '<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">Loading...</p>'
+    content: '<p class="admin-text-center admin-text-muted" style="padding: 2rem;">Loading...</p>'
   });
   
   modal.open();
@@ -1862,67 +1936,125 @@ async function viewEventRegistrations(eventId, eventName) {
     const data = await res.json();
     
     if (!data.registrations || data.registrations.length === 0) {
-      modal.setContent('<p style="text-align: center; color: rgb(var(--color-neutral-500)); padding: 2rem;">No registrations yet</p>');
+      modal.setContent('<p class="admin-text-center admin-text-muted" style="padding: 2rem;">No registrations yet</p>');
       return;
     }
 
     const isFree = data.event.requires_purchase === 0;
     
+    // Group registrations by status
+    const groupedByStatus = {
+      active: data.registrations.filter(r => r.status === 'active'),
+      pending: data.registrations.filter(r => r.status === 'pending'),
+      cancelled: data.registrations.filter(r => r.status === 'cancelled')
+    };
+    
+    // Count totals
+    const activeCount = groupedByStatus.active.length;
+    const pendingCount = groupedByStatus.pending.length;
+    const cancelledCount = groupedByStatus.cancelled.length;
+    
+    const statusConfigs = {
+      active: {
+        label: 'Active',
+        color: '#065f46',
+        bgColor: '#d1fae5',
+        icon: '✓'
+      },
+      pending: {
+        label: 'Pending',
+        color: '#92400e',
+        bgColor: '#fef3c7',
+        icon: '⏳'
+      },
+      cancelled: {
+        label: 'Cancelled',
+        color: '#991b1b',
+        bgColor: '#fee2e2',
+        icon: '✕'
+      }
+    };
+    
+    // Build content with grouped sections
+    let tableHTML = '';
+    
+    ['active', 'pending', 'cancelled'].forEach(status => {
+      const regs = groupedByStatus[status];
+      if (regs.length === 0) return;
+      
+      const config = statusConfigs[status];
+      
+      tableHTML += `
+        <div class="admin-mb-3">
+          <h4 style="margin: 0 0 1rem 0; padding: 0.5rem 1rem; background: ${config.bgColor}; color: ${config.color}; border-radius: 6px; font-size: 1rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+            <span>${config.icon}</span>
+            ${config.label} (${regs.length})
+          </h4>
+          <table style="width: 100%; border-collapse: collapse; margin-top: 0.5rem;">
+            <thead>
+              <tr style="border-bottom: 2px solid rgb(var(--color-neutral-200));">
+                <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Name</th>
+                <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Email</th>
+                ${!isFree ? '<th style="text-align: left; padding: 0.75rem; font-weight: 600;">Amount</th>' : ''}
+                <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${regs.map(reg => {
+                const regDate = new Date(reg.created_at);
+                
+                // Amount is already in pounds from transactions table
+                const amount = parseFloat(reg.amount);
+                const displayAmount = !isNaN(amount) && amount > 0 ? `£${amount.toFixed(2)}` : 'FREE';
+                
+                return `
+                  <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
+                    <td style="padding: 0.75rem;">${utils.escapeHtml(reg.name || 'N/A')}</td>
+                    <td style="padding: 0.75rem;">${utils.escapeHtml(reg.email)}</td>
+                    ${!isFree ? `<td style="padding: 0.75rem;">${displayAmount}</td>` : ''}
+                    <td class="admin-text-sm" style="padding: 0.75rem;">${regDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    });
+    
     modal.setContent(`
-      <div style="margin-bottom: 1.5rem; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 8px;">
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+      <div class="admin-card admin-mb-3">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem;">
           <div>
-            <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Total ${isFree ? 'Registrations' : 'Tickets'}</div>
+            <div class="admin-text-xs admin-text-muted" style="text-transform: uppercase; margin-bottom: 0.25rem;">Total</div>
             <div style="font-size: 1.5rem; font-weight: bold;">${data.registrations.length}</div>
+          </div>
+          <div>
+            <div class="admin-text-xs" style="text-transform: uppercase; margin-bottom: 0.25rem; color: #065f46;">Active</div>
+            <div style="font-size: 1.5rem; font-weight: bold; color: #065f46;">${activeCount}</div>
+          </div>
+          <div>
+            <div class="admin-text-xs" style="text-transform: uppercase; margin-bottom: 0.25rem; color: #92400e;">Pending</div>
+            <div style="font-size: 1.5rem; font-weight: bold; color: #92400e;">${pendingCount}</div>
+          </div>
+          <div>
+            <div class="admin-text-xs" style="text-transform: uppercase; margin-bottom: 0.25rem; color: #991b1b;">Cancelled</div>
+            <div style="font-size: 1.5rem; font-weight: bold; color: #991b1b;">${cancelledCount}</div>
           </div>
           ${data.event.capacity ? `
           <div>
-            <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Capacity</div>
+            <div class="admin-text-xs admin-text-muted" style="text-transform: uppercase; margin-bottom: 0.25rem;">Capacity</div>
             <div style="font-size: 1.5rem; font-weight: bold;">${data.event.capacity}</div>
           </div>
           <div>
-            <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Remaining</div>
+            <div class="admin-text-xs admin-text-muted" style="text-transform: uppercase; margin-bottom: 0.25rem;">Remaining</div>
             <div style="font-size: 1.5rem; font-weight: bold;">${data.event.capacity - data.event.tickets_sold}</div>
           </div>
           ` : ''}
         </div>
       </div>
       
-      <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-          <tr style="border-bottom: 2px solid rgb(var(--color-neutral-200));">
-            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Name</th>
-            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Email</th>
-            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Status</th>
-            ${!isFree ? '<th style="text-align: left; padding: 0.75rem; font-weight: 600;">Amount</th>' : ''}
-            <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.registrations.map(reg => {
-            const statusColors = {
-              active: 'background: #d1fae5; color: #065f46;',
-              pending: 'background: #fef3c7; color: #92400e;',
-              cancelled: 'background: #fee2e2; color: #991b1b;'
-            };
-            const regDate = new Date(reg.created_at);
-            
-            return `
-              <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
-                <td style="padding: 0.75rem;">${utils.escapeHtml(reg.name || 'N/A')}</td>
-                <td style="padding: 0.75rem;">${utils.escapeHtml(reg.email)}</td>
-                <td style="padding: 0.75rem;">
-                  <span style="padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; ${statusColors[reg.status] || statusColors.pending}">
-                    ${reg.status.toUpperCase()}
-                  </span>
-                </td>
-                ${!isFree ? `<td style="padding: 0.75rem;">${reg.amount ? `£${reg.amount}` : 'FREE'}</td>` : ''}
-                <td style="padding: 0.75rem; font-size: 0.875rem;">${regDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>
+      ${tableHTML || '<p class="admin-text-center admin-text-muted" style="padding: 2rem;">No registrations found</p>'}
     `);
   } catch (err) {
     console.error('Error loading event registrations:', err);
@@ -1951,7 +2083,7 @@ async function loadMemberships() {
     if (!data.success || !data.memberships || data.memberships.length === 0) {
       tableBody.innerHTML = `
         <tr>
-          <td colspan="8" style="padding: 3rem; text-align: center; color: rgb(var(--color-neutral-500));">
+          <td colspan="8" class="admin-text-center admin-text-muted" style="padding: 3rem;">
             No memberships found
           </td>
         </tr>
@@ -2002,17 +2134,17 @@ async function loadMemberships() {
             <div style="font-weight: 600;">${escapeHtml(membership.name || 'N/A')}</div>
           </td>
           <td style="padding: 1rem;">
-            <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">${escapeHtml(membership.email)}</div>
+            <div class="admin-text-sm admin-text-muted">${escapeHtml(membership.email)}</div>
           </td>
           <td style="padding: 1rem;">
-            <span style="padding: 0.25rem 0.75rem; background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-700)); border-radius: 4px; font-size: 0.875rem; font-weight: 600;">
+            <span class="admin-text-sm" style="padding: 0.25rem 0.75rem; background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-700)); border-radius: 4px; font-weight: 600;">
               ${planNames[membership.plan] || membership.plan}
             </span>
           </td>
-          <td style="padding: 1rem; font-size: 0.875rem;">
+          <td class="admin-text-sm" style="padding: 1rem;">
             ${startDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
           </td>
-          <td style="padding: 1rem; font-size: 0.875rem;">
+          <td class="admin-text-sm" style="padding: 1rem;">
             ${endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
           </td>
           <td style="padding: 1rem;">
@@ -2021,11 +2153,11 @@ async function loadMemberships() {
             </div>
           </td>
           <td style="padding: 1rem;">
-            <span style="padding: 0.25rem 0.75rem; background: ${statusColor}; color: white; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">
+            <span class="admin-text-xs" style="padding: 0.25rem 0.75rem; background: ${statusColor}; color: white; border-radius: 4px; font-weight: 600;">
               ${statusBadge}
             </span>
           </td>
-          <td style="padding: 1rem; text-align: center;">
+          <td class="admin-text-center" style="padding: 1rem;">
             ${membership.auto_renew ? '✅' : '❌'}
           </td>
         </tr>
@@ -2036,7 +2168,7 @@ async function loadMemberships() {
     console.error('Error loading memberships:', error);
     tableBody.innerHTML = `
       <tr>
-        <td colspan="8" style="padding: 3rem; text-align: center; color: rgb(var(--color-neutral-500));">
+        <td colspan="8" class="admin-text-center admin-text-muted" style="padding: 3rem;">
           Error loading memberships: ${error.message}
         </td>
       </tr>
@@ -2090,40 +2222,40 @@ async function loadCronLogs(page = 0) {
         const lastRun = job.last_run ? new Date(job.last_run).toLocaleString() : 'Never';
         
         return `
-          <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 1.5rem;">
-            <h3 style="margin: 0 0 1rem 0; font-size: 1rem; color: rgb(var(--color-neutral-700));">
+          <div class="admin-card">
+            <h3 class="admin-text-muted" style="margin: 0 0 1rem 0; font-size: 1rem;">
               ${formatJobName(job.job_name)}
             </h3>
-            <div style="display: grid; gap: 0.5rem; font-size: 0.875rem;">
+            <div class="admin-text-sm" style="display: grid; gap: 0.5rem;">
               <div style="display: flex; justify-content: space-between;">
-                <span style="color: rgb(var(--color-neutral-600));">Total Runs (7d):</span>
+                <span class="admin-text-muted">Total Runs (7d):</span>
                 <strong>${job.total_runs}</strong>
               </div>
               <div style="display: flex; justify-content: space-between;">
-                <span style="color: rgb(var(--color-neutral-600));">Success Rate:</span>
+                <span class="admin-text-muted">Success Rate:</span>
                 <strong style="color: ${successRate >= 90 ? '#4CAF50' : successRate >= 70 ? '#ff9800' : '#f44336'};">${successRate}%</strong>
               </div>
               <div style="display: flex; justify-content: space-between;">
-                <span style="color: rgb(var(--color-neutral-600));">Processed:</span>
+                <span class="admin-text-muted">Processed:</span>
                 <strong>${job.total_processed || 0}</strong>
               </div>
               <div style="display: flex; justify-content: space-between;">
-                <span style="color: rgb(var(--color-neutral-600));">Last Run:</span>
-                <strong style="font-size: 0.75rem;">${lastRun}</strong>
+                <span class="admin-text-muted">Last Run:</span>
+                <strong class="admin-text-xs">${lastRun}</strong>
               </div>
             </div>
           </div>
         `;
       }).join('');
     } else {
-      summaryDiv.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No job summary available</p>';
+      summaryDiv.innerHTML = '<p class="admin-text-muted">No job summary available</p>';
     }
     
     // Render logs table
     if (!data.logs || data.logs.length === 0) {
       tableBody.innerHTML = `
         <tr>
-          <td colspan="8" style="padding: 2rem; text-align: center; color: rgb(var(--color-neutral-500));">
+          <td colspan="8" class="admin-text-center admin-text-muted" style="padding: 2rem;">
             No cron job logs found
           </td>
         </tr>
@@ -2153,28 +2285,28 @@ async function loadCronLogs(page = 0) {
           </td>
           <td style="padding: 1rem;">
             <div style="font-weight: 500;">${startDate.toLocaleDateString()}</div>
-            <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-500));">${startDate.toLocaleTimeString()}</div>
+            <div class="admin-text-sm admin-text-muted">${startDate.toLocaleTimeString()}</div>
           </td>
           <td style="padding: 1rem;">
             ${duration !== null ? `${duration}s` : '-'}
           </td>
           <td style="padding: 1rem;">
-            <span style="padding: 0.25rem 0.75rem; background: ${statusColor}22; color: ${statusColor}; border-radius: 4px; font-weight: 500; font-size: 0.875rem; text-transform: uppercase;">
+            <span class="admin-text-sm" style="padding: 0.25rem 0.75rem; background: ${statusColor}22; color: ${statusColor}; border-radius: 4px; font-weight: 500; text-transform: uppercase;">
               ${log.status}
             </span>
           </td>
-          <td style="padding: 1rem; text-align: center;">
+          <td class="admin-text-center" style="padding: 1rem;">
             ${log.records_processed || 0}
           </td>
-          <td style="padding: 1rem; text-align: center; color: #4CAF50; font-weight: 500;">
+          <td class="admin-text-center" style="padding: 1rem; color: #4CAF50; font-weight: 500;">
             ${log.records_succeeded || 0}
           </td>
-          <td style="padding: 1rem; text-align: center; color: #f44336; font-weight: 500;">
+          <td class="admin-text-center" style="padding: 1rem; color: #f44336; font-weight: 500;">
             ${log.records_failed || 0}
           </td>
-          <td style="padding: 1rem; font-size: 0.875rem;">
+          <td class="admin-text-sm" style="padding: 1rem;">
             ${log.error_message ? `<span style="color: #f44336;" title="${log.error_message}">⚠️ Error</span>` : ''}
-            ${log.details ? `<button onclick="showCronDetails(${log.log_id}, '${escapeHtml(log.details)}')" style="padding: 0.25rem 0.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">View</button>` : '-'}
+            ${log.details ? `<button onclick="showCronDetails(${log.log_id}, '${escapeHtml(log.details)}')" class="admin-text-xs" style="padding: 0.25rem 0.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 4px; cursor: pointer;">View</button>` : '-'}
           </td>
         </tr>
       `;
@@ -2186,14 +2318,16 @@ async function loadCronLogs(page = 0) {
       <button 
         onclick="loadCronLogs(${page - 1})" 
         ${page === 0 ? 'disabled' : ''}
-        style="padding: 0.5rem 1rem; background: ${page === 0 ? 'rgb(var(--color-neutral-200))' : 'rgb(var(--color-primary-600))'}; color: ${page === 0 ? 'rgb(var(--color-neutral-500))' : 'white'}; border: none; border-radius: 6px; cursor: ${page === 0 ? 'not-allowed' : 'pointer'};">
+        class="${page === 0 ? 'admin-btn-secondary' : 'admin-btn-primary'}" 
+        style="cursor: ${page === 0 ? 'not-allowed' : 'pointer'}; opacity: ${page === 0 ? '0.5' : '1'};">
         ← Previous
       </button>
       <span>Page ${page + 1}</span>
       <button 
         onclick="loadCronLogs(${page + 1})" 
         ${!hasMore ? 'disabled' : ''}
-        style="padding: 0.5rem 1rem; background: ${!hasMore ? 'rgb(var(--color-neutral-200))' : 'rgb(var(--color-primary-600))'}; color: ${!hasMore ? 'rgb(var(--color-neutral-500))' : 'white'}; border: none; border-radius: 6px; cursor: ${!hasMore ? 'not-allowed' : 'pointer'};">
+        class="${!hasMore ? 'admin-btn-secondary' : 'admin-btn-primary'}" 
+        style="cursor: ${!hasMore ? 'not-allowed' : 'pointer'}; opacity: ${!hasMore ? '0.5' : '1'};">
         Next →
       </button>
     `;
@@ -2202,7 +2336,7 @@ async function loadCronLogs(page = 0) {
     console.error('Error loading cron logs:', err);
     tableBody.innerHTML = `
       <tr>
-        <td colspan="8" style="padding: 2rem; text-align: center; color: #f44336;">
+        <td colspan="8" class="admin-text-center" style="padding: 2rem; color: #f44336;">
           Error loading cron logs: ${err.message}
         </td>
       </tr>
