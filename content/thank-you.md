@@ -130,7 +130,9 @@ const checkPendingAccountSetup = () => {
       // Show the prompt (delay to let success message render)
       if (window.showAccountSetupPrompt) {
         setTimeout(() => {
-          window.showAccountSetupPrompt(data.email, data.eventName, true);
+          // For memberships, use a generic message instead of event name
+          const displayName = data.isMembership ? 'your membership' : data.eventName;
+          window.showAccountSetupPrompt(data.email, displayName, true);
         }, 1500);
       }
     }

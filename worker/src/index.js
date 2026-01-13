@@ -100,22 +100,16 @@ function checkRateLimit(ip, rateLimitMap, limit, windowMinutes) {
 // the payments worker's /internal/verify-webhook endpoint
 // ==================== END ====================
 
-// Webhook duplicate prevention helper
+/**
+ * Check if a webhook has already been processed to prevent duplicates
+ * @param {Object} db - Database connection
+ * @param {string} webhookId - Webhook identifier
+ * @param {string} entityType - Type of entity (membership, ticket, etc)
+ * @param {number} entityId - Entity ID
+ * @returns {boolean} True if duplicate, false if new
+ */
 async function checkAndMarkWebhookProcessed(db, webhookId, entityType, entityId) {
   try {
-    // Create webhook_logs table if it doesn't exist
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS webhook_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        webhook_id TEXT NOT NULL,
-        entity_type TEXT NOT NULL,
-        entity_id INTEGER NOT NULL,
-        processed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        payload TEXT,
-        UNIQUE(webhook_id, entity_type, entity_id)
-      )
-    `).run().catch(() => {})
-    
     // Check if this webhook has already been processed
     const existing = await db.prepare(
       'SELECT * FROM webhook_logs WHERE webhook_id = ? AND entity_type = ? AND entity_id = ?'
@@ -138,24 +132,19 @@ async function checkAndMarkWebhookProcessed(db, webhookId, entityType, entityId)
   }
 }
 
-// Stock reservation helper functions
+// ============================================================================
+// STOCK MANAGEMENT - Inventory Reservation System
+// ============================================================================
+
+/**
+ * Reserve stock for a pending order
+ * @param {Object} db - Database connection
+ * @param {number} productId - Product ID to reserve
+ * @param {number} quantity - Quantity to reserve
+ * @returns {boolean} True if reservation successful
+ */
 async function reserveStock(db, productId, quantity) {
   try {
-    // Create stock_reservations table if it doesn't exist
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS stock_reservations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER NOT NULL,
-        quantity INTEGER NOT NULL,
-        order_id INTEGER,
-        checkout_id TEXT,
-        status TEXT NOT NULL DEFAULT 'reserved',
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        expires_at TEXT NOT NULL,
-        UNIQUE(product_id, order_id)
-      )
-    `).run().catch(() => {})
-    
     // Check available stock
     const product = await db.prepare('SELECT stock_quantity FROM products WHERE id = ?').bind(productId).first()
     if (!product) {
@@ -187,6 +176,9 @@ async function reserveStock(db, productId, quantity) {
   }
 }
 
+/**
+ * Release a stock reservation (e.g., when checkout expires)
+ */
 async function releaseStockReservation(db, productId, orderId) {
   try {
     await db.prepare(
@@ -194,10 +186,12 @@ async function releaseStockReservation(db, productId, orderId) {
     ).bind(productId, orderId).run()
   } catch (error) {
     console.error('Stock release error:', error)
-    // Don't throw to avoid breaking the flow
   }
 }
 
+/**
+ * Commit a stock reservation to actual inventory reduction
+ */
 async function commitStockReservation(db, productId, orderId) {
   try {
     // Update reservation status
@@ -221,7 +215,10 @@ async function commitStockReservation(db, productId, orderId) {
   }
 }
 
-// Cleanup expired stock reservations (should be called periodically)
+/**
+ * Cleanup expired stock reservations (called by cron job)
+ * @returns {number} Number of reservations cleaned up
+ */
 async function cleanupExpiredStockReservations(db) {
   try {
     const now = new Date().toISOString()
@@ -242,7 +239,14 @@ async function cleanupExpiredStockReservations(db) {
   }
 }
 
-// --- Schema compatibility helpers ---
+// ============================================================================
+// DATABASE HELPERS - Schema & Migration Utilities
+// ============================================================================
+
+/**
+ * Get cached schema information for database queries
+ * @returns {Object} Schema configuration with table and column names
+ */
 let __schemaCache
 async function getSchema(db){
   if (__schemaCache) return __schemaCache
@@ -254,206 +258,10 @@ async function getSchema(db){
   return __schemaCache
 }
 
-async function ensureSchema(db, fkColumn){
-  // password_reset_tokens columns for email sending tracking
-  try {
-    const prt = await db.prepare('PRAGMA table_info(password_reset_tokens)').all().catch(()=>({ results: [] }))
-    const prtnames = new Set((prt?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    const prtalter = []
-    if (!prtnames.has('email_sent')) prtalter.push('ALTER TABLE password_reset_tokens ADD COLUMN email_sent INTEGER DEFAULT 1')
-    if (!prtnames.has('source')) prtalter.push('ALTER TABLE password_reset_tokens ADD COLUMN source TEXT')
-    for (const sql of prtalter) { await db.prepare(sql).run().catch(()=>{}) }
-  } catch {}
-  
-  // memberships columns only (assume tickets already has user_id from migrations)
-  try {
-    const mc = await db.prepare('PRAGMA table_info(memberships)').all().catch(()=>({ results: [] }))
-    const mnames = new Set((mc?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    const alter = []
-    if (!mnames.has('amount')) alter.push('ALTER TABLE memberships ADD COLUMN amount TEXT')
-    if (!mnames.has('currency')) alter.push('ALTER TABLE memberships ADD COLUMN currency TEXT')
-    if (!mnames.has('consent_at')) alter.push('ALTER TABLE memberships ADD COLUMN consent_at TEXT')
-    if (!mnames.has('idempotency_key')) alter.push('ALTER TABLE memberships ADD COLUMN idempotency_key TEXT')
-    if (!mnames.has('payment_status')) alter.push('ALTER TABLE memberships ADD COLUMN payment_status TEXT')
-    if (!mnames.has('payment_instrument_id')) alter.push('ALTER TABLE memberships ADD COLUMN payment_instrument_id TEXT')
-    if (!mnames.has('renewal_failed_at')) alter.push('ALTER TABLE memberships ADD COLUMN renewal_failed_at TEXT')
-    if (!mnames.has('renewal_attempts')) alter.push('ALTER TABLE memberships ADD COLUMN renewal_attempts INTEGER DEFAULT 0')
-    if (!mnames.has('renewal_warning_sent')) alter.push('ALTER TABLE memberships ADD COLUMN renewal_warning_sent INTEGER DEFAULT 0')
-    for (const sql of alter) { await db.prepare(sql).run().catch(()=>{}) }
-  } catch {}
-  // tickets columns (post consolidation, expect user_id)
-  try {
-    const tc = await db.prepare('PRAGMA table_info(tickets)').all().catch(()=>({ results: [] }))
-    const tnames = new Set((tc?.results||[]).map(r => String(r.name||'').toLowerCase()))
-    const talter = []
-    if (!tnames.has('amount')) talter.push('ALTER TABLE tickets ADD COLUMN amount TEXT')
-    if (!tnames.has('currency')) talter.push('ALTER TABLE tickets ADD COLUMN currency TEXT')
-    if (!tnames.has('consent_at')) talter.push('ALTER TABLE tickets ADD COLUMN consent_at TEXT')
-    if (!tnames.has('idempotency_key')) talter.push('ALTER TABLE tickets ADD COLUMN idempotency_key TEXT')
-    if (!tnames.has('payment_status')) talter.push('ALTER TABLE tickets ADD COLUMN payment_status TEXT')
-    if (!tnames.has('created_at')) talter.push('ALTER TABLE tickets ADD COLUMN created_at TEXT')
-    for (const sql of talter) { await db.prepare(sql).run().catch(()=>{}) }
-  } catch {}
-  // Create payment_instruments table if not exists
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS payment_instruments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        instrument_id TEXT NOT NULL,
-        card_type TEXT,
-        last_4 TEXT,
-        expiry_month INTEGER,
-        expiry_year INTEGER,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        is_active INTEGER DEFAULT 1,
-        UNIQUE(user_id, instrument_id)
-      )
-    `).run().catch(()=>{})
-  } catch {}
-  // Create renewal_log table for tracking renewal attempts
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS renewal_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        membership_id INTEGER NOT NULL,
-        attempt_date TEXT NOT NULL,
-        status TEXT NOT NULL,
-        payment_id TEXT,
-        error_message TEXT,
-        amount TEXT,
-        currency TEXT
-      )
-    `).run().catch(()=>{})
-  } catch {}
-  // Create transactions table for all payment records
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        transaction_type TEXT NOT NULL,
-        reference_id INTEGER,
-        user_id INTEGER,
-        email TEXT,
-        name TEXT,
-        order_ref TEXT UNIQUE,
-        checkout_id TEXT,
-        payment_id TEXT,
-        amount TEXT,
-        currency TEXT,
-        payment_status TEXT,
-        idempotency_key TEXT,
-        consent_at TEXT,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        updated_at TEXT
-      )
-    `).run().catch(()=>{})
-  } catch {}
-  
-  // Create products table for shop items
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        slug TEXT UNIQUE NOT NULL,
-        description TEXT,
-        price INTEGER NOT NULL,
-        currency TEXT DEFAULT 'GBP',
-        stock_quantity INTEGER DEFAULT 0,
-        image_url TEXT,
-        category TEXT,
-        is_active INTEGER DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-      )
-    `).run().catch(()=>{})
-  } catch {}
-  
-  // Create orders table for shop purchases
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_number TEXT UNIQUE NOT NULL,
-        user_id INTEGER,
-        email TEXT NOT NULL,
-        name TEXT NOT NULL,
-        status TEXT DEFAULT 'pending',
-        subtotal INTEGER NOT NULL,
-        tax INTEGER DEFAULT 0,
-        shipping INTEGER DEFAULT 0,
-        total INTEGER NOT NULL,
-        currency TEXT DEFAULT 'GBP',
-        checkout_id TEXT,
-        payment_id TEXT,
-        payment_status TEXT,
-        shipping_address TEXT,
-        billing_address TEXT,
-        notes TEXT,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        completed_at TEXT
-      )
-    `).run().catch(()=>{})
-  } catch {}
-  
-  // Create order_items table for items in each order
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS order_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER NOT NULL,
-        product_id INTEGER NOT NULL,
-        product_name TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
-        unit_price INTEGER NOT NULL,
-        subtotal INTEGER NOT NULL,
-        FOREIGN KEY (order_id) REFERENCES orders(id),
-        FOREIGN KEY (product_id) REFERENCES products(id)
-      )
-    `).run().catch(()=>{})
-  } catch {}
-  
-  // Create cart_items table for temporary shopping carts
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS cart_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        product_id INTEGER NOT NULL,
-        quantity INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        UNIQUE(session_id, product_id),
-        FOREIGN KEY (product_id) REFERENCES products(id)
-      )
-    `).run().catch(()=>{})
-  } catch {}
-  
-  // Create email_history table for tracking sent emails
-  try {
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS email_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email_type TEXT NOT NULL,
-        recipient_email TEXT NOT NULL,
-        recipient_name TEXT,
-        subject TEXT NOT NULL,
-        template_used TEXT NOT NULL,
-        related_id INTEGER,
-        related_type TEXT,
-        sent_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        status TEXT DEFAULT 'sent',
-        error_message TEXT,
-        metadata TEXT
-      )
-    `).run().catch(()=>{})
-  } catch {}
-}
-
-// One-time migration: copy payment data from memberships/tickets to transactions
+/**
+ * One-time migration: copy payment data from memberships/tickets to transactions table
+ * @param {Object} db - Database connection
+ */
 async function migrateToTransactions(db) {
   try {
     // Check if migration already ran
@@ -521,6 +329,16 @@ async function migrateToTransactions(db) {
   }
 }
 
+// ============================================================================
+// USER & IDENTITY MANAGEMENT
+// ============================================================================
+
+/**
+ * Find user by email (case-insensitive)
+ * @param {Object} db - Database connection
+ * @param {string} email - User email
+ * @returns {Object|null} User object or null if not found
+ */
 async function findIdentityByEmail(db, email){
   const s = await getSchema(db)
   // Use case-insensitive email lookup
@@ -530,6 +348,13 @@ async function findIdentityByEmail(db, email){
   return row
 }
 
+/**
+ * Get existing user or create new one
+ * @param {Object} db - Database connection
+ * @param {string} email - User email
+ * @param {string} name - User name
+ * @returns {Object} User object
+ */
 async function getOrCreateIdentity(db, email, name){
   const s = await getSchema(db)
   // Normalize email to lowercase for case-insensitive comparison
@@ -548,15 +373,30 @@ async function getOrCreateIdentity(db, email, name){
   return existing
 }
 
+/**
+ * Get user's active membership
+ * @param {Object} db - Database connection  
+ * @param {number} identityId - User ID
+ * @returns {Object|null} Active membership or null
+ */
 async function getActiveMembership(db, identityId) {
   const now = new Date().toISOString()
   return await db.prepare(`SELECT * FROM memberships WHERE user_id = ? AND status = "active" AND end_date >= ? ORDER BY end_date DESC LIMIT 1`).bind(identityId, now).first()
 }
 
-// Fetch pricing/details for a plan from the services table
+/**
+ * Fetch pricing and details for a membership plan
+ * @param {Object} db - Database connection
+ * @param {string} planCode - Plan code (monthly, quarterly, annual)
+ * @returns {Object|null} Service details or null
+ */
 async function getServiceForPlan(db, planCode) {
   return await db.prepare('SELECT * FROM services WHERE code = ? AND active = 1 LIMIT 1').bind(planCode).first()
 }
+
+// ============================================================================
+// PAYMENT INSTRUMENT MANAGEMENT
+// ============================================================================
 
 // ==================== PAYMENT FUNCTIONS MOVED TO PAYMENTS WORKER ====================
 // The following functions have been moved to payments-worker and are now called via
@@ -569,9 +409,13 @@ async function getServiceForPlan(db, planCode) {
 // - chargePaymentInstrument() → Now imported from payments-client.js
 // ==================== END MOVED FUNCTIONS ====================
 
-// Update payment instrument card details from checkout transaction
-// Note: This function is kept for backwards compatibility but card details
-// are now primarily handled by the payments worker
+/**
+ * Update payment instrument card details from checkout transaction
+ * @param {Object} db - Database connection
+ * @param {string} instrumentId - Payment instrument ID
+ * @param {Object} checkout - Checkout response from payment provider
+ * @returns {boolean} True if updated successfully
+ */
 async function updatePaymentInstrumentCardDetails(db, instrumentId, checkout) {
   try {
     // Extract card details from the transaction
@@ -629,13 +473,24 @@ async function updatePaymentInstrumentCardDetails(db, instrumentId, checkout) {
 // from payments-client.js
 // ==================== END ====================
 
-// Get active payment instrument for user
+/**
+ * Get user's active payment instrument
+ * @param {Object} db - Database connection
+ * @param {number} userId - User ID
+ * @returns {Object|null} Payment instrument or null
+ */
 async function getActivePaymentInstrument(db, userId) {
   return await db.prepare('SELECT * FROM payment_instruments WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1')
     .bind(userId).first()
 }
 
-// Process renewal for a single membership
+/**
+ * Process automatic renewal for a membership
+ * @param {Object} db - Database connection
+ * @param {Object} membership - Membership record
+ * @param {Object} env - Environment variables
+ * @returns {Object} {success, error, newEndDate, paymentId, attempts}
+ */
 async function processMembershipRenewal(db, membership, env) {
   const s = await getSchema(db)
   const userId = membership.user_id
@@ -786,7 +641,15 @@ async function processMembershipRenewal(db, membership, env) {
   }
 }
 
-// Helper to detect if request is coming from local development (localhost frontend)
+// ============================================================================
+// SECURITY & VALIDATION
+// ============================================================================
+
+/**
+ * Detect if request is from local development environment
+ * @param {Object} c - Hono context
+ * @returns {boolean} True if local development
+ */
 function isLocalDevelopment(c) {
   const origin = c.req.header('Origin') || ''
   const referer = c.req.header('Referer') || ''
@@ -800,7 +663,15 @@ function isLocalDevelopment(c) {
          c.env.ENVIRONMENT === 'local'
 }
 
-// Turnstile verification with optional debug logging
+/**
+ * Verify Cloudflare Turnstile captcha token
+ * @param {Object} env - Environment variables
+ * @param {string} token - Turnstile token
+ * @param {string} ip - Client IP address
+ * @param {boolean} debug - Enable debug logging
+ * @param {Object} context - Request context for local dev detection
+ * @returns {boolean} True if verification successful
+ */
 async function verifyTurnstile(env, token, ip, debug, context = null){
   if (!env.TURNSTILE_SECRET) { if (debug) console.log('turnstile: secret missing -> bypass'); return true }
   
@@ -837,13 +708,29 @@ async function verifyTurnstile(env, token, ip, debug, context = null){
   return !!j.success
 }
 
+// Validation regex patterns
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const EVT_UUID_RE = /^EVT-\d+-[0-9a-f\-]{36}$/i
 
+/**
+ * Clamp string to maximum length
+ * @param {string} v - String to clamp
+ * @param {number} max - Maximum length
+ * @returns {string} Clamped string
+ */
 function clampStr(v, max){ return (v||'').substring(0, max) }
 
-// Log email to history database
+// ============================================================================
+// EMAIL SYSTEM - MailerSend Integration & Templates
+// ============================================================================
+
+/**
+ * Log sent email to history database for tracking
+ * @param {Object} db - Database connection
+ * @param {Object} emailData - Email metadata
+ * @returns {Object} {success, error}
+ */
 async function logEmailHistory(db, emailData) {
   try {
     await db.prepare(`
@@ -871,7 +758,12 @@ async function logEmailHistory(db, emailData) {
   }
 }
 
-// MailerSend email helper
+/**
+ * Send email via MailerSend API
+ * @param {Object} env - Environment variables
+ * @param {Object} params - Email parameters
+ * @returns {Object} {success, error, skipped}
+ */
 async function sendEmail(env, { to, subject, html, text, attachments = null, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null }) {
   if (!env.MAILERSEND_API_KEY) {
     console.warn('MAILERSEND_API_KEY not configured, skipping email')
@@ -954,7 +846,14 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
   }
 }
 
-// UTM Parameter Helper
+/**
+ * Add UTM tracking parameters to URL
+ * @param {string} url - Base URL
+ * @param {string} source - UTM source
+ * @param {string} medium - UTM medium  
+ * @param {string} campaign - UTM campaign (optional)
+ * @returns {string} URL with UTM parameters
+ */
 function addUtmParams(url, source = 'email', medium = 'transactional', campaign = null) {
   try {
     const baseUrl = new URL(url.startsWith('http') ? url : `https://${url}`)
@@ -968,7 +867,12 @@ function addUtmParams(url, source = 'email', medium = 'transactional', campaign 
   }
 }
 
-// Handle email preferences opt-in (only if user explicitly consents)
+/**
+ * Handle email preferences opt-in for new users
+ * @param {Object} db - Database connection
+ * @param {number} userId - User ID
+ * @param {boolean} marketingConsent - Whether user consented to marketing emails
+ */
 async function handleEmailPreferencesOptIn(db, userId, marketingConsent) {
   if (!marketingConsent) return
   
@@ -986,6 +890,144 @@ async function handleEmailPreferencesOptIn(db, userId, marketingConsent) {
       VALUES (?, 1, 1, 1, ?, ?)
     `).bind(userId, now, now).run()
   }
+}
+
+// ============================================================================
+// EMAIL TEMPLATE HELPERS - Shared Components
+// ============================================================================
+
+// Shared constants
+const PLAN_NAMES = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
+
+/**
+ * Format price with currency symbol
+ * @param {string|number} amount - Price amount
+ * @param {string} currency - Currency code (GBP, EUR, USD)
+ * @returns {string} Formatted price
+ */
+function formatPrice(amount, currency = 'GBP') {
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount
+  const symbols = { GBP: '£', EUR: '€', USD: '$' }
+  return `${symbols[currency] || currency}${num.toFixed(2)}`
+}
+
+/**
+ * Format date in British format
+ * @param {Date|string} date - Date to format
+ * @param {boolean} includeDay - Include day of week
+ * @returns {string} Formatted date
+ */
+function formatDate(date, includeDay = false) {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const options = { year: 'numeric', month: 'long', day: 'numeric' }
+  if (includeDay) options.weekday = 'long'
+  return d.toLocaleDateString('en-GB', options)
+}
+
+/**
+ * Base email template with consistent styling
+ * @param {Object} params - Template parameters
+ * @returns {string} Complete HTML email
+ */
+function createEmailTemplate({ headerTitle, headerColor = '#5374a5', headerGradient = null, content, footerText = null }) {
+  const gradient = headerGradient || `linear-gradient(135deg, #b2c6df 0%, ${headerColor} 100%)`
+  const footer = footerText || 'This is an automated email from Dice Bastion.<br>If you need help, contact us at admin@dicebastion.com'
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        .header {
+          background: ${gradient};
+          color: white;
+          padding: 30px 20px;
+          text-align: center;
+          border-radius: 8px 8px 0 0;
+        }
+        .content {
+          background: #ffffff;
+          padding: 30px;
+          border: 1px solid #e5e7eb;
+          border-top: none;
+        }
+        .button {
+          display: inline-block;
+          padding: 12px 30px;
+          background: ${headerColor};
+          color: white !important;
+          text-decoration: none;
+          border-radius: 6px;
+          font-weight: 600;
+          margin: 20px 0;
+        }
+        .highlight {
+          background: #e0f2fe;
+          border-left: 4px solid #0284c7;
+          padding: 15px;
+          margin: 20px 0;
+          border-radius: 4px;
+        }
+        .warning {
+          background: #fef3c7;
+          border-left: 4px solid #f59e0b;
+          padding: 15px;
+          margin: 20px 0;
+          border-radius: 4px;
+        }
+        .alert {
+          background: #fee2e2;
+          border-left: 4px solid #dc2626;
+          padding: 15px;
+          margin: 20px 0;
+          border-radius: 4px;
+        }
+        .success {
+          background: #d1fae5;
+          border-left: 4px solid #10b981;
+          padding: 15px;
+          margin: 20px 0;
+          border-radius: 4px;
+        }
+        .footer {
+          text-align: center;
+          color: #6b7280;
+          font-size: 14px;
+          margin-top: 30px;
+          padding-top: 20px;
+          border-top: 1px solid #e5e7eb;
+        }
+        .link-text {
+          word-break: break-all;
+          color: #6b7280;
+          font-size: 12px;
+          margin-top: 10px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1 style="margin: 0;">${headerTitle}</h1>
+      </div>
+      <div class="content">
+        ${content}
+        <div class="footer">
+          <p>${footer}</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
 }
 
 // Generate admin notification email
@@ -1158,466 +1200,240 @@ Purchase Date: ${new Date().toLocaleString('en-GB')}
   }
 }
 
-// Generate email templates
+// ============================================================================
+// EMAIL TEMPLATES - Using Shared Components
+// ============================================================================
+
 function getRenewalSuccessEmail(membership, user, newEndDate) {
-  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
-  const planName = planNames[membership.plan] || membership.plan
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>Great news! Your <strong>${planName} Membership</strong> has been automatically renewed.</p>
+    <ul>
+      <li><strong>Plan:</strong> ${planName}</li>
+      <li><strong>Amount:</strong> ${formatPrice(membership.amount)}</li>
+      <li><strong>New End Date:</strong> ${formatDate(newEndDate)}</li>
+    </ul>
+    <p>Your membership will continue uninterrupted. If you wish to cancel auto-renewal, you can do so from your <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'membership_renewal')}">account page</a>.</p>
+    <p>Thank you for being a valued member!</p>
+    <p>— The Dice Bastion Team</p>
+  `
   
   return {
     subject: `Your Dice Bastion ${planName} Membership Has Been Renewed`,
-    html: `
-      <h2>Membership Renewed Successfully</h2>
-      <p>Hi ${user.name || 'there'},</p>
-      <p>Great news! Your <strong>${planName} Membership</strong> has been automatically renewed.</p>
-      <ul>
-        <li><strong>Plan:</strong> ${planName}</li>
-        <li><strong>Amount:</strong> £${membership.amount}</li>
-        <li><strong>New End Date:</strong> ${new Date(newEndDate).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</li>
-      </ul>
-      <p>Your membership will continue uninterrupted. If you wish to cancel auto-renewal, you can do so from your <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'membership_renewal')}">account page</a>.</p>
-      <p>Thank you for being a valued member!</p>
-      <p>— The Dice Bastion Team</p>
-    `
+    html: createEmailTemplate({ headerTitle: 'Membership Renewed! 🎉', content, headerColor: '#10b981', headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' })
   }
 }
 
 function getUpcomingRenewalEmail(membership, user, daysUntil) {
-  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
-  const planName = planNames[membership.plan] || membership.plan
-  const renewalDate = new Date(membership.end_date).toLocaleDateString('en-GB', { 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  })
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>This is a friendly reminder that your <strong>${planName} Membership</strong> will automatically renew on <strong>${formatDate(membership.end_date)}</strong>.</p>
+    <p><strong>Your membership details:</strong></p>
+    <ul>
+      <li>Plan: ${planName}</li>
+      <li>Renewal Date: ${formatDate(membership.end_date)}</li>
+      <li>Payment Method: Card ending in ${membership.payment_instrument_last_4 || '••••'}</li>
+    </ul>
+    <p>Your card will be charged automatically, and your membership will continue uninterrupted.</p>
+    <p><strong>Need to make changes?</strong></p>
+    <ul>
+      <li>Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'renewal_reminder')}">dicebastion.com/memberships</a></li>
+      <li>Cancel auto-renewal if you don't wish to continue</li>
+    </ul>
+    <p>Thank you for being part of the Dice Bastion community!</p>
+    <p>— The Dice Bastion Team</p>
+  `
   
   return {
     subject: `Dice Bastion: Your ${planName} Membership Renews in ${daysUntil} Days`,
-    html: `
-      <h2>Your Membership Renews Soon</h2>
-      <p>Hi ${user.name || 'there'},</p>
-      <p>This is a friendly reminder that your <strong>${planName} Membership</strong> will automatically renew on <strong>${renewalDate}</strong>.</p>
-      <p><strong>Your membership details:</strong></p>
-      <ul>
-        <li>Plan: ${planName}</li>
-        <li>Renewal Date: ${renewalDate}</li>
-        <li>Payment Method: Card ending in ${membership.payment_instrument_last_4 || '••••'}</li>
-      </ul>
-      <p>Your card will be charged automatically, and your membership will continue uninterrupted.</p>
-      <p><strong>Need to make changes?</strong></p>
-      <ul>
-        <li>Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'renewal_reminder')}">dicebastion.com/memberships</a></li>
-        <li>Cancel auto-renewal if you don't wish to continue</li>
-      </ul>
-      <p>Thank you for being part of the Dice Bastion community!</p>
-      <p>— The Dice Bastion Team</p>
-    `,
-    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership will automatically renew on ${renewalDate}.\n\nYour card will be charged automatically. If you need to update your payment method or cancel auto-renewal, visit dicebastion.com/memberships.\n\nThank you!\n— The Dice Bastion Team`
+    html: createEmailTemplate({ headerTitle: 'Upcoming Renewal', content }),
+    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership will automatically renew on ${formatDate(membership.end_date)}.\n\nYour card will be charged automatically. If you need to update your payment method or cancel auto-renewal, visit dicebastion.com/memberships.\n\nThank you!\n— The Dice Bastion Team`
   }
 }
 
 function getRenewalFailedEmail(membership, user, attemptNumber = 1) {
-  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
-  const planName = planNames[membership.plan] || membership.plan
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
   const attemptsRemaining = 3 - attemptNumber
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>We attempted to automatically renew your <strong>${planName} Membership</strong>, but the payment was unsuccessful.</p>
+    <div class="warning">
+      <strong>⚠️ Important:</strong> Your membership expires on <strong>${formatDate(membership.end_date)}</strong>.
+    </div>
+    ${attemptsRemaining > 0 ? `
+      <p>We will automatically retry ${attemptsRemaining} more time${attemptsRemaining > 1 ? 's' : ''} before your expiration date. However, to ensure uninterrupted access, please update your payment method now.</p>
+    ` : ''}
+    <p><strong>What to do next:</strong></p>
+    <ul>
+      <li><strong>Recommended:</strong> Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
+      <li>Or purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
+      <li>Contact us if you need help: <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
+    </ul>
+    <p><strong>Common reasons for payment failure:</strong></p>
+    <ul>
+      <li>Card expired or was replaced</li>
+      <li>Insufficient funds</li>
+      <li>Card was reported lost/stolen</li>
+      <li>Bank declined the charge</li>
+    </ul>
+    <p>Thank you for your understanding!</p>
+    <p>— The Dice Bastion Team</p>
+  `
   
   return {
     subject: `Action Required: Dice Bastion Membership Renewal Failed (Attempt ${attemptNumber}/3)`,
-    html: `
-      <h2>Membership Renewal Payment Failed</h2>
-      <p>Hi ${user.name || 'there'},</p>
-      <p>We attempted to automatically renew your <strong>${planName} Membership</strong>, but the payment was unsuccessful.</p>
-      <p><strong>Important:</strong> Your membership expires on <strong>${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>.</p>
-      ${attemptsRemaining > 0 ? `
-        <p>We will automatically retry ${attemptsRemaining} more time${attemptsRemaining > 1 ? 's' : ''} before your expiration date. However, to ensure uninterrupted access, please update your payment method now.</p>
-      ` : ''}
-      <p><strong>What to do next:</strong></p>
-      <ul>
-        <li><strong>Recommended:</strong> Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
-        <li>Or purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
-        <li>Contact us if you need help: <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
-      </ul>
-      <p><strong>Common reasons for payment failure:</strong></p>
-      <ul>
-        <li>Card expired or was replaced</li>
-        <li>Insufficient funds</li>
-        <li>Card was reported lost/stolen</li>
-        <li>Bank declined the charge</li>
-      </ul>
-      <p>Thank you for your understanding!</p>
-      <p>— The Dice Bastion Team</p>
-    `,
-    text: `Hi ${user.name || 'there'},\n\nWe attempted to renew your ${planName} Membership, but the payment failed (attempt ${attemptNumber}/3).\n\nYour membership expires on ${new Date(membership.end_date).toLocaleDateString('en-GB')}.\n\nPlease update your payment method at dicebastion.com/memberships to avoid interruption.\n\n— The Dice Bastion Team`
+    html: createEmailTemplate({ headerTitle: '⚠️ Payment Failed', content, headerColor: '#f59e0b', headerGradient: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' }),
+    text: `Hi ${user.name || 'there'},\n\nWe attempted to renew your ${planName} Membership, but the payment failed (attempt ${attemptNumber}/3).\n\nYour membership expires on ${formatDate(membership.end_date)}.\n\nPlease update your payment method at dicebastion.com/memberships to avoid interruption.\n\n— The Dice Bastion Team`
   }
 }
 
 function getRenewalFailedFinalEmail(membership, user) {
-  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
-  const planName = planNames[membership.plan] || membership.plan
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>After 3 unsuccessful attempts to charge your payment method, we've <strong>disabled auto-renewal</strong> for your ${planName} Membership.</p>
+    <div class="alert">
+      <strong>⚠️ Your membership expires on ${formatDate(membership.end_date)}</strong>
+      <p style="margin: 8px 0 0 0;">It will not automatically renew.</p>
+    </div>
+    <p><strong>What to do now:</strong></p>
+    <ul>
+      <li><strong>Option 1:</strong> Purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'auto_renewal_disabled')}">dicebastion.com/memberships</a> (you can do this now or when your current membership expires)</li>
+      <li><strong>Option 2:</strong> Update your payment method and contact us to re-enable auto-renewal</li>
+      <li><strong>Need help?</strong> Email us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
+    </ul>
+    <p>We'd love to keep you as a member! If you're experiencing payment issues, please reach out and we'll help resolve them.</p>
+    <p>— The Dice Bastion Team</p>
+  `
   
   return {
     subject: `Urgent: Dice Bastion Membership Auto-Renewal Disabled`,
-    html: `
-      <h2>Auto-Renewal Disabled - Action Required</h2>
-      <p>Hi ${user.name || 'there'},</p>
-      <p>After 3 unsuccessful attempts to charge your payment method, we've <strong>disabled auto-renewal</strong> for your ${planName} Membership.</p>
-      <p><strong>Your membership will expire on ${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</strong> and will not automatically renew.</p>
-      <div style="background: #fff3cd; border-left: 4px solid #856404; padding: 16px; margin: 20px 0;">
-        <strong>⚠️ To continue your membership:</strong>
-        <p style="margin: 8px 0 0 0;">You'll need to purchase a new membership after your current one expires.</p>
-      </div>
-      <p><strong>What to do now:</strong></p>
-      <ul>
-        <li><strong>Option 1:</strong> Purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'auto_renewal_disabled')}">dicebastion.com/memberships</a> (you can do this now or when your current membership expires)</li>
-        <li><strong>Option 2:</strong> Update your payment method and contact us to re-enable auto-renewal</li>
-        <li><strong>Need help?</strong> Email us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
-      </ul>
-      <p>We'd love to keep you as a member! If you're experiencing payment issues, please reach out and we'll help resolve them.</p>
-      <p>— The Dice Bastion Team</p>
-    `,
-    text: `Hi ${user.name || 'there'},\n\nAfter 3 unsuccessful payment attempts, we've disabled auto-renewal for your ${planName} Membership.\n\nYour membership expires on ${new Date(membership.end_date).toLocaleDateString('en-GB')} and will NOT automatically renew.\n\nTo continue your membership, purchase a new one at dicebastion.com/memberships or contact us to re-enable auto-renewal.\n\n— The Dice Bastion Team`
+    html: createEmailTemplate({ headerTitle: '⚠️ Auto-Renewal Disabled', content, headerColor: '#dc2626', headerGradient: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' }),
+    text: `Hi ${user.name || 'there'},\n\nAfter 3 unsuccessful payment attempts, we've disabled auto-renewal for your ${planName} Membership.\n\nYour membership expires on ${formatDate(membership.end_date)} and will NOT automatically renew.\n\nTo continue your membership, purchase a new one at dicebastion.com/memberships or contact us to re-enable auto-renewal.\n\n— The Dice Bastion Team`
   }
 }
 
 function getExpiredPaymentMethodEmail(membership, user) {
-  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
-  const planName = planNames[membership.plan] || membership.plan
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>We attempted to renew your ${planName} Membership, but <strong>your saved payment method is no longer valid</strong>.</p>
+    <p>This could happen if your card:</p>
+    <ul>
+      <li>Has expired</li>
+      <li>Was cancelled or replaced by your bank</li>
+      <li>Has insufficient funds</li>
+    </ul>
+    <div class="warning">
+      <strong>⚠️ Auto-renewal has been disabled</strong>
+      <p style="margin: 8px 0 0 0;">Your membership will expire on <strong>${formatDate(membership.end_date)}</strong> unless you take action.</p>
+    </div>
+    <p><strong>To continue your membership:</strong></p>
+    <ol>
+      <li>Visit <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_method_expired')}">dicebastion.com/memberships</a></li>
+      <li>Purchase a new membership with your updated payment details</li>
+      <li>Enable auto-renewal during checkout to save your new payment method</li>
+    </ol>
+    <p><strong>Need help?</strong> Contact us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></p>
+    <p>We'd love to keep you as a member!</p>
+    <p>— The Dice Bastion Team</p>
+  `
   
   return {
     subject: `Action Required: Update Your Payment Method - Dice Bastion`,
-    html: `
-      <h2>Payment Method Update Required</h2>
-      <p>Hi ${user.name || 'there'},</p>
-      <p>We attempted to renew your ${planName} Membership, but <strong>your saved payment method is no longer valid</strong>.</p>
-      <p>This could happen if your card:</p>
-      <ul>
-        <li>Has expired</li>
-        <li>Was cancelled or replaced by your bank</li>
-        <li>Has insufficient funds</li>
-      </ul>
-      <div style="background: #fff3cd; border-left: 4px solid #856404; padding: 16px; margin: 20px 0;">
-        <strong>⚠️ Auto-renewal has been disabled</strong>
-        <p style="margin: 8px 0 0 0;">Your membership will expire on <strong>${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</strong> unless you take action.</p>
-      </div>
-      <p><strong>To continue your membership:</strong></p>
-      <ol>
-        <li>Visit <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_method_expired')}">dicebastion.com/memberships</a></li>
-        <li>Purchase a new membership with your updated payment details</li>
-        <li>Enable auto-renewal during checkout to save your new payment method</li>
-      </ol>
-      <p><strong>Need help?</strong> Contact us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></p>
-      <p>We'd love to keep you as a member!</p>
-      <p>— The Dice Bastion Team</p>
-    `,
-    text: `Hi ${user.name || 'there'},\n\nWe couldn't renew your ${planName} Membership because your saved payment method is no longer valid.\n\nAuto-renewal has been disabled. Your membership expires on ${new Date(membership.end_date).toLocaleDateString('en-GB')}.\n\nTo continue: Visit dicebastion.com/memberships and purchase a new membership with your updated payment details.\n\nNeed help? Email support@dicebastion.com\n\n— The Dice Bastion Team`
+    html: createEmailTemplate({ headerTitle: '💳 Update Payment Method', content }),
+    text: `Hi ${user.name || 'there'},\n\nWe couldn't renew your ${planName} Membership because your saved payment method is no longer valid.\n\nAuto-renewal has been disabled. Your membership expires on ${formatDate(membership.end_date)}.\n\nTo continue: Visit dicebastion.com/memberships and purchase a new membership with your updated payment details.\n\nNeed help? Email support@dicebastion.com\n\n— The Dice Bastion Team`
   }
 }
 
 function getPasswordResetEmail(userName, resetLink) {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-          line-height: 1.6;
-          color: #333;
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 20px;
-        }
-        .header {
-          background: linear-gradient(135deg, #b2c6df 0%, #5374a5 100%);
-          color: white;
-          padding: 30px 20px;
-          text-align: center;
-          border-radius: 8px 8px 0 0;
-        }
-        .content {
-          background: #ffffff;
-          padding: 30px;
-          border: 1px solid #e5e7eb;
-          border-top: none;
-        }
-        .button {
-          display: inline-block;
-          padding: 12px 30px;
-          background: #5374a5;
-          color: white !important;
-          text-decoration: none;
-          border-radius: 6px;
-          font-weight: 600;
-          margin: 20px 0;
-        }
-        .warning {
-          background: #fef3c7;
-          border-left: 4px solid #f59e0b;
-          padding: 15px;
-          margin: 20px 0;
-          border-radius: 4px;
-        }
-        .footer {
-          text-align: center;
-          color: #6b7280;
-          font-size: 14px;
-          margin-top: 30px;
-          padding-top: 20px;
-          border-top: 1px solid #e5e7eb;
-        }
-        .link-text {
-          word-break: break-all;
-          color: #6b7280;
-          font-size: 12px;
-          margin-top: 10px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1 style="margin: 0;">Reset Your Password</h1>
-      </div>
-      <div class="content">
-        <p>Hi ${userName},</p>
-        
-        <p>We received a request to reset your password for your Dice Bastion account.</p>
-        
-        <p>Click the button below to choose a new password:</p>
-        
-        <div style="text-align: center;">
-          <a href="${resetLink}" class="button">Reset Password</a>
-        </div>
-        
-        <p class="link-text">Or copy and paste this link into your browser:<br>${resetLink}</p>
-        
-        <div class="warning">
-          <strong>⏰ This link will expire in 1 hour</strong> for security reasons.
-        </div>
-        
-        <p><strong>Didn't request a password reset?</strong><br>
-        If you didn't request this, you can safely ignore this email. Your password will not be changed.</p>
-        
-        <div class="footer">
-          <p>This is an automated email from Dice Bastion.<br>
-          If you need help, contact us at admin@dicebastion.com</p>
-        </div>
-      </div>
-    </body>
-    </html>
+  const content = `
+    <p>Hi ${userName},</p>
+    <p>We received a request to reset your password for your Dice Bastion account.</p>
+    <p>Click the button below to choose a new password:</p>
+    <div style="text-align: center;">
+      <a href="${resetLink}" class="button">Reset Password</a>
+    </div>
+    <p class="link-text">Or copy and paste this link into your browser:<br>${resetLink}</p>
+    <div class="warning">
+      <strong>⏰ This link will expire in 1 hour</strong> for security reasons.
+    </div>
+    <p><strong>Didn't request a password reset?</strong><br>
+    If you didn't request this, you can safely ignore this email. Your password will not be changed.</p>
   `
+  
+  return createEmailTemplate({ headerTitle: '🔑 Reset Your Password', content })
 }
 
 // Account creation invitation email (sent after event purchase/registration)
 function getAccountCreationInviteEmail(userName, userEmail, setupLink) {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-          line-height: 1.6;
-          color: #333;
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 20px;
-        }
-        .header {
-          background: linear-gradient(135deg, #b2c6df 0%, #5374a5 100%);
-          color: white;
-          padding: 30px 20px;
-          text-align: center;
-          border-radius: 8px 8px 0 0;
-        }
-        .content {
-          background: #ffffff;
-          padding: 30px;
-          border: 1px solid #e5e7eb;
-          border-top: none;
-        }
-        .button {
-          display: inline-block;
-          padding: 12px 30px;
-          background: #5374a5;
-          color: white !important;
-          text-decoration: none;
-          border-radius: 6px;
-          font-weight: 600;
-          margin: 20px 0;
-        }
-        .highlight {
-          background: #e0f2fe;
-          border-left: 4px solid #0284c7;
-          padding: 15px;
-          margin: 20px 0;
-          border-radius: 4px;
-        }
-        .footer {
-          text-align: center;
-          color: #6b7280;
-          font-size: 14px;
-          margin-top: 30px;
-          padding-top: 20px;
-          border-top: 1px solid #e5e7eb;
-        }
-        .link-text {
-          word-break: break-all;
-          color: #6b7280;
-          font-size: 12px;
-          margin-top: 10px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1 style="margin: 0;">🎉 One More Step!</h1>
-      </div>
-      <div class="content">
-        <p>Hi ${userName},</p>
-        
-        <p>Thanks for registering for our event! We'd love to make your experience even better by creating a Dice Bastion account for you.</p>
-        
-        <div class="highlight">
-          <strong>✨ With a Dice Bastion account, you can:</strong>
-          <ul style="margin: 10px 0;">
-            <li>View all your event registrations in one place</li>
-            <li>Access exclusive member benefits and discounts</li>
-            <li>Manage your profile and preferences</li>
-            <li>Get early access to new events</li>
-          </ul>
-        </div>
-        
-        <p><strong>Create your account in seconds:</strong></p>
-        <p>Just click the button below and choose a password for your account (${userEmail}).</p>
-        
-        <div style="text-align: center;">
-          <a href="${setupLink}" class="button">Create My Account</a>
-        </div>
-        
-        <p class="link-text">Or copy and paste this link into your browser:<br>${setupLink}</p>
-        
-        <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
-          <strong>Not interested?</strong> No worries! You can still attend the event. This is completely optional.
-        </p>
-        
-        <div class="footer">
-          <p>This is an automated email from Dice Bastion.<br>
-          If you need help, contact us at admin@dicebastion.com</p>
-        </div>
-      </div>
-    </body>
-    </html>
+  const content = `
+    <p>Hi ${userName},</p>
+    <p>Thanks for registering for our event! We'd love to make your experience even better by creating a Dice Bastion account for you.</p>
+    <div class="highlight">
+      <strong>✨ With a Dice Bastion account, you can:</strong>
+      <ul style="margin: 10px 0;">
+        <li>View all your event registrations in one place</li>
+        <li>Access exclusive member benefits and discounts</li>
+        <li>Manage your profile and preferences</li>
+        <li>Get early access to new events</li>
+      </ul>
+    </div>
+    <p><strong>Create your account in seconds:</strong></p>
+    <p>Just click the button below and choose a password for your account (${userEmail}).</p>
+    <div style="text-align: center;">
+      <a href="${setupLink}" class="button">Create My Account</a>
+    </div>
+    <p class="link-text">Or copy and paste this link into your browser:<br>${setupLink}</p>
+    <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+      <strong>Not interested?</strong> No worries! You can still attend the event. This is completely optional.
+    </p>
   `
+  
+  return createEmailTemplate({ headerTitle: '🎉 One More Step!', content })
 }
 
 // New account welcome email (sent after account creation)
 function getNewAccountWelcomeEmail(userName) {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-          line-height: 1.6;
-          color: #333;
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 20px;
-        }
-        .header {
-          background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-          color: white;
-          padding: 30px 20px;
-          text-align: center;
-          border-radius: 8px 8px 0 0;
-        }
-        .content {
-          background: #ffffff;
-          padding: 30px;
-          border: 1px solid #e5e7eb;
-          border-top: none;
-        }
-        .button {
-          display: inline-block;
-          padding: 12px 30px;
-          background: #10b981;
-          color: white !important;
-          text-decoration: none;
-          border-radius: 6px;
-          font-weight: 600;
-          margin: 10px 5px;
-        }
-        .highlight {
-          background: #d1fae5;
-          border-left: 4px solid #10b981;
-          padding: 15px;
-          margin: 20px 0;
-          border-radius: 4px;
-        }
-        .footer {
-          text-align: center;
-          color: #6b7280;
-          font-size: 14px;
-          margin-top: 30px;
-          padding-top: 20px;
-          border-top: 1px solid #e5e7eb;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1 style="margin: 0;">🎉 Welcome to Dice Bastion!</h1>
-      </div>
-      <div class="content">
-        <p>Hi ${userName},</p>
-        
-        <p><strong>Your account has been created successfully!</strong></p>
-        
-        <p>We're excited to have you as part of our gaming community. Your account gives you access to exclusive benefits and makes managing your events a breeze.</p>
-        
-        <div class="highlight">
-          <strong>🎲 What's Next?</strong>
-          <ul style="margin: 10px 0;">
-            <li><strong>Explore Events:</strong> Browse upcoming gaming sessions and tournaments</li>
-            <li><strong>Join as a Member:</strong> Get exclusive discounts and early access</li>
-            <li><strong>Connect:</strong> Meet fellow gamers and join our community</li>
-          </ul>
-        </div>
-        
-        <p><strong>Quick Links:</strong></p>
-        <div style="text-align: center; margin: 20px 0;">
-          <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'welcome', 'new_account')}" class="button">My Account</a>
-          <a href="${addUtmParams('https://dicebastion.com/events', 'email', 'welcome', 'new_account')}" class="button">Browse Events</a>
-          <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}" class="button">View Memberships</a>
-        </div>
-        
-        <div class="highlight" style="background: #fef3c7; border-left-color: #f59e0b;">
-          <strong>💎 Consider Becoming a Member!</strong>
-          <p style="margin: 10px 0;">
-            Our memberships offer incredible value with discounts on events, priority booking, and exclusive perks. 
-            Check out our <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}">membership options</a> to save on future events!
-          </p>
-        </div>
-        
-        <p>If you have any questions or need help getting started, don't hesitate to reach out to us at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
-        
-        <p>Welcome to the adventure!</p>
-        <p><strong>— The Dice Bastion Team</strong></p>
-        
-        <div class="footer">
-          <p>This is an automated email from Dice Bastion.<br>
-          You can manage your email preferences in your <a href="https://dicebastion.com/account">account settings</a>.</p>
-        </div>
-      </div>
-    </body>
-    </html>
+  const content = `
+    <p>Hi ${userName},</p>
+    <p><strong>Your account has been created successfully!</strong></p>
+    <p>We're excited to have you as part of our gaming community. Your account gives you access to exclusive benefits and makes managing your events a breeze.</p>
+    <div class="highlight">
+      <strong>What's Next?</strong>
+      <ul style="margin: 10px 0;">
+        <li><strong>Explore Events:</strong> Browse upcoming gaming sessions and tournaments</li>
+        <li><strong>Join as a Member:</strong> Get exclusive discounts and early access</li>
+        <li><strong>Connect:</strong> Meet fellow gamers and join our community</li>
+      </ul>
+    </div>
+    <p><strong>Quick Links:</strong></p>
+    <div style="text-align: center; margin: 20px 0;">
+      <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'welcome', 'new_account')}" class="button">My Account</a>
+      <a href="${addUtmParams('https://dicebastion.com/events', 'email', 'welcome', 'new_account')}" class="button">Browse Events</a>
+      <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}" class="button">View Memberships</a>
+    </div>
+    <div class="highlight">
+      <strong>💎 Consider Becoming a Member!</strong>
+      <p style="margin: 10px 0;">
+        Our memberships offer incredible value with discounts on events, priority booking, and exclusive perks. 
+        Check out our <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}">membership options</a> to save on future events!
+      </p>
+    </div>
+    <p>If you have any questions or need help getting started, don't hesitate to reach out to us at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+    <p>Welcome to the adventure!</p>
+    <p><strong>— The Dice Bastion Team</strong></p>
   `
+  
+  const footer = 'This is an automated email from Dice Bastion.<br>You can manage your email preferences in your <a href="https://dicebastion.com/account">account settings</a>.'
+  
+  return createEmailTemplate({ 
+    headerTitle: '🎉 Welcome to Dice Bastion!', 
+    content,
+    footerText: footer
+  })
 }
 
 // Generate .ics calendar file content with Gibraltar timezone (Europe/Gibraltar)
@@ -1699,29 +1515,34 @@ function getTicketConfirmationEmail(event, user, transaction) {
   
   if (isFree) {
     // Free event registration email
+    const content = `
+      <p>Hi ${user.name || 'there'},</p>
+      <p>Thank you for registering for <strong>${event.event_name}</strong>!</p>
+      
+      <h3>Event Details:</h3>
+      <ul>
+        <li><strong>Event:</strong> ${event.event_name}</li>
+        <li><strong>Date:</strong> ${eventDate}</li>
+        <li><strong>Time:</strong> ${eventTime}</li>
+        <li><strong>Location:</strong> ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111">Gibraltar Warhammer Club</a>'}</li>
+        ${event.description ? `<li><strong>Description:</strong> ${event.description}</li>` : ''}
+      </ul>
+      
+      ${event.additional_info ? `<div class="highlight"><strong>📌 Important Information:</strong><p style="margin: 8px 0 0 0;">${event.additional_info}</p></div>` : ''}
+      
+      <p>We've attached a calendar invite for your convenience. See you there!</p>
+      <p>— The Dice Bastion Team</p>
+    `
+    
     return {
       subject: `Registration Confirmed: ${event.event_name}`,
-      html: `
-        <h2>You're Registered!</h2>
-        <p>Hi ${user.name || 'there'},</p>
-        <p>Thank you for registering for <strong>${event.event_name}</strong>!</p>
-        
-        <h3>Event Details:</h3>
-        <ul>
-          <li><strong>Event:</strong> ${event.event_name}</li>
-          <li><strong>Date:</strong> ${eventDate}</li>
-          <li><strong>Time:</strong> ${eventTime}</li>
-          <li><strong>Location:</strong> ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111" style="text-decoration: underline;">Gibraltar Warhammer Club</a>'}</li>
-          ${event.description ? `<li><strong>Description:</strong> ${event.description}</li>` : ''}
-        </ul>
-        
-        ${event.additional_info ? `<p><strong>Important Information:</strong><br>${event.additional_info}</p>` : ''}
-        
-        <p>We've attached a calendar invite for your convenience. See you there!</p>
-        <p>— The Dice Bastion Team</p>
-      `,
-      text: `
-You're Registered!
+      html: createEmailTemplate({ 
+        headerTitle: `You're Registered! 🎉`, 
+        content,
+        headerColor: '#10b981',
+        headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+      }),
+      text: `You're Registered!
 
 Hi ${user.name || 'there'},
 
@@ -1738,8 +1559,7 @@ ${event.additional_info ? `Important Information: ${event.additional_info}` : ''
 
 See you there!
 
-— The Dice Bastion Team
-      `,
+— The Dice Bastion Team`,
       attachments: [{
         filename: `${event.event_name.replace(/[^a-z0-9]/gi, '_')}.ics`,
         content: icsBase64,
@@ -1750,37 +1570,45 @@ See you there!
   }
   
   // Paid event ticket confirmation email
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>Thank you for purchasing a ticket to <strong>${event.event_name}</strong>!</p>
+    
+    <h3>Event Details:</h3>
+    <ul>
+      <li><strong>Event:</strong> ${event.event_name}</li>
+      <li><strong>Date:</strong> ${eventDate}</li>
+      <li><strong>Time:</strong> ${eventTime}</li>
+      <li><strong>Location:</strong> ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111">Gibraltar Warhammer Club</a>'}</li>
+      ${event.description ? `<li><strong>Description:</strong> ${event.description}</li>` : ''}
+    </ul>
+    
+    <h3>Payment Details:</h3>
+    <ul>
+      <li><strong>Amount Paid:</strong> ${formatPrice(amount, currency)}</li>
+      <li><strong>Order Reference:</strong> ${transaction.order_ref}</li>
+    </ul>
+    
+    <div class="success">
+      <strong>✓ Payment Confirmed</strong>
+      <p style="margin: 8px 0 0 0;">Please bring this email or show your order reference at the event check-in.</p>
+    </div>
+    
+    ${event.additional_info ? `<div class="highlight"><strong>📌 Important Information:</strong><p style="margin: 8px 0 0 0;">${event.additional_info}</p></div>` : ''}
+    
+    <p>We've attached a calendar invite for your convenience. Looking forward to seeing you there!</p>
+    <p>— The Dice Bastion Team</p>
+  `
+  
   return {
     subject: `Ticket Confirmed: ${event.event_name}`,
-    html: `
-      <h2>Your Ticket is Confirmed!</h2>
-      <p>Hi ${user.name || 'there'},</p>
-      <p>Thank you for purchasing a ticket to <strong>${event.event_name}</strong>!</p>
-      
-      <h3>Event Details:</h3>
-      <ul>
-        <li><strong>Event:</strong> ${event.event_name}</li>
-        <li><strong>Date:</strong> ${eventDate}</li>
-        <li><strong>Time:</strong> ${eventTime}</li>
-        <li><strong>Location:</strong> ${event.location ? event.location : '<a href="https://www.google.com/maps/place/Gibraltar+Warhammer+Club/data=!4m2!3m1!1s0x0:0x6942154652d2cbe?sa=X&ved=1t:2428&ictx=111" style="text-decoration: underline;">Gibraltar Warhammer Club</a>'}</li>
-        ${event.description ? `<li><strong>Description:</strong> ${event.description}</li>` : ''}
-      </ul>
-      
-      <h3>Payment Details:</h3>
-      <ul>
-        <li><strong>Amount Paid:</strong> ${sym}${amount}</li>
-        <li><strong>Order Reference:</strong> ${transaction.order_ref}</li>
-      </ul>
-      
-      <p>Please bring this email or show your order reference at the event check-in.</p>
-      
-      ${event.additional_info ? `<p><strong>Important Information:</strong><br>${event.additional_info}</p>` : ''}
-      
-      <p>We've attached a calendar invite for your convenience. Looking forward to seeing you there!</p>
-      <p>— The Dice Bastion Team</p>
-    `,
-    text: `
-Your Ticket is Confirmed!
+    html: createEmailTemplate({ 
+      headerTitle: 'Ticket Confirmed! 🎟️', 
+      content,
+      headerColor: '#10b981',
+      headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+    }),
+    text: `Your Ticket is Confirmed!
 
 Hi ${user.name || 'there'},
 
@@ -1794,7 +1622,7 @@ EVENT DETAILS:
 ${event.description ? `- Description: ${event.description}` : ''}
 
 PAYMENT DETAILS:
-- Amount Paid: ${sym}${amount}
+- Amount Paid: ${formatPrice(amount, currency)}
 - Order Reference: ${transaction.order_ref}
 
 Please bring this email or show your order reference at the event check-in.
@@ -1803,8 +1631,7 @@ ${event.additional_info ? `Important Information: ${event.additional_info}` : ''
 
 Looking forward to seeing you there!
 
-— The Dice Bastion Team
-    `,
+— The Dice Bastion Team`,
     attachments: [{
       filename: `${event.event_name.replace(/[^a-z0-9]/gi, '_')}.ics`,
       content: icsBase64,
@@ -1815,31 +1642,37 @@ Looking forward to seeing you there!
 }
 
 function getWelcomeEmail(membership, user, autoRenew) {
-  const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' }
-  const planName = planNames[membership.plan] || membership.plan
-  
-  return {
-    subject: `Welcome to Dice Bastion ${planName} Membership!`,
-    html: `
-      <h2>Welcome to Dice Bastion!</h2>
-      <p>Hi ${user.name || 'there'},</p>
-      <p>Thank you for becoming a <strong>${planName} Member</strong>!</p>
-      <ul>
-        <li><strong>Plan:</strong> ${planName}</li>
-        <li><strong>Valid Until:</strong> ${new Date(membership.end_date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</li>
-        <li><strong>Auto-Renewal:</strong> ${autoRenew ? 'Enabled ✓' : 'Disabled'}</li>
-      </ul>
-      ${autoRenew ? '<p>Your membership will automatically renew before expiration. You can manage this at any time from your <a href="' + addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'welcome') + '">account page</a>.</p>' : '<p>Remember to renew your membership before it expires to continue enjoying member benefits!</p>'}
-      <p><strong>Member Benefits:</strong></p>
-      <ul>
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>Thank you for becoming a <strong>${planName} Member</strong>!</p>
+    <ul>
+      <li><strong>Plan:</strong> ${planName}</li>
+      <li><strong>Valid Until:</strong> ${formatDate(membership.end_date)}</li>
+      <li><strong>Auto-Renewal:</strong> ${autoRenew ? 'Enabled ✓' : 'Disabled'}</li>
+    </ul>
+    ${autoRenew ? '<p>Your membership will automatically renew before expiration. You can manage this at any time from your <a href="' + addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'welcome') + '">account page</a>.</p>' : '<p>Remember to renew your membership before it expires to continue enjoying member benefits!</p>'}
+    <div class="success">
+      <strong>🎲 Member Benefits:</strong>
+      <ul style="margin: 10px 0;">
         <li>Discounted event tickets</li>
         <li>Priority booking for tournaments</li>
         <li>Exclusive member events</li>
         <li>And much more!</li>
       </ul>
-      <p>See you at the club!</p>
-      <p>— The Dice Bastion Team</p>
-    `
+    </div>
+    <p>See you at the club!</p>
+    <p>— The Dice Bastion Team</p>
+  `
+  
+  return {
+    subject: `Welcome to Dice Bastion ${planName} Membership!`,
+    html: createEmailTemplate({ 
+      headerTitle: `Welcome to ${planName} Membership! 🎉`, 
+      content,
+      headerColor: '#10b981',
+      headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+    })
   }
 }
 
@@ -2886,7 +2719,6 @@ app.post('/membership/checkout', async (c) => {
     const s = await getSchema(c.env.DB)
 
     // Ensure schema is up to date
-    await ensureSchema(c.env.DB, s.fkColumn)
     await migrateToTransactions(c.env.DB)
 
     // Idempotency check in transactions table
@@ -2995,6 +2827,9 @@ app.get('/membership/confirm', async (c) => {
   const pending = await c.env.DB.prepare('SELECT * FROM memberships WHERE id = ?').bind(transaction.reference_id).first()
   if (!pending) return c.json({ ok:false, error:'membership_not_found' },404)
   if (pending.status === 'active') {
+    // Get user details for account setup check
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(pending.user_id).first()
+    
     // Get card details if auto-renewal is enabled
     let cardLast4 = null
     if (pending.auto_renew === 1 && pending.payment_instrument_id) {
@@ -3002,6 +2837,10 @@ app.get('/membership/confirm', async (c) => {
         .bind(pending.payment_instrument_id).first()
       cardLast4 = instrument?.last_4 || null
     }
+    
+    // Check if user needs account setup (no password set)
+    const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
+    
     return c.json({ 
       ok: true, 
       status: 'already_active',
@@ -3010,7 +2849,9 @@ app.get('/membership/confirm', async (c) => {
       amount: transaction.amount,
       currency: transaction.currency || 'GBP',
       autoRenew: pending.auto_renew === 1,
-      cardLast4
+      cardLast4,
+      needsAccountSetup: needsAccountSetup,
+      userEmail: user?.email || transaction.email
     })
   }
   
@@ -3153,6 +2994,9 @@ app.get('/membership/confirm', async (c) => {
     cardLast4 = instrument?.last_4 || null
   }
   
+  // Check if user needs account setup (no password set)
+  const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
+  
   return c.json({ 
     ok: true, 
     status: 'active',
@@ -3161,7 +3005,9 @@ app.get('/membership/confirm', async (c) => {
     amount: transaction.amount,
     currency: transaction.currency || 'GBP',
     autoRenew: pending.auto_renew === 1,
-    cardLast4
+    cardLast4,
+    needsAccountSetup: needsAccountSetup,
+    userEmail: user?.email || transaction.email
   })
 })
 
@@ -3722,7 +3568,6 @@ app.post('/events/:id/register', async c => {
       console.error('identity missing id', ident)
       return c.json({ error:'identity_error' },500)
     }    const s = await getSchema(c.env.DB)
-    await ensureSchema(c.env.DB, s.fkColumn)
     await migrateToTransactions(c.env.DB)
     
     // Multiple registrations are now allowed - duplicate check removed// Create ticket record with status 'active' (no payment needed)
@@ -4272,7 +4117,6 @@ app.post('/events/:id/checkout', async c => {
     const currency = c.env.CURRENCY || 'GBP'
 
     const s = await getSchema(c.env.DB)
-    await ensureSchema(c.env.DB, s.fkColumn)
     await migrateToTransactions(c.env.DB)
 
     const order_ref = `EVT-${evId}-${crypto.randomUUID()}`
@@ -4493,8 +4337,6 @@ app.post('/membership/retry-renewal', async (c) => {
     const { email } = await c.req.json()
     if (!email || !EMAIL_RE.test(email)) return c.json({ error: 'invalid_email' }, 400)
     
-    await ensureSchema(c.env.DB, 'user_id')
-    
     const ident = await findIdentityByEmail(c.env.DB, email)
     if (!ident) return c.json({ error: 'user_not_found' }, 404)
     
@@ -4529,7 +4371,7 @@ app.get('/test/renew-user', async (c) => {
   const email = c.req.query('email')
   if (!email) return c.json({ error: 'email required' }, 400)
   
-  try {    await ensureSchema(c.env.DB, 'user_id')
+  try {    
     
     const ident = await findIdentityByEmail(c.env.DB, email)
     if (!ident) return c.json({ error: 'user_not_found' }, 404)
@@ -4591,8 +4433,6 @@ app.get('/test/event-reminders', async (c) => {
 // Get all active products (public)
 app.get('/products', async (c) => {
   try {
-    await ensureSchema(c.env.DB, 'user_id')
-    
     const products = await c.env.DB.prepare(`
       SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
       FROM products
@@ -4610,7 +4450,6 @@ app.get('/products', async (c) => {
 // Get single product by ID or slug (public)
 app.get('/products/:id', async (c) => {
   try {
-    await ensureSchema(c.env.DB, 'user_id')
     const id = c.req.param('id')
     
     // Try to find by ID first, then by slug
@@ -4637,8 +4476,6 @@ app.get('/products/:id', async (c) => {
 // Create new product (admin only - TODO: add authentication)
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
-    await ensureSchema(c.env.DB, 'user_id')
-    
     const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date } = await c.req.json()
     
     if (!name || !slug || price === undefined) {
@@ -4678,8 +4515,6 @@ app.post('/admin/products', requireAdmin, async (c) => {
 // Update product (admin only)
 app.put('/admin/products/:id', requireAdmin, async (c) => {
   try {
-    await ensureSchema(c.env.DB, 'user_id')
-    
     const id = c.req.param('id')
     const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date } = await c.req.json()
     
@@ -4740,8 +4575,6 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
 // Delete product (admin only - soft delete by setting is_active = 0)
 app.delete('/admin/products/:id', requireAdmin, async (c) => {
   try {
-    await ensureSchema(c.env.DB, 'user_id')
-    
     const id = c.req.param('id')
     
     // Get product to find image
@@ -4774,8 +4607,6 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
 // Get all orders (admin only)
 app.get('/admin/orders', async (c) => {
   try {
-    await ensureSchema(c.env.DB, 'user_id')
-    
     const adminKey = c.req.header('X-Admin-Key')
     if (adminKey !== c.env.ADMIN_KEY) {
       return c.json({ error: 'unauthorized' }, 401)

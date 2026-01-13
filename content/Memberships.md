@@ -112,6 +112,10 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     });
   }
   
+  function getLoggedInUser() {
+    return utils.session.getUser();
+  }
+  
   function clearError(){
     const err = membershipModal ? membershipModal.querySelector('#sumup-error') : null;
     if (err) { err.textContent = ''; err.style.display = 'none'; }
@@ -122,59 +126,108 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     if (err) { err.textContent = msg || 'Payment error. Please try again.'; err.style.display = 'block'; }
   }
   
+  function closeModal() {
+    if (membershipModal) {
+      const sumupCardEl = membershipModal.querySelector('#sumup-card');
+      if (sumupCardEl) sumupCardEl.innerHTML = '';
+      if (window.turnstile) { 
+        try { 
+          window.turnstile.reset('#mship-ts'); 
+          window.turnstile.reset('#mship-ts-logged'); 
+        } catch(_){} 
+      }
+      membershipModal.close();
+      membershipModal = null;
+    }
+  }
+  
   function openModal(){
+    const user = getLoggedInUser();
+    const isLoggedIn = user && user.email;
+    
+    // Build modal content based on login status
+    const guestForm = `
+      <div id="sumup-email-step" style="display: ${isLoggedIn ? 'none' : 'block'};">
+        <div class="modal-form-group">
+          <label for="modal-name" class="modal-form-label">Full name</label>
+          <input id="modal-name" type="text" placeholder="Your full name" class="modal-form-input">
+        </div>
+
+        <div class="modal-form-group">
+          <label for="modal-email" class="modal-form-label">Email</label>
+          <input id="modal-email" type="email" placeholder="you@example.com" class="modal-form-input">
+        </div>
+
+        <div class="modal-checkbox-group">
+          <input id="modal-privacy" type="checkbox" class="modal-checkbox">
+          <label for="modal-privacy" class="modal-checkbox-label">
+            I agree to the
+            <a href="/privacy-policy/" target="_blank" rel="noopener" class="modal-link">Privacy Policy</a>.
+          </label>
+        </div>
+
+        <div class="modal-checkbox-group">
+          <input id="modal-auto-renew" type="checkbox" class="modal-checkbox">
+          <label for="modal-auto-renew" class="modal-checkbox-label">
+            Enable auto-renewal (saves your payment method for automatic renewal before expiry)
+          </label>
+        </div>
+
+        <div class="modal-section">
+          <div class="modal-help-text">Security check</div>
+          <div id="mship-ts" class="cf-turnstile" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
+        </div>
+
+        <button id="modal-continue" type="button" class="modal-btn modal-btn-primary modal-section">Continue</button>
+      </div>
+    `;
+    
+    const loggedInForm = `
+      <div id="sumup-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
+        <div class="modal-info-box">
+          <p style="margin: 0 0 8px 0; color: #666;">Purchasing membership as:</p>
+          <p style="margin: 0; font-weight: 600; font-size: 1.05em;" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
+        </div>
+        
+        <div class="modal-checkbox-group">
+          <input id="modal-auto-renew-logged" type="checkbox" class="modal-checkbox">
+          <label for="modal-auto-renew-logged" class="modal-checkbox-label">
+            Enable auto-renewal (saves your payment method for automatic renewal before expiry)
+          </label>
+        </div>
+
+        <div class="modal-section">
+          <div class="modal-help-text">Security check</div>
+          <div id="mship-ts-logged" class="cf-turnstile" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
+        </div>
+
+        <button id="modal-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
+        
+        <div class="modal-section" style="text-align: center;">
+          <button id="modal-use-different" type="button" class="modal-btn-secondary" style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+            Use a different email address
+          </button>
+        </div>
+      </div>
+    `;
+    
     membershipModal = new Modal({
       title: 'Complete your membership',
       size: 'md',
       closeOnBackdrop: false,
       content: `
-        <div id="sumup-email-step">
-          <div class="modal-form-group">
-            <label for="modal-name" class="modal-form-label">Full name</label>
-            <input id="modal-name" type="text" placeholder="Your full name" class="modal-form-input">
-          </div>
-
-          <div class="modal-form-group">
-            <label for="modal-email" class="modal-form-label">Email</label>
-            <input id="modal-email" type="email" placeholder="you@example.com" class="modal-form-input">
-          </div>
-
-          <div class="modal-checkbox-group">
-            <input id="modal-privacy" type="checkbox" class="modal-checkbox">
-            <label for="modal-privacy" class="modal-checkbox-label">
-              I agree to the
-              <a href="/privacy-policy/" target="_blank" rel="noopener" class="modal-link">Privacy Policy</a>.
-            </label>
-          </div>
-
-          <div class="modal-checkbox-group">
-            <input id="modal-auto-renew" type="checkbox" class="modal-checkbox">
-            <label for="modal-auto-renew" class="modal-checkbox-label">
-              Enable auto-renewal (saves your payment method for automatic renewal before expiry)
-            </label>
-          </div>
-
-          <div class="modal-section">
-            <div class="modal-help-text">Security check</div>
-            <div id="mship-ts" class="cf-turnstile" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
-          </div>
-
-          <button id="modal-continue" type="button" class="modal-btn modal-btn-primary modal-section">Continue</button>
-        </div>
+        ${guestForm}
+        ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
         <div id="sumup-error" class="modal-error"></div>
       `,
-      onClose: () => {
-        const sumupCardEl = membershipModal ? membershipModal.querySelector('#sumup-card') : null;
-        if (sumupCardEl) sumupCardEl.innerHTML = '';
-        if (window.turnstile) { try { window.turnstile.reset('#mship-ts'); } catch(_){} }
-      }
+      onClose: closeModal
     });
     
     membershipModal.open();
     loadTurnstileSdk().catch(()=>{});
     
-    // Setup event listeners
+    // Setup event listeners for guest flow
     const modalNameEl = membershipModal.querySelector('#modal-name');
     const modalEmailEl = membershipModal.querySelector('#modal-email');
     const privacyEl = membershipModal.querySelector('#modal-privacy');
@@ -188,46 +241,127 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     });
     
     if (modalContinueBtn) modalContinueBtn.addEventListener('click', handleContinue);
-    if (modalNameEl) modalNameEl.focus();
-  }
-  
-  function closeModal(){
-    if (membershipModal) {
-      membershipModal.close();
-      membershipModal = null;
+    if (modalNameEl && !isLoggedIn) modalNameEl.focus();
+    
+    // Setup event listeners for logged-in flow
+    const autoRenewLoggedEl = membershipModal.querySelector('#modal-auto-renew-logged');
+    const modalContinueLoggedBtn = membershipModal.querySelector('#modal-continue-logged');
+    const useDifferentBtn = membershipModal.querySelector('#modal-use-different');
+    
+    if (autoRenewLoggedEl) autoRenewLoggedEl.addEventListener('change', clearError);
+    if (modalContinueLoggedBtn) modalContinueLoggedBtn.addEventListener('click', handleContinueLogged);
+    if (useDifferentBtn) {
+      useDifferentBtn.addEventListener('click', () => {
+        // Switch to guest flow
+        const guestStep = membershipModal.querySelector('#sumup-email-step');
+        const loggedStep = membershipModal.querySelector('#sumup-logged-step');
+        if (guestStep) guestStep.style.display = 'block';
+        if (loggedStep) loggedStep.style.display = 'none';
+        if (modalNameEl) modalNameEl.focus();
+      });
     }
   }
 
-  function showError(msg){ 
-    const sumupErr = membershipModal ? membershipModal.querySelector('#sumup-err') : null;
-    if (!sumupErr) return; 
-    sumupErr.textContent = msg || 'Payment error. Please try again.'; 
-    sumupErr.style.display='block'; 
+  async function getTurnstileToken(isLoggedIn){ 
+    if (IS_LOCALHOST) { 
+      console.log('Localhost detected - using test-bypass token'); 
+      return 'test-bypass'; 
+    } 
+    await loadTurnstileSdk(); 
+    const elId = isLoggedIn ? '#mship-ts-logged' : '#mship-ts';
+    const el = membershipModal ? membershipModal.querySelector(elId) : document.querySelector(elId); 
+    if (!el || !window.turnstile) throw new Error('Security check not ready'); 
+    const t = window.turnstile.getResponse(el); 
+    if (!t) throw new Error('Please complete the security check.'); 
+    return t; 
   }
 
-  function clearError(){ 
-    const sumupErr = membershipModal ? membershipModal.querySelector('#sumup-err') : null;
-    if (!sumupErr) return; 
-    sumupErr.style.display = 'none'; 
+  async function confirmOrder(ref){ 
+    const maxAttempts=200; 
+    for(let i=0;i<maxAttempts;i++){ 
+      try { 
+        const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); 
+        const d=await r.json(); 
+        if(d.ok && (d.status==='active' || d.status==='already_active')){ 
+          // Redirect to thank-you page like event flow
+          const successData = {
+            plan: d.plan,
+            endDate: d.endDate,
+            amount: d.amount,
+            currency: d.currency,
+            autoRenew: d.autoRenew,
+            cardLast4: d.cardLast4
+          };
+          
+          // Store in sessionStorage for thank-you page if account setup needed
+          if (d.needsAccountSetup) {
+            sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+              email: d.userEmail,
+              eventName: null,  // Not an event
+              isMembership: true
+            }));
+          }
+          
+          // Redirect to thank-you page
+          window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref);
+          return true; 
+        } 
+        if(d.status && String(d.status).toUpperCase()==='PENDING'){ 
+          await new Promise(r=>setTimeout(r,1500)); 
+          continue; 
+        } 
+      } catch(e){} 
+      await new Promise(r=>setTimeout(r,1500)); 
+    } 
+    showError('Payment is still processing. Please refresh shortly.'); 
+    return false; 
   }
 
-  async function loadSumUpSdk(){ if (window.SumUpCard) return true; return new Promise((resolve,reject)=>{ const s=document.createElement('script'); s.src='https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js'; s.async=true; s.onload=()=>resolve(true); s.onerror=()=>reject(new Error('Failed to load SumUp SDK')); document.head.appendChild(s); }); }
+  async function loadSumUpSdk(){ 
+    if (window.SumUpCard) return true; 
+    return new Promise((resolve,reject)=>{ 
+      const s=document.createElement('script'); 
+      s.src='https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js'; 
+      s.async=true; 
+      s.onload=()=>resolve(true); 
+      s.onerror=()=>reject(new Error('Failed to load SumUp SDK')); 
+      document.head.appendChild(s); 
+    }); 
+  }
   
-  function loadTurnstileSdk(){ if (IS_LOCALHOST || window.turnstile) return Promise.resolve(true); return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s); }); }
-  
-  async function getTurnstileToken(){ if (IS_LOCALHOST) { console.log('Localhost detected - using test-bypass token'); return 'test-bypass'; } await loadTurnstileSdk(); const el = membershipModal ? membershipModal.querySelector('#mship-ts') : document.getElementById('mship-ts'); if (!el || !window.turnstile) throw new Error('Security check not ready'); const t = window.turnstile.getResponse(el); if (!t) throw new Error('Please complete the security check.'); return t; }
+  function loadTurnstileSdk(){ 
+    if (IS_LOCALHOST || window.turnstile) return Promise.resolve(true); 
+    return new Promise((res,rej)=>{ 
+      const s=document.createElement('script'); 
+      s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; 
+      s.async=true; 
+      s.defer=true; 
+      s.onload=()=>res(true); 
+      s.onerror=()=>rej(new Error('Turnstile load failed')); 
+      document.head.appendChild(s); 
+    }); 
+  }
 
-  async function confirmOrder(ref){ const maxAttempts=200; for(let i=0;i<maxAttempts;i++){ try { const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); const d=await r.json(); if(d.ok && d.status==='active'){ closeModal(); return true; } if(d.status && String(d.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e){} await new Promise(r=>setTimeout(r,1500)); } showError('Payment is still processing. Please refresh shortly.'); return false; }
-
-  async function checkActiveMembership(email){ try { const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}`); const d = await r.json(); if (d && d.active && d.endDate) { return { active:true, endDate:d.endDate, plan:d.plan }; } } catch(_){} return { active:false }; }
+  async function checkActiveMembership(email){ 
+    try { 
+      const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}`); 
+      const d = await r.json(); 
+      if (d && d.active && d.endDate) { 
+        return { active:true, endDate:d.endDate, plan:d.plan }; 
+      } 
+    } catch(_){} 
+    return { active:false }; 
+  }
 
   async function mountSumUpWidget(checkoutId, ref){
     try { await loadSumUpSdk(); } catch(e){ showError('Could not load payment widget.'); return; }
     try {
       clearError();
       const emailStepEl = membershipModal ? membershipModal.querySelector('#sumup-email-step') : null;
+      const loggedStepEl = membershipModal ? membershipModal.querySelector('#sumup-logged-step') : null;
       const sumupCardEl = membershipModal ? membershipModal.querySelector('#sumup-card') : null;
       if (emailStepEl) emailStepEl.style.display = 'none';
+      if (loggedStepEl) loggedStepEl.style.display = 'none';
       if (sumupCardEl) { sumupCardEl.style.display = 'block'; sumupCardEl.innerHTML = ''; }
       window.SumUpCard.mount({
         id:'sumup-card',
@@ -247,7 +381,33 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
   function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
 
-  async function startCheckout(plan, email, name, privacyConsent, autoRenew){ try { clearError(); const token = await getTurnstileToken(); const resp = await fetch(`${API_BASE}/membership/checkout`, { method:'POST', headers:{ 'Content-Type':'application/json', 'Idempotency-Key': newIdempotencyKey() }, body: JSON.stringify({ email, name, plan, privacyConsent, autoRenew, turnstileToken: token }) }); const data = await resp.json(); if(!resp.ok){ const msg = data?.message || data?.error || 'Unknown error'; showError(`Checkout failed: ${msg}`); return; } if(data.checkoutId){ await mountSumUpWidget(data.checkoutId, data.orderRef); return; } showError('Failed to create in-page checkout.'); } catch(e){ showError('Checkout error.'); } }
+  async function startCheckout(plan, email, name, privacyConsent, autoRenew, isLoggedIn = false){ 
+    try { 
+      clearError(); 
+      const token = await getTurnstileToken(isLoggedIn); 
+      const resp = await fetch(`${API_BASE}/membership/checkout`, { 
+        method:'POST', 
+        headers:{ 
+          'Content-Type':'application/json', 
+          'Idempotency-Key': newIdempotencyKey() 
+        }, 
+        body: JSON.stringify({ email, name, plan, privacyConsent, autoRenew, turnstileToken: token }) 
+      }); 
+      const data = await resp.json(); 
+      if(!resp.ok){ 
+        const msg = data?.message || data?.error || 'Unknown error'; 
+        showError(`Checkout failed: ${msg}`); 
+        return; 
+      } 
+      if(data.checkoutId){ 
+        await mountSumUpWidget(data.checkoutId, data.orderRef); 
+        return; 
+      } 
+      showError('Failed to create in-page checkout.'); 
+    } catch(e){ 
+      showError('Checkout error.'); 
+    } 
+  }
 
   async function handleContinue(){
     const modalNameEl = membershipModal ? membershipModal.querySelector('#modal-name') : null;
@@ -269,7 +429,27 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     if (status.active) { showActiveGuard(status.endDate); return; }
     
     clearError();
-    await startCheckout(pendingPlan,email,name,consent,autoRenew);
+    await startCheckout(pendingPlan, email, name, consent, autoRenew, false);
+  }
+  
+  async function handleContinueLogged(){
+    const user = getLoggedInUser();
+    if (!user || !user.email) {
+      showError('Session expired. Please refresh and try again.');
+      return;
+    }
+    
+    const autoRenewLoggedEl = membershipModal ? membershipModal.querySelector('#modal-auto-renew-logged') : null;
+    const autoRenew = !!(autoRenewLoggedEl && autoRenewLoggedEl.checked);
+    
+    if(!pendingPlan){ showError('Please select a membership plan.'); return; }
+    
+    const status = await checkActiveMembership(user.email);
+    if (status.active) { showActiveGuard(status.endDate); return; }
+    
+    clearError();
+    // For logged-in users, privacy consent is implicitly agreed (they have an account)
+    await startCheckout(pendingPlan, user.email, user.name || '', true, autoRenew, true);
   }
 
   plansGrid && plansGrid.addEventListener('click', (e)=>{ 
