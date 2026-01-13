@@ -1643,9 +1643,43 @@ async function deleteEvent(id, title) {
     if (res.ok) {
       loadEvents();
     } else {
-      alert('Failed to delete event');
+      const data = await res.json();
+      
+      // Event has tickets - show warning with ticket holders
+      if (data.error === 'has_tickets') {
+        const ticketHolders = data.ticket_holders || [];
+        const ticketCount = data.tickets_sold || 0;
+        
+        let message = `⚠️ WARNING: "${data.event_name}" has ${ticketCount} ticket(s) sold.\n\n`;
+        message += `The following users have purchased tickets:\n\n`;
+        
+        ticketHolders.forEach(holder => {
+          message += `• ${holder.name} (${holder.email}) - ${holder.ticket_count} ticket(s)\n`;
+        });
+        
+        message += `\n🗑️ If you delete this event, ALL ${ticketCount} ticket(s) will be permanently deleted.\n\n`;
+        message += `Do you want to proceed?`;
+        
+        if (confirm(message)) {
+          // Force delete with all tickets
+          const forceRes = await fetch(`${API_BASE}/admin/events/${id}?force=true`, {
+            method: 'DELETE',
+            headers: { 'X-Session-Token': sessionToken }
+          });
+          
+          if (forceRes.ok) {
+            alert('Event and all associated tickets deleted successfully');
+            loadEvents();
+          } else {
+            alert('Failed to delete event');
+          }
+        }
+      } else {
+        alert('Failed to delete event');
+      }
     }
   } catch (err) {
+    console.error('Delete event error:', err);
     alert('Error deleting event');
   }
 }

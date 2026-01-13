@@ -4089,15 +4089,37 @@ app.put('/admin/events/:id', requireAdmin, async c => {
 app.delete('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
+    const force = c.req.query('force') === 'true'
     
-    // Check if event has tickets sold
-    const event = await c.env.DB.prepare('SELECT tickets_sold FROM events WHERE event_id = ?').bind(id).first()
+    // Check if event exists
+    const event = await c.env.DB.prepare('SELECT event_id, event_name, tickets_sold FROM events WHERE event_id = ?').bind(id).first()
     if (!event) {
       return c.json({ error: 'not_found' }, 404)
     }
     
-    if (event.tickets_sold > 0) {
-      return c.json({ error: 'cannot_delete_event_with_tickets' }, 400)
+    // Check if event has tickets sold (only count paid/confirmed tickets)
+    const ticketHolders = await c.env.DB.prepare(`
+      SELECT DISTINCT u.user_id, u.name, u.email, COUNT(*) as ticket_count
+      FROM tickets t
+      JOIN users u ON t.user_id = u.user_id
+      WHERE t.event_id = ? AND (t.payment_status = 'PAID' OR t.payment_status IS NULL)
+      GROUP BY u.user_id, u.name, u.email
+    `).bind(id).all()
+    
+    const confirmedTicketCount = ticketHolders.results?.reduce((sum, holder) => sum + holder.ticket_count, 0) || 0
+    
+    if (confirmedTicketCount > 0 && !force) {
+      return c.json({ 
+        error: 'has_tickets',
+        event_name: event.event_name,
+        tickets_sold: confirmedTicketCount,
+        ticket_holders: ticketHolders.results || []
+      }, 400)
+    }
+    
+    // Force delete: remove all tickets (including pending ones), then the event
+    if (force) {
+      await c.env.DB.prepare('DELETE FROM tickets WHERE event_id = ?').bind(id).run()
     }
     
     await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
