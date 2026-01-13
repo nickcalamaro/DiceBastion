@@ -1646,7 +1646,9 @@ uploadedEventImage = null;
 
 async function editEvent(id) {
   try {
-    const res = await fetch(`${API_BASE}/events/${id}`);
+    const res = await fetch(`${API_BASE}/admin/events/${id}`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
     const data = await res.json();
     const event = data.event || data;
 

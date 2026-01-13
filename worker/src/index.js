@@ -239,6 +239,18 @@ async function cleanupExpiredStockReservations(db) {
   }
 }
 
+/**
+ * Extract image key from R2 URL
+ * @param {string} url - Full R2 URL
+ * @returns {string|null} Image key or null
+ */
+function extractImageKey(url) {
+  if (!url) return null
+  // Extract the key from a URL like "https://pub-xxx.r2.dev/images/filename.jpg"
+  const match = url.match(/\/images\/(.+)$/)
+  return match ? `images/${match[1]}` : null
+}
+
 // ============================================================================
 // DATABASE HELPERS - Schema & Migration Utilities
 // ============================================================================
@@ -3874,6 +3886,45 @@ app.get('/admin/cron-logs', async c => {
 // ADMIN EVENT MANAGEMENT ENDPOINTS
 // ============================================================================
 
+// Get single event by ID (admin only)
+app.get('/admin/events/:id', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    
+    const event = await c.env.DB.prepare(`
+      SELECT 
+        event_id as id,
+        event_name as title,
+        slug,
+        description,
+        full_description,
+        event_datetime,
+        location,
+        membership_price,
+        non_membership_price,
+        capacity,
+        tickets_sold,
+        image_url,
+        requires_purchase,
+        is_active,
+        is_recurring,
+        recurrence_pattern,
+        recurrence_end_date
+      FROM events 
+      WHERE event_id = ?
+    `).bind(id).first()
+    
+    if (!event) {
+      return c.json({ error: 'event_not_found' }, 404)
+    }
+    
+    return c.json(event)
+  } catch (err) {
+    console.error('Error fetching event:', err)
+    return c.json({ error: 'failed_to_fetch_event' }, 500)
+  }
+})
+
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
@@ -4633,6 +4684,53 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
   } catch (e) {
     console.error('Delete product error:', e)
     return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Upload image to R2 (admin only)
+app.post('/admin/images', requireAdmin, async (c) => {
+  try {
+    const { image, filename } = await c.req.json()
+    
+    if (!image || !filename) {
+      return c.json({ error: 'missing_image_or_filename' }, 400)
+    }
+
+    // Check if R2 bucket is configured
+    if (!c.env.IMAGES) {
+      console.error('R2 bucket not configured')
+      return c.json({ error: 'storage_not_configured' }, 500)
+    }
+
+    // Convert base64 to buffer
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '')
+    const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0))
+
+    // Generate unique filename with timestamp
+    const timestamp = Date.now()
+    const key = `images/${timestamp}-${filename}`
+
+    // Upload to R2
+    await c.env.IMAGES.put(key, buffer, {
+      httpMetadata: {
+        contentType: 'image/jpeg',
+      },
+    })
+
+    // Return public URL
+    // Use R2_PUBLIC_URL env var if set, otherwise construct default URL
+    const baseUrl = c.env.R2_PUBLIC_URL || `https://pub-${c.env.R2_ACCOUNT_HASH || 'unknown'}.r2.dev`
+    const publicUrl = `${baseUrl}/${key}`
+    
+    console.log('Image uploaded successfully:', key)
+    
+    return c.json({ 
+      success: true, 
+      url: publicUrl 
+    })
+  } catch (e) {
+    console.error('Image upload error:', e)
+    return c.json({ error: 'upload_failed', details: e.message }, 500)
   }
 })
 
