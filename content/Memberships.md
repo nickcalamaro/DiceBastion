@@ -10,76 +10,79 @@ showDate: false
 <script src="/js/utils.js"></script>
 <script src="/js/modal.js"></script>
 
+<!-- Component Styles -->
+<link rel="stylesheet" href="/css/components.css">
+
 <meta name="description" content="Become a member of Dice Bastion Gibraltar and enjoy local discounts, free venue access, and exclusive support for our board game, card game, RPG, and wargame events.">
 
 <b>Gibraltar Dice Bastion is completely funded by our members!</b>
 
 If you'd like to support us, get free bookings for game tables, and a whole range of other benefits, please consider becoming a member!
 
-  <div class="plans-grid" id="membership-plans" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items:stretch;">
+  <div class="plans-grid" id="membership-plans">
   <!-- Monthly -->
-  <div class="plan-card" data-plan="monthly" style="background:linear-gradient(180deg,#ffffff,#f9f9f9); border:1px solid #eaeaea; border-radius:12px; padding:18px; box-shadow:0 4px 14px rgba(0,0,0,0.06); display:flex; flex-direction:column;">
-    <div style="font-weight:700; color: rgb(var(--color-primary-600)); font-size:0.85rem;">Most flexible</div>
-    <h3 style="margin:6px 0 0; font-size:1.2rem;">Monthly</h3>
-    <div style="margin:8px 0 12px; font-size:1.7rem; font-weight:800;">
+  <div class="plan-card" data-plan="monthly">
+    <div class="plan-label">Most flexible</div>
+    <h3 class="plan-name">Monthly</h3>
+    <div class="plan-price">
       <span class="currency">£</span><span class="amount" data-price-for="monthly">10.00</span>
-      <span style="font-size:0.9rem; color:#666; font-weight:500;">/month</span>
+      <span class="plan-price-period">/month</span>
     </div>
-    <ul style="list-style: none; padding:0; margin:0 0 12px; color:#333; line-height:1.5;">
+    <ul class="plan-features">
       <li>Free access to table bookings</li>
       <li>Support our events and community</li>
     </ul>
-    <button class="cta" data-plan="monthly" style="margin-top:auto; padding:10px 12px; border:none; border-radius:8px; background: rgb(var(--color-primary-500)); color:#fff; font-weight:700; cursor:pointer;">
+    <button class="plan-cta" data-plan="monthly">
       Join Monthly
     </button>
   </div>
 
   <!-- Quarterly (Most popular) -->
-  <div class="plan-card" data-plan="quarterly" style="background:linear-gradient(180deg,#ffffff,#f9f9f9); border:2px solid rgb(var(--color-primary-500)); border-radius:12px; padding:18px; box-shadow:0 6px 16px rgba(0,0,0,0.08); position:relative; display:flex; flex-direction:column;">
-    <div style="position:absolute; top:-10px; right:12px; background: rgb(var(--color-primary-500)); color:#fff; padding:4px 8px; border-radius:999px; font-size:0.8rem; font-weight:800;">Most popular</div>
-    <h3 style="margin:6px 0 0; font-size:1.2rem;">Quarterly</h3>
-    <div style="margin:8px 0 12px; font-size:1.7rem; font-weight:800;">
+  <div class="plan-card plan-card-featured" data-plan="quarterly">
+    <div class="plan-badge">Most popular</div>
+    <h3 class="plan-name">Quarterly</h3>
+    <div class="plan-price">
       <span class="currency">£</span><span class="amount" data-price-for="quarterly">25.00</span>
-      <span style="font-size:0.9rem; color:#666; font-weight:500;">/quarter</span>
+      <span class="plan-price-period">/quarter</span>
     </div>
-    <ul style="list-style: none; padding:0; margin:0 0 12px; color:#333; line-height:1.5;">
+    <ul class="plan-features">
       <li>Free table bookings</li>
       <li>Local discounts (Dominos, Imperial Newsagents, Music Corner, Euphoria)</li>
       <li>Discounts on club events</li>
       <li>Free drinks at selected events</li>
     </ul>
-    <button class="cta" data-plan="quarterly" style="margin-top:auto; padding:10px 12px; border:none; border-radius:8px; background: rgb(var(--color-primary-500)); color:#fff; font-weight:700; cursor:pointer;">
+    <button class="plan-cta" data-plan="quarterly">
       Join Quarterly
     </button>
   </div>
 
   <!-- Annual -->
-  <div class="plan-card" data-plan="annual" style="background:linear-gradient(180deg,#ffffff,#f9f9f9); border:1px solid #eaeaea; border-radius:12px; padding:18px; box-shadow:0 4px 14px rgba(0,0,0,0.06); display:flex; flex-direction:column;">
-    <div style="font-weight:700; color: rgb(var(--color-primary-600)); font-size:0.85rem;">Best value</div>
-    <h3 style="margin:6px 0 0; font-size:1.2rem;">Annual</h3>
-    <div style="margin:8px 0 12px; font-size:1.7rem; font-weight:800;">
+  <div class="plan-card" data-plan="annual">
+    <div class="plan-label">Best value</div>
+    <h3 class="plan-name">Annual</h3>
+    <div class="plan-price">
       <span class="currency">£</span><span class="amount" data-price-for="annual">90.00</span>
-      <span style="font-size:0.9rem; color:#666; font-weight:500;">/year</span>
+      <span class="plan-price-period">/year</span>
     </div>
-    <ul style="list-style: none; padding:0; margin:0 0 12px; color:#333; line-height:1.5;">
+    <ul class="plan-features">
       <li>All quarterly benefits</li>
       <li>10% cheaper than paying quarterly</li>
     </ul>
-    <button class="cta" data-plan="annual" style="margin-top:auto; padding:10px 12px; border:none; border-radius:8px; background: rgb(var(--color-primary-500)); color:#fff; font-weight:700; cursor:pointer;">
+    <button class="plan-cta" data-plan="annual">
       Join Annual
     </button>
   </div>
 </div>
 
-<div style="display:flex; gap:12px; align-items:center; justify-content:center; margin-top:12px; color:#333;">
-  <span style="font-size:0.95rem;">Secure checkout powered by SumUp</span>
-  <span aria-hidden="true" style="width:6px; height:6px; background: rgb(var(--color-primary-500)); border-radius:50%; display:inline-block;"></span>
-  <span style="font-size:0.95rem;">Auto-renewal is optional</span>
+<div class="footer-info">
+  <span>Secure checkout powered by SumUp</span>
+  <span class="footer-divider" aria-hidden="true"></span>
+  <span>Auto-renewal is optional</span>
 </div>
 
 <!-- Simple footer with member login placeholder -->
-<div id="membership-cta-footer" style="text-align:center; margin: 1.5rem auto;">
-  <a href="/login" style="color: rgb(var(--color-primary-600)); text-decoration: underline;">Already a member? Log in here.</a>
+<div id="membership-cta-footer" class="text-center" style="margin: 1.5rem auto;">
+  <a href="/login" class="link">Already a member? Log in here.</a>
 </div>
 </section>
 
@@ -130,12 +133,11 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     if (membershipModal) {
       const sumupCardEl = membershipModal.querySelector('#sumup-card');
       if (sumupCardEl) sumupCardEl.innerHTML = '';
-      if (window.turnstile) { 
-        try { 
-          window.turnstile.reset('#mship-ts'); 
-          window.turnstile.reset('#mship-ts-logged'); 
-        } catch(_){} 
-      }
+      
+      // Clean up Turnstile widgets using shared utility
+      window.utils.cleanupTurnstile(null, 'mship-ts');
+      window.utils.cleanupTurnstile(null, 'mship-ts-logged');
+      
       membershipModal.close();
       membershipModal = null;
     }
@@ -175,7 +177,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
         <div class="modal-section">
           <div class="modal-help-text">Security check</div>
-          <div id="mship-ts" class="cf-turnstile" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
+          <div id="mship-ts" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
         </div>
 
         <button id="modal-continue" type="button" class="modal-btn modal-btn-primary modal-section">Continue</button>
@@ -198,7 +200,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
         <div class="modal-section">
           <div class="modal-help-text">Security check</div>
-          <div id="mship-ts-logged" class="cf-turnstile" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
+          <div id="mship-ts-logged" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
         </div>
 
         <button id="modal-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
@@ -225,8 +227,19 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     });
     
     membershipModal.open();
-    loadTurnstileSdk().catch(()=>{});
     
+    // Render Turnstile programmatically (respects localhost skip)
+    if (isLoggedIn) {
+      setTimeout(() => {
+        window.utils.renderTurnstile('mship-ts-logged', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+      }, 100);
+    } else {
+      setTimeout(() => {
+        window.utils.renderTurnstile('mship-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+      }, 100);
+    }
+    
+    window.utils.loadTurnstileSdk().catch(()=>{});
     // Setup event listeners for guest flow
     const modalNameEl = membershipModal.querySelector('#modal-name');
     const modalEmailEl = membershipModal.querySelector('#modal-email');
@@ -263,83 +276,31 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   }
 
   async function getTurnstileToken(isLoggedIn){ 
-    if (IS_LOCALHOST) { 
-      console.log('Localhost detected - using test-bypass token'); 
-      return 'test-bypass'; 
-    } 
-    await loadTurnstileSdk(); 
-    const elId = isLoggedIn ? '#mship-ts-logged' : '#mship-ts';
-    const el = membershipModal ? membershipModal.querySelector(elId) : document.querySelector(elId); 
-    if (!el || !window.turnstile) throw new Error('Security check not ready'); 
-    const t = window.turnstile.getResponse(el); 
-    if (!t) throw new Error('Please complete the security check.'); 
-    return t; 
+    const elId = isLoggedIn ? 'mship-ts-logged' : 'mship-ts';
+    return await window.utils.getTurnstileToken(elId, null, IS_LOCALHOST);
   }
 
   async function confirmOrder(ref){ 
-    const maxAttempts=200; 
-    for(let i=0;i<maxAttempts;i++){ 
-      try { 
-        const r=await fetch(`${API_BASE}/membership/confirm?orderRef=${encodeURIComponent(ref)}`); 
-        const d=await r.json(); 
-        if(d.ok && (d.status==='active' || d.status==='already_active')){ 
-          // Redirect to thank-you page like event flow
-          const successData = {
-            plan: d.plan,
-            endDate: d.endDate,
-            amount: d.amount,
-            currency: d.currency,
-            autoRenew: d.autoRenew,
-            cardLast4: d.cardLast4
-          };
-          
-          // Store in sessionStorage for thank-you page if account setup needed
-          if (d.needsAccountSetup) {
-            sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
-              email: d.userEmail,
-              eventName: null,  // Not an event
-              isMembership: true
-            }));
-          }
-          
-          // Redirect to thank-you page
-          window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref);
-          return true; 
-        } 
-        if(d.status && String(d.status).toUpperCase()==='PENDING'){ 
-          await new Promise(r=>setTimeout(r,1500)); 
-          continue; 
-        } 
-      } catch(e){} 
-      await new Promise(r=>setTimeout(r,1500)); 
-    } 
-    showError('Payment is still processing. Please refresh shortly.'); 
-    return false; 
-  }
-
-  async function loadSumUpSdk(){ 
-    if (window.SumUpCard) return true; 
-    return new Promise((resolve,reject)=>{ 
-      const s=document.createElement('script'); 
-      s.src='https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js'; 
-      s.async=true; 
-      s.onload=()=>resolve(true); 
-      s.onerror=()=>reject(new Error('Failed to load SumUp SDK')); 
-      document.head.appendChild(s); 
-    }); 
-  }
-  
-  function loadTurnstileSdk(){ 
-    if (IS_LOCALHOST || window.turnstile) return Promise.resolve(true); 
-    return new Promise((res,rej)=>{ 
-      const s=document.createElement('script'); 
-      s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; 
-      s.async=true; 
-      s.defer=true; 
-      s.onload=()=>res(true); 
-      s.onerror=()=>rej(new Error('Turnstile load failed')); 
-      document.head.appendChild(s); 
-    }); 
+    const result = await window.utils.pollPaymentConfirmation('/membership/confirm', ref, {
+      onSuccess: (data) => {
+        // Store in sessionStorage for thank-you page if account setup needed
+        if (data.needsAccountSetup) {
+          sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+            email: data.userEmail,
+            eventName: null,  // Not an event
+            isMembership: true
+          }));
+        }
+        
+        // Redirect to thank-you page
+        window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref);
+      },
+      onError: (errorMsg) => {
+        showError(errorMsg);
+      }
+    });
+    
+    return result !== null; 
   }
 
   async function checkActiveMembership(email){ 
@@ -354,7 +315,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   }
 
   async function mountSumUpWidget(checkoutId, ref){
-    try { await loadSumUpSdk(); } catch(e){ showError('Could not load payment widget.'); return; }
+    try { await window.utils.loadSumUpSdk(); } catch(e){ showError('Could not load payment widget.'); return; }
     try {
       clearError();
       const emailStepEl = membershipModal ? membershipModal.querySelector('#sumup-email-step') : null;
@@ -453,7 +414,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   }
 
   plansGrid && plansGrid.addEventListener('click', (e)=>{ 
-    const btn = e.target.closest('button.cta[data-plan]'); 
+    const btn = e.target.closest('button.plan-cta[data-plan]'); 
     if(!btn) return; 
     pendingPlan = btn.dataset.plan; 
     const planName = btn.textContent || 'Membership';

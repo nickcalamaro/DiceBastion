@@ -4718,15 +4718,29 @@ app.post('/admin/images', requireAdmin, async (c) => {
     })
 
     // Return public URL
-    // Use R2_PUBLIC_URL env var if set, otherwise construct default URL
-    const baseUrl = c.env.R2_PUBLIC_URL || `https://pub-${c.env.R2_ACCOUNT_HASH || 'unknown'}.r2.dev`
-    const publicUrl = `${baseUrl}/${key}`
+    // For R2 public buckets, the URL format is typically:
+    // - Custom domain: https://images.dicebastion.com/{key}
+    // - R2.dev subdomain: https://{bucket}.{accountId}.r2.cloudflarestorage.com/{key}
+    // You need to configure public access in Cloudflare dashboard and set R2_PUBLIC_URL
+    
+    let publicUrl
+    if (c.env.R2_PUBLIC_URL) {
+      // Use configured public URL
+      publicUrl = `${c.env.R2_PUBLIC_URL}/${key}`
+    } else {
+      // Fallback: return a placeholder URL that indicates configuration needed
+      publicUrl = `/r2-placeholder/${key}`
+      console.warn('R2_PUBLIC_URL not configured. Set this environment variable to enable public image access.')
+      console.log('Configure R2 public access at: https://dash.cloudflare.com/?to=/:account/r2/buckets/dicebastion-images/settings')
+    }
     
     console.log('Image uploaded successfully:', key)
+    console.log('Public URL:', publicUrl)
     
     return c.json({ 
       success: true, 
-      url: publicUrl 
+      url: publicUrl,
+      key: key  // Return the key for debugging
     })
   } catch (e) {
     console.error('Image upload error:', e)

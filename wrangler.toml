@@ -12,10 +12,12 @@ binding = "DB"
 database_name = "dicebastion"
 database_id = "9abc9bae-236a-4237-aa88-78cf161ba9d1"
 
-# R2 Object Storage (for future image uploads)
+# R2 Object Storage (for image uploads)
 [[r2_buckets]]
 binding = "IMAGES"
 bucket_name = "dicebastion-images"
+# Note: After enabling public access in Cloudflare dashboard, set R2_PUBLIC_URL:
+# R2_PUBLIC_URL = "https://pub-xxxxx.r2.dev"  # or your custom domain
 
 # Service Bindings (Worker-to-Worker Communication)
 [[services]]
@@ -36,6 +38,7 @@ MAILERSEND_FROM_NAME = "Dice Bastion"
 MAILERSEND_FROM_EMAIL = "noreply@dicebastion.com"
 ALLOW_TEST_BYPASS = "true"
 PAYMENTS_WORKER_URL = "https://dicebastion-payments.ncalamaro.workers.dev"
+R2_PUBLIC_URL = "https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev"
 
 # Production secrets (set via: wrangler secret put SECRET_NAME)
 # - INTERNAL_SECRET (must match payments worker)

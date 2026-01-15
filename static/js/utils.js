@@ -159,6 +159,268 @@ window.utils = {
       .replace(/\-\-+/g, '-')
       .replace(/^-+/, '')
       .replace(/-+$/, '');
+  },
+
+  /**
+   * Poll payment confirmation endpoint until payment is confirmed or timeout
+   * @param {string} endpoint - The API endpoint to poll (e.g., '/events/confirm' or '/membership/confirm')
+   * @param {string} orderRef - The order reference ID
+   * @param {Object} options - Optional configuration
+   * @param {number} options.maxAttempts - Maximum polling attempts (default: 120)
+   * @param {number} options.pollInterval - Time between polls in ms (default: 1500)
+   * @param {Function} options.onSuccess - Callback when payment confirmed, receives response data
+   * @param {Function} options.onError - Callback when error occurs, receives error message
+   * @returns {Promise<Object|null>} - Response data on success, null on timeout/error
+   */
+  pollPaymentConfirmation: async (endpoint, orderRef, options = {}) => {
+    const {
+      maxAttempts = 120,  // 3 minutes at 1.5s intervals
+      pollInterval = 1500,
+      onSuccess = null,
+      onError = null
+    } = options;
+
+    const apiBase = window.utils.getApiBase();
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        const url = `${apiBase}${endpoint}?orderRef=${encodeURIComponent(orderRef)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        // Success cases: payment confirmed (active or already_active status)
+        if (data.ok && (data.status === 'active' || data.status === 'already_active')) {
+          if (onSuccess) {
+            onSuccess(data);
+          }
+          return data;
+        }
+        
+        // Still pending - keep polling
+        if (data.status && String(data.status).toUpperCase() === 'PENDING') {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          continue;
+        }
+        
+        // If we get ok: false with a specific error, stop polling
+        if (!data.ok && data.error && data.error !== 'verify_failed') {
+          const errorMsg = data.message || 'Payment failed: ' + data.error;
+          if (onError) {
+            onError(errorMsg);
+          }
+          return null;
+        }
+      } catch (error) {
+        console.error('Payment confirmation polling error:', error);
+        // Don't fail immediately on network errors - payment might still be processing
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+    
+    // Timeout - payment is taking longer than expected
+    const timeoutMsg = 'Your payment is still being processed. Please check your email for confirmation, or refresh this page in a minute.';
+    if (onError) {
+      onError(timeoutMsg);
+    }
+    return null;
+  },
+
+  /**
+   * Load SumUp Card SDK dynamically
+   * @returns {Promise<boolean>} - Resolves when SDK is loaded
+   */
+  loadSumUpSdk: async () => {
+    if (window.SumUpCard) return true;
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error('Failed to load SumUp SDK'));
+      document.head.appendChild(script);
+    });
+  },
+
+  /**
+   * Load Cloudflare Turnstile SDK dynamically
+   * @returns {Promise<boolean>} - Resolves when SDK is loaded
+   */
+  loadTurnstileSdk: async () => {
+    if (window.turnstile) return true;
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error('Turnstile load failed'));
+      document.head.appendChild(script);
+    });
+  },
+
+  /**
+   * Render Turnstile widget with automatic cleanup and retry logic
+   * @param {string} elementId - The ID of the container element
+   * @param {string} sitekey - Turnstile site key
+   * @param {Object} options - Optional configuration
+   * @param {boolean} options.skipOnLocalhost - Skip rendering on localhost (default: true)
+   * @param {Object} options.widgetState - Object to store widget ID (e.g., {widgetId: null})
+   * @returns {Promise<string|null>} - Widget ID on success, null if skipped
+   */
+  renderTurnstile: async (elementId, sitekey, options = {}) => {
+    const {
+      skipOnLocalhost = true,
+      widgetState = null
+    } = options;
+
+    // Skip on localhost if configured
+    if (skipOnLocalhost && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      console.log('Localhost detected - skipping Turnstile render');
+      return null;
+    }
+
+    await window.utils.loadTurnstileSdk();
+    const element = document.getElementById(elementId);
+    
+    if (!element || !window.turnstile) return null;
+
+    // Remove existing widget if present
+    if (widgetState && widgetState.widgetId !== null && widgetState.widgetId !== undefined) {
+      try {
+        window.turnstile.remove(widgetState.widgetId);
+        console.log('Turnstile widget removed:', widgetState.widgetId);
+      } catch(e) {
+        console.log('Turnstile remove failed:', e);
+      }
+    }
+
+    // Clear container and reset state
+    element.innerHTML = '';
+    try {
+      if (window.turnstile.getResponse) {
+        const existingResponse = window.turnstile.getResponse(element);
+        if (existingResponse !== undefined) {
+          console.log('Found orphaned Turnstile widget, attempting cleanup');
+          window.turnstile.reset(element);
+        }
+      }
+    } catch(e) {
+      // Expected if no widget exists
+    }
+
+    // Small delay to ensure DOM is ready
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Render new widget
+    try {
+      const widgetId = window.turnstile.render(element, {
+        sitekey,
+        size: 'flexible'
+      });
+      
+      if (widgetState) {
+        widgetState.widgetId = widgetId;
+      }
+      
+      console.log('Turnstile widget rendered with ID:', widgetId);
+      return widgetId;
+    } catch(e) {
+      console.error('Turnstile render failed:', e);
+      // Retry once with fresh container
+      element.innerHTML = '';
+      try {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const widgetId = window.turnstile.render(element, {
+          sitekey,
+          size: 'flexible'
+        });
+        
+        if (widgetState) {
+          widgetState.widgetId = widgetId;
+        }
+        
+        console.log('Turnstile widget rendered (retry):', widgetId);
+        return widgetId;
+      } catch(e2) {
+        console.error('Turnstile render failed again:', e2);
+        if (widgetState) {
+          widgetState.widgetId = null;
+        }
+        return null;
+      }
+    }
+  },
+
+  /**
+   * Get Turnstile token from a rendered widget
+   * @param {string} elementId - The ID of the Turnstile container
+   * @param {string|null} widgetId - The widget ID (optional, will try to get from element)
+   * @param {boolean} skipOnLocalhost - Return test token on localhost (default: true)
+   * @returns {Promise<string>} - The Turnstile token
+   */
+  getTurnstileToken: async (elementId, widgetId = null, skipOnLocalhost = true) => {
+    // Bypass on localhost
+    if (skipOnLocalhost && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      console.log('Localhost detected - using test-bypass token');
+      return 'test-bypass';
+    }
+
+    await window.utils.loadTurnstileSdk();
+    const element = document.getElementById(elementId);
+    
+    if (!element || !window.turnstile) {
+      throw new Error('Turnstile not ready');
+    }
+
+    // Get token from widget
+    const token = widgetId !== null 
+      ? window.turnstile.getResponse(widgetId)
+      : window.turnstile.getResponse(element);
+      
+    if (!token) {
+      throw new Error('Please complete the security check.');
+    }
+    
+    return token;
+  },
+
+  /**
+   * Clean up Turnstile widget and container
+   * @param {string|null} widgetId - The widget ID to remove
+   * @param {string} elementId - The container element ID
+   */
+  cleanupTurnstile: (widgetId, elementId) => {
+    const element = document.getElementById(elementId);
+    
+    if (window.turnstile && widgetId !== null) {
+      try {
+        console.log('Removing Turnstile widget:', widgetId);
+        window.turnstile.remove(widgetId);
+        console.log('Turnstile widget removed successfully');
+      } catch(e) {
+        console.error('Turnstile cleanup failed:', e);
+      }
+    }
+    
+    if (window.turnstile && element) {
+      try {
+        window.turnstile.reset(element);
+        console.log('Reset Turnstile container as fallback');
+      } catch(e) {
+        // Silent fail - expected if no widget exists
+      }
+    }
+    
+    if (element) {
+      element.innerHTML = '';
+      const parent = element.parentNode;
+      if (parent) {
+        const newElement = element.cloneNode(false);
+        parent.replaceChild(newElement, element);
+        console.log('Turnstile container replaced with fresh clone');
+      }
+    }
   }
 };
 

@@ -151,182 +151,49 @@ window.initEventPurchase = function initEventPurchase(event) {
     if (el) el.style.display = 'block';
   }
   
-  async function loadSumUpSdk() {
-    if (window.SumUpCard) return true;
-    return new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = 'https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js';
-      s.async = true;
-      s.onload = () => res(true);
-      s.onerror = () => rej(new Error('SumUp SDK load failed'));
-      document.head.appendChild(s);
-    });
-  }
-    function loadTurnstileSdk() {
-    if (window.turnstile) return Promise.resolve(true);
-    return new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
-      s.async = true;
-      s.defer = true;
-      s.onload = () => res(true);
-      s.onerror = () => rej(new Error('Turnstile load failed'));
-      document.head.appendChild(s);
-    });
-  }  async function renderTurnstile(isLoggedIn = false) {
-    // Skip Turnstile rendering on localhost
-    if (IS_LOCALHOST) {
-      console.log('Localhost detected - skipping Turnstile render');
-      return;
-    }
-    
-    await loadTurnstileSdk();
-    const tsElId = isLoggedIn ? 'evt-ts-logged-' + eventId : 'evt-ts-' + eventId;
-    const tsEl = document.getElementById(tsElId);
-    const widgetIdRef = isLoggedIn ? 'turnstileLoggedWidgetId' : 'turnstileWidgetId';
-    
-    if (!tsEl || !window.turnstile) return;
-    
+  async function renderTurnstile(isLoggedIn = false) {
     // Check if modal is still visible (in case it was closed while timeout was pending)
     if (!modal || modal.style.display === 'none') {
       console.log('Modal closed, skipping Turnstile render');
       return;
     }
     
-    // Remove existing widget if present
-    const currentWidgetId = isLoggedIn ? turnstileLoggedWidgetId : turnstileWidgetId;
-    if (currentWidgetId !== null) {
-      try {
-        window.turnstile.remove(currentWidgetId);
-        console.log('Turnstile widget removed:', currentWidgetId);
-      } catch(e) {
-        console.log('Turnstile remove failed:', e);
-      }
-      if (isLoggedIn) {
-        turnstileLoggedWidgetId = null;
-      } else {
-        turnstileWidgetId = null;
-      }
-    }
-    
-    // Clear the container completely and reset any Turnstile state
-    tsEl.innerHTML = '';
-    
-    // Remove any orphaned widgets by trying to get response from container
-    try {
-      if (window.turnstile.getResponse) {
-        const existingResponse = window.turnstile.getResponse(tsEl);
-        if (existingResponse !== undefined) {
-          console.log('Found orphaned Turnstile widget, attempting cleanup');
-          window.turnstile.reset(tsEl);
-        }
-      }
-    } catch(e) {
-      // Expected if no widget exists
-    }
-    
-    // Small delay to ensure DOM is ready
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Render new widget and store the ID
-    try {
-      const widgetId = window.turnstile.render(tsEl, {
-        sitekey: TURNSTILE_SITE_KEY,
-        size: 'flexible'
-      });
-      if (isLoggedIn) {
-        turnstileLoggedWidgetId = widgetId;
-      } else {
-        turnstileWidgetId = widgetId;
-      }
-      console.log('Turnstile widget rendered with ID:', widgetId, 'isLoggedIn:', isLoggedIn);
-    } catch(e) {
-      console.error('Turnstile render failed:', e);
-      // If render fails, try one more time with a fresh container
-      tsEl.innerHTML = '';
-      try {
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const widgetId = window.turnstile.render(tsEl, {
-          sitekey: TURNSTILE_SITE_KEY,
-          size: 'flexible'
-        });
-        if (isLoggedIn) {
-          turnstileLoggedWidgetId = widgetId;
-        } else {
-          turnstileWidgetId = widgetId;
-        }
-        console.log('Turnstile widget rendered with ID (retry):', widgetId, 'isLoggedIn:', isLoggedIn);
-      } catch(e2) {
-        console.error('Turnstile render failed again:', e2);
-        if (isLoggedIn) {
-          turnstileLoggedWidgetId = null;
-        } else {
-          turnstileWidgetId = null;
-        }
-      }
-    }
-  }
-    async function getTurnstileToken(isLoggedIn = false) {
-    // Bypass Turnstile on localhost
-    if (IS_LOCALHOST) {
-      console.log('Localhost detected - using test-bypass token');
-      return 'test-bypass';
-    }
-    
-    await loadTurnstileSdk();
     const tsElId = isLoggedIn ? 'evt-ts-logged-' + eventId : 'evt-ts-' + eventId;
-    const tsEl = document.getElementById(tsElId);
+    const widgetState = isLoggedIn 
+      ? { get widgetId() { return turnstileLoggedWidgetId; }, set widgetId(val) { turnstileLoggedWidgetId = val; } }
+      : { get widgetId() { return turnstileWidgetId; }, set widgetId(val) { turnstileWidgetId = val; } };
+    
+    const widgetId = await window.utils.renderTurnstile(tsElId, TURNSTILE_SITE_KEY, {
+      skipOnLocalhost: IS_LOCALHOST,
+      widgetState
+    });
+    
+    console.log('Turnstile widget rendered:', widgetId, 'isLoggedIn:', isLoggedIn);
+  }
+  async function getTurnstileToken(isLoggedIn = false) {
+    const tsElId = isLoggedIn ? 'evt-ts-logged-' + eventId : 'evt-ts-' + eventId;
     const currentWidgetId = isLoggedIn ? turnstileLoggedWidgetId : turnstileWidgetId;
     
-    if (!tsEl || !window.turnstile) throw new Error('Turnstile not ready');
-    
-    // Get token from the widget
-    const token = currentWidgetId !== null 
-      ? window.turnstile.getResponse(currentWidgetId)
-      : window.turnstile.getResponse(tsEl);
-      
-    if (!token) throw new Error('Please complete the security check.');
-    return token;
+    return await window.utils.getTurnstileToken(tsElId, currentWidgetId, IS_LOCALHOST);
   }
   async function confirmPayment(ref) {
-    const attempts = 15;
-    for (let i = 0; i < attempts; i++) {
-      try {
-        const r = await fetch(API_BASE + '/events/confirm?orderRef=' + encodeURIComponent(ref));
-        const j = await r.json();
-        
-        // Success cases: ticket is active or already_active
-        if (j.ok && (j.status === 'active' || j.status === 'already_active')) {
-          // Check if user needs account setup and store data in sessionStorage
-          if (j.needsAccountSetup && j.userEmail) {
-            sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
-              email: j.userEmail,
-              eventName: j.eventName || 'this event'
-            }));
-          }
-          
-          showSuccess();
-          return true;
+    const result = await window.utils.pollPaymentConfirmation('/events/confirm', ref, {
+      onSuccess: (data) => {
+        // Check if user needs account setup and store data in sessionStorage
+        if (data.needsAccountSetup && data.userEmail) {
+          sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+            email: data.userEmail,
+            eventName: data.eventName || 'this event'
+          }));
         }
-        
-        // Still pending - keep polling
-        if (j.status && String(j.status).toUpperCase() === 'PENDING') {
-          await new Promise(r => setTimeout(r, 1500));
-          continue;
-        }
-        
-        // If we get ok: false with a specific error, stop polling
-        if (!j.ok && j.error && j.error !== 'verify_failed') {
-          showError(j.message || 'Payment failed: ' + j.error);
-          return false;
-        }
-      } catch(e) {
-        console.error('Polling error:', e);
+        showSuccess();
+      },
+      onError: (errorMsg) => {
+        showError(errorMsg);
       }
-      await new Promise(r => setTimeout(r, 1500));
-    }
-    showError('Payment verification timed out. Please check your email or refresh the page.');
-    return false;
+    });
+    
+    return result !== null;
   }
     function unmountWidget() {
     // Properly unmount SumUp widget if it exists
@@ -346,7 +213,7 @@ window.initEventPurchase = function initEventPurchase(event) {
   
   async function mountWidget(checkoutId, orderRef) {
     try {
-      await loadSumUpSdk();
+      await window.utils.loadSumUpSdk();
     } catch(e) {
       showError('Payment widget failed.');
       return;
@@ -371,11 +238,8 @@ window.initEventPurchase = function initEventPurchase(event) {
           // Handle final states only - intermediate states like verification should not trigger actions
           if (type === 'success') {
             // Payment succeeded - verify with backend
-            const confirmed = await confirmPayment(orderRef);
-            if (!confirmed) {
-              // Only show error if backend confirmation failed after polling
-              showError('Payment verification failed. Please check your email or refresh the page.');
-            }
+            // Don't show error immediately if confirmation times out - payment likely succeeded
+            await confirmPayment(orderRef);
           } else if (type === 'error' || type === 'fail') {
             // Payment failed
             showError(body.message || 'Payment failed. Please try again.');
@@ -548,43 +412,10 @@ window.initEventPurchase = function initEventPurchase(event) {
       }
       
       // Clean up both Turnstile widgets
-      const cleanupTurnstile = (widgetId, elementId) => {
-        const tsEl = document.getElementById(elementId);
-        
-        if (window.turnstile && widgetId !== null) {
-          try {
-            console.log('Removing Turnstile widget:', widgetId);
-            window.turnstile.remove(widgetId);
-            console.log('Turnstile widget removed successfully');
-          } catch(e) {
-            console.error('Turnstile cleanup failed:', e);
-          }
-        }
-        
-        if (window.turnstile && tsEl) {
-          try {
-            window.turnstile.reset(tsEl);
-            console.log('Reset Turnstile container as fallback');
-          } catch(e) {
-            // Silent fail - expected if no widget exists
-          }
-        }
-        
-        if (tsEl) {
-          tsEl.innerHTML = '';
-          const parent = tsEl.parentNode;
-          const newTsEl = tsEl.cloneNode(false);
-          parent.replaceChild(newTsEl, tsEl);
-          console.log('Turnstile container replaced with fresh clone');
-        }
-      };
-      
-      // Clean up guest flow Turnstile
-      cleanupTurnstile(turnstileWidgetId, 'evt-ts-' + eventId);
+      window.utils.cleanupTurnstile(turnstileWidgetId, 'evt-ts-' + eventId);
       turnstileWidgetId = null;
       
-      // Clean up logged-in flow Turnstile
-      cleanupTurnstile(turnstileLoggedWidgetId, 'evt-ts-logged-' + eventId);
+      window.utils.cleanupTurnstile(turnstileLoggedWidgetId, 'evt-ts-logged-' + eventId);
       turnstileLoggedWidgetId = null;
       
       // Use the unmount helper to properly clean up SumUp widget
