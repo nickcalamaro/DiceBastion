@@ -1,0 +1,261 @@
+/**
+ * Dice Bastion Component Styles
+ * Standardized UI components used across homepage, events, and memberships
+ */
+
+/* ===== HERO / CTA SECTIONS ===== */
+.hero-cta-banner {
+  background: linear-gradient(135deg, #4f46e5 0%, #2563eb 50%, #0ea5e9 100%);
+  border-radius: 12px;
+  padding: 1.75rem 2rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3);
+  text-align: center;
+}
+
+.hero-cta-title {
+  color: white;
+  font-size: clamp(1.25rem, 4vw, 1.75rem);
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  line-height: 1.2;
+}
+
+.hero-cta-subtitle {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: clamp(0.95rem, 2.5vw, 1.1rem);
+  margin: 0 0 1.25rem 0;
+  max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.hero-cta-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.hero-cta-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 2rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 1.05rem;
+  transition: all 0.2s ease;
+  width: 240px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.hero-cta-btn-primary {
+  background: white;
+  color: rgb(var(--color-primary-600));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 2px solid white;
+}
+
+.hero-cta-btn-primary:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.hero-cta-btn-secondary {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 2px solid white;
+}
+
+.hero-cta-btn-secondary:hover {
+  background: white;
+  color: rgb(var(--color-primary-600));
+}
+
+/* ===== PRICING / PLAN CARDS ===== */
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  align-items: stretch;
+  margin: 2rem 0;
+}
+
+.plan-card {
+  background: linear-gradient(180deg, #ffffff, #f9f9f9);
+  border: 1px solid rgb(var(--color-neutral-300));
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.plan-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+}
+
+.plan-card-featured {
+  border: 2px solid rgb(var(--color-primary-500));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+.plan-badge {
+  position: absolute;
+  top: -10px;
+  right: 12px;
+  background: rgb(var(--color-primary-500));
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.plan-label {
+  font-weight: 700;
+  color: rgb(var(--color-primary-600));
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+.plan-name {
+  margin: 0.5rem 0 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: rgb(var(--color-neutral-900));
+}
+
+.plan-price {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 1.7rem;
+  font-weight: 800;
+  color: rgb(var(--color-neutral-900));
+}
+
+.plan-price-period {
+  font-size: 0.9rem;
+  color: rgb(var(--color-neutral-600));
+  font-weight: 500;
+}
+
+.plan-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+  color: rgb(var(--color-neutral-700));
+  line-height: 1.8;
+}
+
+.plan-features li::before {
+  content: "✓ ";
+  color: rgb(var(--color-primary-600));
+  font-weight: bold;
+  margin-right: 0.5rem;
+}
+
+.plan-cta {
+  margin-top: auto;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 8px;
+  background: rgb(var(--color-primary-500));
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.plan-cta:hover {
+  background: rgb(var(--color-primary-600));
+  transform: translateY(-2px);
+}
+
+/* ===== INFO BADGES ===== */
+.info-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+}
+
+.info-badge-success {
+  background: rgba(var(--color-success-100), 1);
+  color: rgba(var(--color-success-700), 1);
+}
+
+.info-badge-primary {
+  background: rgb(var(--color-primary-100));
+  color: rgb(var(--color-primary-700));
+}
+
+.info-badge-neutral {
+  background: rgb(var(--color-neutral-200));
+  color: rgb(var(--color-neutral-700));
+}
+
+/* ===== FOOTER / SUB-TEXT ===== */
+.footer-info {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1rem;
+  color: rgb(var(--color-neutral-600));
+  font-size: 0.95rem;
+}
+
+.footer-divider {
+  width: 6px;
+  height: 6px;
+  background: rgb(var(--color-primary-500));
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* ===== RESPONSIVE CONTAINER ===== */
+.page-container {
+  margin: 1rem auto 1.5rem;
+  max-width: 1100px;
+  padding: 0 1rem;
+}
+
+/* ===== TABLE CONTAINER (from homepage) ===== */
+.table-container {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  padding: 0 1rem;
+}
+
+@media (min-width: 768px) {
+  .table-container {
+    padding: 0 100px;
+  }
+}
+
+@media (max-width: 640px) {
+  .table-container {
+    padding: 0 0.5rem;
+  }
+  
+  .plans-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .hero-cta-buttons {
+    flex-direction: column;
+  }
+  
+  .hero-cta-btn {
+    width: 100%;
+  }
+}

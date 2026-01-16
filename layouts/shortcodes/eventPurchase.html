@@ -42,7 +42,7 @@
       </div>
       <div class="mt-3">
         <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2">Security check</div>
-        <div id="evt-ts-{{ .Get "id" }}" class="cf-turnstile" data-sitekey="{{ .Get "sitekey" | default "0x4AAAAAACAB4xlOnW3S8K0k" }}" data-size="flexible"></div>
+        <div id="evt-ts-{{ .Get "id" }}" data-sitekey="{{ .Get "sitekey" | default "0x4AAAAAACAB4xlOnW3S8K0k" }}" data-size="flexible"></div>
       </div>
       <button type="button" class="evt-continue mt-4 w-full py-3 border-none rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 font-bold cursor-pointer hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Continue to Payment</button>
     </div>
@@ -57,6 +57,7 @@
   const API_BASE = (window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev').replace(/\/+$/,'');
   const eventId = '{{ .Get "id" }}';
   const TS_SITE_KEY = '{{ .Get "sitekey" | default "0x4AAAAAACAB4xlOnW3S8K0k" }}';
+  const IS_LOCALHOST = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   if(!eventId) return;
 
   const root = document.querySelector('.event-purchase[data-event-id="'+eventId+'"]');
@@ -84,27 +85,8 @@
     } catch(e){ showError('Failed loading event'); }
   }
 
-  async function loadSumUpSdk(){
-    if(window.SumUpCard) return true;
-    return new Promise((res,rej)=>{
-      const s=document.createElement('script'); s.src='https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js'; s.async=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('SumUp SDK load failed')); document.head.appendChild(s);
-    });
-  }
-
-  function loadTurnstileSdk(){
-    if (window.turnstile) return Promise.resolve(true);
-    return new Promise((res,rej)=>{
-      const s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js'; s.async=true; s.defer=true; s.onload=()=>res(true); s.onerror=()=>rej(new Error('Turnstile load failed')); document.head.appendChild(s);
-    });
-  }
-
   async function getTurnstileToken(){
-    await loadTurnstileSdk();
-    const tsEl = document.getElementById('evt-ts-'+eventId);
-    if (!tsEl || !window.turnstile) throw new Error('Turnstile not ready');
-    const token = window.turnstile.getResponse(tsEl);
-    if (!token) throw new Error('Please complete the security check.');
-    return token;
+    return await window.utils.getTurnstileToken('evt-ts-' + eventId, null, false);
   }
 
   async function confirm(ref){
@@ -117,7 +99,7 @@
   }
 
   async function mountWidget(checkoutId, orderRef){
-    try { await loadSumUpSdk(); } catch(e){ showError('Payment widget failed.'); return; }
+    try { await window.utils.loadSumUpSdk(); } catch(e){ showError('Payment widget failed.'); return; }
     try {
       clearError();
       cardEl.style.display='block';
@@ -142,8 +124,8 @@
     showError('Missing checkout ID');
   }
 
-  function openModal(){ if(modal){ modal.style.display='flex'; const nameInput = modal.querySelector('.evt-name'); if(nameInput) nameInput.focus(); loadTurnstileSdk().catch(()=>{}); } }
-  function closeModal(){ if(modal){ modal.style.display='none'; const d = modal.querySelector('.evt-details'); if(d) d.style.display='block'; if(cardEl){ cardEl.innerHTML=''; cardEl.style.display='none'; } clearError(); const s=modal.querySelector('.evt-success'); if(s) s.style.display='none'; modal.querySelector('.evt-name').value=''; modal.querySelector('.evt-email').value=''; modal.querySelector('.evt-privacy').checked=false; if (window.turnstile) { try { window.turnstile.reset('#evt-ts-'+eventId); } catch(_){} } } }
+  function openModal(){ if(modal){ modal.style.display='flex'; const nameInput = modal.querySelector('.evt-name'); if(nameInput) nameInput.focus(); window.utils.loadTurnstileSdk().catch(()=>{}); } }
+  function closeModal(){ if(modal){ modal.style.display='none'; const d = modal.querySelector('.evt-details'); if(d) d.style.display='block'; if(cardEl){ cardEl.innerHTML=''; cardEl.style.display='none'; } clearError(); const s=modal.querySelector('.evt-success'); if(s) s.style.display='none'; modal.querySelector('.evt-name').value=''; modal.querySelector('.evt-email').value=''; modal.querySelector('.evt-privacy').checked=false; window.utils.cleanupTurnstile(null, 'evt-ts-'+eventId); } }
 
   root && root.querySelector('.evt-buy-btn')?.addEventListener('click', async () => { openModal(); });
   modal && modal.querySelector('.evt-close')?.addEventListener('click', closeModal);
@@ -171,6 +153,20 @@
 
   const qs = new URLSearchParams(location.search); const ref = qs.get('orderRef');
   if(ref){ confirm(ref).then(()=>{ const u=new URL(location.href); u.searchParams.delete('orderRef'); history.replaceState({},'',u); }); }
+
+  // Render Turnstile programmatically when modal opens
+  const buyBtn = root && root.querySelector('.evt-buy-btn');
+  if (buyBtn) {
+    buyBtn.addEventListener('click', () => {
+      if (modal) {
+        modal.style.display = 'flex';
+        // Render Turnstile after a short delay to ensure modal is visible
+        setTimeout(() => {
+          window.utils.renderTurnstile('evt-ts-' + eventId, TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+        }, 100);
+      }
+    });
+  }
 
   loadEvent();
 })();
