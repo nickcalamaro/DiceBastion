@@ -287,10 +287,13 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   }
 
   async function confirmOrder(ref, pollOptions = {}){ 
+    console.log('[confirmOrder] Starting payment confirmation for orderRef:', ref);
     const result = await window.utils.pollPaymentConfirmation('/membership/confirm', ref, {
       pollInterval: pollOptions.pollInterval,
       maxAttempts: pollOptions.maxAttempts,
       onSuccess: (data) => {
+        console.log('[confirmOrder] Payment confirmed successfully:', data);
+        
         // Store in sessionStorage for thank-you page if account setup needed
         if (data.needsAccountSetup) {
           sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
@@ -306,19 +309,24 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
         }
         
         // Redirect to thank-you page (even if email pending)
-        window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
+        const redirectUrl = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
           (data.emailSent === false ? '&emailPending=1' : '');
+        console.log('[confirmOrder] Redirecting to:', redirectUrl);
+        window.location.href = redirectUrl;
       },
       onError: (errorMsg) => {
+        console.error('[confirmOrder] Payment failed:', errorMsg);
         showError(errorMsg);
       },
       onTimeout: () => {
+        console.log('[confirmOrder] Payment polling timed out, redirecting with processing flag');
         // Payment is processing - webhook will complete it
         // Redirect to thank-you with processing flag
         window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&processing=1';
       }
     });
     
+    console.log('[confirmOrder] Poll result:', result);
     return result !== null; 
   }
 
@@ -347,6 +355,9 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
         id:'sumup-card',
         checkoutId,
         onResponse: async (type)=>{
+          // Clear any previous errors when user tries again
+          clearError();
+          
           const t = String(type||'').toLowerCase();
           if (t === 'success') {
             // Payment succeeded - use reduced polling (3s intervals, 20 attempts = 1 min)

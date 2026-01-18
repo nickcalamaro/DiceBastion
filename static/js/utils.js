@@ -190,8 +190,11 @@ window.utils = {
         const response = await fetch(url);
         const data = await response.json();
         
+        console.log('[pollPaymentConfirmation] Response:', JSON.stringify(data, null, 2));
+        
         // Success cases: payment confirmed (active or already_active status)
         if (data.ok && (data.status === 'active' || data.status === 'already_active')) {
+          console.log('[pollPaymentConfirmation] ✅ Payment confirmed! Calling onSuccess');
           if (onSuccess) {
             onSuccess(data);
           }
@@ -204,11 +207,12 @@ window.utils = {
           continue;
         }
         
-        // Payment failed or was declined
+        // Payment failed or was declined - use backend message if available
         if (data.status === 'FAILED' || data.status === 'DECLINED') {
-          const errorMsg = data.status === 'DECLINED' 
+          const errorMsg = data.message || (data.status === 'DECLINED' 
             ? 'Your card was declined. Please check your card details and try again, or use a different payment method.'
-            : 'Payment failed. Please try again or use a different payment method.';
+            : 'Payment failed. Please try again or use a different payment method.');
+          console.log('[pollPaymentConfirmation] Payment failed:', data.status, errorMsg);
           if (onError) {
             onError(errorMsg);
           }

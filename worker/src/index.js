@@ -2870,7 +2870,18 @@ app.get('/membership/confirm', async (c) => {
   catch { return c.json({ ok:false, error:'verify_failed' },400) }
   
   const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
-  if (!paid) return c.json({ ok:false, status: payment?.status || 'PENDING' })
+  if (!paid) {
+    const currentStatus = payment?.status || 'PENDING'
+    console.log('[membership/confirm] Payment not yet paid, status:', currentStatus)
+    
+    return c.json({ 
+      ok: false, 
+      status: currentStatus,
+      message: currentStatus === 'FAILED' ? 'Payment failed. Please check your card details and try again.' :
+               currentStatus === 'DECLINED' ? 'Your card was declined. Please use a different payment method.' :
+               'Payment is still processing.'
+    })
+  }
   
   // Verify amount/currency
   if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
@@ -3411,8 +3422,18 @@ app.get('/events/confirm', async c => {
     
     const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
     if (!paid) {
-      console.log('[events/confirm] Payment not yet paid, status:', payment?.status || 'PENDING')
-      return c.json({ ok:false, status: payment?.status || 'PENDING' })
+      const currentStatus = payment?.status || 'PENDING'
+      console.log('[events/confirm] Payment not yet paid, status:', currentStatus)
+      
+      // Return specific status for frontend to handle appropriately
+      // FAILED/DECLINED should stop polling and show error
+      return c.json({ 
+        ok: false, 
+        status: currentStatus,
+        message: currentStatus === 'FAILED' ? 'Payment failed. Please check your card details and try again.' :
+                 currentStatus === 'DECLINED' ? 'Your card was declined. Please use a different payment method.' :
+                 'Payment is still processing.'
+      })
     }
     
     console.log('[events/confirm] Payment verified as PAID')

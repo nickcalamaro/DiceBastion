@@ -210,10 +210,13 @@ window.initEventPurchase = function initEventPurchase(event) {
     return await window.utils.getTurnstileToken(tsElId, currentWidgetId, IS_LOCALHOST);
   }
   async function confirmPayment(ref, pollOptions = {}) {
+    console.log('[confirmPayment] Starting confirmation for ref:', ref, 'options:', pollOptions);
     const result = await window.utils.pollPaymentConfirmation('/events/confirm', ref, {
       pollInterval: pollOptions.pollInterval,
       maxAttempts: pollOptions.maxAttempts,
       onSuccess: (data) => {
+        console.log('[confirmPayment] ✅ Success callback triggered with data:', data);
+        
         // Check if user needs account setup and store data in sessionStorage
         if (data.needsAccountSetup && data.userEmail) {
           sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
@@ -222,23 +225,30 @@ window.initEventPurchase = function initEventPurchase(event) {
           }));
         }
         
-        // Show success even if email failed - payment went through
+        // Log if email failed but still redirect - payment succeeded
         if (!data.emailSent) {
           console.warn('[eventPurchase] Payment succeeded but email failed. User:', data.userEmail);
         }
         
-        showSuccess(data.emailSent);
+        // Redirect to thank-you page with event details
+        const redirectUrl = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
+          (data.emailSent === false ? '&emailPending=1' : '');
+        console.log('[confirmPayment] Redirecting to:', redirectUrl);
+        window.location.href = redirectUrl;
       },
       onError: (errorMsg) => {
+        console.error('[confirmPayment] ❌ Error callback triggered:', errorMsg);
         showError(errorMsg);
       },
       onTimeout: () => {
+        console.log('[confirmPayment] ⏱️ Timeout callback triggered');
         // Payment is processing - webhook will complete it
-        // Show pending message instead of error
-        showPending();
+        // Redirect to thank-you with processing flag
+        window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&processing=1';
       }
     });
     
+    console.log('[confirmPayment] Poll completed with result:', result);
     return result !== null;
   }
     function unmountWidget() {
@@ -271,15 +281,21 @@ window.initEventPurchase = function initEventPurchase(event) {
       // First unmount any existing widget to ensure clean state
       unmountWidget();
       
-      // Show payment section and hide details
+      // Hide all form steps and show payment section
+      const detailsEl = modal.querySelector('.evt-details');
+      const confirmLoggedEl = modal.querySelector('.evt-confirm-logged-in');
+      if (detailsEl) detailsEl.style.display = 'none';
+      if (confirmLoggedEl) confirmLoggedEl.style.display = 'none';
       cardEl.style.display = 'block';
-      modal.querySelector('.evt-details').style.display = 'none';
         // Mount fresh widget
       window.SumUpCard.mount({
         id: 'evt-card-'+eventId,
         checkoutId,
         onResponse: async (type, body) => {
           console.log('SumUp onResponse:', type, body);
+          
+          // Clear any previous errors when user tries again
+          clearError();
           
           // Handle final states only - intermediate states like verification should not trigger actions
           if (type === 'success') {
