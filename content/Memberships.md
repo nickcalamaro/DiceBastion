@@ -270,6 +270,12 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
         const loggedStep = membershipModal.querySelector('#sumup-logged-step');
         if (guestStep) guestStep.style.display = 'block';
         if (loggedStep) loggedStep.style.display = 'none';
+        
+        // Render Turnstile for guest form
+        setTimeout(() => {
+          window.utils.renderTurnstile('mship-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+        }, 100);
+        
         if (modalNameEl) modalNameEl.focus();
       });
     }
