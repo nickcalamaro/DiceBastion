@@ -2100,10 +2100,12 @@ async function loadMemberships() {
 
     // Render table rows
     tableBody.innerHTML = data.memberships.map(membership => {
-      const startDate = new Date(membership.start_date);
-      const endDate = new Date(membership.end_date);
+      // Handle null dates for pending memberships
+      const hasValidDates = membership.start_date && membership.end_date;
+      const startDate = hasValidDates ? new Date(membership.start_date) : null;
+      const endDate = hasValidDates ? new Date(membership.end_date) : null;
       const today = new Date();
-      const daysLeft = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+      const daysLeft = hasValidDates ? Math.ceil((endDate - today) / (1000 * 60 * 60 * 24)) : null;
       
       let statusBadge, statusColor;
       if (membership.status === 'active') {
@@ -2145,14 +2147,14 @@ async function loadMemberships() {
             </span>
           </td>
           <td class="admin-text-sm" style="padding: 1rem;">
-            ${startDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+            ${startDate ? startDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '<span style="color: rgb(var(--color-neutral-400));">N/A</span>'}
           </td>
           <td class="admin-text-sm" style="padding: 1rem;">
-            ${endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+            ${endDate ? endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '<span style="color: rgb(var(--color-neutral-400));">N/A</span>'}
           </td>
           <td style="padding: 1rem;">
-            <div style="font-weight: 600; color: ${daysLeft < 0 ? '#f44336' : daysLeft <= 30 ? '#ff9800' : '#4CAF50'};">
-              ${daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Today' : daysLeft === 1 ? '1 day' : `${daysLeft} days`}
+            <div style="font-weight: 600; color: ${daysLeft === null ? '#9e9e9e' : daysLeft < 0 ? '#f44336' : daysLeft <= 30 ? '#ff9800' : '#4CAF50'};">
+              ${daysLeft === null ? 'Pending' : daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Today' : daysLeft === 1 ? '1 day' : `${daysLeft} days`}
             </div>
           </td>
           <td style="padding: 1rem;">
