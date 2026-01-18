@@ -91,7 +91,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 <script>
 (function(){
   const API_BASE = utils.getApiBase();
-  const TS_SITE_KEY = (window.__DB_TS_SITE_KEY || '{{ with site.Params.turnstile_site_key }}{{ . }}{{ end }}' || (window.TURNSTILE_SITE_KEY || '0x4AAAAAACAB4xlOnW3S8K0k'));
+  const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   
   // Detect if we're running on localhost
   const IS_LOCALHOST = window.location.hostname === 'localhost' || 
