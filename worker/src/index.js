@@ -2956,19 +2956,27 @@ app.get('/membership/confirm', async (c) => {
     WHERE id = ?
   `).bind(actualPaymentId, toIso(new Date()), transaction.id).run()
   
-  // Get user details and send welcome email
+  // Get user details and send welcome email (don't block if email fails)
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
+  let emailSent = false
   if (user) {
-    const updatedMembership = { ...pending, end_date: toIso(end) }
-    const emailContent = getWelcomeEmail(updatedMembership, user, pending.auto_renew === 1)
-    await sendEmail(c.env, { 
-      to: user.email, 
-      ...emailContent,
-      emailType: 'membership_welcome',
-      relatedId: pending.id,
-      relatedType: 'membership',
-      metadata: { plan: pending.plan, auto_renew: pending.auto_renew }
-    })
+    try {
+      const updatedMembership = { ...pending, end_date: toIso(end) }
+      const emailContent = getWelcomeEmail(updatedMembership, user, pending.auto_renew === 1)
+      await sendEmail(c.env, { 
+        to: user.email, 
+        ...emailContent,
+        emailType: 'membership_welcome',
+        relatedId: pending.id,
+        relatedType: 'membership',
+        metadata: { plan: pending.plan, auto_renew: pending.auto_renew }
+      })
+      emailSent = true
+      console.log('[membership/confirm] Welcome email sent successfully to:', user.email)
+    } catch (emailError) {
+      console.error('[membership/confirm] Failed to send welcome email:', emailError)
+      // Don't fail the transaction - payment succeeded and membership is active
+    }
   }
   // Send admin notification
   try {
@@ -2990,8 +2998,9 @@ app.get('/membership/confirm', async (c) => {
       relatedType: 'membership',
       metadata: { plan: pending.plan, amount: transaction.amount }
     })
+    console.log('[membership/confirm] Admin notification sent successfully')
   } catch (adminEmailError) {
-    console.error('Failed to send admin notification for membership:', adminEmailError)
+    console.error('[membership/confirm] Failed to send admin notification:', adminEmailError)
     // Don't fail the main transaction if admin email fails
   }
   
@@ -3016,7 +3025,8 @@ app.get('/membership/confirm', async (c) => {
     autoRenew: pending.auto_renew === 1,
     cardLast4,
     needsAccountSetup: needsAccountSetup,
-    userEmail: user?.email || transaction.email
+    userEmail: user?.email || transaction.email,
+    emailSent  // Let frontend know if welcome email was sent
   })
 })
 
@@ -3432,27 +3442,35 @@ app.get('/events/confirm', async c => {
         .bind(ticket.event_id)
     ])
     
-    // Send confirmation email
+    // Send confirmation email (don't block success if email fails)
     const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(transaction.user_id).first()
+    let emailSent = false
     if (user) {
-      // For recurring events, calculate next occurrence for calendar invite
-      const eventForEmail = { ...ev }
-      if (ev.is_recurring === 1) {
-        const nextOccurrence = calculateNextOccurrence(ev, new Date())
-        if (nextOccurrence) {
-          eventForEmail.event_datetime = nextOccurrence.toISOString()
+      try {
+        // For recurring events, calculate next occurrence for calendar invite
+        const eventForEmail = { ...ev }
+        if (ev.is_recurring === 1) {
+          const nextOccurrence = calculateNextOccurrence(ev, new Date())
+          if (nextOccurrence) {
+            eventForEmail.event_datetime = nextOccurrence.toISOString()
+          }
         }
+        
+        const emailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
+        await sendEmail(c.env, { 
+          to: user.email, 
+          ...emailContent,
+          emailType: 'event_ticket_confirmation',
+          relatedId: ticket.id,
+          relatedType: 'ticket',
+          metadata: { event_id: ev.id, event_name: ev.event_name }
+        })
+        emailSent = true
+        console.log('[events/confirm] Confirmation email sent successfully to:', user.email)
+      } catch (emailError) {
+        console.error('[events/confirm] Failed to send confirmation email:', emailError)
+        // Don't fail the transaction - payment succeeded and ticket is active
       }
-      
-      const emailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
-      await sendEmail(c.env, { 
-        to: user.email, 
-        ...emailContent,
-        emailType: 'event_ticket_confirmation',
-        relatedId: ticket.id,
-        relatedType: 'ticket',
-        metadata: { event_id: ev.id, event_name: ev.event_name }
-      })
     }
     
     // Send admin notification for event tickets
@@ -3474,8 +3492,10 @@ app.get('/events/confirm', async c => {
         relatedId: ticket.id,
         relatedType: 'ticket',
         metadata: { event_id: ev.id, event_name: ev.event_name }
-      })    } catch (adminEmailError) {
-      console.error('Failed to send admin notification for event ticket:', adminEmailError)
+      })
+      console.log('[events/confirm] Admin notification sent successfully')
+    } catch (adminEmailError) {
+      console.error('[events/confirm] Failed to send admin notification:', adminEmailError)
       // Don't fail the main transaction if admin email fails
     }
     
@@ -3500,7 +3520,8 @@ app.get('/events/confirm', async c => {
       amount: transaction.amount,
       currency: transaction.currency || 'GBP',
       needsAccountSetup: needsAccountSetup,
-      userEmail: user?.email || transaction.email
+      userEmail: user?.email || transaction.email,
+      emailSent  // Let frontend know if confirmation email was sent
     })
   } catch (error) {
     console.error('[events/confirm] EXCEPTION:', error)

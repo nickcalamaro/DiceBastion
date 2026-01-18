@@ -71,7 +71,24 @@
     if(!el) return; el.textContent = msg || 'Error'; el.style.display='block';
   }
   function clearError(){ const el = modal && modal.querySelector('.evt-error'); if(el){ el.textContent=''; el.style.display='none'; } }
-  function showSuccess(){ const el = modal && modal.querySelector('.evt-success'); if(el){ el.style.display='block'; } }
+  function showSuccess(emailSent = true){ 
+    const el = modal && modal.querySelector('.evt-success'); 
+    if(!el) return;
+    if (!emailSent) {
+      const note = document.createElement('p');
+      note.style.cssText = 'margin-top:0.75rem;font-size:0.9em;color:#f59e0b;';
+      note.textContent = 'Note: Your confirmation email is being processed and will arrive shortly.';
+      el.appendChild(note);
+    }
+    el.style.display='block';
+  }
+  
+  function showPending(){
+    const el = modal && modal.querySelector('.evt-success');
+    if(!el) return;
+    el.innerHTML = '<div style="text-align:center;"><h3>🎉 Payment Received!</h3><p>Your payment is being processed. You\'ll receive a confirmation email shortly.</p><p style="margin-top:1rem;font-size:0.9em;color:#666;">You can safely close this window.</p></div>';
+    el.style.display='block';
+  }
 
   async function loadEvent(){
     try {
@@ -89,13 +106,37 @@
     return await window.utils.getTurnstileToken('evt-ts-' + eventId, null, false);
   }
 
-  async function confirm(ref){
-    const attempts=15; for(let i=0;i<attempts;i++){
-      try { const r = await fetch(API_BASE + '/events/confirm?orderRef=' + encodeURIComponent(ref)); const j = await r.json(); if(j.ok && j.status==='active'){ showSuccess(); return true; } if(j.status && String(j.status).toUpperCase()==='PENDING'){ await new Promise(r=>setTimeout(r,1500)); continue; } } catch(e) {}
-      await new Promise(r=>setTimeout(r,1500));
-    }
-    showError('Payment still processing. Refresh soon.');
-    return false;
+  async function confirm(ref, pollOptions = {}){
+    const result = await window.utils.pollPaymentConfirmation('/events/confirm', ref, {
+      pollInterval: pollOptions.pollInterval,
+      maxAttempts: pollOptions.maxAttempts,
+      onSuccess: (data) => {
+        if (data.needsAccountSetup && data.userEmail) {
+          sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+            email: data.userEmail,
+            eventName: data.eventName || 'this event'
+          }));
+        }
+        if (!data.emailSent) {
+          console.warn('[shortcode] Payment succeeded but email failed. User:', data.userEmail);
+        }
+        showSuccess(data.emailSent);
+      },
+      onError: (errorMsg) => {
+        const t = String(type||'').toLowerCase();
+        if (t === 'success') {
+          await confirm(orderRef, { pollInterval: 3000, maxAttempts: 20 });
+        } else if (t === 'error' || t === 'fail') {
+          showError('Payment failed. Please try again.');
+        } else if (t === 'cancel') {
+          showError('Payment cancelled.');
+       
+      },
+      onTimeout: () => {
+        showPending();
+      }
+    });
+    return result !== null;
   }
 
   async function mountWidget(checkoutId, orderRef){

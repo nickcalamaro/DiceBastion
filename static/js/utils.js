@@ -170,6 +170,7 @@ window.utils = {
    * @param {number} options.pollInterval - Time between polls in ms (default: 1500)
    * @param {Function} options.onSuccess - Callback when payment confirmed, receives response data
    * @param {Function} options.onError - Callback when error occurs, receives error message
+   * @param {Function} options.onTimeout - Callback when polling times out (webhook will complete)
    * @returns {Promise<Object|null>} - Response data on success, null on timeout/error
    */
   pollPaymentConfirmation: async (endpoint, orderRef, options = {}) => {
@@ -177,7 +178,8 @@ window.utils = {
       maxAttempts = 120,  // 3 minutes at 1.5s intervals
       pollInterval = 1500,
       onSuccess = null,
-      onError = null
+      onError = null,
+      onTimeout = null
     } = options;
 
     const apiBase = window.utils.getApiBase();
@@ -202,6 +204,17 @@ window.utils = {
           continue;
         }
         
+        // Payment failed or was declined
+        if (data.status === 'FAILED' || data.status === 'DECLINED') {
+          const errorMsg = data.status === 'DECLINED' 
+            ? 'Your card was declined. Please check your card details and try again, or use a different payment method.'
+            : 'Payment failed. Please try again or use a different payment method.';
+          if (onError) {
+            onError(errorMsg);
+          }
+          return null;
+        }
+        
         // If we get ok: false with a specific error, stop polling
         if (!data.ok && data.error && data.error !== 'verify_failed') {
           const errorMsg = data.message || 'Payment failed: ' + data.error;
@@ -218,9 +231,12 @@ window.utils = {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
     
-    // Timeout - payment is taking longer than expected
-    const timeoutMsg = 'Your payment is still being processed. Please check your email for confirmation, or refresh this page in a minute.';
-    if (onError) {
+    // Timeout - webhook will complete the payment
+    console.log('Payment polling timed out - webhook will complete transaction');
+    if (onTimeout) {
+      onTimeout();
+    } else if (onError) {
+      const timeoutMsg = 'Your payment is being processed. Please check your email for confirmation.';
       onError(timeoutMsg);
     }
     return null;

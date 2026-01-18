@@ -51,8 +51,7 @@ R2_PUBLIC_URL = "https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev"
 # Observability & Logging
 [observability]
 [observability.logs]
-enabled = false
-head_sampling_rate = 1
+enabled = true
 invocation_logs = true
 
 # Cron trigger for membership renewals (runs daily at 2 AM UTC)

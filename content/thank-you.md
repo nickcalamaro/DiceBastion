@@ -143,7 +143,11 @@ const checkPendingAccountSetup = () => {
 
 // Render success state for membership
 const renderMembershipSuccess = (data) => {
-const { plan, endDate, amount, currency, autoRenew, cardLast4 } = data;
+const { plan, endDate, amount, currency, autoRenew, cardLast4, emailSent } = data;
+
+// Check if we have emailPending flag in URL
+const urlParams = new URLSearchParams(window.location.search);
+const emailPending = urlParams.get('emailPending') === '1' || emailSent === false;
 
 container.innerHTML = `
 <h1>✅ Welcome to Dice Bastion!</h1>
@@ -181,8 +185,10 @@ ${autoRenew ? `
 </div>
 
 <p style="margin-top: 24px; color: #666;">
-A confirmation email has been sent to your registered email address.
-${autoRenew ? 'Your membership will automatically renew before expiration.' : ''}
+${emailPending 
+  ? '<strong style="color: #f59e0b;">⚠️ Your confirmation email is being processed and will arrive shortly.</strong><br>' 
+  : 'A confirmation email has been sent to your registered email address.'}
+${autoRenew ? ' Your membership will automatically renew before expiration.' : ''}
 </p>
 `;
 };

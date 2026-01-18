@@ -286,8 +286,10 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     return await window.utils.getTurnstileToken(elId, null, IS_LOCALHOST);
   }
 
-  async function confirmOrder(ref){ 
+  async function confirmOrder(ref, pollOptions = {}){ 
     const result = await window.utils.pollPaymentConfirmation('/membership/confirm', ref, {
+      pollInterval: pollOptions.pollInterval,
+      maxAttempts: pollOptions.maxAttempts,
       onSuccess: (data) => {
         // Store in sessionStorage for thank-you page if account setup needed
         if (data.needsAccountSetup) {
@@ -298,11 +300,22 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
           }));
         }
         
-        // Redirect to thank-you page
-        window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref);
+        // Log if email failed but still redirect - payment succeeded
+        if (!data.emailSent) {
+          console.warn('[Memberships] Payment succeeded but email failed. User:', data.userEmail);
+        }
+        
+        // Redirect to thank-you page (even if email pending)
+        window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
+          (data.emailSent === false ? '&emailPending=1' : '');
       },
       onError: (errorMsg) => {
         showError(errorMsg);
+      },
+      onTimeout: () => {
+        // Payment is processing - webhook will complete it
+        // Redirect to thank-you with processing flag
+        window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&processing=1';
       }
     });
     
@@ -335,12 +348,14 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
         checkoutId,
         onResponse: async (type)=>{
           const t = String(type||'').toLowerCase();
-          try {
-            const ok = await confirmOrder(ref);
-            if (ok) return;
-          } catch(_) {}
-          if (t === 'success') return;
-          showError('Payment is processing. If you were charged, it will confirm shortly.');
+          if (t === 'success') {
+            // Payment succeeded - use reduced polling (3s intervals, 20 attempts = 1 min)
+            await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
+          } else if (t === 'error' || t === 'fail') {
+            showError('Payment failed. Please try again.');
+          } else if (t === 'cancel') {
+            showError('Payment cancelled.');
+          }
         }
       });
     } catch (e) { showError('Could not start payment.'); }

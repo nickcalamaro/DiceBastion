@@ -146,9 +146,42 @@ window.initEventPurchase = function initEventPurchase(event) {
     }
   }
   
-  function showSuccess() {
+  function showSuccess(emailSent = true) {
     const el = modal.querySelector('.evt-success');
-    if (el) el.style.display = 'block';
+    if (!el) return;
+    
+    // Update success message based on whether email was sent
+    const message = el.querySelector('.success-message') || el;
+    if (!emailSent && message) {
+      const originalText = message.textContent || message.innerText;
+      // Add note about email if not already mentioned
+      if (!originalText.includes('check your email')) {
+        const emailNote = document.createElement('p');
+        emailNote.className = 'email-pending-note';
+        emailNote.style.cssText = 'margin-top: 0.75rem; font-size: 0.9em; color: #f59e0b;';
+        emailNote.textContent = 'Note: Your confirmation email is being processed and will arrive shortly.';
+        el.appendChild(emailNote);
+      }
+    }
+    
+    el.style.display = 'block';
+  }
+  
+  function showPending() {
+    const el = modal.querySelector('.evt-success');
+    if (!el) return;
+    
+    // Show processing message (webhook will complete payment)
+    el.innerHTML = `
+      <div style="text-align: center;">
+        <h3>🎉 Payment Received!</h3>
+        <p>Your payment is being processed. You'll receive a confirmation email shortly.</p>
+        <p style="margin-top: 1rem; font-size: 0.9em; color: #666;">
+          You can safely close this window. We'll email you once everything is confirmed.
+        </p>
+      </div>
+    `;
+    el.style.display = 'block';
   }
   
   async function renderTurnstile(isLoggedIn = false) {
@@ -176,8 +209,10 @@ window.initEventPurchase = function initEventPurchase(event) {
     
     return await window.utils.getTurnstileToken(tsElId, currentWidgetId, IS_LOCALHOST);
   }
-  async function confirmPayment(ref) {
+  async function confirmPayment(ref, pollOptions = {}) {
     const result = await window.utils.pollPaymentConfirmation('/events/confirm', ref, {
+      pollInterval: pollOptions.pollInterval,
+      maxAttempts: pollOptions.maxAttempts,
       onSuccess: (data) => {
         // Check if user needs account setup and store data in sessionStorage
         if (data.needsAccountSetup && data.userEmail) {
@@ -186,10 +221,21 @@ window.initEventPurchase = function initEventPurchase(event) {
             eventName: data.eventName || 'this event'
           }));
         }
-        showSuccess();
+        
+        // Show success even if email failed - payment went through
+        if (!data.emailSent) {
+          console.warn('[eventPurchase] Payment succeeded but email failed. User:', data.userEmail);
+        }
+        
+        showSuccess(data.emailSent);
       },
       onError: (errorMsg) => {
         showError(errorMsg);
+      },
+      onTimeout: () => {
+        // Payment is processing - webhook will complete it
+        // Show pending message instead of error
+        showPending();
       }
     });
     
@@ -237,9 +283,10 @@ window.initEventPurchase = function initEventPurchase(event) {
           
           // Handle final states only - intermediate states like verification should not trigger actions
           if (type === 'success') {
-            // Payment succeeded - verify with backend
-            // Don't show error immediately if confirmation times out - payment likely succeeded
-            await confirmPayment(orderRef);
+            // Payment succeeded! Try immediate verification (should be instant)
+            // Use reduced polling: 3s intervals, only 20 attempts (1 minute)
+            // Webhook will handle it if user closes browser
+            await confirmPayment(orderRef, { pollInterval: 3000, maxAttempts: 20 });
           } else if (type === 'error' || type === 'fail') {
             // Payment failed
             showError(body.message || 'Payment failed. Please try again.');
