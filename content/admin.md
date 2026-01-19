@@ -2083,7 +2083,10 @@ async function loadMemberships() {
 
     const data = await res.json();
     
-    if (!data.success || !data.memberships || data.memberships.length === 0) {
+    // Filter out pending memberships
+    const activeMemberships = data.memberships ? data.memberships.filter(m => m.status !== 'pending') : [];
+    
+    if (!data.success || !activeMemberships || activeMemberships.length === 0) {
       tableBody.innerHTML = `
         <tr>
           <td colspan="8" class="admin-text-center admin-text-muted" style="padding: 3rem;">
@@ -2099,13 +2102,11 @@ async function loadMemberships() {
     updateMembershipStats(data.stats || {});
 
     // Render table rows
-    tableBody.innerHTML = data.memberships.map(membership => {
-      // Handle null dates for pending memberships
-      const hasValidDates = membership.start_date && membership.end_date;
-      const startDate = hasValidDates ? new Date(membership.start_date) : null;
-      const endDate = hasValidDates ? new Date(membership.end_date) : null;
+    tableBody.innerHTML = activeMemberships.map(membership => {
+      const startDate = new Date(membership.start_date);
+      const endDate = new Date(membership.end_date);
       const today = new Date();
-      const daysLeft = hasValidDates ? Math.ceil((endDate - today) / (1000 * 60 * 60 * 24)) : null;
+      const daysLeft = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
       
       let statusBadge, statusColor;
       if (membership.status === 'active') {
@@ -2147,14 +2148,14 @@ async function loadMemberships() {
             </span>
           </td>
           <td class="admin-text-sm" style="padding: 1rem;">
-            ${startDate ? startDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '<span style="color: rgb(var(--color-neutral-400));">N/A</span>'}
+            ${startDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
           </td>
           <td class="admin-text-sm" style="padding: 1rem;">
-            ${endDate ? endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '<span style="color: rgb(var(--color-neutral-400));">N/A</span>'}
+            ${endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
           </td>
           <td style="padding: 1rem;">
-            <div style="font-weight: 600; color: ${daysLeft === null ? '#9e9e9e' : daysLeft < 0 ? '#f44336' : daysLeft <= 30 ? '#ff9800' : '#4CAF50'};">
-              ${daysLeft === null ? 'Pending' : daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Today' : daysLeft === 1 ? '1 day' : `${daysLeft} days`}
+            <div style="font-weight: 600; color: ${daysLeft < 0 ? '#f44336' : daysLeft <= 30 ? '#ff9800' : '#4CAF50'};">
+              ${daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Today' : daysLeft === 1 ? '1 day' : `${daysLeft} days`}
             </div>
           </td>
           <td style="padding: 1rem;">
