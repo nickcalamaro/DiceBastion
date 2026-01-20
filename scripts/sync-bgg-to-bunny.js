@@ -158,16 +158,28 @@ async function fetchGeeklist(retries = 3) {
       for (const game of games) {
         try {
           const thingUrl = `https://boardgamegeek.com/xmlapi2/thing?id=${game.id}`;
-          await new Promise(resolve => setTimeout(resolve, 200)); // Rate limit
+          await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
           const { data } = await fetchURL(thingUrl);
           const parser = new xml2js.Parser({ explicitArray: false });
           const thingResult = await parser.parseStringPromise(data);
           const thing = thingResult.items?.item;
-          if (thing && thing.image) {
-            game.imageUrl = thing.image;
+          
+          if (thing) {
+            // BGG API v2 returns <image> and <thumbnail> tags
+            // <image> is full-size, <thumbnail> is small
+            // Both are direct URLs to cf.geekdo-images.com
+            if (thing.image && typeof thing.image === 'string') {
+              game.imageUrl = thing.image;
+              console.log(`✅ ${game.name}: ${game.imageUrl}`);
+            } else if (thing.thumbnail && typeof thing.thumbnail === 'string') {
+              game.imageUrl = thing.thumbnail;
+              console.log(`✅ ${game.name}: ${game.imageUrl} (thumbnail)`);
+            } else {
+              console.log(`⚠️  ${game.name}: No image found in API response`);
+            }
           }
         } catch (err) {
-          console.warn(`⚠️  Could not fetch image for ${game.name}`);
+          console.warn(`⚠️  Could not fetch image for ${game.name}: ${err.message}`);
         }
       }
       
@@ -188,14 +200,18 @@ async function fetchGeeklist(retries = 3) {
 
 // Download image and upload to Bunny
 async function cacheImageToBunny(game, imageIndex) {
-  if (!game.imageUrl) return null;
+  if (!game.imageUrl) {
+    console.log(`⏭️  Skipping ${game.name} - no image URL`);
+    return null;
+  }
   
   try {
     const imageExt = game.imageUrl.match(/\.(jpg|jpeg|png|webp)$/i)?.[1] || 'jpg';
     const imagePath = `boardgames/images/${game.id}.${imageExt}`;
     
-    console.log(`Downloading image for ${game.name}...`);
+    console.log(`📥 Downloading ${game.name} from ${game.imageUrl}...`);
     const imageBuffer = await fetchBinary(game.imageUrl);
+    console.log(`   Downloaded ${imageBuffer.length} bytes`);
     
     await uploadToBunny(imagePath, imageBuffer, 'image/jpeg');
     
@@ -204,6 +220,7 @@ async function cacheImageToBunny(game, imageIndex) {
     
   } catch (error) {
     console.warn(`⚠️  Failed to cache image for ${game.name}: ${error.message}`);
+    console.warn(`   URL was: ${game.imageUrl}`);
     return game.imageUrl; // Return original URL as fallback
   }
 }
