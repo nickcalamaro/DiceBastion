@@ -4,6 +4,9 @@
  * Run with: node scripts/sync-bgg-to-bunny.js
  */
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const https = require('https');
 const http = require('http');
 const xml2js = require('xml2js');
