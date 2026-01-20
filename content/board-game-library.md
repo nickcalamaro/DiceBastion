@@ -8,9 +8,6 @@ showReadingTime: false
 ---
 
 <div id="board-game-library" style="max-width: 1200px; margin: 2rem auto; padding: 0 1rem;">
-  <!-- Header -->
-  <div style="text-align: center; margin-bottom: 3rem;">
-    <h1 style="font-size: 2.5rem; margin-bottom: 1rem;">🎲 Board Game Library</h1>
     <p id="library-description" style="font-size: 1.1rem; color: rgb(var(--color-neutral-600)); max-width: 800px; margin: 0 auto;">
       Explore our collection of board games available at Dice Bastion Gibraltar.
     </p>
@@ -53,7 +50,7 @@ showReadingTime: false
   </div>
 
   <!-- Games Grid -->
-  <div id="games-grid" style="display: none; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem;">
+  <div id="games-grid" style="display: none; display: flex; flex-direction: column; gap: 1.5rem;">
     <!-- Games will be populated here -->
   </div>
 
@@ -81,7 +78,12 @@ showReadingTime: false
   async function loadBoardGames() {
     try {
       // Fetch from Bunny CDN
-      const response = await fetch('https://dicebastion.b-cdn.net/boardgames/data.json');
+      // Use CORS proxy for localhost development, direct fetch for production
+      const dataUrl = 'https://dicebastion.b-cdn.net/boardgames/data.json';
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const fetchUrl = isLocalhost ? `https://corsproxy.io/?${encodeURIComponent(dataUrl)}` : dataUrl;
+      
+      const response = await fetch(fetchUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.status}`);
       }
@@ -116,12 +118,14 @@ showReadingTime: false
       border-radius: 12px;
       overflow: hidden;
       transition: transform 0.2s, box-shadow 0.2s;
-      cursor: pointer;
+      display: flex;
+      gap: 1.5rem;
+      padding: 1rem;
     `;
     
     card.addEventListener('mouseenter', () => {
-      card.style.transform = 'translateY(-4px)';
-      card.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
+      card.style.transform = 'translateY(-2px)';
+      card.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
     });
     
     card.addEventListener('mouseleave', () => {
@@ -132,8 +136,11 @@ showReadingTime: false
     const imageUrl = game.imageUrl || '/img/default-boardgame.jpg';
     const bggUrl = `https://boardgamegeek.com/boardgame/${game.id}`;
     
+    // Strip HTML tags from description
+    const cleanDescription = game.description ? game.description.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim() : '';
+    
     card.innerHTML = `
-      <div style="aspect-ratio: 1; background: rgb(var(--color-neutral-100)); position: relative; overflow: hidden;">
+      <div style="flex-shrink: 0; width: 150px; height: 150px; background: rgb(var(--color-neutral-100)); border-radius: 8px; overflow: hidden;">
         <img 
           src="${imageUrl}" 
           alt="${game.name}"
@@ -142,28 +149,28 @@ showReadingTime: false
           onerror="this.src='/img/default-boardgame.jpg'"
         />
       </div>
-      <div style="padding: 1rem;">
-        <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 600; color: rgb(var(--color-neutral-800));">
+      <div style="flex: 1; display: flex; flex-direction: column;">
+        <h3 style="margin: 0 0 0.5rem 0; font-size: 1.25rem; font-weight: 600; color: rgb(var(--color-neutral-800));">
           ${game.name}
         </h3>
-        ${game.body ? `
-          <p style="margin: 0.5rem 0; font-size: 0.875rem; color: rgb(var(--color-neutral-600)); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
-            ${game.body.replace(/<[^>]*>/g, '')}
+        ${cleanDescription ? `
+          <p style="margin: 0.5rem 0; font-size: 0.9rem; color: rgb(var(--color-neutral-600)); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
+            ${cleanDescription}
           </p>
         ` : ''}
-        <div style="display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.85rem; color: rgb(var(--color-neutral-500));">
-          ${game.thumbs > 0 ? `<span>👍 ${game.thumbs}</span>` : ''}
+        <div style="margin-top: auto; padding-top: 1rem; display: flex; align-items: center; gap: 1rem;">
+          ${game.thumbs > 0 ? `<span style="font-size: 0.85rem; color: rgb(var(--color-neutral-500));">👍 ${game.thumbs}</span>` : ''}
+          <a 
+            href="${bggUrl}" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            style="display: inline-block; padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border-radius: 6px; text-decoration: none; font-size: 0.875rem; font-weight: 600; transition: background 0.2s;"
+            onmouseover="this.style.background='rgb(var(--color-primary-700))'"
+            onmouseout="this.style.background='rgb(var(--color-primary-600))'"
+          >
+            View on BGG →
+          </a>
         </div>
-        <a 
-          href="${bggUrl}" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          style="display: inline-block; margin-top: 1rem; padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border-radius: 6px; text-decoration: none; font-size: 0.875rem; font-weight: 600; transition: background 0.2s;"
-          onmouseover="this.style.background='rgb(var(--color-primary-700))'"
-          onmouseout="this.style.background='rgb(var(--color-primary-600))'"
-        >
-          View on BGG →
-        </a>
       </div>
     `;
 
@@ -191,9 +198,10 @@ showReadingTime: false
     const searchTerm = searchInput.value.toLowerCase();
     const sortBy = sortSelect.value;
     
-    // Filter
+    // Filter - search in name, description, and body
     filteredGames = allGames.filter(game => 
       game.name.toLowerCase().includes(searchTerm) ||
+      (game.description && game.description.toLowerCase().includes(searchTerm)) ||
       (game.body && game.body.toLowerCase().includes(searchTerm))
     );
     

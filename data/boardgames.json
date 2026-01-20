@@ -1,0 +1,34 @@
+{
+  "metadata": {
+    "title": "Dice Bastion Board Game Library",
+    "description": "Our collection of board games available for members to play at Dice Bastion Gibraltar.",
+    "lastUpdate": "2026-01-17T00:00:00.000Z",
+    "source": "https://boardgamegeek.com/geeklist/352631/games-in-the-gwc"
+  },
+  "games": [
+    {
+      "id": "822",
+      "name": "Carcassonne",
+      "imageUrl": "https://cf.geekdo-images.com/Z3upN53-fsVPUDimN9SpOA__imagepage/img/sT0Z_ngO6CTT-RiYsLu_9IDGQeE=/fit-in/900x600/filters:no_upscale():strip_icc()/pic2337577.jpg",
+      "description": "A tile-placement game where players build the landscape of a medieval fortress city one tile at a time.",
+      "thumbs": 10,
+      "postdate": "2026-01-01"
+    },
+    {
+      "id": "13",
+      "name": "Catan",
+      "imageUrl": "https://cf.geekdo-images.com/W3Bsga_uLP9kO91gZ7H8yw__imagepage/img/M_3Vg1j2HlNgkv7PL2xl0B6I1k0=/fit-in/900x600/filters:no_upscale():strip_icc()/pic2419375.jpg",
+      "description": "Trade, build, and settle the island of Catan in this modern classic.",
+      "thumbs": 8,
+      "postdate": "2026-01-01"
+    },
+    {
+      "id": "30549",
+      "name": "Pandemic",
+      "imageUrl": "https://cf.geekdo-images.com/cTrAWasNHyKMcNs8Zrv5O7sKS6M=/fit-in/246x300/pic1534148.jpg",
+      "description": "Work together to save humanity from four deadly diseases in this cooperative game.",
+      "thumbs": 12,
+      "postdate": "2026-01-01"
+    }
+  ]
+}

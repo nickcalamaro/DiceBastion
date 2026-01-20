@@ -115,13 +115,22 @@ async function fetchGeeklist(retries = 3) {
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      // XML API doesn't use authentication headers
-      const { data } = await fetchURL(BGG_GEEKLIST_URL);
+      const headers = {};
+      if (BGG_API_TOKEN) {
+        headers['Authorization'] = `Bearer ${BGG_API_TOKEN}`;
+      }
+      
+      const { data } = await fetchURL(BGG_GEEKLIST_URL, headers);
       const parser = new xml2js.Parser({ explicitArray: false });
       const result = await parser.parseStringPromise(data);
       
       const geeklist = result.geeklist;
       const items = Array.isArray(geeklist.item) ? geeklist.item : [geeklist.item];
+      
+      // Log first item to see what image data is available
+      if (items.length > 0) {
+        console.log('First item structure:', JSON.stringify(items[0], null, 2));
+      }
       
       const metadata = {
         title: geeklist.title || 'Board Game Library',
@@ -134,13 +143,12 @@ async function fetchGeeklist(retries = 3) {
         .filter(item => item.$.objecttype === 'thing' && item.$.subtype === 'boardgame')
         .map(item => {
           // BGG XML API v1 geeklist includes imageid attribute
-          // imageid="0" means no image was set in the geeklist
           let imageUrl = null;
           const imageId = item.$.imageid;
           
           if (imageId && imageId !== '0') {
             // BGG image URL format
-            imageUrl = `https://cf.geekdo-images.com/${imageId}.jpg`;
+            imageUrl = `https://cf.geekdo-images.com/original/img/${imageId.substring(0, 2)}/${imageId}.jpg`;
           }
           
           return {
@@ -157,39 +165,7 @@ async function fetchGeeklist(retries = 3) {
         .filter(game => game.id && game.name);
       
       console.log(`✅ Fetched ${games.length} games from geeklist`);
-      console.log(`   ${games.filter(g => g.imageUrl).length} games have images from geeklist`);
-      
-      // For games without images, fetch from BGG API v2
-      const gamesWithoutImages = games.filter(g => !g.imageUrl);
-      if (gamesWithoutImages.length > 0) {
-        console.log(`📸 Fetching ${gamesWithoutImages.length} missing images from BGG API v2...`);
-        console.log(`   This will take ~${Math.ceil(gamesWithoutImages.length * 1.5 / 60)} minutes (rate limiting)`);
-        
-        for (const game of gamesWithoutImages) {
-          try {
-            const thingUrl = `https://boardgamegeek.com/xmlapi2/thing?id=${game.id}`;
-            // BGG rate limit: Be respectful! 1.5s between requests
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            // XML API v2 doesn't use authentication headers
-            const { data } = await fetchURL(thingUrl);
-            const parser = new xml2js.Parser({ explicitArray: false });
-            const thingResult = await parser.parseStringPromise(data);
-            const thing = thingResult.items?.item;
-            
-            if (thing) {
-              if (thing.image && typeof thing.image === 'string') {
-                game.imageUrl = thing.image;
-                console.log(`   ✅ ${game.name}`);
-              } else if (thing.thumbnail && typeof thing.thumbnail === 'string') {
-                game.imageUrl = thing.thumbnail;
-                console.log(`   ✅ ${game.name} (thumbnail)`);
-              }
-            }
-          } catch (err) {
-            console.warn(`   ⚠️  ${game.name}: ${err.message}`);
-          }
-        }
-      }
+      console.log(`   ${games.filter(g => g.imageUrl).length} games have images from geeklist`)
       
       return { metadata, games };
       
@@ -206,14 +182,58 @@ async function fetchGeeklist(retries = 3) {
   throw new Error('Failed to fetch geeklist after multiple retries');
 }
 
+// Fetch game details from BGG API v2
+async function fetchGameDetails(gameId, retries = 3) {
+  const url = `https://boardgamegeek.com/xmlapi2/thing?id=${gameId}&type=boardgame`;
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const headers = BGG_API_TOKEN ? { 'Authorization': `Bearer ${BGG_API_TOKEN}` } : {};
+      const { data } = await fetchURL(url, headers);
+      const parser = new xml2js.Parser({ explicitArray: false });
+      const result = await parser.parseStringPromise(data);
+      
+      const item = result.items?.item;
+      if (item) {
+        return {
+          imageUrl: item.image || null,
+          description: item.description || null
+        };
+      }
+      return null;
+    } catch (error) {
+      if (error.message === 'BGG_RETRY' && attempt < retries) {
+        console.log(`   BGG API returned 202, retrying... (attempt ${attempt}/${retries})`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        continue;
+      }
+      // If we get 401 or other error, just return null
+      console.warn(`   Could not fetch details: ${error.message}`);
+      return null;
+    }
+  }
+  return null;
+}
+
 // Download image and upload to Bunny
 async function cacheImageToBunny(game, imageIndex) {
-  if (!game.imageUrl) {
-    console.log(`⏭️  Skipping ${game.name} - no image URL`);
-    return null;
-  }
-  
   try {
+    // If no imageUrl from geeklist, fetch from BGG API v2
+    if (!game.imageUrl) {
+      console.log(`📡 Fetching details for ${game.name}...`);
+      const details = await fetchGameDetails(game.id);
+      const imageUrl = details?.imageUrl;
+      if (!imageUrl) {
+        console.log(`⏭️  Skipping ${game.name} - no image available`);
+        return null;
+      }
+      game.imageUrl = imageUrl;
+      // Also store the description if we fetched it
+      if (details?.description && !game.description) {
+        game.description = details.description;
+      }
+    }
+    
     const imageExt = game.imageUrl.match(/\.(jpg|jpeg|png|webp)$/i)?.[1] || 'jpg';
     const imagePath = `boardgames/images/${game.id}.${imageExt}`;
     
@@ -228,8 +248,8 @@ async function cacheImageToBunny(game, imageIndex) {
     
   } catch (error) {
     console.warn(`⚠️  Failed to cache image for ${game.name}: ${error.message}`);
-    console.warn(`   URL was: ${game.imageUrl}`);
-    return game.imageUrl; // Return original URL as fallback
+    console.warn(`   URL was: ${game.imageUrl || 'unknown'}`);
+    return game.imageUrl || null; // Return original URL as fallback
   }
 }
 
@@ -241,22 +261,57 @@ async function syncBoardGames() {
     throw new Error('BUNNY_STORAGE_API_KEY environment variable is required');
   }
   
+  // Fetch existing data to avoid re-downloading images
+  let existingGames = {};
+  try {
+    console.log('📥 Checking for existing data...');
+    const { data } = await fetchURL('https://dicebastion.b-cdn.net/boardgames/data.json');
+    const existingData = JSON.parse(data);
+    // Create a map of existing games by ID for quick lookup
+    existingData.games.forEach(game => {
+      existingGames[game.id] = game;
+    });
+    console.log(`✅ Found ${Object.keys(existingGames).length} existing games\n`);
+  } catch (error) {
+    console.log('ℹ️  No existing data found, will create new library\n');
+  }
+  
   // Fetch geeklist
   const { metadata, games } = await fetchGeeklist();
   
-  // Cache images to Bunny Storage
-  console.log(`\n📸 Caching ${games.length} images to Bunny Storage...`);
-  for (let i = 0; i < games.length; i++) {
-    const game = games[i];
-    const cachedUrl = await cacheImageToBunny(game, i);
-    if (cachedUrl) {
-      game.imageUrl = cachedUrl;
+  // Identify new games vs existing games
+  const newGames = games.filter(game => !existingGames[game.id]);
+  const existingGamesList = games.filter(game => existingGames[game.id]);
+  
+  console.log(`\n📊 Summary:`);
+  console.log(`   - Total games in geeklist: ${games.length}`);
+  console.log(`   - New games to process: ${newGames.length}`);
+  console.log(`   - Existing games (reusing data): ${existingGamesList.length}`);
+  
+  // Reuse existing game data
+  existingGamesList.forEach(game => {
+    const existing = existingGames[game.id];
+    game.imageUrl = existing.imageUrl;
+    game.description = existing.description || game.description;
+  });
+  
+  // Cache images only for NEW games
+  if (newGames.length > 0) {
+    console.log(`\n📸 Fetching details and caching images for ${newGames.length} new games...`);
+    for (let i = 0; i < newGames.length; i++) {
+      const game = newGames[i];
+      const cachedUrl = await cacheImageToBunny(game, i);
+      if (cachedUrl) {
+        game.imageUrl = cachedUrl;
+      }
+      
+      // Rate limiting - wait 1.5s between requests to be respectful
+      if (i < newGames.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
     }
-    
-    // Rate limiting - wait 500ms between requests
-    if (i < games.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+  } else {
+    console.log('\n✅ No new games to process!');
   }
   
   // Sort games alphabetically
