@@ -13,10 +13,11 @@ const GEEKLIST_ID = '352631';
 const BGG_API_TOKEN = process.env.BGG_API_TOKEN; // Your BGG API token
 const BUNNY_STORAGE_API_KEY = process.env.BUNNY_STORAGE_API_KEY;
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE || 'dicebastion';
-const BUNNY_STORAGE_REGION = process.env.BUNNY_STORAGE_REGION || 'de'; // or 'ny', 'la', 'sg', etc.
+const BUNNY_STORAGE_REGION = process.env.BUNNY_STORAGE_REGION || 'de'; // de, ny, la, sg, etc.
 
 const BGG_GEEKLIST_URL = `https://boardgamegeek.com/xmlapi/geeklist/${GEEKLIST_ID}`;
-const BUNNY_STORAGE_URL = `https://${BUNNY_STORAGE_REGION}.storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}`;
+// Bunny Storage endpoint format: storage.bunnycdn.com/{storageZoneName}/{path}
+const BUNNY_STORAGE_URL = `https://storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}`;
 
 // Fetch from URL with retry logic for BGG API
 function fetchURL(url, headers = {}) {
@@ -42,6 +43,26 @@ function fetchURL(url, headers = {}) {
           reject(new Error(`HTTP ${res.statusCode}: ${data.substring(0, 200)}`));
         }
       });
+    }).on('error', reject);
+  });
+}
+
+// Download binary data (for images)
+function fetchBinary(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, {
+      headers: {
+        'User-Agent': 'DiceBastion/1.0 (+https://dicebastion.com)'
+      }
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
+      
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
     }).on('error', reject);
   });
 }
@@ -143,9 +164,9 @@ async function cacheImageToBunny(game, imageIndex) {
     const imagePath = `boardgames/images/${game.id}.${imageExt}`;
     
     console.log(`Downloading image for ${game.name}...`);
-    const { data } = await fetchURL(game.imageUrl);
+    const imageBuffer = await fetchBinary(game.imageUrl);
     
-    await uploadToBunny(imagePath, data, 'image/jpeg');
+    await uploadToBunny(imagePath, imageBuffer, 'image/jpeg');
     
     // Return Bunny CDN URL (update with your actual Pull Zone URL)
     return `https://dicebastion.b-cdn.net/${imagePath}`;
