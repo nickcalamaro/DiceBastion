@@ -115,12 +115,8 @@ async function fetchGeeklist(retries = 3) {
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const headers = {};
-      if (BGG_API_TOKEN) {
-        headers['Authorization'] = `Bearer ${BGG_API_TOKEN}`;
-      }
-      
-      const { data } = await fetchURL(BGG_GEEKLIST_URL, headers);
+      // XML API doesn't use authentication headers
+      const { data } = await fetchURL(BGG_GEEKLIST_URL);
       const parser = new xml2js.Parser({ explicitArray: false });
       const result = await parser.parseStringPromise(data);
       
@@ -167,11 +163,14 @@ async function fetchGeeklist(retries = 3) {
       const gamesWithoutImages = games.filter(g => !g.imageUrl);
       if (gamesWithoutImages.length > 0) {
         console.log(`📸 Fetching ${gamesWithoutImages.length} missing images from BGG API v2...`);
+        console.log(`   This will take ~${Math.ceil(gamesWithoutImages.length * 1.5 / 60)} minutes (rate limiting)`);
         
         for (const game of gamesWithoutImages) {
           try {
             const thingUrl = `https://boardgamegeek.com/xmlapi2/thing?id=${game.id}`;
-            await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
+            // BGG rate limit: Be respectful! 1.5s between requests
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            // XML API v2 doesn't use authentication headers
             const { data } = await fetchURL(thingUrl);
             const parser = new xml2js.Parser({ explicitArray: false });
             const thingResult = await parser.parseStringPromise(data);
