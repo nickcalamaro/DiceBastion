@@ -159,7 +159,7 @@ async function fetchGeeklist(retries = 3) {
             thumbs: parseInt(item.$.thumbs || '0', 10),
             imageUrl: imageUrl,
             imageId: imageId || null,
-            description: typeof item.body === 'string' ? item.body.trim() : ''
+            description: null // Will be fetched from BGG API v2
           };
         })
         .filter(game => game.id && game.name);
@@ -218,20 +218,24 @@ async function fetchGameDetails(gameId, retries = 3) {
 // Download image and upload to Bunny
 async function cacheImageToBunny(game, imageIndex) {
   try {
-    // If no imageUrl from geeklist, fetch from BGG API v2
+    // Always fetch details from BGG API v2 to get description
+    console.log(`📡 Fetching details for ${game.name}...`);
+    const details = await fetchGameDetails(game.id);
+    
+    // Store description from BGG API
+    if (details?.description) {
+      game.description = details.description;
+    }
+    
+    // If no imageUrl from geeklist, use the one from API
+    if (!game.imageUrl && details?.imageUrl) {
+      game.imageUrl = details.imageUrl;
+    }
+    
+    // Skip if still no image
     if (!game.imageUrl) {
-      console.log(`📡 Fetching details for ${game.name}...`);
-      const details = await fetchGameDetails(game.id);
-      const imageUrl = details?.imageUrl;
-      if (!imageUrl) {
-        console.log(`⏭️  Skipping ${game.name} - no image available`);
-        return null;
-      }
-      game.imageUrl = imageUrl;
-      // Also store the description if we fetched it
-      if (details?.description && !game.description) {
-        game.description = details.description;
-      }
+      console.log(`⏭️  Skipping ${game.name} - no image available`);
+      return null;
     }
     
     const imageExt = game.imageUrl.match(/\.(jpg|jpeg|png|webp)$/i)?.[1] || 'jpg';

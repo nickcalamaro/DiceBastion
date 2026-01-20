@@ -92,9 +92,6 @@ showReadingTime: false
       
       // Update metadata
       if (data.metadata) {
-        if (data.metadata.description) {
-          libraryDescription.textContent = data.metadata.description;
-        }
         libraryStats.textContent = `${data.games.length} games • Last updated: ${new Date(data.metadata.lastUpdate).toLocaleDateString()}`;
       }
       
@@ -136,16 +133,28 @@ showReadingTime: false
     const imageUrl = game.imageUrl || '/img/default-boardgame.jpg';
     const bggUrl = `https://boardgamegeek.com/boardgame/${game.id}`;
     
-    // Strip HTML tags from description
-    const cleanDescription = game.description ? game.description.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim() : '';
+    // Strip HTML tags and BBCode from description
+    const cleanDescription = game.description 
+      ? game.description
+          .replace(/<[^>]*>/g, '') // Remove HTML tags
+          .replace(/\[b\]|\[\/b\]/gi, '') // Remove [b] and [/b]
+          .replace(/\[i\]|\[\/i\]/gi, '') // Remove [i] and [/i]
+          .replace(/\[u\]|\[\/u\]/gi, '') // Remove [u] and [/u]
+          .replace(/\[color=[^\]]+\]|\[\/color\]/gi, '') // Remove [color=...] and [/color]
+          .replace(/\[size=[^\]]+\]|\[\/size\]/gi, '') // Remove [size=...] and [/size]
+          .replace(/\[url=[^\]]+\]|\[\/url\]/gi, '') // Remove [url=...] and [/url]
+          .replace(/\[img\]|\[\/img\]/gi, '') // Remove [img] and [/img]
+          .replace(/&[^;]+;/g, ' ') // Remove HTML entities
+          .trim() 
+      : '';
     
     card.innerHTML = `
-      <div style="flex-shrink: 0; width: 150px; height: 150px; background: rgb(var(--color-neutral-100)); border-radius: 8px; overflow: hidden;">
+      <div style="flex-shrink: 0; width: 150px; height: 150px; background: rgb(var(--color-neutral-100)); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
         <img 
           src="${imageUrl}" 
           alt="${game.name}"
           loading="lazy"
-          style="width: 100%; height: 100%; object-fit: cover;"
+          style="width: 100%; height: 100%; object-fit: contain;"
           onerror="this.src='/img/default-boardgame.jpg'"
         />
       </div>
