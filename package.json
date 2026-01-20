@@ -124,6 +124,7 @@
     "@tailwindcss/forms": "^0.5.10",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
-    "commander": "^13.1.0"
+    "commander": "^13.1.0",
+    "xml2js": "^0.6.2"
   }
 }

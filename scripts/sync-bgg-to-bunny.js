@@ -73,6 +73,9 @@ async function uploadToBunny(path, data, contentType = 'application/json') {
     const url = `${BUNNY_STORAGE_URL}/${path}`;
     const options = new URL(url);
     
+    console.log(`Uploading to: ${url}`);
+    console.log(`API Key length: ${BUNNY_STORAGE_API_KEY ? BUNNY_STORAGE_API_KEY.length : 0}`);
+    
     const req = https.request({
       hostname: options.hostname,
       path: options.pathname,
@@ -90,6 +93,8 @@ async function uploadToBunny(path, data, contentType = 'application/json') {
           console.log(`✅ Uploaded: ${path}`);
           resolve(responseData);
         } else {
+          console.error(`Upload failed - Status: ${res.statusCode}`);
+          console.error(`Response: ${responseData}`);
           reject(new Error(`Upload failed (${res.statusCode}): ${responseData}`));
         }
       });
@@ -128,18 +133,41 @@ async function fetchGeeklist(retries = 3) {
       
       const games = items
         .filter(item => item.$.objecttype === 'thing' && item.$.subtype === 'boardgame')
-        .map(item => ({
-          id: item.$.objectid,
-          name: item.$.objectname,
-          username: item.$.username,
-          postdate: item.$.postdate,
-          thumbs: parseInt(item.$.thumbs || '0', 10),
-          imageUrl: item.$.imageid ? `https://cf.geekdo-images.com/original/img/${item.$.imageid}.jpg` : null,
-          description: typeof item.body === 'string' ? item.body.trim() : ''
-        }))
+        .map(item => {
+          // BGG geeklist doesn't include image URLs in XML API v1
+          // We'll fetch them separately using the thing ID
+          return {
+            id: item.$.objectid,
+            name: item.$.objectname,
+            username: item.$.username,
+            postdate: item.$.postdate,
+            thumbs: parseInt(item.$.thumbs || '0', 10),
+            imageUrl: null, // Will be fetched separately
+            description: typeof item.body === 'string' ? item.body.trim() : ''
+          };
+        })
         .filter(game => game.id && game.name);
       
       console.log(`✅ Fetched ${games.length} games from geeklist`);
+      
+      // Fetch images from BGG API v2 for each game
+      console.log('📸 Fetching game images from BGG API v2...');
+      for (const game of games) {
+        try {
+          const thingUrl = `https://boardgamegeek.com/xmlapi2/thing?id=${game.id}`;
+          await new Promise(resolve => setTimeout(resolve, 200)); // Rate limit
+          const { data } = await fetchURL(thingUrl);
+          const parser = new xml2js.Parser({ explicitArray: false });
+          const thingResult = await parser.parseStringPromise(data);
+          const thing = thingResult.items?.item;
+          if (thing && thing.image) {
+            game.imageUrl = thing.image;
+          }
+        } catch (err) {
+          console.warn(`⚠️  Could not fetch image for ${game.name}`);
+        }
+      }
+      
       return { metadata, games };
       
     } catch (error) {
