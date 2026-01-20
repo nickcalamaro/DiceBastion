@@ -23,6 +23,11 @@ exampleSite/resources/
 node_modules
 .hugo_build.lock
 
+# Environment variables (contains secrets)
+.env
+.env.local
+.env.*.local
+
 # OS generated files
 .DS_Store
 .DS_Store?

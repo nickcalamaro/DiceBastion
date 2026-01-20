@@ -1,0 +1,27 @@
+{{ define "main" }}
+<article>
+  {{ if .Params.showHero | default (.Site.Params.article.showHero | default true) }}
+  {{ $heroStyle := .Params.heroStyle }}
+  {{ if not $heroStyle }}{{ $heroStyle = .Site.Params.article.heroStyle }}{{ end }}
+  {{ $heroStyle := print "partials/hero/" $heroStyle ".html" }}
+  {{ if templates.Exists $heroStyle }}
+  {{ partial $heroStyle . }}
+  {{ else }}
+  {{ partial "partials/hero/basic.html" . }}
+  {{ end }}
+  {{ end }}
+  
+  <header>
+    {{ if .Params.showBreadcrumbs | default (.Site.Params.article.showBreadcrumbs | default false) }}
+    {{ partial "breadcrumbs.html" . }}
+    {{ end }}
+    <h1 class="mt-0 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
+      {{ .Title | emojify }}
+    </h1>
+  </header>
+  
+  <section class="flex flex-col max-w-full mt-0 prose dark:prose-invert">
+    {{ .Content | emojify }}
+  </section>
+</article>
+{{ end }}
