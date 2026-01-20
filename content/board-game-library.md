@@ -81,7 +81,9 @@ showReadingTime: false
       // Use CORS proxy for localhost development, direct fetch for production
       const dataUrl = 'https://dicebastion.b-cdn.net/boardgames/data.json';
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      const fetchUrl = isLocalhost ? `https://corsproxy.io/?${encodeURIComponent(dataUrl)}` : dataUrl;
+      // Add cache-busting parameter for development
+      const cacheBuster = isLocalhost ? `?t=${Date.now()}` : '';
+      const fetchUrl = isLocalhost ? `https://corsproxy.io/?${encodeURIComponent(dataUrl + cacheBuster)}` : dataUrl;
       
       const response = await fetch(fetchUrl);
       if (!response.ok) {

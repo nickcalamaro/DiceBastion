@@ -195,8 +195,16 @@ async function fetchGameDetails(gameId, retries = 3) {
       
       const item = result.items?.item;
       if (item) {
+        console.log(`   DEBUG - Image field: ${item.image}`);
+        console.log(`   DEBUG - Thumbnail field: ${item.thumbnail}`);
+        // Prefer thumbnail over main image if main image looks broken
+        let imageUrl = item.image;
+        if (imageUrl && imageUrl.includes('/original/img/')) {
+          // This format is often broken, try thumbnail instead
+          imageUrl = item.thumbnail || imageUrl;
+        }
         return {
-          imageUrl: item.image || null,
+          imageUrl: imageUrl || item.thumbnail || null,
           description: item.description || null
         };
       }
@@ -227,8 +235,8 @@ async function cacheImageToBunny(game, imageIndex) {
       game.description = details.description;
     }
     
-    // If no imageUrl from geeklist, use the one from API
-    if (!game.imageUrl && details?.imageUrl) {
+    // Always use fresh image URL from API if available, or keep existing
+    if (details?.imageUrl) {
       game.imageUrl = details.imageUrl;
     }
     
@@ -287,16 +295,37 @@ async function syncBoardGames() {
   const newGames = games.filter(game => !existingGames[game.id]);
   const existingGamesList = games.filter(game => existingGames[game.id]);
   
+  // Identify games that need description updates (existing games without BGG descriptions)
+  const gamesNeedingDescriptions = existingGamesList.filter(game => {
+    const existing = existingGames[game.id];
+    // If the existing description looks like BBCode (contains [color, [b], etc), it's from geeklist, not BGG
+    return !existing.description || existing.description.includes('[color') || existing.description.includes('[b]');
+  });
+  
+  // Identify games with broken/missing images (invalid URLs like cf.geekdo-images.com/original/img/26/268839.jpg)
+  const gamesNeedingImages = existingGamesList.filter(game => {
+    const existing = existingGames[game.id];
+    // Check for broken image patterns
+    return !existing.imageUrl || 
+           existing.imageUrl.includes('/original/img/') || // Old broken format
+           existing.imageUrl.includes('default-boardgame.jpg'); // Default fallback
+  });
+  
   console.log(`\n📊 Summary:`);
   console.log(`   - Total games in geeklist: ${games.length}`);
   console.log(`   - New games to process: ${newGames.length}`);
   console.log(`   - Existing games (reusing data): ${existingGamesList.length}`);
+  console.log(`   - Existing games needing BGG descriptions: ${gamesNeedingDescriptions.length}`);
+  console.log(`   - Existing games needing image fix: ${gamesNeedingImages.length}`);
   
   // Reuse existing game data
   existingGamesList.forEach(game => {
     const existing = existingGames[game.id];
     game.imageUrl = existing.imageUrl;
-    game.description = existing.description || game.description;
+    // Only reuse description if it doesn't look like BBCode
+    if (existing.description && !existing.description.includes('[color') && !existing.description.includes('[b]')) {
+      game.description = existing.description;
+    }
   });
   
   // Cache images only for NEW games
@@ -316,6 +345,41 @@ async function syncBoardGames() {
     }
   } else {
     console.log('\n✅ No new games to process!');
+  }
+  
+  // Fetch BGG descriptions for existing games that don't have them
+  if (gamesNeedingDescriptions.length > 0) {
+    console.log(`\n📝 Fetching BGG descriptions for ${gamesNeedingDescriptions.length} existing games...`);
+    for (let i = 0; i < gamesNeedingDescriptions.length; i++) {
+      const game = gamesNeedingDescriptions[i];
+      console.log(`📡 Fetching description for ${game.name}...`);
+      const details = await fetchGameDetails(game.id);
+      if (details?.description) {
+        game.description = details.description;
+      }
+      
+      // Rate limiting
+      if (i < gamesNeedingDescriptions.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    }
+  }
+  
+  // Fix broken images for existing games
+  if (gamesNeedingImages.length > 0) {
+    console.log(`\n🔧 Fixing images for ${gamesNeedingImages.length} existing games...`);
+    for (let i = 0; i < gamesNeedingImages.length; i++) {
+      const game = gamesNeedingImages[i];
+      const cachedUrl = await cacheImageToBunny(game, i);
+      if (cachedUrl) {
+        game.imageUrl = cachedUrl;
+      }
+      
+      // Rate limiting
+      if (i < gamesNeedingImages.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    }
   }
   
   // Sort games alphabetically
