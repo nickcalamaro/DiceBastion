@@ -137,51 +137,29 @@ async function fetchGeeklist(retries = 3) {
       const games = items
         .filter(item => item.$.objecttype === 'thing' && item.$.subtype === 'boardgame')
         .map(item => {
-          // BGG geeklist doesn't include image URLs in XML API v1
-          // We'll fetch them separately using the thing ID
+          // BGG XML API v1 geeklist includes imageid attribute
+          // We can construct the image URL from the imageid
+          let imageUrl = null;
+          if (item.$.imageid) {
+            // BGG image URL format
+            imageUrl = `https://cf.geekdo-images.com/${item.$.imageid}.jpg`;
+          }
+          
           return {
             id: item.$.objectid,
             name: item.$.objectname,
             username: item.$.username,
             postdate: item.$.postdate,
             thumbs: parseInt(item.$.thumbs || '0', 10),
-            imageUrl: null, // Will be fetched separately
+            imageUrl: imageUrl,
+            imageId: item.$.imageid || null,
             description: typeof item.body === 'string' ? item.body.trim() : ''
           };
         })
         .filter(game => game.id && game.name);
       
       console.log(`✅ Fetched ${games.length} games from geeklist`);
-      
-      // Fetch images from BGG API v2 for each game
-      console.log('📸 Fetching game images from BGG API v2...');
-      for (const game of games) {
-        try {
-          const thingUrl = `https://boardgamegeek.com/xmlapi2/thing?id=${game.id}`;
-          await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
-          const { data } = await fetchURL(thingUrl);
-          const parser = new xml2js.Parser({ explicitArray: false });
-          const thingResult = await parser.parseStringPromise(data);
-          const thing = thingResult.items?.item;
-          
-          if (thing) {
-            // BGG API v2 returns <image> and <thumbnail> tags
-            // <image> is full-size, <thumbnail> is small
-            // Both are direct URLs to cf.geekdo-images.com
-            if (thing.image && typeof thing.image === 'string') {
-              game.imageUrl = thing.image;
-              console.log(`✅ ${game.name}: ${game.imageUrl}`);
-            } else if (thing.thumbnail && typeof thing.thumbnail === 'string') {
-              game.imageUrl = thing.thumbnail;
-              console.log(`✅ ${game.name}: ${game.imageUrl} (thumbnail)`);
-            } else {
-              console.log(`⚠️  ${game.name}: No image found in API response`);
-            }
-          }
-        } catch (err) {
-          console.warn(`⚠️  Could not fetch image for ${game.name}: ${err.message}`);
-        }
-      }
+      console.log(`   ${games.filter(g => g.imageUrl).length} games have images`);
       
       return { metadata, games };
       
