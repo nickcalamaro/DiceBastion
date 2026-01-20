@@ -165,9 +165,16 @@ showReadingTime: false
           ${game.name}
         </h3>
         ${cleanDescription ? `
-          <p style="margin: 0.5rem 0; font-size: 0.9rem; color: rgb(var(--color-neutral-600)); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
-            ${cleanDescription}
-          </p>
+          <div class="description-container">
+            <p class="description-text" style="margin: 0.5rem 0; font-size: 0.9rem; color: rgb(var(--color-neutral-600)); line-height: 1.5;">
+              ${cleanDescription.length > 200 ? cleanDescription.substring(0, 200) + '...' : cleanDescription}
+            </p>
+            ${cleanDescription.length > 200 ? `
+              <button class="read-more-btn" style="background: none; border: none; color: rgb(var(--color-primary-600)); font-size: 0.85rem; font-weight: 600; cursor: pointer; padding: 0.25rem 0; text-decoration: underline;" data-full-text="${cleanDescription.replace(/"/g, '&quot;')}">
+                Read more
+              </button>
+            ` : ''}
+          </div>
         ` : ''}
         <div style="margin-top: auto; padding-top: 1rem; display: flex; align-items: center; gap: 1rem;">
           ${game.thumbs > 0 ? `<span style="font-size: 0.85rem; color: rgb(var(--color-neutral-500));">👍 ${game.thumbs}</span>` : ''}
@@ -237,6 +244,23 @@ showReadingTime: false
   // Event listeners
   searchInput.addEventListener('input', filterAndSort);
   sortSelect.addEventListener('change', filterAndSort);
+  
+  // Handle read more button clicks
+  gamesGrid.addEventListener('click', (e) => {
+    if (e.target.classList.contains('read-more-btn')) {
+      const button = e.target;
+      const descriptionText = button.previousElementSibling;
+      const fullText = button.getAttribute('data-full-text');
+      
+      if (button.textContent === 'Read more') {
+        descriptionText.textContent = fullText;
+        button.textContent = 'Read less';
+      } else {
+        descriptionText.textContent = fullText.substring(0, 200) + '...';
+        button.textContent = 'Read more';
+      }
+    }
+  });
 
   // Load games on page load
   loadBoardGames();

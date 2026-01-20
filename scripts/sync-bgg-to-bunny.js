@@ -184,7 +184,7 @@ async function fetchGeeklist(retries = 3) {
 
 // Fetch game details from BGG API v2
 async function fetchGameDetails(gameId, retries = 3) {
-  const url = `https://boardgamegeek.com/xmlapi2/thing?id=${gameId}&type=boardgame`;
+  const url = `https://boardgamegeek.com/xmlapi2/thing?id=${gameId}&type=boardgame,boardgameexpansion`;
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
