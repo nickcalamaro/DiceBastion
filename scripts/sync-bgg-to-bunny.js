@@ -138,11 +138,13 @@ async function fetchGeeklist(retries = 3) {
         .filter(item => item.$.objecttype === 'thing' && item.$.subtype === 'boardgame')
         .map(item => {
           // BGG XML API v1 geeklist includes imageid attribute
-          // We can construct the image URL from the imageid
+          // imageid="0" means no image was set in the geeklist
           let imageUrl = null;
-          if (item.$.imageid) {
+          const imageId = item.$.imageid;
+          
+          if (imageId && imageId !== '0') {
             // BGG image URL format
-            imageUrl = `https://cf.geekdo-images.com/${item.$.imageid}.jpg`;
+            imageUrl = `https://cf.geekdo-images.com/${imageId}.jpg`;
           }
           
           return {
@@ -152,14 +154,43 @@ async function fetchGeeklist(retries = 3) {
             postdate: item.$.postdate,
             thumbs: parseInt(item.$.thumbs || '0', 10),
             imageUrl: imageUrl,
-            imageId: item.$.imageid || null,
+            imageId: imageId || null,
             description: typeof item.body === 'string' ? item.body.trim() : ''
           };
         })
         .filter(game => game.id && game.name);
       
       console.log(`✅ Fetched ${games.length} games from geeklist`);
-      console.log(`   ${games.filter(g => g.imageUrl).length} games have images`);
+      console.log(`   ${games.filter(g => g.imageUrl).length} games have images from geeklist`);
+      
+      // For games without images, fetch from BGG API v2
+      const gamesWithoutImages = games.filter(g => !g.imageUrl);
+      if (gamesWithoutImages.length > 0) {
+        console.log(`📸 Fetching ${gamesWithoutImages.length} missing images from BGG API v2...`);
+        
+        for (const game of gamesWithoutImages) {
+          try {
+            const thingUrl = `https://boardgamegeek.com/xmlapi2/thing?id=${game.id}`;
+            await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
+            const { data } = await fetchURL(thingUrl);
+            const parser = new xml2js.Parser({ explicitArray: false });
+            const thingResult = await parser.parseStringPromise(data);
+            const thing = thingResult.items?.item;
+            
+            if (thing) {
+              if (thing.image && typeof thing.image === 'string') {
+                game.imageUrl = thing.image;
+                console.log(`   ✅ ${game.name}`);
+              } else if (thing.thumbnail && typeof thing.thumbnail === 'string') {
+                game.imageUrl = thing.thumbnail;
+                console.log(`   ✅ ${game.name} (thumbnail)`);
+              }
+            }
+          } catch (err) {
+            console.warn(`   ⚠️  ${game.name}: ${err.message}`);
+          }
+        }
+      }
       
       return { metadata, games };
       
