@@ -151,6 +151,11 @@ async function fetchGeeklist(retries = 3) {
             imageUrl = `https://cf.geekdo-images.com/original/img/${imageId.substring(0, 2)}/${imageId}.jpg`;
           }
           
+          // Extract short description from body if it's in curly braces
+          const body = item.body || '';
+          const shortDescMatch = body.match(/\{([^}]+)\}/);
+          const shortDescription = shortDescMatch ? shortDescMatch[1].trim() : null;
+          
           return {
             id: item.$.objectid,
             name: item.$.objectname,
@@ -159,6 +164,8 @@ async function fetchGeeklist(retries = 3) {
             thumbs: parseInt(item.$.thumbs || '0', 10),
             imageUrl: imageUrl,
             imageId: imageId || null,
+            body: body,
+            shortDescription: shortDescription,
             description: null // Will be fetched from BGG API v2
           };
         })

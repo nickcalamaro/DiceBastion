@@ -275,5 +275,5 @@ showReadingTime: false
 })();
 
   loadBoardGames();
-})();
+  </script>
 </script>
