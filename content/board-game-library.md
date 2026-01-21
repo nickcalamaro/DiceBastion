@@ -61,6 +61,8 @@ showReadingTime: false
   </div>
 </div>
 
+<script src="/js/modal.js"></script>
+
 <script>
 (async function() {
   const gamesGrid = document.getElementById('games-grid');
@@ -81,7 +83,7 @@ showReadingTime: false
       // Use CORS proxy for localhost development, direct fetch for production
       const dataUrl = 'https://dicebastion.b-cdn.net/boardgames/data.json';
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      // Add cache-busting parameter to force fresh data (temporary workaround for CDN cache)
+        // Add cache-busting parameter to force fresh data (temporary workaround for CDN cache)
       const cacheBuster = `?v=${Date.now()}`;
       const fetchUrl = isLocalhost ? `https://corsproxy.io/?${encodeURIComponent(dataUrl + cacheBuster)}` : dataUrl + cacheBuster;
       
@@ -135,8 +137,11 @@ showReadingTime: false
     const imageUrl = game.imageUrl || '/img/default-boardgame.jpg';
     const bggUrl = `https://boardgamegeek.com/boardgame/${game.id}`;
     
-    // Strip HTML tags and BBCode from description
-    const cleanDescription = game.description 
+    // Use shortDescription from geeklist body (text in curly braces)
+    const displayDescription = game.shortDescription || '';
+    
+    // Strip HTML tags and BBCode from full description for modal
+    const cleanFullDescription = game.description 
       ? game.description
           .replace(/<[^>]*>/g, '') // Remove HTML tags
           .replace(/\[b\]|\[\/b\]/gi, '') // Remove [b] and [/b]
@@ -164,20 +169,24 @@ showReadingTime: false
         <h3 style="margin: 0 0 0.5rem 0; font-size: 1.25rem; font-weight: 600; color: rgb(var(--color-neutral-800));">
           ${game.name}
         </h3>
-        ${cleanDescription ? `
-          <div class="description-container">
-            <p class="description-text" style="margin: 0.5rem 0; font-size: 0.9rem; color: rgb(var(--color-neutral-600)); line-height: 1.5;">
-              ${cleanDescription.length > 200 ? cleanDescription.substring(0, 200) + '...' : cleanDescription}
-            </p>
-            ${cleanDescription.length > 200 ? `
-              <button class="read-more-btn" style="background: none; border: none; color: rgb(var(--color-primary-600)); font-size: 0.85rem; font-weight: 600; cursor: pointer; padding: 0.25rem 0; text-decoration: underline;" data-full-text="${cleanDescription.replace(/"/g, '&quot;')}">
-                Read more
-              </button>
-            ` : ''}
-          </div>
+        ${displayDescription ? `
+          <p style="margin: 0.5rem 0; font-size: 0.9rem; color: rgb(var(--color-neutral-600)); line-height: 1.5;">
+            ${displayDescription}
+          </p>
         ` : ''}
         <div style="margin-top: auto; padding-top: 1rem; display: flex; align-items: center; gap: 1rem;">
           ${game.thumbs > 0 ? `<span style="font-size: 0.85rem; color: rgb(var(--color-neutral-500));">👍 ${game.thumbs}</span>` : ''}
+          ${cleanFullDescription ? `
+            <button 
+              class="read-more-modal-btn" 
+              style="background: none; border: none; color: rgb(var(--color-primary-600)); font-size: 0.85rem; font-weight: 600; cursor: pointer; padding: 0.25rem 0; text-decoration: underline;"
+              data-game-id="${game.id}"
+              data-game-name="${game.name.replace(/"/g, '&quot;')}"
+              data-full-description="${cleanFullDescription.replace(/"/g, '&quot;')}"
+            >
+              Read more
+            </button>
+          ` : ''}
           <a 
             href="${bggUrl}" 
             target="_blank" 
@@ -245,24 +254,26 @@ showReadingTime: false
   searchInput.addEventListener('input', filterAndSort);
   sortSelect.addEventListener('change', filterAndSort);
   
-  // Handle read more button clicks
+  // Handle read more modal button clicks
   gamesGrid.addEventListener('click', (e) => {
-    if (e.target.classList.contains('read-more-btn')) {
+    if (e.target.classList.contains('read-more-modal-btn')) {
       const button = e.target;
-      const descriptionText = button.previousElementSibling;
-      const fullText = button.getAttribute('data-full-text');
+      const gameName = button.getAttribute('data-game-name');
+      const fullDescription = button.getAttribute('data-full-description');
       
-      if (button.textContent === 'Read more') {
-        descriptionText.textContent = fullText;
-        button.textContent = 'Read less';
-      } else {
-        descriptionText.textContent = fullText.substring(0, 200) + '...';
-        button.textContent = 'Read more';
-      }
+      const modal = new Modal({
+        title: gameName,
+        content: `<p style="line-height: 1.6; color: rgb(var(--color-neutral-700)); white-space: pre-wrap;">${fullDescription}</p>`,
+        size: 'lg'
+      });
+      modal.open();
     }
   });
 
   // Load games on page load
+  loadBoardGames();
+})();
+
   loadBoardGames();
 })();
 </script>
