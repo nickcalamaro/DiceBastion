@@ -3318,6 +3318,80 @@ app.get('/events', async c => {
     return c.json({ error: 'failed_to_fetch_events' }, 500)  }
 })
 
+// ============================================================================
+// BOARD GAMES ENDPOINTS
+// ============================================================================
+
+// Get all board games (public endpoint)
+app.get('/api/board-games', async c => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT 
+        id,
+        name,
+        description,
+        short_description as shortDescription,
+        image_url as imageUrl,
+        thumbs,
+        post_date as postdate,
+        synced_at as syncedAt
+      FROM board_games
+      ORDER BY name ASC
+    `).all()
+    
+    const metadata = {
+      lastUpdate: results && results.length > 0 ? results[0].syncedAt : new Date().toISOString(),
+      totalGames: results?.length || 0
+    }
+    
+    return c.json({
+      metadata,
+      games: results || []
+    })
+  } catch (err) {
+    console.error('Error fetching board games:', err)
+    return c.json({ error: 'failed_to_fetch_board_games' }, 500)
+  }
+})
+
+// Manual sync trigger (admin only)
+app.post('/admin/sync-board-games', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    const now = toIso(new Date())
+    const session = await c.env.DB.prepare(`
+      SELECT s.*, u.is_admin, u.is_active
+      FROM user_sessions s
+      JOIN users u ON s.user_id = u.user_id
+      WHERE s.session_token = ? AND s.expires_at > ? AND u.is_active = 1 AND u.is_admin = 1
+    `).bind(sessionToken, now).first()
+    
+    if (!session) {
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    
+    // Trigger the sync job
+    await syncBoardGamesFromBGG(c.env)
+    
+    return c.json({ 
+      success: true,
+      message: 'Board games sync completed successfully'
+    })
+  } catch (err) {
+    console.error('Error syncing board games:', err)
+    return c.json({ 
+      success: false,
+      error: 'sync_failed',
+      message: err.message
+    }, 500)
+  }
+})
+
 // Confirm ticket purchase - MUST come before /events/:slug route!
 app.get('/events/confirm', async c => {
   try {
@@ -4811,6 +4885,39 @@ app.get('/admin/orders', async (c) => {
 })
 
 // ============================================================================
+// HELPER FUNCTIONS FOR CRON JOBS
+// ============================================================================
+
+/**
+ * Log cron job execution to database
+ */
+async function logCronJob(db, jobName, status, details = {}) {
+  try {
+    const completedAt = status !== 'running' ? new Date().toISOString() : null
+    
+    await db.prepare(`
+      INSERT INTO cron_job_log (
+        job_name, started_at, completed_at, status,
+        records_processed, records_succeeded, records_failed,
+        error_message, details
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      jobName,
+      details.started_at || new Date().toISOString(),
+      completedAt,
+      status,
+      details.records_processed || 0,
+      details.records_succeeded || 0,
+      details.records_failed || 0,
+      details.error_message || null,
+      details.extra ? JSON.stringify(details.extra) : null
+    ).run()
+  } catch (err) {
+    console.error(`[logCronJob] Failed to log ${jobName}:`, err)
+  }
+}
+
+// ============================================================================
 // CRON JOB: Auto-renewal processing
 // ============================================================================
 
@@ -5437,6 +5544,131 @@ async function processPaymentReconciliation(env) {
 }
 
 /**
+ * Sync board games from BoardGameGeek
+ * Fetches the geeklist and stores game data in the database
+ */
+async function syncBoardGamesFromBGG(env) {
+  const jobName = 'bgg_board_games_sync'
+  const startedAt = new Date().toISOString()
+  
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+  
+  let processed = 0
+  let succeeded = 0
+  let failed = 0
+  const errors = []
+  
+  try {
+    // Fetch the pre-processed data.json from Bunny CDN
+    // This is maintained by the sync-bgg-to-bunny.js script and has correct image URLs
+    const DATA_URL = 'https://dicebastion.b-cdn.net/boardgames/data.json'
+    
+    console.log(`[CRON] Fetching data from ${DATA_URL}...`)
+    
+    const response = await fetch(DATA_URL)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch data: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    const items = data.games || []
+    
+    console.log(`[CRON] Found ${items.length} board games`)
+    
+    if (items.length === 0) {
+      throw new Error('No board games found in data')
+    }
+    
+    // Sample first game for logging
+    if (items.length > 0) {
+      console.log(`[CRON] Sample game:`, {
+        id: items[0].id,
+        name: items[0].name,
+        hasDescription: !!items[0].description,
+        hasShortDesc: !!items[0].shortDescription,
+        imageUrl: items[0].imageUrl
+      })
+    }
+    
+    // Clear existing games and insert new ones
+    await env.DB.prepare('DELETE FROM board_games').run()
+    
+    for (const game of items) {
+      if (!game.id || !game.name) {
+        console.warn(`[CRON] Skipping game with missing id or name:`, game)
+        continue
+      }
+      
+      try {
+        await env.DB.prepare(`
+          INSERT INTO board_games (
+            id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          game.id,
+          game.name,
+          game.description || null,
+          game.shortDescription || null,
+          game.imageUrl || null,
+          game.thumbs || 0,
+          game.postdate || null,
+          new Date().toISOString(),
+          new Date().toISOString()
+        ).run()
+        
+        succeeded++
+      } catch (err) {
+        failed++
+        errors.push({
+          game_id: game.id,
+          game_name: game.name,
+          error: err.message
+        })
+        console.error(`[CRON] Failed to insert game ${game.id}:`, err)
+      }
+    }
+    
+    processed = items.length
+    
+    console.log(`[CRON] ${jobName} summary:`)
+    console.log(`  - Games processed: ${processed}`)
+    console.log(`  - Games inserted: ${succeeded}`)
+    console.log(`  - Games failed: ${failed}`)
+    
+    try {
+      await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        extra: {
+          errors: errors.length > 0 ? errors : undefined
+        }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log success:`, logErr)
+    }
+    
+  } catch (err) {
+    console.error(`[CRON] ${jobName} failed:`, err)
+    try {
+      await logCronJob(env.DB, jobName, 'failed', {
+        started_at: startedAt,
+        records_processed: processed,
+        records_succeeded: succeeded,
+        records_failed: failed,
+        error_message: err.message,
+        extra: {
+          errors: errors.length > 0 ? errors : undefined
+        }
+      })
+    } catch (logErr) {
+      console.error(`[CRON] ${jobName} - Failed to log error:`, logErr)
+    }
+  }
+}
+
+/**
  * Main scheduled handler - runs all cron jobs
  * Scheduled to run daily at 2 AM UTC
  */
@@ -5450,7 +5682,8 @@ async function handleScheduled(event, env, ctx) {
     auto_renewals: null,
     event_reminders: null,
     delayed_account_setup_emails: null,
-    payment_reconciliation: null
+    payment_reconciliation: null,
+    bgg_board_games_sync: null
   }
   
   // Run all cron jobs sequentially, catching errors individually
@@ -5490,6 +5723,15 @@ async function handleScheduled(event, env, ctx) {
     // Individual job already logged its own error
   }
   
+  try {
+    await syncBoardGamesFromBGG(env)
+    jobResults.bgg_board_games_sync = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] BGG board games sync failed:', e)
+    jobResults.bgg_board_games_sync = 'failed'
+    // Individual job already logged its own error
+  }
+  
   console.log('============================================')
   console.log('All cron jobs completed at:', new Date().toISOString())
   console.log('Job Results:', jobResults)
@@ -5501,7 +5743,7 @@ async function handleScheduled(event, env, ctx) {
     try {
     await logCronJob(env.DB, 'cron_master', allSucceeded ? 'completed' : 'partial', {
       started_at: runStarted,
-      records_processed: 4,
+      records_processed: 5,
       records_succeeded: Object.values(jobResults).filter(r => r === 'completed').length,
       records_failed: Object.values(jobResults).filter(r => r === 'failed').length,
       extra: jobResults

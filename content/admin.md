@@ -533,9 +533,14 @@ Loading memberships...
 <div id="cron-tab" class="tab-content" style="display: none;">
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
 <h2 style="margin: 0;">Automated Jobs</h2>
+<div style="display: flex; gap: 0.5rem;">
+<button id="sync-board-games-btn" onclick="syncBoardGames()" style="padding: 0.5rem 1rem; background: rgb(var(--color-secondary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+🎲 Sync Board Games
+</button>
 <button id="refresh-cron-btn" onclick="loadCronLogs()" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
 🔄 Refresh
 </button>
+</div>
 </div>
 
 <!-- Job Filter -->
@@ -546,6 +551,7 @@ Loading memberships...
 <option value="auto_renewals">Auto Renewals</option>
 <option value="event_reminders">Event Reminders</option>
 <option value="payment_reconciliation">Payment Reconciliation</option>
+<option value="bgg_board_games_sync">Board Games Sync</option>
 </select>
 </div>
 
@@ -1810,7 +1816,7 @@ async function loadRegistrations() {
   list.innerHTML = '<p class="admin-text-center admin-text-muted" style="padding: 2rem;">Loading...</p>';
   
   try {
-    const res = await fetch(`https://dicebastion-memberships.ncalamaro.workers.dev/admin/registrations`, {
+    const res = await fetch(`${API_BASE}/admin/registrations`, {
       headers: {
         'X-Session-Token': sessionToken
       }
@@ -2071,7 +2077,7 @@ async function loadMemberships() {
   const filter = document.getElementById('membership-filter')?.value || 'all';
   
   try {
-    const res = await fetch(`https://dicebastion-memberships.ncalamaro.workers.dev/admin/memberships?filter=${filter}`, {
+    const res = await fetch(`${API_BASE}/admin/memberships?filter=${filter}`, {
       headers: {
         'X-Session-Token': sessionToken
       }
@@ -2202,7 +2208,7 @@ async function loadCronLogs(page = 0) {
   
   try {
     const offset = page * cronPageSize;
-    let url = `https://dicebastion-memberships.ncalamaro.workers.dev/admin/cron-logs?limit=${cronPageSize}&offset=${offset}`;
+    let url = `${API_BASE}/admin/cron-logs?limit=${cronPageSize}&offset=${offset}`;
     if (jobFilter) {
       url += `&job_name=${encodeURIComponent(jobFilter)}`;
     }
@@ -2354,9 +2360,56 @@ function formatJobName(jobName) {
   const names = {
     auto_renewals: '🔄 Auto Renewals',
     event_reminders: '📧 Event Reminders',
-    payment_reconciliation: '💳 Payment Reconciliation'
+    payment_reconciliation: '💳 Payment Reconciliation',
+    bgg_board_games_sync: '🎲 Board Games Sync'
   };
   return names[jobName] || jobName;
+}
+
+async function syncBoardGames() {
+  const button = document.getElementById('sync-board-games-btn');
+  const originalText = button.innerHTML;
+  
+  try {
+    button.disabled = true;
+    button.innerHTML = '⏳ Syncing...';
+    button.style.opacity = '0.6';
+    
+    const response = await fetch(`${API_BASE}/admin/sync-board-games`, {
+      method: 'POST',
+      headers: {
+        'X-Session-Token': sessionToken
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Sync failed');
+    }
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      button.innerHTML = '✅ Synced!';
+      // Refresh cron logs to show the new sync job
+      setTimeout(() => {
+        loadCronLogs();
+        button.innerHTML = originalText;
+        button.disabled = false;
+        button.style.opacity = '1';
+      }, 2000);
+    } else {
+      throw new Error(data.message || 'Sync failed');
+    }
+  } catch (err) {
+    console.error('Error syncing board games:', err);
+    button.innerHTML = '❌ Failed';
+    alert(`Failed to sync board games: ${err.message}`);
+    setTimeout(() => {
+      button.innerHTML = originalText;
+      button.disabled = false;
+      button.style.opacity = '1';
+    }, 2000);
+  }
 }
 
 function showCronDetails(logId, details) {

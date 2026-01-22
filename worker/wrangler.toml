@@ -32,6 +32,7 @@ ALLOW_TEST_BYPASS = "true"
 # - SUMUP_MERCHANT_CODE
 # - MAILERSEND_API_KEY
 # - ADMIN_KEY (for shop admin endpoints)
+# - BGG_API_TOKEN (for BoardGameGeek API access)
 
 # Cron trigger for membership renewals (daily at 2 AM UTC)
 [triggers]

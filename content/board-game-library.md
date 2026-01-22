@@ -79,15 +79,10 @@ showReadingTime: false
 
   async function loadBoardGames() {
     try {
-      // Fetch from Bunny CDN
-      // Use CORS proxy for localhost development, direct fetch for production
-      const dataUrl = 'https://dicebastion.b-cdn.net/boardgames/data.json';
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        // Add cache-busting parameter to force fresh data (temporary workaround for CDN cache)
-      const cacheBuster = `?v=${Date.now()}`;
-      const fetchUrl = isLocalhost ? `https://corsproxy.io/?${encodeURIComponent(dataUrl + cacheBuster)}` : dataUrl + cacheBuster;
+      // Fetch from worker API
+      const apiUrl = 'https://dicebastion-memberships.ncalamaro.workers.dev/api/board-games';
       
-      const response = await fetch(fetchUrl);
+      const response = await fetch(apiUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.status}`);
       }
@@ -135,6 +130,12 @@ showReadingTime: false
     });
 
     const imageUrl = game.imageUrl || '/img/default-boardgame.jpg';
+    
+    // Add Bunny CDN optimization class for thumbnail (only if it's a Bunny URL)
+    const optimizedImageUrl = imageUrl.includes('dicebastion.b-cdn.net') 
+      ? `${imageUrl}?class=thumb`
+      : imageUrl;
+    
     const bggUrl = `https://boardgamegeek.com/boardgame/${game.id}`;
     
     // Use shortDescription from geeklist body (text in curly braces)
@@ -158,11 +159,11 @@ showReadingTime: false
     card.innerHTML = `
       <div style="flex-shrink: 0; width: 150px; height: 150px; background: rgb(var(--color-neutral-100)); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
         <img 
-          src="${imageUrl}" 
+          src="${optimizedImageUrl}" 
           alt="${game.name}"
           loading="lazy"
           style="width: 100%; height: 100%; object-fit: contain;"
-          onerror="this.src='/img/default-boardgame.jpg'"
+          onerror="if(!this.dataset.retry){this.dataset.retry='1';this.src=this.src.replace('.png?','.jpg?').replace('.png','.jpg')}else{this.src='/img/default-boardgame.jpg'}"
         />
       </div>
       <div style="flex: 1; display: flex; flex-direction: column;">
@@ -273,7 +274,4 @@ showReadingTime: false
   // Load games on page load
   loadBoardGames();
 })();
-
-  loadBoardGames();
-  </script>
 </script>
