@@ -110,10 +110,10 @@ function requireAuth(request: Request): boolean {
 
 async function listBoardGames() {
   try {
-    const result = await db.execute(\
+    const result = await db.execute(`
       SELECT id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at
       FROM board_games ORDER BY post_date DESC
-    \);
+    `);
     return jsonResponse({ games: result.rows, count: result.rows.length });
   } catch (error) {
     console.error("Error listing board games:", error);
@@ -130,7 +130,7 @@ async function getBoardGame(id: string) {
     if (result.rows.length === 0) return jsonResponse({ error: "Game not found" }, 404);
     return jsonResponse({ game: result.rows[0] });
   } catch (error) {
-    console.error(\Error fetching board game \:\, error);
+    console.error(`Error fetching board game ${id}:`, error);
     return jsonResponse({ error: "Failed to fetch board game" }, 500);
   }
 }
@@ -168,10 +168,10 @@ async function updateBoardGame(id: string, request: Request) {
     updates.push("updated_at = ?");
     args.push(new Date().toISOString());
     args.push(id);
-    await db.execute({ sql: \UPDATE board_games SET \ WHERE id = ?\, args });
+    await db.execute({ sql: `UPDATE board_games SET ${updates.join(", ")} WHERE id = ?`, args });
     return jsonResponse({ success: true, message: "Board game updated", id });
   } catch (error) {
-    console.error(\Error updating board game \:\, error);
+    console.error(`Error updating board game ${id}:`, error);
     return jsonResponse({ error: "Failed to update board game" }, 500);
   }
 }
@@ -181,7 +181,7 @@ async function deleteBoardGame(id: string) {
     await db.execute({ sql: "DELETE FROM board_games WHERE id = ?", args: [id] });
     return jsonResponse({ success: true, message: "Board game deleted", id });
   } catch (error) {
-    console.error(\Error deleting board game \:\, error);
+    console.error(`Error deleting board game ${id}:`, error);
     return jsonResponse({ error: "Failed to delete board game" }, 500);
   }
 }
