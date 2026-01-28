@@ -2375,10 +2375,10 @@ async function syncBoardGames() {
     button.innerHTML = '⏳ Syncing...';
     button.style.opacity = '0.6';
     
-    const response = await fetch(`${API_BASE}/admin/sync-board-games`, {
+    const response = await fetch('https://dicebastiongames-9ze9m.bunny.run/api/boardgames/sync', {
       method: 'POST',
       headers: {
-        'X-Session-Token': sessionToken
+        'Authorization': `Bearer ${sessionToken}`
       }
     });
     
@@ -2389,14 +2389,36 @@ async function syncBoardGames() {
     const data = await response.json();
     
     if (data.success) {
-      button.innerHTML = '✅ Synced!';
-      // Refresh cron logs to show the new sync job
+      const stats = data.stats || {};
+      const message = `✅ Synced! Created: ${stats.created || 0}, Updated: ${stats.updated || 0}, Images: ${stats.imagesUploaded || 0}`;
+      button.innerHTML = message;
+      
+      // Show detailed results in a modal if there were errors
+      if (data.errors && data.errors.length > 0) {
+        const modal = new Modal({
+          title: 'Sync Completed with Errors',
+          content: `
+            <p><strong>Stats:</strong></p>
+            <ul>
+              <li>Processed: ${stats.processed || 0}</li>
+              <li>Created: ${stats.created || 0}</li>
+              <li>Updated: ${stats.updated || 0}</li>
+              <li>Images Uploaded: ${stats.imagesUploaded || 0}</li>
+              <li>Errors: ${stats.errors || 0}</li>
+            </ul>
+            <p><strong>Errors:</strong></p>
+            <ul>${data.errors.map(e => `<li>${e}</li>`).join('')}</ul>
+          `,
+          size: 'lg'
+        });
+        modal.open();
+      }
+      
       setTimeout(() => {
-        loadCronLogs();
         button.innerHTML = originalText;
         button.disabled = false;
         button.style.opacity = '1';
-      }, 2000);
+      }, 3000);
     } else {
       throw new Error(data.message || 'Sync failed');
     }
