@@ -26,13 +26,13 @@ jobs:
           deno-version: v1.x
 
       - name: Install
-        run: "npm install"
+        run: "cd bgg-bunny && npm install"
 
       - name: Build
-        run: "npm run build"
+        run: "cd bgg-bunny && npx esbuild board-games-api.ts --bundle --format=esm --outfile=dist/index.js --platform=browser --target=es2022"
 
       - name: Publish the script to Bunny
         uses: "BunnyWay/actions/deploy-script@main"
         with:
           script_id: 61994
-          file: "dist/index.js"
+          file: "bgg-bunny/dist/index.js"

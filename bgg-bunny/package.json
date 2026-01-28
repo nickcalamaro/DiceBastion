@@ -1,0 +1,21 @@
+{
+  "name": "bgg-bunny-sync",
+  "version": "1.0.0",
+  "description": "BGG board game sync using Bunny Database and Edge Scripting",
+  "type": "module",
+  "scripts": {
+    "init-db": "node init-database.js",
+    "test-sync": "node test-sync.js",
+    "deploy": "node deploy.js",
+    "build": "esbuild board-games-api.ts --bundle --format=esm --outfile=dist/index.js --platform=browser --target=es2022"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0",
+    "esbuild": "^0.20.0"
+  }
+}
