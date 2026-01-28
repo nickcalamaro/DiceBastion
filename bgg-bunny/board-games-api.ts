@@ -1,36 +1,31 @@
 /**
- * Bunny Edge Script - Board Games API
- * Serves board game library data from Bunny Database
+ * Board Games API - Bunny Edge Script
  * 
- * Endpoints:
- * - GET /api/boardgames - List all board games
- * - GET /api/boardgames/:id - Get single board game by ID
- * - POST /api/boardgames - Create new board game (requires auth)
- * - PUT /api/boardgames/:id - Update board game (requires auth)
- * - DELETE /api/boardgames/:id - Delete board game (requires auth)
+ * A RESTful API for managing board game library data stored in Bunny Database.
  * 
- * Environment Secrets Required:
- * - DATABASE_URL: libsql://01KG03QGHB70WY748QJ1WJXKN9-dicebastion.lite.bunnydb.net/
- * - DATABASE_TOKEN: Your Bunny Database access token (Full Access)
- * - ADMIN_API_KEY: Secret key for authenticating write operations
+ * Environment Variables (auto-configured from Bunny Dashboard):
+ *   - DB_URL: Database connection URL
+ *   - DB_TOKEN: Database access token (Full Access for write operations)
+ *   - ADMIN_API_KEY: Bearer token for write operation authentication
+ * 
+ * API Endpoints:
+ *   GET    /api/boardgames     - List all board games
+ *   GET    /api/boardgames/:id - Get single board game by ID
+ *   POST   /api/boardgames     - Create new board game (auth required)
+ *   PUT    /api/boardgames/:id - Update board game (auth required)
+ *   DELETE /api/boardgames/:id - Delete board game (auth required)
  */
 
 import * as BunnySDK from "@bunny.net/edgescript-sdk";
 import { createClient } from "@libsql/client/web";
 
-// Get environment secrets
-const DB_URL = BunnySDK.getEnvironmentVariable("DATABASE_URL") || "";
-const DB_TOKEN = BunnySDK.getEnvironmentVariable("DATABASE_TOKEN") || "";
-const ADMIN_API_KEY = BunnySDK.getEnvironmentVariable("ADMIN_API_KEY") || "";
-
-// Initialize database client
-const db = createClient({
-  url: DB_URL,
-  authToken: DB_TOKEN,
+// Initialize libSQL client with Bunny Database credentials
+const client = createClient({
+  url: process.env.DB_URL,
+  authToken: process.env.DB_TOKEN,
 });
 
-// CORS headers
-const corsHeaders = {
+const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
@@ -42,10 +37,7 @@ BunnySDK.net.http.serve(async (request: Request) => {
 
   // Handle CORS preflight
   if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
   try {
@@ -100,21 +92,31 @@ BunnySDK.net.http.serve(async (request: Request) => {
   }
 });
 
+/**
+ * Validate Authorization header against ADMIN_API_KEY
+ * Expects: Authorization: Bearer <token>
+ */
 function requireAuth(request: Request): boolean {
-  if (!ADMIN_API_KEY) return false;
+  const apiKey = process.env.ADMIN_API_KEY;
+  if (!apiKey) return false;
+  
   const authHeader = request.headers.get("Authorization");
-  if (!authHeader) return false;
-  const token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-  return token === ADMIN_API_KEY;
+  if (!authHeader?.startsWith("Bearer ")) return false;
+  
+  const token = authHeader.substring(7);
+  return token === apiKey;
 }
 
 async function listBoardGames() {
   try {
-    const result = await db.execute(`
-      SELECT id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at
-      FROM board_games ORDER BY post_date DESC
-    `);
-    return jsonResponse({ games: result.rows, count: result.rows.length });
+    const result = await client.execute(
+      "SELECT id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at FROM board_games ORDER BY post_date DESC"
+    );
+    
+    return jsonResponse({
+      games: result.rows,
+      count: result.rows.length,
+    });
   } catch (error) {
     console.error("Error listing board games:", error);
     return jsonResponse({ error: "Failed to fetch board games" }, 500);
@@ -123,11 +125,15 @@ async function listBoardGames() {
 
 async function getBoardGame(id: string) {
   try {
-    const result = await db.execute({
+    const result = await client.execute({
       sql: "SELECT * FROM board_games WHERE id = ?",
       args: [id],
     });
-    if (result.rows.length === 0) return jsonResponse({ error: "Game not found" }, 404);
+    
+    if (result.rows.length === 0) {
+      return jsonResponse({ error: "Board game not found" }, 404);
+    }
+    
     return jsonResponse({ game: result.rows[0] });
   } catch (error) {
     console.error(`Error fetching board game ${id}:`, error);
@@ -139,12 +145,18 @@ async function createBoardGame(request: Request) {
   try {
     const data = await request.json();
     const { id, name, description, short_description, image_url, thumbs, post_date } = data;
-    if (!id || !name) return jsonResponse({ error: "Missing required fields: id, name" }, 400);
+    
+    if (!id || !name) {
+      return jsonResponse({ error: "Missing required fields: id, name" }, 400);
+    }
+    
     const now = new Date().toISOString();
-    await db.execute({
+    
+    await client.execute({
       sql: "INSERT INTO board_games (id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       args: [id, name, description || null, short_description || null, image_url || null, thumbs || 0, post_date || now, now, now],
     });
+    
     return jsonResponse({ success: true, message: "Board game created", id }, 201);
   } catch (error) {
     console.error("Error creating board game:", error);
@@ -156,19 +168,30 @@ async function updateBoardGame(id: string, request: Request) {
   try {
     const data = await request.json();
     const { name, description, short_description, image_url, thumbs, post_date } = data;
+    
     const updates: string[] = [];
     const args: any[] = [];
+    
     if (name !== undefined) { updates.push("name = ?"); args.push(name); }
     if (description !== undefined) { updates.push("description = ?"); args.push(description); }
     if (short_description !== undefined) { updates.push("short_description = ?"); args.push(short_description); }
     if (image_url !== undefined) { updates.push("image_url = ?"); args.push(image_url); }
     if (thumbs !== undefined) { updates.push("thumbs = ?"); args.push(thumbs); }
     if (post_date !== undefined) { updates.push("post_date = ?"); args.push(post_date); }
-    if (updates.length === 0) return jsonResponse({ error: "No fields to update" }, 400);
+    
+    if (updates.length === 0) {
+      return jsonResponse({ error: "No fields to update" }, 400);
+    }
+    
     updates.push("updated_at = ?");
     args.push(new Date().toISOString());
     args.push(id);
-    await db.execute({ sql: `UPDATE board_games SET ${updates.join(", ")} WHERE id = ?`, args });
+    
+    await client.execute({
+      sql: `UPDATE board_games SET ${updates.join(", ")} WHERE id = ?`,
+      args,
+    });
+    
     return jsonResponse({ success: true, message: "Board game updated", id });
   } catch (error) {
     console.error(`Error updating board game ${id}:`, error);
@@ -178,7 +201,11 @@ async function updateBoardGame(id: string, request: Request) {
 
 async function deleteBoardGame(id: string) {
   try {
-    await db.execute({ sql: "DELETE FROM board_games WHERE id = ?", args: [id] });
+    await client.execute({
+      sql: "DELETE FROM board_games WHERE id = ?",
+      args: [id],
+    });
+    
     return jsonResponse({ success: true, message: "Board game deleted", id });
   } catch (error) {
     console.error(`Error deleting board game ${id}:`, error);
@@ -189,6 +216,10 @@ async function deleteBoardGame(id: string) {
 function jsonResponse(data: any, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=3600" },
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+      "Cache-Control": "public, max-age=3600",
+    },
   });
 }
