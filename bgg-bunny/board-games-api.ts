@@ -79,11 +79,8 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await deleteBoardGame(id!);
     }
 
-    // POST /api/boardgames/sync - Sync from BGG geeklist (requires auth)
+    // POST /api/boardgames/sync - Sync from BGG geeklist (public, rate-limited by BGG)
     if (path === "/api/boardgames/sync" && request.method === "POST") {
-      if (!requireAuth(request)) {
-        return jsonResponse({ error: "Unauthorized" }, 401);
-      }
       return await syncFromBGG();
     }
 
