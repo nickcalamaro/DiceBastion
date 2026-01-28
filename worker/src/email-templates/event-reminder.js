@@ -43,9 +43,9 @@ export function getEventReminderEmail(event, user, ticket) {
         </div>
         
         <div class="content">
-            <p>Hello ${user.name || 'there'},</p>
+            <p>Hi ${user.name || 'there'},</p>
             
-            <p>This is a friendly reminder that <strong>${event.event_name}</strong> is happening <strong>tomorrow</strong>! We're excited to see you there.</p>
+            <p>Just a friendly reminder that <strong>${event.event_name}</strong> is happening <strong>tomorrow</strong>! We're excited to see you there.</p>
             
             <div class="event-date">
                 📅 ${formattedDate}
@@ -70,30 +70,20 @@ export function getEventReminderEmail(event, user, ticket) {
             <div style="text-align: center; margin: 30px 0;">
                 <a href="https://dicebastion.com/events" class="cta-button">View Event Details</a>
             </div>
-            
-            <h3>📋 What to Bring</h3>
-            <ul>
-                <li>Your ticket confirmation (digital or printed)</li>
-                <li>Photo ID (if required for age verification)</li>
-                <li>Comfortable clothing and any necessary equipment</li>
-                <li>Your enthusiasm and excitement!</li>
-            </ul>
-            
+                            
             <h3>🚨 Important Notes</h3>
             <ul>
                 <li><strong>Arrival Time:</strong> Please arrive 15-30 minutes early for check-in</li>
-                <li><strong>Cancellation Policy:</strong> Contact us ASAP if you can't attend</li>
-                <li><strong>Questions?</strong> Reply to this email or contact our support team</li>
+                <li><strong>Cancellation Policy:</strong> Please let us know ASAP if you won't be able to attend</li>
+                <li><strong>Any questions?</strong> Reach out to us via WhatsApp or drop us an email and we'll make sure to get back to you as soon as we can!</li>
             </ul>
             
-            <p>We can't wait to see you there! If you have any questions or need to make changes to your reservation, please don't hesitate to contact us.</p>
-            
-            <p>See you soon!</p>
-            
-            <p><strong>The Dice Bastion Team</strong></p>
+            <p>We can't wait to see you there!</p>
+                        
+            <p><strong>The Gibraltar Dice Bastion Team</strong></p>
             
             <div class="footer">
-                <p>Dice Bastion | Gibraltar's Premier Gaming Club</p>
+                <p>Dice Bastion | Gibraltar's  premier location for board games, wargames, card games and RPGs!</p>
                 <p><a href="https://dicebastion.com" style="color: #667eea;">dicebastion.com</a> | <a href="mailto:info@dicebastion.com" style="color: #667eea;">info@dicebastion.com</a></p>
                 <p style="font-size: 12px; margin-top: 10px;">You're receiving this email because you registered for ${event.event_name}.</p>
             </div>
@@ -103,63 +93,8 @@ export function getEventReminderEmail(event, user, ticket) {
 </html>
   `
   
-  const textContent = `
-Event Reminder: ${event.event_name}
-================================
-
-Hello ${user.name || 'there'},
-
-This is a friendly reminder that ${event.event_name} is happening tomorrow! We're excited to see you there.
-
-📅 Event Date: ${formattedDate}
-📍 Location: ${event.location || 'TBD - Check our website for updates'}
-
-${ticket ? `
-🎟️ Your Ticket Information:
-- Order Reference: ${ticket.order_ref}
-- Status: ${ticket.status === 'confirmed' ? 'Confirmed' : ticket.status}
-` : ''}
-
-📋 What to Bring:
-- Your ticket confirmation (digital or printed)
-- Photo ID (if required for age verification)
-- Comfortable clothing and any necessary equipment
-- Your enthusiasm and excitement!
-
-🚨 Important Notes:
-- Arrival Time: Please arrive 15-30 minutes early for check-in
-- Cancellation Policy: Contact us ASAP if you can't attend
-- Questions? Reply to this email or contact our support team
-
-View event details: https://dicebastion.com/events
-
-We can't wait to see you there!
-
-The Dice Bastion Team
-
----
-Dice Bastion | Gibraltar's Premier Gaming Club
-dicebastion.com | info@dicebastion.com
-You're receiving this email because you registered for ${event.event_name}.
-`
-  
   return {
     subject: `⏰ Reminder: ${event.event_name} is tomorrow!`,
-    html: htmlContent,
-    text: textContent
+    html: htmlContent
   }
-}
-
-// Helper function to check if event reminder should be sent
-export function shouldSendEventReminder(eventDate) {
-  const now = new Date()
-  const oneDayFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-  const tomorrow = new Date(now)
-  tomorrow.setDate(now.getDate() + 1)
-  tomorrow.setHours(0, 0, 0, 0)
-  
-  const eventStart = new Date(eventDate)
-  
-  // Check if event is tomorrow (within 24-48 hours from now)
-  return eventStart >= tomorrow && eventStart < oneDayFromNow
 }

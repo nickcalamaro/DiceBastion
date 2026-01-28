@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { createHmac } from 'crypto'
 import { calculateNextOccurrence } from './utils/recurring.js'
-import { getEventReminderEmail, shouldSendEventReminder } from './email-templates/event-reminder.js'
+import { getEventReminderEmail } from './email-templates/event-reminder.js'
 import {
   createEmailVerificationToken,
   verifyEmailVerificationToken,
@@ -824,6 +824,9 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
       
       return { success: false, error: txt }
     }
+    
+    // Consume the response body to prevent stalled response warning
+    await res.text()
     
     // Log successful email
     await logEmailHistory(env.DB, {
@@ -4605,25 +4608,51 @@ app.get('/test/renew-user', async (c) => {
 // Test endpoint to manually trigger event reminders
 app.get('/test/event-reminders', async (c) => {
   try {
-    console.log('[TEST] Manually triggering event reminders...')
-    
-    // Call the processEventReminders function
+    console.log('Manually triggering event reminders cron job...')
     await processEventReminders(c.env)
     
     return c.json({ 
-      success: true, 
-      message: 'Event reminders processed. Check logs for details.',
-      timestamp: new Date().toISOString()
+      success: true,
+      message: 'Event reminders processed. Check logs for details.'
     })
   } catch (e) {
-    console.error('[TEST] Event reminder test error:', e)
-    return c.json({ 
-      success: false, 
-      error: String(e.message || e), 
-      stack: String(e.stack || '') 
-    }, 500)
+    console.error('Manual event reminders error:', e)
+    return c.json({ error: String(e), stack: String(e.stack || '') }, 500)
   }
 })
+
+// Test endpoint to manually trigger auto-renewals
+app.get('/test/auto-renewals', async (c) => {
+  try {
+    console.log('Manually triggering auto-renewals cron job...')
+    await processAutoRenewals(c.env)
+    
+    return c.json({ 
+      success: true,
+      message: 'Auto-renewals processed. Check logs for details.'
+    })
+  } catch (e) {
+    console.error('Manual auto-renewals error:', e)
+    return c.json({ error: String(e), stack: String(e.stack || '') }, 500)
+  }
+})
+
+// Test endpoint to manually trigger delayed account setup emails
+app.get('/test/delayed-emails', async (c) => {
+  try {
+    console.log('Manually triggering delayed account setup emails cron job...')
+    await processDelayedAccountSetupEmails(c.env)
+    
+    return c.json({ 
+      success: true,
+      message: 'Delayed account setup emails processed. Check logs for details.'
+    })
+  } catch (e) {
+    console.error('Manual delayed emails error:', e)
+    return c.json({ error: String(e), stack: String(e.stack || '') }, 500)
+  }
+})
+
 
 // ============================================================================
 // PRODUCT & SHOP API ENDPOINTS
@@ -5228,13 +5257,6 @@ async function processEventReminders(env) {
           throw new Error(`Event ${event.event_id} not found`)
         }
         
-        // Check if we should send reminders (uses shouldSendEventReminder helper)
-        if (!shouldSendEventReminder(fullEvent.event_datetime)) {
-          console.log(`[CRON] Event ${event.event_id} is not within reminder window`)
-          succeeded++
-          continue
-        }
-        
         // Send reminder email to each attendee
         let emailsSent = 0
         let emailsFailed = 0
@@ -5261,6 +5283,10 @@ async function processEventReminders(env) {
             
             if (emailResult.success === false) {
               throw new Error(emailResult.error || 'Email send failed')
+            }
+            
+            if (emailResult.skipped) {
+              throw new Error('Email skipped - MAILERSEND_API_KEY not configured')
             }
             
             emailsSent++
@@ -5446,106 +5472,210 @@ async function processDelayedAccountSetupEmails(env) {
   }
 }
 
+// ============================================================================
+// BGG SYNC HELPER FUNCTIONS
+// ============================================================================
+
 /**
- * Reconcile payment statuses
- * Checks for stuck/pending payments and syncs with Stripe
+ * Download image from BGG and upload to Bunny Storage
  */
-async function processPaymentReconciliation(env) {
-  const jobName = 'payment_reconciliation'
-  const startedAt = new Date().toISOString()
-  
-  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
-  
-  let processed = 0
-  let succeeded = 0
-  let failed = 0
-  const errors = []
-  
-  try {    // Find payments stuck in pending/processing for more than 1 hour
-    const oneHourAgo = new Date()
-    oneHourAgo.setHours(oneHourAgo.getHours() - 1)
-    const cutoffTime = oneHourAgo.toISOString()
-    
-    // Use transactions table instead of checkout_sessions
-    const stuckPayments = await env.DB.prepare(`
-      SELECT 
-        checkout_id,
-        order_ref,
-        payment_status as status,
-        created_at
-      FROM transactions
-      WHERE payment_status IN ('pending', 'processing')
-        AND created_at < ?
-      LIMIT 100
-    `).bind(cutoffTime).all()
-    
-    processed = stuckPayments.results?.length || 0
-    console.log(`[CRON] Found ${processed} stuck payments to reconcile`)
-    
-    if (processed === 0) {
-      await logCronJob(env.DB, jobName, 'completed', {
-        started_at: startedAt,
-        records_processed: 0,
-        records_succeeded: 0,
-        records_failed: 0
-      })
-      return
+async function downloadAndUploadImage(imageUrl, gameId, env) {
+  try {
+    // Download image from BGG
+    console.log(`  Downloading from BGG: ${imageUrl}`)
+    const response = await fetch(imageUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to download image: ${response.status}`)
     }
     
-    // Check each payment with Stripe
-    for (const payment of stuckPayments.results) {
-      try {        // TODO: Query Stripe/SumUp API to get actual payment status
-        console.log(`[CRON] Would check payment status for order_ref: ${payment.order_ref}`)
-        
-        // Future implementation:
-        // 1. Call payment provider API to get payment intent status
-        // 2. Update transactions payment_status accordingly
-        // 3. If failed, update memberships/tickets to 'cancelled'
-        // 4. Send appropriate notification emails
-          succeeded++
-      } catch (err) {
-        failed++
-        errors.push({
-          checkout_id: payment.checkout_id,
-          order_ref: payment.order_ref,
-          error: err.message
+    const imageBuffer = await response.arrayBuffer()
+    console.log(`  Downloaded ${imageBuffer.byteLength} bytes`)
+    
+    // Determine file extension from URL
+    const imageExt = imageUrl.match(/\.(jpg|jpeg|png|webp)$/i)?.[1] || 'jpg'
+    const imagePath = `boardgames/images/${gameId}.${imageExt}`
+    
+    // Determine content type based on extension
+    const contentTypeMap = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'webp': 'image/webp'
+    }
+    const contentType = contentTypeMap[imageExt.toLowerCase()] || 'image/jpeg'
+    
+    // Check if Bunny Storage is configured
+    if (!env.BUNNY_STORAGE_API_KEY) {
+      throw new Error('BUNNY_STORAGE_API_KEY not configured')
+    }
+    
+    // Upload to Bunny Storage via their API with retry
+    const bunnyStorageUrl = `https://storage.bunnycdn.com/dicebastion/${imagePath}`
+    console.log(`  Uploading to: ${bunnyStorageUrl}`)
+    console.log(`  Content-Type: ${contentType}`)
+    console.log(`  Content-Length: ${imageBuffer.byteLength}`)
+    
+    let uploadResponse
+    let lastError
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`  Upload attempt ${attempt}/3 to Bunny Storage...`)
+        uploadResponse = await fetch(bunnyStorageUrl, {
+          method: 'PUT',
+          headers: {
+            'AccessKey': env.BUNNY_STORAGE_API_KEY,
+            'Content-Type': contentType,
+            'Content-Length': imageBuffer.byteLength.toString()
+          },
+          body: imageBuffer
         })
-        console.error(`[CRON] Failed to reconcile payment ${payment.order_ref}:`, err)
+        
+        if (uploadResponse.ok) {
+          console.log(`  Upload successful (status ${uploadResponse.status})`)
+          break
+        }
+        
+        const errorText = await uploadResponse.text()
+        lastError = `Upload failed (${uploadResponse.status}): ${errorText}`
+        console.warn(`  ${lastError}`)
+        
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        }
+      } catch (err) {
+        lastError = err.message
+        console.warn(`  Upload attempt ${attempt} failed: ${err.message}`)
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        }
       }
     }
     
-    try {
-      await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
-        started_at: startedAt,
-        records_processed: processed,
-        records_succeeded: succeeded,
-        records_failed: failed,
-        extra: { errors: errors.length > 0 ? errors : undefined }
-      })
-    } catch (logErr) {
-      console.error(`[CRON] ${jobName} - Failed to log success:`, logErr)
+    if (!uploadResponse || !uploadResponse.ok) {
+      throw new Error(lastError || 'All upload attempts failed')
     }
     
+    // Return Bunny CDN URL
+    return `https://dicebastion.b-cdn.net/${imagePath}`
   } catch (err) {
-    console.error(`[CRON] ${jobName} failed:`, err)
-    try {
-      await logCronJob(env.DB, jobName, 'failed', {
-        started_at: startedAt,
-        records_processed: processed,
-        records_succeeded: succeeded,
-        records_failed: failed,
-        error_message: err.message,
-        extra: { errors: errors.length > 0 ? errors : undefined }
-      })
-    } catch (logErr) {
-      console.error(`[CRON] ${jobName} - Failed to log error:`, logErr)
-    }
+    console.error(`Failed to upload image for game ${gameId}:`, err.message)
+    return null
   }
 }
 
 /**
+ * Simple XML parser for BGG geeklist
+ */
+function parseGeeklistXML(xmlText) {
+  const items = []
+  
+  // Extract items using regex (simple but works for geeklist structure)
+  const itemRegex = /<item[\s\S]*?<\/item>/g
+  const itemMatches = xmlText.match(itemRegex) || []
+  
+  for (const itemXml of itemMatches) {
+    const idMatch = itemXml.match(/objectid="(\d+)"/)
+    const nameMatch = itemXml.match(/objectname="([^"]+)"/)
+    const bodyMatch = itemXml.match(/<body>([\s\S]*?)<\/body>/)
+    const thumbsMatch = itemXml.match(/thumbs="(\d+)"/)
+    const postdateMatch = itemXml.match(/postdate="([^"]+)"/)
+    const imageidMatch = itemXml.match(/imageid="(\d+)"/)
+    
+    if (idMatch && nameMatch) {
+      const body = bodyMatch ? bodyMatch[1].trim() : ''
+      
+      // Extract short description from body if it's in curly braces
+      const shortDescMatch = body.match(/\{([^}]+)\}/)
+      const shortDescription = shortDescMatch ? shortDescMatch[1].trim() : null
+      
+      // BGG image URL format from imageid
+      let imageUrl = null
+      const imageId = imageidMatch ? imageidMatch[1] : null
+      if (imageId && imageId !== '0') {
+        imageUrl = `https://cf.geekdo-images.com/original/img/${imageId.substring(0, 2)}/${imageId}.jpg`
+      }
+      
+      items.push({
+        id: idMatch[1],
+        name: nameMatch[1],
+        shortDescription: shortDescription,
+        thumbs: thumbsMatch ? parseInt(thumbsMatch[1]) : 0,
+        postdate: postdateMatch ? postdateMatch[1] : null,
+        imageUrl: imageUrl,
+        imageId: imageId
+      })
+    }
+  }
+  
+  return items
+}
+
+/**
+ * Fetch game details from BGG API v2
+ */
+async function fetchBGGGameDetails(gameId, env, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const url = `https://boardgamegeek.com/xmlapi2/thing?id=${gameId}&type=boardgame`
+      const headers = {
+        'User-Agent': 'DiceBastion/1.0 (+https://dicebastion.com)'
+      }
+      
+      // Add authentication if available
+      if (env.BGG_API_TOKEN) {
+        headers['Authorization'] = `Bearer ${env.BGG_API_TOKEN}`
+      }
+      
+      const response = await fetch(url, { headers })
+      
+      if (response.status === 202) {
+        // BGG is preparing data, retry
+        if (attempt < retries) {
+          console.log(`   BGG returned 202, retrying... (${attempt}/${retries})`)
+          await new Promise(resolve => setTimeout(resolve, 3000))
+          continue
+        }
+        throw new Error('BGG API returned 202 after retries')
+      }
+      
+      const xmlText = await response.text() // Always consume body first
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      
+      // Extract image and description
+      const imageMatch = xmlText.match(/<image>([^<]+)<\/image>/)
+      const thumbnailMatch = xmlText.match(/<thumbnail>([^<]+)<\/thumbnail>/)
+      const descMatch = xmlText.match(/<description>([\s\S]*?)<\/description>/)
+      
+      let imageUrl = imageMatch ? imageMatch[1] : null
+      
+      // Prefer thumbnail if main image looks broken
+      if (imageUrl && imageUrl.includes('/original/img/')) {
+        imageUrl = thumbnailMatch ? thumbnailMatch[1] : imageUrl
+      }
+      
+      return {
+        imageUrl: imageUrl || (thumbnailMatch ? thumbnailMatch[1] : null),
+        description: descMatch ? descMatch[1].trim() : null
+      }
+    } catch (err) {
+      if (attempt < retries && err.message.includes('202')) {
+        continue
+      }
+      console.warn(`   Could not fetch details: ${err.message}`)
+      return null
+    }
+  }
+  return null
+}
+
+
+/**
  * Sync board games from BoardGameGeek
- * Fetches the geeklist and stores game data in the database
+ * Fetches directly from BGG geeklist and stores game data in the database
+ * Only downloads images for new games to save bandwidth
  */
 async function syncBoardGamesFromBGG(env) {
   const jobName = 'bgg_board_games_sync'
@@ -5557,45 +5687,153 @@ async function syncBoardGamesFromBGG(env) {
   let succeeded = 0
   let failed = 0
   const errors = []
+  const GEEKLIST_ID = '352631'
   
   try {
-    // Fetch the pre-processed data.json from Bunny CDN
-    // This is maintained by the sync-bgg-to-bunny.js script and has correct image URLs
-    const DATA_URL = 'https://dicebastion.b-cdn.net/boardgames/data.json'
+    // Fetch existing games from DB to avoid re-downloading images
+    const existingGamesResult = await env.DB.prepare('SELECT id, image_url, description, short_description FROM board_games').all()
+    const existingGames = new Map()
+    for (const game of (existingGamesResult.results || [])) {
+      existingGames.set(String(game.id), game) // Convert to string for consistent lookup
+    }
+    console.log(`[CRON] Found ${existingGames.size} existing games in database`)
     
-    console.log(`[CRON] Fetching data from ${DATA_URL}...`)
+    // Fetch geeklist from BGG
+    const BGG_URL = `https://boardgamegeek.com/xmlapi/geeklist/${GEEKLIST_ID}`
+    console.log(`[CRON] Fetching geeklist from ${BGG_URL}...`)
     
-    const response = await fetch(DATA_URL)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch data: ${response.status}`)
+    const headers = {
+      'User-Agent': 'DiceBastion/1.0 (+https://dicebastion.com)',
+      'Accept': 'application/xml, text/xml'
     }
     
-    const data = await response.json()
-    const items = data.games || []
+    // Add authentication if available (optional for public geeklists)
+    if (env.BGG_API_TOKEN) {
+      headers['Authorization'] = `Bearer ${env.BGG_API_TOKEN}`
+    }
     
-    console.log(`[CRON] Found ${items.length} board games`)
+    let response = await fetch(BGG_URL, { headers })
+    
+    // If we get 401, wait and retry once (BGG might be rate limiting)
+    if (response.status === 401) {
+      console.log('[CRON] Got 401, waiting 5 seconds and retrying...')
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      response = await fetch(BGG_URL, { headers })
+    }
+    
+    if (!response.ok) {
+      if (response.status === 202) {
+        throw new Error('BGG returned 202 - geeklist data is being prepared, try again in a few seconds')
+      }
+      throw new Error(`Failed to fetch geeklist: ${response.status}`)
+    }
+    
+    const xmlText = await response.text()
+    console.log(`[CRON] Received XML, length: ${xmlText.length} bytes`)
+    console.log(`[CRON] XML preview:`, xmlText.substring(0, 500))
+    
+    // Parse XML (simple parsing for geeklist structure)
+    const items = parseGeeklistXML(xmlText)
+    
+    console.log(`[CRON] Found ${items.length} games in geeklist`)
     
     if (items.length === 0) {
-      throw new Error('No board games found in data')
+      throw new Error('No board games found in geeklist')
     }
     
-    // Sample first game for logging
-    if (items.length > 0) {
-      console.log(`[CRON] Sample game:`, {
-        id: items[0].id,
-        name: items[0].name,
-        hasDescription: !!items[0].description,
-        hasShortDesc: !!items[0].shortDescription,
-        imageUrl: items[0].imageUrl
-      })
+    // Identify new games (not in DB)
+    const newGames = items.filter(item => !existingGames.has(item.id))
+    
+    // Identify existing games with NULL image_url
+    const gamesNeedingImages = items.filter(item => {
+      const existing = existingGames.get(item.id)
+      return existing && !existing.image_url
+    })
+    
+    console.log(`[CRON] New games: ${newGames.length}, Existing: ${items.length - newGames.length}`)
+    console.log(`[CRON] Existing games needing images: ${gamesNeedingImages.length}`)
+    
+    // For existing games, preserve their data
+    items.forEach(item => {
+      const existing = existingGames.get(item.id)
+      if (existing) {
+        item.imageUrl = existing.image_url // Will be null for games needing images
+        item.description = existing.description
+        item.shortDescription = existing.short_description || item.shortDescription
+      }
+    })
+    
+    // Fetch BGG details for NEW games
+    if (newGames.length > 0) {
+      console.log(`[CRON] Fetching details and uploading images for ${newGames.length} new games...`)
+      for (let i = 0; i < newGames.length; i++) {
+        const game = newGames[i]
+        try {
+          console.log(`[CRON] ${i + 1}/${newGames.length} - Fetching ${game.name}`)
+          const details = await fetchBGGGameDetails(game.id, env)
+          if (details) {
+            game.description = details.description
+            
+            // Download image from BGG and upload to Bunny Storage
+            if (details.imageUrl) {
+              console.log(`[CRON] Uploading image to Bunny for ${game.name}...`)
+              const bunnyUrl = await downloadAndUploadImage(details.imageUrl, game.id, env)
+              if (bunnyUrl) {
+                game.imageUrl = bunnyUrl
+                console.log(`[CRON] ✅ Image uploaded: ${bunnyUrl}`)
+              } else {
+                console.warn(`[CRON] ⚠️ Failed to upload image for ${game.name}`)
+              }
+            }
+          }
+          
+          // Rate limiting - wait 1.5s between BGG API calls
+          if (i < newGames.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1500))
+          }
+        } catch (err) {
+          console.warn(`[CRON] Could not fetch details for ${game.name}:`, err.message)
+        }
+      }
+    } else {
+      console.log(`[CRON] No new games to fetch details for`)
     }
     
-    // Clear existing games and insert new ones
+    // Fetch and upload images for existing games with NULL image_url
+    if (gamesNeedingImages.length > 0) {
+      console.log(`[CRON] Fetching images for ${gamesNeedingImages.length} existing games with missing images...`)
+      for (let i = 0; i < gamesNeedingImages.length; i++) {
+        const game = gamesNeedingImages[i]
+        try {
+          console.log(`[CRON] ${i + 1}/${gamesNeedingImages.length} - Fetching image for ${game.name}`)
+          const details = await fetchBGGGameDetails(game.id, env)
+          if (details?.imageUrl) {
+            console.log(`[CRON] Uploading image to Bunny for ${game.name}...`)
+            const bunnyUrl = await downloadAndUploadImage(details.imageUrl, game.id, env)
+            if (bunnyUrl) {
+              game.imageUrl = bunnyUrl
+              console.log(`[CRON] ✅ Image uploaded: ${bunnyUrl}`)
+            } else {
+              console.warn(`[CRON] ⚠️ Failed to upload image for ${game.name}`)
+            }
+          }
+          
+          // Rate limiting
+          if (i < gamesNeedingImages.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1500))
+          }
+        } catch (err) {
+          console.warn(`[CRON] Could not fetch image for ${game.name}:`, err.message)
+        }
+      }
+    }
+    
+    // Clear and rebuild the table
     await env.DB.prepare('DELETE FROM board_games').run()
     
-    for (const game of items) {
-      if (!game.id || !game.name) {
-        console.warn(`[CRON] Skipping game with missing id or name:`, game)
+    for (const item of items) {
+      if (!item.id || !item.name) {
+        console.warn(`[CRON] Skipping game with missing id or name:`, item)
         continue
       }
       
@@ -5605,13 +5843,13 @@ async function syncBoardGamesFromBGG(env) {
             id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
-          game.id,
-          game.name,
-          game.description || null,
-          game.shortDescription || null,
-          game.imageUrl || null,
-          game.thumbs || 0,
-          game.postdate || null,
+          item.id,
+          item.name,
+          item.description || null,
+          item.shortDescription || null,
+          item.imageUrl || null,
+          item.thumbs || 0,
+          item.postdate || null,
           new Date().toISOString(),
           new Date().toISOString()
         ).run()
@@ -5620,11 +5858,11 @@ async function syncBoardGamesFromBGG(env) {
       } catch (err) {
         failed++
         errors.push({
-          game_id: game.id,
-          game_name: game.name,
+          game_id: item.id,
+          game_name: item.name,
           error: err.message
         })
-        console.error(`[CRON] Failed to insert game ${game.id}:`, err)
+        console.error(`[CRON] Failed to insert game ${item.id}:`, err)
       }
     }
     
@@ -5682,7 +5920,6 @@ async function handleScheduled(event, env, ctx) {
     auto_renewals: null,
     event_reminders: null,
     delayed_account_setup_emails: null,
-    payment_reconciliation: null,
     bgg_board_games_sync: null
   }
   
@@ -5711,15 +5948,6 @@ async function handleScheduled(event, env, ctx) {
   } catch (e) {
     console.error('[CRON MASTER] Delayed account setup emails failed:', e)
     jobResults.delayed_account_setup_emails = 'failed'
-    // Individual job already logged its own error
-  }
-  
-  try {
-    await processPaymentReconciliation(env)
-    jobResults.payment_reconciliation = 'completed'
-  } catch (e) {
-    console.error('[CRON MASTER] Payment reconciliation failed:', e)
-    jobResults.payment_reconciliation = 'failed'
     // Individual job already logged its own error
   }
   
