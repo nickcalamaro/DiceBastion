@@ -20,9 +20,10 @@ import * as BunnySDK from "@bunny.net/edgescript-sdk";
 import { createClient } from "@libsql/client/web";
 
 // Initialize libSQL client with Bunny Database credentials
+// These are auto-configured when you add database secrets from the Bunny dashboard
 const client = createClient({
-  url: process.env.DB_URL,
-  authToken: process.env.DB_TOKEN,
+  url: process.env.BUNNY_DATABASE_URL,
+  authToken: process.env.BUNNY_DATABASE_AUTH_TOKEN,
 });
 
 const CORS_HEADERS = {

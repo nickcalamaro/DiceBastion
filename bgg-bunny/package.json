@@ -7,7 +7,7 @@
     "init-db": "node init-database.js",
     "test-sync": "node test-sync.js",
     "deploy": "node deploy.js",
-    "build": "esbuild board-games-api.ts --bundle --format=esm --outfile=dist/index.js --platform=browser --target=es2022 --external:@bunny.net/edgescript-sdk --external:@libsql/client/web"
+    "build": "esbuild board-games-api.ts --bundle --format=esm --outfile=dist/index.js --platform=browser --target=es2022 --external:@bunny.net/edgescript-sdk"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",
