@@ -79,8 +79,8 @@ showReadingTime: false
 
   async function loadBoardGames() {
     try {
-      // Fetch from worker API
-      const apiUrl = 'https://dicebastion-memberships.ncalamaro.workers.dev/api/board-games';
+      // Fetch from Bunny Edge Script API
+      const apiUrl = 'https://dicebastiongames-9ze9m.bunny.run/api/boardgames';
       
       const response = await fetch(apiUrl);
       if (!response.ok) {
@@ -89,13 +89,24 @@ showReadingTime: false
       
       const data = await response.json();
       
-      // Update metadata
-      if (data.metadata) {
-        libraryStats.textContent = `${data.games.length} games • Last updated: ${new Date(data.metadata.lastUpdate).toLocaleDateString()}`;
-      }
+      // Map Bunny Database fields to frontend format
+      allGames = (data.games || []).map(game => ({
+        id: game.id,
+        name: game.name,
+        description: game.description,
+        shortDescription: game.short_description,
+        imageUrl: game.image_url,
+        thumbs: game.thumbs || 0,
+        postdate: game.post_date
+      }));
       
-      allGames = data.games || [];
       filteredGames = [...allGames];
+      
+      // Update stats
+      const lastUpdated = data.games[0]?.updated_at 
+        ? new Date(data.games[0].updated_at).toLocaleDateString()
+        : new Date().toLocaleDateString();
+      libraryStats.textContent = `${allGames.length} games • Last updated: ${lastUpdated}`;
       
       loadingState.style.display = 'none';
       renderGames();
