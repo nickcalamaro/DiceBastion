@@ -296,12 +296,18 @@ async function syncFromBGG() {
 
     // Fetch BGG geeklist
     console.log(`[BGG SYNC] Fetching geeklist from BGG (ID: ${GEEKLIST_ID})...`);
-    const response = await fetch(BGG_URL, {
-      headers: {
-        "User-Agent": "DiceBastion/1.0 (+https://dicebastion.com)",
-        "Accept": "application/xml, text/xml",
-      },
-    });
+    
+    const headers: Record<string, string> = {
+      "User-Agent": "DiceBastion/1.0 (+https://dicebastion.com)",
+      "Accept": "application/xml, text/xml",
+    };
+    
+    const BGG_API_TOKEN = process.env.BGG_API_TOKEN;
+    if (BGG_API_TOKEN) {
+      headers["Authorization"] = `Bearer ${BGG_API_TOKEN}`;
+    }
+    
+    const response = await fetch(BGG_URL, { headers });
 
     if (!response.ok) {
       throw new Error(`BGG returned ${response.status}`);
@@ -466,16 +472,23 @@ function parseGeeklistXML(xmlText: string) {
 }
 
 /**
- * Fetch game details from BGG API
+ * Fetch game details from BGG API v2
  */
 async function fetchBGGDetails(gameId: string) {
-  const BGG_API_URL = `https://boardgamegeek.com/xmlapi2/thing?id=${gameId}`;
+  const BGG_API_URL = `https://boardgamegeek.com/xmlapi2/thing?id=${gameId}&type=boardgame,boardgameexpansion`;
+  const BGG_API_TOKEN = process.env.BGG_API_TOKEN;
   
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const response = await fetch(BGG_API_URL, {
-        headers: { "User-Agent": "DiceBastion/1.0 (+https://dicebastion.com)" },
-      });
+      const headers: Record<string, string> = {
+        "User-Agent": "DiceBastion/1.0 (+https://dicebastion.com)"
+      };
+      
+      if (BGG_API_TOKEN) {
+        headers["Authorization"] = `Bearer ${BGG_API_TOKEN}`;
+      }
+      
+      const response = await fetch(BGG_API_URL, { headers });
       
       if (response.status === 202) {
         await new Promise(resolve => setTimeout(resolve, attempt * 2000));
@@ -489,10 +502,20 @@ async function fetchBGGDetails(gameId: string) {
       const xmlText = await response.text();
       const descMatch = xmlText.match(/<description>([\s\S]*?)<\/description>/);
       const imageMatch = xmlText.match(/<image>([\s\S]*?)<\/image>/);
+      const thumbnailMatch = xmlText.match(/<thumbnail>([\s\S]*?)<\/thumbnail>/);
+      
+      // Prefer image, but fall back to thumbnail if image looks broken
+      let imageUrl = imageMatch ? imageMatch[1].trim() : null;
+      const thumbnail = thumbnailMatch ? thumbnailMatch[1].trim() : null;
+      
+      if (imageUrl && imageUrl.includes('/original/img/')) {
+        // This format is often broken, use thumbnail instead
+        imageUrl = thumbnail || imageUrl;
+      }
       
       return {
         description: descMatch ? descMatch[1].trim() : null,
-        imageUrl: imageMatch ? imageMatch[1].trim() : null,
+        imageUrl: imageUrl || thumbnail,
       };
     } catch (err) {
       if (attempt === 3) throw err;
@@ -509,7 +532,12 @@ async function fetchBGGDetails(gameId: string) {
 async function uploadImageToBunny(imageUrl: string, gameId: string) {
   try {
     // Download image from BGG
-    const response = await fetch(imageUrl);
+    const response = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "DiceBastion/1.0 (+https://dicebastion.com)"
+      }
+    });
+    
     if (!response.ok) {
       throw new Error(`Failed to download image: ${response.status}`);
     }
@@ -517,11 +545,17 @@ async function uploadImageToBunny(imageUrl: string, gameId: string) {
     const imageBuffer = await response.arrayBuffer();
     const contentType = response.headers.get("content-type") || "image/jpeg";
     
-    // Determine file extension
-    let ext = "jpg";
-    if (contentType.includes("png")) ext = "png";
-    else if (contentType.includes("gif")) ext = "gif";
-    else if (contentType.includes("webp")) ext = "webp";
+    // Determine file extension from URL or content type
+    const urlExt = imageUrl.match(/\.(jpg|jpeg|png|webp|gif)$/i)?.[1]?.toLowerCase();
+    let ext = urlExt || "jpg";
+    
+    // Override from content type if URL didn't have extension
+    if (!urlExt) {
+      if (contentType.includes("png")) ext = "png";
+      else if (contentType.includes("gif")) ext = "gif";
+      else if (contentType.includes("webp")) ext = "webp";
+      else if (contentType.includes("jpeg")) ext = "jpg";
+    }
     
     // Upload to Bunny Storage
     const storageUrl = `https://storage.bunnycdn.com/dicebastion/boardgames/images/${gameId}.${ext}`;
@@ -543,6 +577,8 @@ async function uploadImageToBunny(imageUrl: string, gameId: string) {
     if (!uploadResponse.ok) {
       throw new Error(`Upload failed: ${uploadResponse.status}`);
     }
+    
+    console.log(`[BGG SYNC]   Uploaded as ${ext} format`);
     
     // Return Bunny CDN URL
     return `https://dicebastion.b-cdn.net/boardgames/images/${gameId}.${ext}`;
