@@ -111,7 +111,7 @@ function requireAuth(request: Request): boolean {
 async function listBoardGames() {
   try {
     const result = await client.execute(
-      "SELECT id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at FROM board_games ORDER BY name DESC"
+      "SELECT id, name, description, short_description, image_url, thumbs, post_date, synced_at, updated_at FROM board_games ORDER BY name ASC"
     );
     
     return jsonResponse({
