@@ -21,6 +21,10 @@
       color: rgb(var(--color-neutral-700));
     }
     
+    .dark .modal-form-label {
+      color: rgb(var(--color-neutral-300));
+    }
+    
     .modal-form-input {
       width: 100%;
       padding: 0.625rem;
@@ -28,12 +32,41 @@
       border-radius: 0.5rem;
       font-size: 1rem;
       transition: border-color 0.2s;
+      background: rgba(var(--color-neutral), 1);
+      color: rgb(var(--color-neutral-800));
+    }
+    
+    .dark .modal-form-input {
+      background: rgb(var(--color-neutral-700));
+      border-color: rgb(var(--color-neutral-600));
+      color: rgb(var(--color-neutral-200));
     }
     
     .modal-form-input:focus {
       outline: none;
       border-color: rgb(var(--color-primary-500));
       box-shadow: 0 0 0 3px rgba(var(--color-primary-500), 0.1);
+    }
+    
+    .modal-info-box {
+      background: rgb(var(--color-neutral-50));
+      border: 1px solid rgb(var(--color-neutral-200));
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+    }
+    
+    .dark .modal-info-box {
+      background: rgb(var(--color-neutral-800));
+      border-color: rgb(var(--color-neutral-600));
+    }
+    
+    .modal-info-box p {
+      color: rgb(var(--color-neutral-600));
+    }
+    
+    .dark .modal-info-box p {
+      color: rgb(var(--color-neutral-300));
     }
     
     .modal-checkbox-group {
@@ -52,6 +85,11 @@
       line-height: 1.4;
       cursor: pointer;
       user-select: none;
+      color: rgb(var(--color-neutral-700));
+    }
+    
+    .dark .modal-checkbox-label {
+      color: rgb(var(--color-neutral-200));
     }
     
     .modal-btn {
@@ -86,8 +124,8 @@
     
     .modal-btn-secondary {
       background: transparent;
-      color: #6b7280;
-      border: 1px solid #d1d5db;
+      color: rgb(var(--color-neutral-600));
+      border: 1px solid rgb(var(--color-neutral-300));
       padding: 0.75rem 1.5rem;
       font-size: 0.875rem;
       font-weight: 500;
@@ -95,8 +133,18 @@
     }
     
     .modal-btn-secondary:hover {
-      background: #f9fafb;
-      color: #374151;
+      background: rgb(var(--color-neutral-50));
+      color: rgb(var(--color-neutral-800));
+    }
+    
+    .dark .modal-btn-secondary {
+      color: rgb(var(--color-neutral-300));
+      border-color: rgb(var(--color-neutral-700));
+    }
+    
+    .dark .modal-btn-secondary:hover {
+      background: rgb(var(--color-neutral-800));
+      color: rgb(var(--color-neutral-200));
     }
     
     .modal-btn-danger {
@@ -123,10 +171,15 @@
       display: none;
       margin-top: 0.5rem;
       padding: 0.75rem;
-      background: #fee;
-      color: #c00;
+      background: rgb(var(--color-danger-50));
+      color: rgb(var(--color-danger-700));
       border-radius: 0.375rem;
       font-size: 0.9rem;
+    }
+    
+    .dark .modal-error {
+      background: rgba(var(--color-danger-900), 0.3);
+      color: rgb(var(--color-danger-300));
     }
     
     .modal-link {
@@ -134,8 +187,16 @@
       text-decoration: underline;
     }
     
+    .dark .modal-link {
+      color: rgb(var(--color-primary-400));
+    }
+    
     .modal-link:hover {
       color: rgb(var(--color-primary-700));
+    }
+    
+    .dark .modal-link:hover {
+      color: rgb(var(--color-primary-300));
     }
     
     .modal-section {
@@ -146,6 +207,10 @@
       font-size: 0.85rem;
       color: rgb(var(--color-neutral-600));
       margin-bottom: 0.375rem;
+    }
+    
+    .dark .modal-help-text {
+      color: rgb(var(--color-neutral-400));
     }
     
     .modal-widget-container {
@@ -178,7 +243,11 @@
     }
     
     .modal-icon-success {
-      background: #e0f2fe;
+      background: rgb(var(--color-success-100));
+    }
+    
+    .dark .modal-icon-success {
+      background: rgba(var(--color-success-900), 0.3);
     }
     
     /* Modal Typography */
@@ -187,27 +256,43 @@
       font-size: 1.5rem;
       font-weight: 700;
       text-align: center;
-      color: #1f2937;
+      color: rgb(var(--color-neutral-900));
+    }
+    
+    .dark .modal-heading {
+      color: rgb(var(--color-neutral-100));
     }
     
     .modal-subheading {
       margin: 0 0 0.75rem 0;
       font-size: 1.25rem;
       font-weight: 700;
-      color: #5374a5;
+      color: rgb(var(--color-primary-600));
+    }
+    
+    .dark .modal-subheading {
+      color: rgb(var(--color-primary-400));
     }
     
     .modal-text {
       margin: 0 0 1.5rem 0;
       font-size: 0.875rem;
       text-align: center;
-      color: #6b7280;
+      color: rgb(var(--color-neutral-600));
+    }
+    
+    .dark .modal-text {
+      color: rgb(var(--color-neutral-300));
     }
     
     .modal-text-sm {
       font-size: 0.813rem;
-      color: #6b7280;
+      color: rgb(var(--color-neutral-600));
       margin: 0.5rem 0 0 0;
+    }
+    
+    .dark .modal-text-sm {
+      color: rgb(var(--color-neutral-400));
     }
     
     .modal-text-center {
@@ -229,44 +314,69 @@
     .modal-strength-bar {
       flex: 1;
       height: 0.25rem;
-      background: #e5e7eb;
+      background: rgb(var(--color-neutral-200));
       border-radius: 0.125rem;
+    }
+    
+    .dark .modal-strength-bar {
+      background: rgb(var(--color-neutral-700));
     }
     
     .modal-strength-text {
       margin: 0;
       font-size: 0.75rem;
-      color: #6b7280;
+      color: rgb(var(--color-neutral-600));
+    }
+    
+    .dark .modal-strength-text {
+      color: rgb(var(--color-neutral-400));
     }
     
     /* Email Display Box */
     .modal-email-box {
-      background: #eff6ff;
-      border: 1px solid #bfdbfe;
+      background: rgb(var(--color-primary-50));
+      border: 1px solid rgb(var(--color-primary-200));
       border-radius: 0.5rem;
       padding: 0.75rem 1rem;
       margin-bottom: 1.5rem;
     }
     
+    .dark .modal-email-box {
+      background: rgba(var(--color-primary-900), 0.2);
+      border-color: rgba(var(--color-primary-700), 0.5);
+    }
+    
     .modal-email-label {
       font-size: 0.75rem;
-      color: #1e40af;
+      color: rgb(var(--color-primary-700));
       font-weight: 600;
       margin-bottom: 0.25rem;
     }
     
+    .dark .modal-email-label {
+      color: rgb(var(--color-primary-400));
+    }
+    
     .modal-email-value {
       font-size: 0.938rem;
-      color: #1e3a8a;
+      color: rgb(var(--color-primary-800));
       font-weight: 500;
+    }
+    
+    .dark .modal-email-value {
+      color: rgb(var(--color-primary-300));
     }
     
     /* Benefits List */
     .modal-benefits {
-      background: #f9fafb;
+      background: rgb(var(--color-neutral-50));
       border-radius: 0.75rem;
       padding: 1.25rem;
       margin-bottom: 1.5rem;
+    }
+    
+    .dark .modal-benefits {
+      background: rgb(var(--color-neutral-900));
     }
     
     .modal-benefit-item {
@@ -281,13 +391,21 @@
     }
     
     .modal-benefit-icon {
-      color: #5374a5;
+      color: rgb(var(--color-primary-600));
       font-size: 1.25rem;
     }
     
+    .dark .modal-benefit-icon {
+      color: rgb(var(--color-primary-400));
+    }
+    
     .modal-benefit-text {
-      color: #374151;
+      color: rgb(var(--color-neutral-700));
       font-size: 0.875rem;
+    }
+    
+    .dark .modal-benefit-text {
+      color: rgb(var(--color-neutral-300));
     }
   `;
   document.head.appendChild(style);

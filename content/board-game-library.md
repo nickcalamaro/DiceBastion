@@ -7,8 +7,17 @@ showDate: false
 showReadingTime: false
 ---
 
+<style>
+.text-muted {
+  color: rgb(var(--color-neutral-600));
+}
+.dark .text-muted {
+  color: rgb(var(--color-neutral-300));
+}
+</style>
+
 <div id="board-game-library" style="max-width: 1200px; margin: 2rem auto; padding: 0 1rem;">
-    <p id="library-description" style="font-size: 1.1rem; color: rgb(var(--color-neutral-600)); max-width: 800px; margin: 0 auto;">
+    <p id="library-description" class="text-muted" style="font-size: 1.1rem; max-width: 800px; margin: 0 auto;">
       Explore our collection of board games available at Dice Bastion Gibraltar.
     </p>
     <p id="library-stats" style="margin-top: 1rem; font-size: 0.95rem; color: rgb(var(--color-neutral-500));">
@@ -40,13 +49,13 @@ showReadingTime: false
   <!-- Loading State -->
   <div id="loading-state" style="text-align: center; padding: 4rem 0;">
     <div style="font-size: 3rem; margin-bottom: 1rem;">⏳</div>
-    <p style="color: rgb(var(--color-neutral-600));">Loading board game library...</p>
+    <p class="text-muted">Loading board game library...</p>
   </div>
 
   <!-- Error State -->
   <div id="error-state" style="display: none; text-align: center; padding: 4rem 0;">
     <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
-    <p style="color: rgb(var(--color-neutral-600));">Failed to load board game library. Please try again later.</p>
+    <p class="text-muted">Failed to load board game library. Please try again later.</p>
   </div>
 
   <!-- Games Grid -->
@@ -57,7 +66,7 @@ showReadingTime: false
   <!-- No Results -->
   <div id="no-results" style="display: none; text-align: center; padding: 4rem 0;">
     <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
-    <p style="color: rgb(var(--color-neutral-600));">No games found matching your search.</p>
+    <p class="text-muted">No games found matching your search.</p>
   </div>
 </div>
 
@@ -119,27 +128,11 @@ showReadingTime: false
 
   function createGameCard(game) {
     const card = document.createElement('div');
-    card.style.cssText = `
-      background: rgb(var(--color-neutral));
-      border: 1px solid rgb(var(--color-neutral-200));
-      border-radius: 12px;
-      overflow: hidden;
-      transition: transform 0.2s, box-shadow 0.2s;
-      display: flex;
-      gap: 1.5rem;
-      padding: 1rem;
-    `;
+    card.className = 'card';
+    card.style.display = 'flex';
+    card.style.gap = '1.5rem';
+    card.style.alignItems = 'start';
     
-    card.addEventListener('mouseenter', () => {
-      card.style.transform = 'translateY(-2px)';
-      card.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-    });
-    
-    card.addEventListener('mouseleave', () => {
-      card.style.transform = 'translateY(0)';
-      card.style.boxShadow = 'none';
-    });
-
     const imageUrl = game.imageUrl || '/img/default-boardgame.jpg';
     
     // Add Bunny CDN optimization class for thumbnail (only if it's a Bunny URL)
@@ -178,16 +171,16 @@ showReadingTime: false
         />
       </div>
       <div style="flex: 1; display: flex; flex-direction: column;">
-        <h3 style="margin: 0 0 0.5rem 0; font-size: 1.25rem; font-weight: 600; color: rgb(var(--color-neutral-800));">
+        <h3 class="card-header" style="margin: 0 0 0.5rem 0;">
           ${game.name}
         </h3>
         ${displayDescription ? `
-          <p style="margin: 0.5rem 0; font-size: 0.9rem; color: rgb(var(--color-neutral-600)); line-height: 1.5;">
+          <p class="text-muted" style="margin: 0.5rem 0; font-size: 0.9rem; line-height: 1.5;">
             ${displayDescription}
           </p>
         ` : ''}
-        <div style="margin-top: auto; padding-top: 1rem; display: flex; align-items: center; gap: 1rem;">
-          ${game.thumbs > 0 ? `<span style="font-size: 0.85rem; color: rgb(var(--color-neutral-500));">👍 ${game.thumbs}</span>` : ''}
+        <div style="margin-top: auto; padding-top: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+          ${game.thumbs > 0 ? `<span class="text-muted" style="font-size: 0.85rem;">👍 ${game.thumbs}</span>` : ''}
           ${cleanFullDescription ? `
             <button 
               class="read-more-modal-btn" 
@@ -203,7 +196,7 @@ showReadingTime: false
             href="${bggUrl}" 
             target="_blank" 
             rel="noopener noreferrer"
-            style="display: inline-block; padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border-radius: 6px; text-decoration: none; font-size: 0.875rem; font-weight: 600; transition: background 0.2s;"
+            style="display: inline-block; padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border-radius: 6px; text-decoration: none; font-size: 0.875rem; font-weight: 600; transition: background 0.2s; margin-left: auto;"
             onmouseover="this.style.background='rgb(var(--color-primary-700))'"
             onmouseout="this.style.background='rgb(var(--color-primary-600))'"
           >

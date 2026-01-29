@@ -13,7 +13,7 @@ showReadingTime: false
 
 <!-- Login Form -->
 <div id="login-form-container">
-<form id="login-form" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
+<form id="login-form" class="card card-centered">
 <div style="margin-bottom: 1.5rem;">
 <label for="user-email" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Email</label>
 <input type="email" id="user-email" required autocomplete="email" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 1rem;">
@@ -35,7 +35,7 @@ Login
 <div id="login-error" style="display: none; margin-top: 1rem; padding: 0.75rem; background: #fee; color: #c00; border-radius: 6px; font-size: 0.875rem;"></div>
 </form>
 
-<p style="text-align: center; margin-top: 1.5rem; color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
+<p class="text-muted" style="text-align: center; margin-top: 1.5rem; font-size: 0.875rem;">
 Don't have an account? <a href="/memberships" style="color: rgb(var(--color-primary-600)); font-weight: 600; text-decoration: none; hover: underline;">Become a member</a>
 </p>
 </div>

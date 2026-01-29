@@ -10,8 +10,8 @@ showReadingTime: false
 <h1 style="text-align: center; margin-bottom: 2rem;">Reset Your Password</h1>
 
 <div id="request-form-container">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
-<p style="text-align: center; color: rgb(var(--color-neutral-600)); margin-bottom: 2rem;">
+<div class="card card-centered">
+<p class="text-muted" style="text-align: center; margin-bottom: 2rem;">
 Enter your email address and we'll send you a link to reset your password.
 </p>
 
@@ -37,19 +37,19 @@ Send Reset Link
 </form>
 </div>
 
-<p style="text-align: center; margin-top: 1.5rem; color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
+<p class="text-muted" style="text-align: center; margin-top: 1.5rem; font-size: 0.875rem;">
 Remember your password? <a href="/login" style="color: rgb(var(--color-primary-600)); font-weight: 600; text-decoration: none;">Back to login</a>
 </p>
 </div>
 
 <div id="success-message-container" style="display: none;">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; text-align: center;">
+<div class="card card-centered">
 <div style="font-size: 3rem; margin-bottom: 1rem;">✉️</div>
 <h2 style="margin-top: 0; margin-bottom: 1rem;">Check Your Email</h2>
-<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
+<p class="text-muted" style="margin-bottom: 1.5rem;">
 If an account exists for <strong id="submitted-email"></strong>, you will receive an email with instructions to reset your password.
 </p>
-<p style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem; margin-bottom: 1.5rem;">
+<p class="text-muted" style="font-size: 0.875rem; margin-bottom: 1.5rem;">
 Please check your spam folder if you don't see the email within a few minutes.
 </p>
 <a href="/login" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">

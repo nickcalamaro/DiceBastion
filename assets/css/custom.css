@@ -3,7 +3,6 @@
  * Form components and UI standardization
  */
 
-/* Import form styles */
-@import url('/css/forms.css');
+/* Form styles now consolidated in components.css */
 
 /* Additional custom styles can go here */

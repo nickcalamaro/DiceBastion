@@ -6,12 +6,12 @@ showDate: false
 showReadingTime: false
 ---
 
-<div id="reset-password-page" style="max-width: 450px; margin: 5rem auto;">
+<div id="reset-password-page" style="max-width: 450px; margin: 5rem auto; padding: 0 1rem;">
 <h1 style="text-align: center; margin-bottom: 2rem;">Set New Password</h1>
 
 <div id="reset-form-container">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
-<p style="text-align: center; color: rgb(var(--color-neutral-600)); margin-bottom: 2rem;">
+<div class="card card-centered">
+<p class="text-muted" style="text-align: center; margin-bottom: 2rem;">
 Enter your new password below.
 </p>
 
@@ -54,10 +54,10 @@ Enter your new password below.
 </div>
 
 <div id="success-message-container" style="display: none;">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; text-align: center;">
+<div class="card card-centered">
 <div style="font-size: 3rem; margin-bottom: 1rem;">✅</div>
 <h2 style="margin-top: 0; margin-bottom: 1rem;">Password Reset Successful</h2>
-<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
+<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;" class="dark:text-neutral-300">
 Your password has been reset successfully. You can now log in with your new password.
 </p>
 <a href="/login" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
@@ -67,10 +67,10 @@ Go to Login
 </div>
 
 <div id="invalid-token-container" style="display: none;">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; text-align: center;">
+<div class="card card-centered">
 <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
 <h2 style="margin-top: 0; margin-bottom: 1rem;">Invalid or Expired Link</h2>
-<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
+<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;" class="dark:text-neutral-300">
 This password reset link is invalid or has expired. Please request a new one.
 </p>
 <a href="/forgot-password" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">

@@ -17,14 +17,14 @@ showReadingTime: false
 <!-- Loading State -->
 <div id="loading-state" style="text-align: center; padding: 4rem 0;">
 <div style="font-size: 3rem; margin-bottom: 1rem;">⏳</div>
-<p style="color: rgb(var(--color-neutral-600));">Loading your account...</p>
+<p class="text-muted">Loading your account...</p>
 </div>
 
 <!-- Not Logged In State -->
 <div id="not-logged-in-state" style="display: none; text-align: center; padding: 4rem 0;">
 <div style="font-size: 3rem; margin-bottom: 1rem;">🔒</div>
 <h2>Please Log In</h2>
-<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 2rem;">
+<p class="text-muted" style="margin-bottom: 2rem;">
 You need to be logged in to view your account.
 </p>
 <a href="/login" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
@@ -36,29 +36,29 @@ Go to Login
 <div id="account-content" style="display: none;">
 <!-- Header -->
 <div style="margin-bottom: 2rem;">
-<p id="user-email" style="color: rgb(var(--color-neutral-600)); margin: 0;"></p>
+<p id="user-email" class="text-muted" style="margin: 0;"></p>
 </div>
 
 <!-- Membership Status -->
-<div id="membership-section" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
-<h2 style="margin-top: 0; margin-bottom: 1.5rem;">Membership Status</h2>
+<div id="membership-section" class="card">
+<h2 class="card-header">Membership Status</h2>
 <div id="membership-active" style="display: none;">
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
     <span style="font-size: 2rem;">✅</span>
     <div>
     <div style="font-size: 1.25rem; font-weight: 600; color: rgb(var(--color-primary-600));" id="membership-plan"></div>
-    <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">Active Member</div>
+    <div class="text-muted" style="font-size: 0.875rem;">Active Member</div>
     </div>
 </div>
-<div style="background: rgb(var(--color-neutral-50)); dark:bg-neutral-800; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+<div class="card-section">
+    <div class="card-grid">
     <div>
-        <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Valid Until</div>
-        <div style="font-weight: 600;" id="membership-end-date"></div>
+        <div class="card-label">Valid Until</div>
+        <div class="card-value" id="membership-end-date"></div>
     </div>
     <div>
-        <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-600)); text-transform: uppercase; margin-bottom: 0.25rem;">Auto-Renewal</div>
-        <div style="font-weight: 600;" id="membership-auto-renew"></div>
+        <div class="card-label">Auto-Renewal</div>
+        <div class="card-value" id="membership-auto-renew"></div>
     </div>
     </div>
 </div>
@@ -69,7 +69,7 @@ Go to Login
     <div style="display: flex; align-items: start; gap: 1rem;">
         <div style="font-size: 1.5rem;">🔄</div>
         <div style="flex: 1;">        <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 600;">Enable Auto-Renewal</h3>
-        <p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
+        <p class="text-muted" style="margin: 0 0 1rem 0; font-size: 0.875rem;">
             Set up automatic renewal to ensure uninterrupted access. <strong>You'll be asked to save your payment details.</strong> Your card will not be charged until <span id="renewal-date-enable"></span>. You can cancel anytime before then.
         </p>        <button id="enable-auto-renewal-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
             Enable Auto-Renewal
@@ -89,7 +89,7 @@ Go to Login
 <div style="font-size: 1.5rem;">✅</div>
 <div style="flex: 1;">
 <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 600;">Auto-Renewal Active</h3>
-<p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
+<p class="text-muted" style="margin: 0 0 1rem 0; font-size: 0.875rem;">
     Your membership will automatically renew when it expires. <strong>If you cancel, your membership will remain active until <span id="cancel-expiry-date"></span>.</strong>
 </p>
 <button id="cancel-auto-renewal-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
@@ -107,7 +107,7 @@ Go to Login
 <div id="membership-inactive" style="display: none; text-align: center; padding: 2rem;">
 <div style="font-size: 3rem; margin-bottom: 1rem;">🎫</div>
 <h3 style="margin-top: 0; margin-bottom: 0.5rem;">No Active Membership</h3>
-<p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
+<p class="text-muted" style="margin-bottom: 1.5rem;">
     Join us and get access to exclusive member benefits!
 </p>
 <a href="/memberships" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
@@ -117,22 +117,22 @@ Go to Login
 </div>
 
 <!-- Email Preferences -->
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
-<h2 style="margin-top: 0; margin-bottom: 1.5rem;">Email Preferences</h2>
-<div style="display: flex; align-items: start; gap: 1rem; padding: 1rem; background: rgb(var(--color-neutral-50)); dark:bg-neutral-800; border-radius: 8px; margin-bottom: 1rem;">
+<div class="card">
+<h2 class="card-header">Email Preferences</h2>
+<div class="card-section" style="display: flex; align-items: start; gap: 1rem; margin-bottom: 1rem;">
 <input type="checkbox" id="essential-emails" checked disabled style="margin-top: 0.25rem;">
 <div style="flex: 1;">
-    <label for="essential-emails" style="font-weight: 600; display: block; margin-bottom: 0.25rem;">Essential Emails</label>
-    <p style="margin: 0; font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
+    <label for="essential-emails" class="card-label" style="display: block; margin-bottom: 0.25rem; text-transform: none; font-size: 1rem;">Essential Emails</label>
+    <p class="text-muted" style="margin: 0; font-size: 0.875rem;">
     Order confirmations, event tickets, and account updates (required)
     </p>
 </div>
 </div>
-<div style="display: flex; align-items: start; gap: 1rem; padding: 1rem; background: rgb(var(--color-neutral-50)); dark:bg-neutral-800; border-radius: 8px;">
+<div class="card-section" style="display: flex; align-items: start; gap: 1rem;">
 <input type="checkbox" id="marketing-emails" style="margin-top: 0.25rem;">
 <div style="flex: 1;">
-    <label for="marketing-emails" style="font-weight: 600; display: block; margin-bottom: 0.25rem;">Marketing Emails</label>
-    <p style="margin: 0; font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
+    <label for="marketing-emails" class="card-label" style="display: block; margin-bottom: 0.25rem; text-transform: none; font-size: 1rem;">Marketing Emails</label>
+    <p class="text-muted" style="margin: 0; font-size: 0.875rem;">
     News, special offers, and upcoming events
     </p>
 </div>
@@ -141,14 +141,14 @@ Go to Login
 </div>
 
 <!-- Event Tickets -->
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
-<h2 style="margin-top: 0; margin-bottom: 1.5rem;">My Event Tickets</h2>
+<div class="card">
+<h2 class="card-header">My Event Tickets</h2>
 <div id="tickets-list"></div>
 </div>
 
 <!-- Shop Orders -->
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
-<h2 style="margin-top: 0; margin-bottom: 1.5rem;">Shop Orders</h2>
+<div class="card">
+<h2 class="card-header">Shop Orders</h2>
 <div id="orders-list"></div>
 </div>
 </div>
@@ -210,7 +210,7 @@ throw new Error(data.error || 'Unknown error');
 console.error('Error loading account:', error);
 loadingState.innerHTML = `
 <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
-<p style="color: rgb(var(--color-neutral-600));">Failed to load account data. Please try again.</p>
+<p style="color: rgb(var(--color-neutral-600));" class="dark:text-neutral-300">Failed to load account data. Please try again.</p>
 <button onclick="location.reload()" style="margin-top: 1rem; padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
     Retry
 </button>
@@ -337,7 +337,7 @@ return;
 
 if (!tickets || tickets.length === 0) {
 ticketsList.innerHTML = `
-<p style="text-align: center; color: rgb(var(--color-neutral-600)); padding: 2rem 0;">
+<p class="card-empty">
     No event tickets yet. <a href="/events" style="color: rgb(var(--color-primary-600)); font-weight: 600;">Browse upcoming events</a>
 </p>
 `;
@@ -349,20 +349,20 @@ const eventDate = new Date(ticket.event_datetime);
 const isPast = eventDate < new Date();
 
 return `
-<div style="border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 1rem 0; last:border-0;">
-    <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem;">
-    <div style="flex: 1;">
+<div class="card-list-item">
+    <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 200px;">
         <h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">
         <a href="#" onclick="openAccountEventModal('${ticket.slug}'); return false;" style="color: rgb(var(--color-primary-600)); text-decoration: none; cursor: pointer;">${ticket.event_name}</a>
         </h3>
-        <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
+        <div class="card-label" style="margin-bottom: 0.5rem;">
         📅 ${eventDate.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} 
         at ${eventDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
         </div>
-        ${ticket.location ? `<div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">📍 ${ticket.location}</div>` : ''}
+        ${ticket.location ? `<div class="card-label">📍 ${ticket.location}</div>` : ''}
     </div>
     <div style="text-align: right;">
-        <span style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; ${isPast ? 'background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700));' : 'background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-700));'}">
+        <span class="${isPast ? 'card-badge card-badge-neutral' : 'card-badge card-badge-primary'}">
         ${isPast ? 'Past Event' : 'Upcoming'}
         </span>
         ${ticket.payment_status ? `<div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-top: 0.25rem;">${ticket.payment_status}</div>` : ''}
@@ -382,7 +382,7 @@ return;
 
 if (!orders || orders.length === 0) {
 ordersList.innerHTML = `
-<p style="text-align: center; color: rgb(var(--color-neutral-600)); padding: 2rem 0;">
+<p class="card-empty">
     No shop orders yet. <a href="/shop" style="color: rgb(var(--color-primary-600)); font-weight: 600;">Visit the shop</a>
 </p>
 `;
@@ -393,26 +393,31 @@ ordersList.innerHTML = orders.map(order => {
 const orderDate = new Date(order.created_at);
 const total = (order.total / 100).toFixed(2);
 
-const statusColors = {
-pending: 'background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700));',
+const statusBadges = {
+pending: 'card-badge card-badge-neutral',
+processing: 'card-badge',
+shipped: 'card-badge card-badge-primary',
+delivered: 'card-badge card-badge-success',
+cancelled: 'card-badge'
+};
+
+const statusInlineStyles = {
 processing: 'background: #fef3c7; color: #92400e;',
-shipped: 'background: #dbeafe; color: #1e40af;',
-delivered: 'background: #d1fae5; color: #065f46;',
 cancelled: 'background: #fee2e2; color: #991b1b;'
 };
 
 return `
-<div style="border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 1rem 0; last:border-0;">
+<div class="card-list-item">
     <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap;">
     <div style="flex: 1; min-width: 200px;">
         <div style="font-weight: 600; margin-bottom: 0.25rem;">Order #${order.order_number}</div>
-        <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
+        <div class="card-label">
         ${orderDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })}
         </div>
     </div>
     <div style="text-align: right;">
-        <div style="font-weight: 600; margin-bottom: 0.25rem;">£${total}</div>
-        <span style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; ${statusColors[order.status] || statusColors.pending}">
+        <div class="card-value" style="margin-bottom: 0.25rem;">£${total}</div>
+        <span class="${statusBadges[order.status] || statusBadges.pending}" ${statusInlineStyles[order.status] ? `style="${statusInlineStyles[order.status]}"` : ''}>
         ${order.status || 'Pending'}
         </span>
     </div>
@@ -745,7 +750,7 @@ window.openAccountEventModal = async function(eventSlug) {
           purchaseSection.innerHTML = `
             <div style="padding: 1rem; background: rgb(var(--color-primary-50)); border: 1px solid rgb(var(--color-primary-200)); border-radius: 8px; text-align: center;">
               <div style="font-size: 1.25rem; font-weight: 700; color: rgb(var(--color-primary-700)); margin-bottom: 0.5rem;">✓ You're Registered!</div>
-              <p style="margin: 0; color: rgb(var(--color-neutral-600));">We'll send you a reminder before the event.</p>
+              <p style="margin: 0; color: rgb(var(--color-neutral-600));" class="dark:text-neutral-300">We'll send you a reminder before the event.</p>
             </div>
           `;
         }

@@ -45,6 +45,10 @@
   {{ if $cssCustom }}
   {{ $assets.Add "css" (slice $cssCustom) }}
   {{ end }}
+  {{ $cssForms := resources.Get "css/forms.css" }}
+  {{ if $cssForms }}
+  {{ $assets.Add "css" (slice $cssForms) }}
+  {{ end }}
   {{ $bundleCSS := $assets.Get "css" | resources.Concat "css/main.bundle.css" | resources.Minify | resources.Fingerprint
   "sha512" }}
   <link type="text/css" rel="stylesheet" href="{{ $bundleCSS.RelPermalink }}"
