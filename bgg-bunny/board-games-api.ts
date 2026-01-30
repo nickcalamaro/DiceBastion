@@ -331,8 +331,9 @@ async function syncFromBGG() {
 
         // Only fetch BGG details and upload image if:
         // 1. New game (no existing entry), OR
-        // 2. Image URL has changed from what's in database
-        if (isNewGame || (game.imageUrl && game.imageUrl !== existingImageUrl)) {
+        // 2. No image URL exists in database (null/undefined), OR
+        // 3. Image URL has changed from what's in database
+        if (isNewGame || !existingImageUrl || (game.imageUrl && game.imageUrl !== existingImageUrl)) {
           console.log(`[BGG SYNC]   ${isNewGame ? 'New game' : 'Image changed'} - fetching details from BGG...`);
           
           // Fetch full details from BGG API
