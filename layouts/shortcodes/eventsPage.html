@@ -131,29 +131,73 @@
   color: rgb(var(--color-neutral-50));
 }
 
-/* Organiser Tab */
+/* Organiser Corner Ribbon */
 .event-organiser-banner {
   position: absolute;
-  top: -1px;
-  left: 20px;
+  top: 0;
+  right: 0;
   z-index: 10;
   pointer-events: none;
+  overflow: hidden;
+  width: 150px;
+  height: 150px;
 }
 
 .event-organiser-ribbon {
-  background: rgb(var(--color-primary-600));
+  position: absolute;
+  top: 30px;
+  right: -40px;
+  width: 200px;
+  background: linear-gradient(135deg, 
+    rgba(var(--color-primary-400), 1) 0%, 
+    rgba(var(--color-primary-600), 1) 50%,
+    rgba(var(--color-primary-700), 1) 100%);
   color: white;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.5rem 1rem;
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
-  transform: translateY(-100%);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: center;
+  padding: 0.65rem 0;
+  transform: rotate(45deg);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.event-organiser-ribbon::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(0, 0, 0, 0.3) 50%, 
+    transparent 100%);
+}
+
+.event-organiser-ribbon::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(255, 255, 255, 0.5) 50%, 
+    transparent 100%);
 }
 
 .dark .event-organiser-ribbon {
-  background: rgb(var(--color-primary-500));
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, 
+    rgba(var(--color-primary-300), 1) 0%, 
+    rgba(var(--color-primary-500), 1) 50%,
+    rgba(var(--color-primary-600), 1) 100%);
+
 }
 
 .free-badge {
@@ -329,48 +373,6 @@ function formatEventDate(datetime) {
   return `${weekday} ${day}${suffix} ${month}`;
 }
 
-// Analyze image transparency and calculate zoom needed to fill width
-function analyzeImageTransparency(img) {
-  return new Promise((resolve) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    
-    try {
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      
-      let minX = canvas.width;
-      let maxX = 0;
-      
-      // Scan for non-transparent pixels
-      for (let y = 0; y < canvas.height; y++) {
-        for (let x = 0; x < canvas.width; x++) {
-          const alpha = data[(y * canvas.width + x) * 4 + 3];
-          if (alpha > 10) {
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-          }
-        }
-      }
-      
-      if (minX < maxX) {
-        const contentWidth = maxX - minX + 1;
-        const zoomFactor = canvas.width / contentWidth;
-        console.log(`Image ${img.src.split('/').pop()}: zoom factor ${zoomFactor.toFixed(2)}`);
-        resolve(zoomFactor > 1.01 ? zoomFactor : 1);
-      } else {
-        resolve(1);
-      }
-    } catch (e) {
-      console.warn('Cannot analyze image (CORS?):', img.src.split('/').pop(), e.message);
-      resolve(1); // Fallback to no zoom
-    }
-  });
-}
-
 async function loadEvents() {
   try {
     const res = await fetch(`${API_BASE}/events`);
@@ -399,7 +401,7 @@ async function loadEvents() {
               <div class="event-organiser-ribbon">${event.organiser}</div>
             </div>
           ` : ''}
-          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url}');"><img src="${event.image_url}" alt="${event.title}" crossorigin="anonymous"></div>` : ''}
+          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url}');"><img src="${event.image_url}" alt="${event.title}"></div>` : ''}
           <div class="event-content">
             <h3 class="event-title">
               ${event.title}
@@ -426,32 +428,6 @@ async function loadEvents() {
         </div>
       `;
     }).join('');
-    
-    // Apply zoom to images with transparent padding
-    setTimeout(async () => {
-      const images = document.querySelectorAll('.event-card-image img');
-      
-      for (const img of images) {
-        const processImage = async () => {
-          // Only process card images, not modal images
-          if (!img.closest('.event-card-image') || img.closest('.event-modal')) {
-            return;
-          }
-          
-          const zoom = await analyzeImageTransparency(img);
-          if (zoom > 1) {
-            img.style.transform = `scale(${zoom})`;
-            img.style.transformOrigin = 'center center';
-          }
-        };
-        
-        if (img.complete && img.naturalWidth > 0) {
-          await processImage();
-        } else {
-          img.addEventListener('load', processImage, { once: true });
-        }
-      }
-    }, 100);
   } catch (err) {
     console.error('Error loading events:', err);
     document.getElementById('events-grid').innerHTML = 

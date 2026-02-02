@@ -1168,6 +1168,53 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
   // Draw the cropped image onto the transparent canvas
   ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
 
+  // Analyze for horizontal transparency and zoom if needed
+  const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
+  const data = imageData.data;
+  
+  let minX = targetWidth;
+  let maxX = 0;
+  
+  // Scan for non-transparent pixels
+  for (let y = 0; y < targetHeight; y++) {
+    for (let x = 0; x < targetWidth; x++) {
+      const alpha = data[(y * targetWidth + x) * 4 + 3];
+      if (alpha > 10) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+      }
+    }
+  }
+  
+  // If there's significant horizontal transparency, zoom to fill
+  if (minX < maxX) {
+    const contentWidth = maxX - minX + 1;
+    const zoomFactor = targetWidth / contentWidth;
+    
+    if (zoomFactor > 1.01) {
+      console.log(`Detected transparency - applying zoom factor: ${zoomFactor.toFixed(2)}`);
+      
+      // Create temp canvas with zoomed content
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = targetWidth;
+      tempCanvas.height = targetHeight;
+      const tempCtx = tempCanvas.getContext('2d', { alpha: true });
+      
+      // Calculate centered zoom
+      const zoomedWidth = targetWidth * zoomFactor;
+      const zoomedHeight = targetHeight * zoomFactor;
+      const offsetX = -(zoomedWidth - targetWidth) / 2;
+      const offsetY = -(zoomedHeight - targetHeight) / 2;
+      
+      // Draw zoomed image
+      tempCtx.drawImage(finalCanvas, offsetX, offsetY, zoomedWidth, zoomedHeight);
+      
+      // Copy back to final canvas
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+      ctx.drawImage(tempCanvas, 0, 0);
+    }
+  }
+
   // Convert to PNG base64 (PNG supports transparency)
   const croppedImage = finalCanvas.toDataURL('image/png');
 
