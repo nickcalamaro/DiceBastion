@@ -12,7 +12,7 @@ dateFormat = "2 January 2006"
 
 [params.author]
 name = "Gibraltar Dice Bastion"
-image = "img/GWC_Logo.png"
+image = "img/DB_Logo_2025.png"
 headline = "Tabletop games on the rock"
 links = [
     { facebook = "https://www.facebook.com/gibraltarwarhammerclub"},

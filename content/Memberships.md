@@ -15,7 +15,7 @@ showDate: false
 
 <meta name="description" content="Become a member of Dice Bastion Gibraltar and enjoy local discounts, free venue access, and exclusive support for our board game, card game, RPG, and wargame events.">
 
-<b>Gibraltar Dice Bastion is completely funded by our members!</b>
+<b>Gibraltar Dice Bastion is part of the Gibraltar Warhammer Club, and we're completely funded by our members!</b>
 
 If you'd like to support us, get free bookings for game tables, and a whole range of other benefits, please consider becoming a member!
 

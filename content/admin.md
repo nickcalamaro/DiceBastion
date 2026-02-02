@@ -278,6 +278,12 @@ Logout
 </div>
 
 <div style="margin-bottom: 1rem;">
+<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Organised By</label>
+<input type="text" id="event-organiser" placeholder="e.g., John Smith, Gaming Club" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Person or group organising this event (optional)</small>
+</div>
+
+<div style="margin-bottom: 1rem;">
 <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
 <input type="text" id="event-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: monospace;">
 <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Auto-generated from title, used in URL</small>
@@ -1065,10 +1071,10 @@ cropper.zoomTo(clampedRatio, { x: centerX, y: centerY });
 const percentage = Math.round((clampedRatio / baseRatio) * 100);
 document.getElementById('crop-zoom').value = percentage;
 document.getElementById('crop-zoom-value').textContent = percentage + '%';
-}
-});
-};
-reader.readAsDataURL(file);
+    }
+  });
+  };
+  reader.readAsDataURL(file);
 }
 
 document.getElementById('crop-zoom').addEventListener('input', (e) => {
@@ -1144,15 +1150,11 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
     targetHeight = 440;
   }
 
-  // Create a canvas with white background at target size
+  // Create a canvas with transparent background at target size
   const finalCanvas = document.createElement('canvas');
   finalCanvas.width = targetWidth;
   finalCanvas.height = targetHeight;
-  const ctx = finalCanvas.getContext('2d');
-
-  // Fill with white background
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, targetWidth, targetHeight);
+  const ctx = finalCanvas.getContext('2d', { alpha: true });
 
   // Get the cropped portion
   const croppedCanvas = cropper.getCroppedCanvas({
@@ -1160,14 +1162,14 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
     height: targetHeight,
     imageSmoothingEnabled: true,
     imageSmoothingQuality: 'high',
-    fillColor: '#FFFFFF',
+    fillColor: 'transparent',
   });
 
-  // Draw the cropped image onto the white canvas
+  // Draw the cropped image onto the transparent canvas
   ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
 
-  // Convert to base64
-  const croppedImage = finalCanvas.toDataURL('image/jpeg', 0.9);
+  // Convert to PNG base64 (PNG supports transparency)
+  const croppedImage = finalCanvas.toDataURL('image/png');
 
   // Upload to R2
   try {
@@ -1587,6 +1589,7 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
   const data = {
     title: document.getElementById('event-title').value,
     slug: document.getElementById('event-slug').value,
+    organiser: document.getElementById('event-organiser').value,
     description: document.getElementById('event-description').value,
     full_description: document.getElementById('event-full-description').innerHTML,
     event_date: isRecurring ? '2025-01-01' : document.getElementById('event-date').value,
@@ -1661,6 +1664,7 @@ async function editEvent(id) {
     document.getElementById('event-id').value = event.id || event.event_id;
     document.getElementById('event-title').value = event.title || event.event_name;
     document.getElementById('event-slug').value = event.slug || '';
+    document.getElementById('event-organiser').value = event.organiser || '';
     document.getElementById('event-description').value = event.description || '';
     document.getElementById('event-full-description').innerHTML = event.full_description || '';
 
