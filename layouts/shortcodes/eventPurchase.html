@@ -65,6 +65,10 @@
   const nonMemberPriceEl = document.getElementById('evt-nonmember-price-'+eventId);
   const modal = document.getElementById('evt-modal-'+eventId);
   const cardEl = document.getElementById('evt-card-'+eventId);
+  
+  let currentEvent = null;
+  let hasActiveMembership = false;
+  let userApplicablePrice = null;
 
   function showError(msg){
     const el = modal && modal.querySelector('.evt-error');
@@ -92,13 +96,54 @@
 
   async function loadEvent(){
     try {
+      // Check if user has active membership
+      const sessionToken = localStorage.getItem('admin_session');
+      if (sessionToken) {
+        try {
+          const accountResp = await fetch(API_BASE + '/account/info', {
+            headers: { 'X-Session-Token': sessionToken }
+          });
+          if (accountResp.ok) {
+            const accountData = await accountResp.json();
+            hasActiveMembership = accountData.membership !== null && accountData.membership !== undefined;
+            console.log('[eventPurchase] Membership check:', { 
+              hasMembership: hasActiveMembership, 
+              email: accountData.user?.email,
+              membershipData: accountData.membership 
+            });
+          } else {
+            const errorData = await accountResp.json();
+            console.log('[eventPurchase] Account info failed:', accountResp.status, errorData);
+          }
+        } catch (e) {
+          console.log('[eventPurchase] Could not check membership status:', e);
+        }
+      } else {
+        console.log('[eventPurchase] No session token found');
+      }
+      
       const r = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId));
       const j = await r.json();
       if(!r.ok || !j.event){ showError('Event not found'); return; }
       const ev = j.event;
+      currentEvent = ev;
+      
       const sym = (c) => ({ GBP:'£', EUR:'€', USD:'$' }[String(c||'').toUpperCase()] || '');
-      if(memberPriceEl) memberPriceEl.textContent = sym('GBP') + String(ev.membership_price);
-      if(nonMemberPriceEl) nonMemberPriceEl.textContent = sym('GBP') + String(ev.non_membership_price);
+      const formatPrice = (price, currency) => {
+        const numPrice = Number(price || 0);
+        return numPrice === 0 ? 'FREE' : sym(currency) + numPrice.toFixed(2);
+      };
+      if(memberPriceEl) memberPriceEl.textContent = formatPrice(ev.membership_price, 'GBP');
+      if(nonMemberPriceEl) nonMemberPriceEl.textContent = formatPrice(ev.non_membership_price, 'GBP');
+      
+      // Determine applicable price for this user
+      userApplicablePrice = hasActiveMembership ? Number(ev.membership_price || 0) : Number(ev.non_membership_price || 0);
+      
+      // Update button text based on price
+      const buyBtn = root && root.querySelector('.evt-buy-btn');
+      if (buyBtn && userApplicablePrice === 0) {
+        buyBtn.textContent = 'Register for Free';
+      }
     } catch(e){ showError('Failed loading event'); }
   }
 
@@ -161,6 +206,38 @@
 
   async function startCheckout(email,name,privacy,turnstileToken){
     clearError();
+    
+    // If user's applicable price is 0, use free registration endpoint
+    if (userApplicablePrice === 0) {
+      let resp;
+      try {
+        resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, name, turnstileToken })
+        });
+      } catch(e) {
+        showError('Network error');
+        return;
+      }
+      
+      const data = await resp.json();
+      if (!resp.ok) {
+        showError(data?.message || data?.error || 'Registration failed');
+        return;
+      }
+      
+      // Show success and redirect
+      if (data.success) {
+        showSuccess(true);
+        setTimeout(() => {
+          window.location.href = '/thank-you?event=' + encodeURIComponent(currentEvent.title || 'Event');
+        }, 2000);
+      }
+      return;
+    }
+    
+    // Otherwise, use paid checkout flow
     let resp; try {
       resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/checkout', { method:'POST', headers:{'Content-Type':'application/json','Idempotency-Key': newIdempotencyKey() }, body: JSON.stringify({ email, name, privacyConsent: privacy, turnstileToken }) });
     } catch(e){ showError('Network error'); return; }

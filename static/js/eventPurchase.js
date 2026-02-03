@@ -35,6 +35,11 @@ window.renderEventPurchase = function renderEventPurchase(event) {
   }
   
   // Paid event
+  const formatPrice = (price) => {
+    const numPrice = parseFloat(price || 0);
+    return numPrice === 0 ? 'FREE' : `£${numPrice.toFixed(2)}`;
+  };
+  
   return `
     <div class="event-purchase my-6" data-event-id="${eventId}" style="margin-top: 2rem;">
       <div class="event-ticket-box border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 bg-neutral dark:bg-neutral-800 shadow-lg max-w-xl">
@@ -42,15 +47,15 @@ window.renderEventPurchase = function renderEventPurchase(event) {
         <div class="event-prices flex gap-5 flex-wrap items-end mb-3">
           <div class="flex-1 min-w-[140px]">
             <div class="text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400 tracking-wide">Member Price</div>
-            <div class="text-2xl font-extrabold text-neutral-800 dark:text-neutral-200">£${event.membership_price}</div>
+            <div class="text-2xl font-extrabold text-neutral-800 dark:text-neutral-200">${formatPrice(event.membership_price)}</div>
           </div>
           <div class="flex-1 min-w-[160px]">
             <div class="text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400 tracking-wide">Non‑Member Price</div>
-            <div class="text-2xl font-extrabold text-neutral-800 dark:text-neutral-200">£${event.non_membership_price}</div>
+            <div class="text-2xl font-extrabold text-neutral-800 dark:text-neutral-200">${formatPrice(event.non_membership_price)}</div>
           </div>
         </div>
         <p class="mt-0 mb-4 text-sm text-neutral-700 dark:text-neutral-300">Member discount is applied automatically if an active membership is found for your email.</p>
-        <button type="button" class="evt-buy-btn w-full py-3 px-6 border-0 rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 text-base font-bold cursor-pointer shadow-md hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors">Buy Ticket</button>
+        <button type="button" class="evt-buy-btn w-full py-3 px-6 border-0 rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 text-base font-bold cursor-pointer shadow-md hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors" data-member-price="${event.membership_price}" data-nonmember-price="${event.non_membership_price}">Get Your Ticket</button>
       </div>
       <div class="event-membership-promo mt-3 max-w-xl text-sm text-neutral-800 dark:text-neutral-200 bg-neutral-50 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 py-3 px-4 rounded-lg">
         <strong>Not a member yet?</strong> <span>Check out the list of benefits and sign up today!</span>
@@ -123,8 +128,119 @@ window.initEventPurchase = function initEventPurchase(event) {
   let turnstileWidgetId = null; // Store the Turnstile widget ID
   let turnstileLoggedWidgetId = null; // Store the Turnstile widget ID for logged-in flow
   let turnstileRenderTimeout = null; // Store timeout ID to cancel if needed
+  let userApplicablePrice = null; // User's price based on membership status
+  let hasActiveMembership = false; // Whether user has active membership
   
   if (!root || !modal) return;
+  
+  // Check membership status and update button text if needed
+  async function checkMembershipAndUpdateButton() {
+    const user = getLoggedInUser();
+    const buyBtn = root.querySelector('.evt-buy-btn');
+    if (!buyBtn) return;
+    
+    const memberPrice = parseFloat(buyBtn.dataset.memberPrice || 0);
+    const nonMemberPrice = parseFloat(buyBtn.dataset.nonmemberPrice || 0);
+    
+    if (user && user.email) {
+      // User is logged in - check for membership
+      try {
+        const sessionToken = localStorage.getItem('admin_session');
+        if (sessionToken) {
+          const resp = await fetch(API_BASE + '/account/info', {
+            headers: { 'X-Session-Token': sessionToken }
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            hasActiveMembership = data.membership !== null && data.membership !== undefined;
+            
+            // Update applicable price
+            userApplicablePrice = hasActiveMembership ? memberPrice : nonMemberPrice;
+            
+            // If member price is 0, enable auto-registration
+            if (hasActiveMembership && memberPrice === 0) {
+              buyBtn.dataset.autoRegister = 'true';
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[eventPurchase] Error checking membership:', e);
+      }
+    } else {
+      // Not logged in - use non-member price
+      userApplicablePrice = nonMemberPrice;
+    }
+  }
+  
+  // Run membership check on init
+  checkMembershipAndUpdateButton();
+  
+  // Auto-register function for logged-in members with free access
+  async function autoRegisterMember() {
+    const user = getLoggedInUser();
+    if (!user || !user.email) {
+      console.error('[autoRegister] No user found');
+      return;
+    }
+    
+    // Show a subtle loading indicator
+    const buyBtn = root.querySelector('.evt-buy-btn');
+    if (buyBtn) {
+      buyBtn.disabled = true;
+      buyBtn.textContent = 'Registering...';
+    }
+    
+    try {
+      // Get Turnstile token (will be test token on localhost)
+      const token = await window.utils.getTurnstileToken(null, null, IS_LOCALHOST);
+      
+      // Call registration endpoint
+      const resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: user.email,
+          name: user.name || user.email,
+          turnstileToken: token
+        })
+      });
+      
+      const data = await resp.json();
+      
+      if (!resp.ok) {
+        console.error('[autoRegister] Registration failed:', data);
+        if (buyBtn) {
+          buyBtn.disabled = false;
+          buyBtn.textContent = 'Register for Free';
+        }
+        // Show error in modal instead
+        openPurchaseModal();
+        showError(data?.message || data?.error || 'Registration failed');
+        return;
+      }
+      
+      if (data.success || data.registered) {
+        // Check if user needs account setup
+        if (data.needsAccountSetup && data.userEmail) {
+          sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+            email: data.userEmail,
+            eventName: data.eventName || event.event_name || 'this event'
+          }));
+        }
+        
+        // Redirect to thank-you page
+        const ticketId = data.ticketId || Date.now();
+        const regRef = `REG-${eventId}-${ticketId}`;
+        window.location.href = '/thank-you?orderRef=' + encodeURIComponent(regRef);
+      }
+    } catch (e) {
+      console.error('[autoRegister] Error:', e);
+      if (buyBtn) {
+        buyBtn.disabled = false;
+        buyBtn.textContent = 'Register for Free';
+      }
+    }
+  }
   
   // Check if user is logged in
   function getLoggedInUser() {
@@ -337,6 +453,14 @@ window.initEventPurchase = function initEventPurchase(event) {
   
   async function startCheckout(email, name, privacy, turnstileToken) {
     clearError();
+    
+    // If user's applicable price is 0, use free registration
+    if (userApplicablePrice === 0) {
+      await startRegistration(email, name, turnstileToken);
+      return;
+    }
+    
+    // Otherwise proceed with paid checkout
     let resp;
     try {
       resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/checkout', {
@@ -416,6 +540,14 @@ window.initEventPurchase = function initEventPurchase(event) {
   }
 
   function openPurchaseModal() {
+    // Check if auto-registration should happen (logged-in member with free price)
+    const buyBtn = root.querySelector('.evt-buy-btn');
+    if (buyBtn && buyBtn.dataset.autoRegister === 'true') {
+      // Auto-register without showing modal
+      autoRegisterMember();
+      return;
+    }
+    
     if (modal) {
       // Check if user is logged in
       const user = getLoggedInUser();
@@ -574,11 +706,9 @@ window.initEventPurchase = function initEventPurchase(event) {
     // Use user's name from session if available, otherwise use email
     const name = user.name || user.email;
     
-    // Check if this is a free event by looking for privacy checkbox
-    const privacyCheckbox = modal.querySelector('.evt-privacy');
-    const isFreeEvent = !privacyCheckbox;
-    
-    if (isFreeEvent) {
+    // Route based on user's applicable price (not just event type)
+    // If member has 0 price, use free registration even if event has paid tier
+    if (userApplicablePrice === 0) {
       startRegistration(user.email, name, token);
     } else {
       startCheckout(user.email, name, true, token);

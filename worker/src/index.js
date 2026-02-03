@@ -3628,20 +3628,29 @@ app.post('/events/:id/register', async c => {
     const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
     if (!ev) return c.json({ error:'event_not_found' },404)
     
-    // Ensure this is a free event
-    if (ev.requires_purchase === 1) {
-      return c.json({ error:'event_requires_payment' },400)
+    // Get or create identity to check membership status
+    const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
+    if (!ident || typeof ident.id === 'undefined' || ident.id === null) {
+      console.error('identity missing id', ident)
+      return c.json({ error:'identity_error' },500)
+    }
+    
+    // Check user's membership status and calculate applicable price
+    const isActive = !!(await getActiveMembership(c.env.DB, ident.id))
+    const memberPrice = Number(ev.membership_price || 0)
+    const nonMemberPrice = Number(ev.non_membership_price || 0)
+    const applicablePrice = isActive ? memberPrice : nonMemberPrice
+    
+    // Only allow free registration if user's applicable price is 0
+    if (applicablePrice > 0) {
+      return c.json({ error:'event_requires_payment', message: `This event costs £${applicablePrice.toFixed(2)} for you. Please use the checkout flow.` },400)
     }
     
     if (ev.capacity && ev.tickets_sold >= ev.capacity) {
       return c.json({ error:'event_full' },409)
     }
 
-    const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
-    if (!ident || typeof ident.id === 'undefined' || ident.id === null) {
-      console.error('identity missing id', ident)
-      return c.json({ error:'identity_error' },500)
-    }    const s = await getSchema(c.env.DB)
+    const s = await getSchema(c.env.DB)
     await migrateToTransactions(c.env.DB)
     
     // Multiple registrations are now allowed - duplicate check removed// Create ticket record with status 'active' (no payment needed)
@@ -4246,7 +4255,8 @@ app.post('/events/:id/checkout', async c => {
     }
     const isActive = !!(await getActiveMembership(c.env.DB, ident.id))
     const amount = Number(isActive ? ev.membership_price : ev.non_membership_price)
-    if (!Number.isFinite(amount) || amount <= 0) return c.json({ error:'invalid_amount' },400)
+    if (!Number.isFinite(amount)) return c.json({ error:'invalid_amount' },400)
+    if (amount <= 0) return c.json({ error:'invalid_amount' },400)
     const currency = c.env.CURRENCY || 'GBP'
 
     const s = await getSchema(c.env.DB)
