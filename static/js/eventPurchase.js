@@ -311,7 +311,7 @@ window.initEventPurchase = function initEventPurchase(event) {
             </div>
             <div style="display: flex; justify-content: space-between; color: rgb(var(--color-neutral-700)); font-size: 0.875rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgb(var(--color-neutral-200));">
               <span>${eventName} (member price)</span>
-              <span style="font-weight: 600;">£${memberPrice.toFixed(2)}</span>
+              <span style="font-weight: 600;">${memberPrice === 0 ? 'FREE' : '£' + memberPrice.toFixed(2)}</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; color: rgb(var(--color-neutral-900)); font-weight: 700; font-size: 1rem;">
               <span>Total</span>
