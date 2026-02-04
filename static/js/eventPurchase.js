@@ -224,9 +224,10 @@ window.initEventPurchase = function initEventPurchase(event) {
             // Update applicable price
             userApplicablePrice = hasActiveMembership ? memberPrice : nonMemberPrice;
             
-            // If member price is 0, enable auto-registration
+            // If member price is 0, update button text but DON'T auto-register without user interaction
             if (hasActiveMembership && memberPrice === 0) {
-              buyBtn.dataset.autoRegister = 'true';
+              buyBtn.textContent = 'Register for Free';
+              buyBtn.dataset.isFreeForMember = 'true';
             }
           }
         }
@@ -994,17 +995,41 @@ window.initEventPurchase = function initEventPurchase(event) {
   }
 
   function openPurchaseModal() {
-    // Check if auto-registration should happen (logged-in member with free price)
+    // Check if this is a free registration for a logged-in member
     const buyBtn = root.querySelector('.evt-buy-btn');
-    if (buyBtn && buyBtn.dataset.autoRegister === 'true') {
-      // Auto-register without showing modal
-      autoRegisterMember();
+    const user = getLoggedInUser();
+    
+    if (buyBtn && buyBtn.dataset.isFreeForMember === 'true' && user && user.email) {
+      // Show modal with auto-filled info and Turnstile, then auto-submit
+      modal.style.display = 'flex';
+      
+      // Show logged-in confirmation screen
+      const confirmStep = modal.querySelector('.evt-confirm-logged-in');
+      const detailsStep = modal.querySelector('.evt-details');
+      const userEmailEl = modal.querySelector('.evt-user-email');
+      
+      if (confirmStep && detailsStep && userEmailEl) {
+        userEmailEl.textContent = user.email;
+        detailsStep.style.display = 'none';
+        confirmStep.style.display = 'block';
+        
+        // Update title and message for free registration
+        const titleEl = modal.querySelector('.evt-modal-title');
+        const messageEl = modal.querySelector('.evt-logged-message');
+        const btnEl = modal.querySelector('.evt-continue-logged');
+        
+        if (titleEl) titleEl.textContent = 'Event Registration';
+        if (messageEl) messageEl.textContent = 'Registering as';
+        if (btnEl) btnEl.textContent = 'Complete Registration';
+        
+        // Render Turnstile
+        renderTurnstileForLoggedIn();
+      }
       return;
     }
     
     if (modal) {
       // Check if user is logged in
-      const user = getLoggedInUser();
       const isLoggedIn = user && user.email;
       
       // Show modal FIRST so Turnstile can render properly
