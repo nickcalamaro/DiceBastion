@@ -344,15 +344,17 @@ return;
 // Detect order type:
 // - EVT-{eventId}-{uuid} = paid event ticket
 // - REG-{eventId}-{ticketId} = free event registration
-// - MEM-... = membership
-const isEvent = /^EVT-\d+-[0-9a-f\-]{36}$/i.test(orderRef);
-const isRegistration = /^REG-\d+-\d+$/i.test(orderRef);
-const type = (isEvent || isRegistration) ? 'event' : 'membership';
-const endpoint = (isEvent || isRegistration)
-? `/events/confirm?orderRef=${encodeURIComponent(orderRef)}`
-: `/membership/confirm?orderRef=${encodeURIComponent(orderRef)}`;
+  // - BUNDLE-{eventId}-{uuid} = membership + event bundle
+  // - MEM-... = membership
+  const isEvent = /^EVT-\d+-[0-9a-f\-]{36}$/i.test(orderRef);
+  const isRegistration = /^REG-\d+-\d+$/i.test(orderRef);
+  const isBundle = /^BUNDLE-\d+-[0-9a-f\-]{36}$/i.test(orderRef);
+  const type = (isEvent || isRegistration || isBundle) ? 'event' : 'membership';
+  const endpoint = (isEvent || isRegistration || isBundle)
+    ? `/events/confirm?orderRef=${encodeURIComponent(orderRef)}`
+    : `/membership/confirm?orderRef=${encodeURIComponent(orderRef)}`;
 
-// Immediate status check from URL params (quick feedback)
+  // Immediate status check from URL params (quick feedback)
 if (status === 'failed' || status === 'cancelled') {
 renderFailed(type);
 return;
@@ -363,78 +365,152 @@ const maxAttempts = 5;
 const delayMs = 2000;
 
 for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-try {
-console.log(`Confirmation attempt ${attempt}/${maxAttempts}`);
-const response = await fetch(API_BASE + endpoint);
-const data = await response.json();
+  try {
+    console.log(`Confirmation attempt ${attempt}/${maxAttempts}`);
+    const response = await fetch(API_BASE + endpoint);
+    
+    if (!response.ok) {
+      console.error('Confirmation request failed:', response.status, response.statusText);
+      if (response.status >= 400) {
+        const data = await response.json().catch(() => ({}));
+        renderFailed(type, data.error || data.message || 'Order not found');
+        return;
+      }
+    }
+    
+    const data = await response.json();
+    console.log('Confirmation response:', data);
+    console.log('Response checks:', {
+      hasOk: !!data.ok,
+      status: data.status,
+      isActive: data.status === 'active',
+      isAlreadyActive: data.status === 'already_active',
+      isBundle: data.isBundle,
+      conditionMet: data.ok && (data.status === 'active' || data.status === 'already_active')
+    });
 
-console.log('Confirmation response:', data);
+    // Success states
+    if (data.ok && (data.status === 'active' || data.status === 'already_active')) {
+      // Handle bundle purchases (membership + event)
+      if (data.isBundle) {
+        // Format membership plan name
+        const planName = data.membershipPlan 
+          ? data.membershipPlan.charAt(0).toUpperCase() + data.membershipPlan.slice(1) + ' Membership'
+          : 'Membership';
+        
+        container.innerHTML = `
+<h1>🎉 Bundle Purchase Complete!</h1>
+<div class="status-badge status-success">Payment Confirmed</div>
 
-// Success states
-if (data.ok && (data.status === 'active' || data.status === 'already_active')) {
-if (type === 'membership') {
-  renderMembershipSuccess({
-    plan: data.plan,
-    endDate: data.endDate,
-    amount: data.amount,
-    currency: data.currency,
-    autoRenew: data.autoRenew,
-    cardLast4: data.cardLast4
-  });
-  
-  // Check for pending account setup (from membership purchase)
-  checkPendingAccountSetup();
-} else {      renderEventSuccess({
-    eventName: data.eventName,
-    eventDate: data.eventDate,
-    ticketCount: data.ticketCount,
-    amount: data.amount,
-    currency: data.currency,
-    isFree: data.isFree
-  });
-  
-  // Check for pending account setup (from event registration)
-  checkPendingAccountSetup();
-}
-return; // Success - stop polling
-}
+<div class="info-box">
+<h3>${planName} + ${data.eventName || 'Event Ticket'}</h3>
+<p>Your membership and event ticket have both been confirmed. Welcome to Dice Bastion!</p>
+</div>
 
-// Still pending
-if (data.status === 'PENDING' || data.payment_status === 'PENDING') {
-if (attempt === maxAttempts) {
-  // After max attempts, show pending state
-  // Webhook will handle confirmation + email independently
-  renderPending(type);
-  return;
-}
-// Continue polling
-await new Promise(resolve => setTimeout(resolve, delayMs));
-continue;
-}
+<div class="details-grid">
+<div class="detail-row">
+<span class="detail-label">Membership Plan:</span>
+<span class="detail-value">${data.membershipPlan || 'Standard'}</span>
+</div>
+<div class="detail-row">
+<span class="detail-label">Valid Until:</span>
+<span class="detail-value">${formatDate(data.membershipEndDate)}</span>
+</div>
+<div class="detail-row">
+<span class="detail-label">Event:</span>
+<span class="detail-value">${data.eventName || 'Event'}</span>
+</div>
+${data.eventDate ? `
+<div class="detail-row">
+<span class="detail-label">Event Date:</span>
+<span class="detail-value">${formatDate(data.eventDate)}</span>
+</div>
+` : ''}
+<div class="detail-row">
+<span class="detail-label">Total Paid:</span>
+<span class="detail-value">${formatCurrency(data.amount, data.currency)}</span>
+</div>
+</div>
 
-// Failed/declined
-if (data.status === 'FAILED' || data.payment_status === 'FAILED' || response.status >= 400) {
-renderFailed(type, data.error || data.message);
-return; // Failed - stop polling
-}
+<div style="margin-top: 24px;">
+<a href="/events" class="action-button">Browse Events</a>
+<a href="/account" class="action-button secondary-button">View Account</a>
+</div>
 
-// Unknown state - try again
-if (attempt < maxAttempts) {
-await new Promise(resolve => setTimeout(resolve, delayMs));
-} else {
-renderPending(type);
-}
+<p style="margin-top: 24px; color: #666;">
+Confirmation emails for your membership and event ticket have been sent to your registered email address.
+</p>
+`;
+        // Check for pending account setup
+        checkPendingAccountSetup();
+        return; // Success - stop polling
+      }
+      
+      // Regular membership or event
+      if (type === 'membership') {
+        renderMembershipSuccess({
+          plan: data.plan,
+          endDate: data.endDate,
+          amount: data.amount,
+          currency: data.currency,
+          autoRenew: data.autoRenew,
+          cardLast4: data.cardLast4
+        });
+        
+        // Check for pending account setup (from membership purchase)
+        checkPendingAccountSetup();
+      } else {
+        renderEventSuccess({
+          eventName: data.eventName,
+          eventDate: data.eventDate,
+          ticketCount: data.ticketCount,
+          amount: data.amount,
+          currency: data.currency,
+          isFree: data.isFree
+        });
+        
+        // Check for pending account setup (from event registration)
+        checkPendingAccountSetup();
+      }
+      return; // Success - stop polling
+    }
 
-} catch (error) {
-console.error('Confirmation error:', error);
-if (attempt < maxAttempts) {
-await new Promise(resolve => setTimeout(resolve, delayMs));
-} else {
-// After all attempts failed, show pending state
-// Webhook will handle confirmation + email
-renderPending(type);
-}
-}
+    // Still pending
+    if (data.status === 'PENDING' || data.payment_status === 'PENDING') {
+      if (attempt === maxAttempts) {
+        // After max attempts, show pending state
+        // Webhook will handle confirmation + email independently
+        renderPending(type);
+        return;
+      }
+      // Continue polling
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    // Failed/declined
+    if (data.status === 'FAILED' || data.payment_status === 'FAILED' || response.status >= 400) {
+      renderFailed(type, data.error || data.message);
+      return; // Failed - stop polling
+    }
+
+    // Unknown state - try again
+    if (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    } else {
+      renderPending(type);
+    }
+
+  } catch (error) {
+    console.error('Confirmation error:', error);
+    if (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    } else {
+      // After all attempts failed, show pending state
+      // Webhook will handle confirmation + email
+      renderPending(type);
+    }
+  }
 }
 };
 

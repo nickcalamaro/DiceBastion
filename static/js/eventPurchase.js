@@ -117,6 +117,71 @@ function generateModal(eventId, isFree) {
         <div class="evt-success mt-4 py-3 px-4 rounded-lg font-semibold" style="display:none; background:#e9fbe9; border:1px solid #b9e8b9; color:#1a5d1a;">${isFree ? 'Registration confirmed! See you there.' : 'Ticket confirmed! See you there.'}</div>
       </div>
     </div>
+    
+    <!-- Bundle Upsell Modal (shown before payment for non-members) -->
+    ${!isFree ? `
+    <div class="evt-bundle-modal" id="evt-bundle-modal-${eventId}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); z-index:999999; align-items:center; justify-content:center; padding:1rem;">
+      <div class="evt-bundle-modal-inner bg-neutral dark:bg-neutral-800 rounded-2xl relative shadow-2xl" style="width:min(700px,95vw); max-height:90vh; display:flex; flex-direction:column;">
+        <button type="button" class="evt-bundle-close bg-transparent border-none text-3xl cursor-pointer text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors" aria-label="Close" style="position:absolute; top:1rem; right:1rem; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; z-index:10;">×</button>
+        
+        <!-- Scrollable content area -->
+        <div style="overflow-y:auto; padding:1.5rem; flex:1;">
+          <div class="text-center mb-5">
+            <h3 class="mt-0 mb-2 text-lg font-bold text-neutral-900 dark:text-neutral-100">
+              Become a Dice Bastion Member to save and <button type="button" class="evt-show-benefits-header" style="background:none; border:none; color:rgb(var(--color-primary-600)); text-decoration:underline; cursor:pointer; padding:0; font-size:inherit; font-weight:inherit;">unlock benefits</button>?
+            </h3>
+            <p class="mt-0 mb-0 text-sm text-neutral-600 dark:text-neutral-400" style="font-style:italic;">Optional - you're under no obligation to purchase a membership.</p>
+          </div>
+          
+          <!-- Bundle deals -->
+          <div id="evt-bundle-plans-${eventId}" class="evt-bundle-plans-grid" style="display:grid; gap:0.75rem; margin-bottom:1.5rem;"></div>
+        </div>
+        
+        <!-- Fixed footer with button -->
+        <div style="padding:1rem 1.5rem; border-top:1px solid rgb(var(--color-neutral-200)); background:rgb(var(--color-neutral-50));" class="dark:border-neutral-700 dark:bg-neutral-900">
+          <div style="text-align:center; margin-bottom:0.75rem; color:rgb(var(--color-neutral-500)); font-size:0.875rem; font-weight:600;">OR</div>
+          
+          <!-- Primary action: Just get the ticket - prominent blue button -->
+          <button type="button" class="evt-bundle-no-thanks" style="width:100%; padding:1rem 1.5rem; border:none; border-radius:0.75rem; background:rgb(var(--color-primary-600)); color:white; font-weight:700; font-size:1.05rem; cursor:pointer; transition:all 0.2s; box-shadow:0 2px 8px rgba(79, 70, 229, 0.3);" 
+            onmouseover="this.style.background='rgb(var(--color-primary-700))'; this.style.boxShadow='0 4px 12px rgba(79, 70, 229, 0.4)'; this.style.transform='translateY(-1px)';" 
+            onmouseout="this.style.background='rgb(var(--color-primary-600))'; this.style.boxShadow='0 2px 8px rgba(79, 70, 229, 0.3)'; this.style.transform='translateY(0)';">
+            No Thanks, Just The Event
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Benefits Popup Modal -->
+    <div class="evt-benefits-modal" id="evt-benefits-modal-${eventId}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); z-index:9999999; align-items:center; justify-content:center; padding:1rem;">
+      <div class="bg-neutral dark:bg-neutral-800 rounded-2xl p-6 relative shadow-2xl" style="width:min(500px,95vw); max-height:90vh; overflow-y:auto;">
+        <button type="button" class="evt-benefits-close bg-transparent border-none text-3xl cursor-pointer text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors" aria-label="Close" style="position:absolute; top:1rem; right:1rem; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;">×</button>
+        
+        <h3 class="mt-0 mb-4 text-xl font-bold text-neutral-900 dark:text-neutral-100">Member Benefits</h3>
+        
+        <ul style="list-style:none; padding:0; margin:0; color:rgb(var(--color-neutral-700)); line-height:2;" class="dark:text-neutral-200">
+          <li style="padding:0.5rem 0; border-bottom:1px solid rgb(var(--color-neutral-200));" class="dark:border-neutral-700">
+            <span style="color:rgb(var(--color-primary-600)); font-weight:bold; margin-right:0.75rem; font-size:1.1rem;">✓</span>
+            <strong>Free table bookings</strong>
+          </li>
+          <li style="padding:0.5rem 0; border-bottom:1px solid rgb(var(--color-neutral-200));" class="dark:border-neutral-700">
+            <span style="color:rgb(var(--color-primary-600)); font-weight:bold; margin-right:0.75rem; font-size:1.1rem;">✓</span>
+            <strong>Member pricing on all events</strong>
+          </li>
+          <li style="padding:0.5rem 0; border-bottom:1px solid rgb(var(--color-neutral-200));" class="dark:border-neutral-700">
+            <span style="color:rgb(var(--color-primary-600)); font-weight:bold; margin-right:0.75rem; font-size:1.1rem;">✓</span>
+            <strong>Local discounts:</strong>
+            <ul style="list-style:none; padding-left:2rem; margin-top:0.5rem; font-size:0.95rem; color:rgb(var(--color-neutral-600));" class="dark:text-neutral-400">
+              <li>• Dominos</li>
+              <li>• Imperial Newsagents</li>
+              <li>• Euphoria</li>
+            </ul>
+          </li>
+        </ul>
+        
+        <button type="button" class="evt-benefits-close-btn w-full mt-5 py-2.5 px-4 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral-50 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-600 transition-colors">Close</button>
+      </div>
+    </div>
+    ` : ''}
   `;
 }
 
@@ -125,11 +190,13 @@ window.initEventPurchase = function initEventPurchase(event) {
   const root = document.querySelector('.event-purchase[data-event-id="'+eventId+'"]');
   const modal = document.getElementById('evt-modal-'+eventId);
   const cardEl = document.getElementById('evt-card-'+eventId);
-  let turnstileWidgetId = null; // Store the Turnstile widget ID
-  let turnstileLoggedWidgetId = null; // Store the Turnstile widget ID for logged-in flow
-  let turnstileRenderTimeout = null; // Store timeout ID to cancel if needed
-  let userApplicablePrice = null; // User's price based on membership status
-  let hasActiveMembership = false; // Whether user has active membership
+  let turnstileWidgetId = null;
+  let turnstileLoggedWidgetId = null;
+  let turnstileRenderTimeout = null;
+  let userApplicablePrice = null;
+  let hasActiveMembership = false;
+  let membershipPlans = []; // Store available membership plans
+  let selectedMembershipPlan = null; // Currently selected plan for bundle
   
   if (!root || !modal) return;
   
@@ -174,6 +241,229 @@ window.initEventPurchase = function initEventPurchase(event) {
   
   // Run membership check on init
   checkMembershipAndUpdateButton();
+  
+  // Load membership plans for bundle upsell
+  async function loadMembershipPlans() {
+    try {
+      const resp = await fetch(API_BASE + '/membership/plans');
+      if (resp.ok) {
+        const data = await resp.json();
+        membershipPlans = data.plans || [];
+      }
+    } catch (e) {
+      console.error('[eventPurchase] Failed to load membership plans:', e);
+    }
+  }
+  
+  // Show bundle upsell modal with plan cards
+  function showBundleUpsell(onSelect) {
+    const bundleModal = document.getElementById('evt-bundle-modal-' + eventId);
+    if (!bundleModal) return;
+    
+    const memberPrice = parseFloat(event.membership_price || 0);
+    const nonMemberPrice = parseFloat(event.non_membership_price || 0);
+    const savings = nonMemberPrice - memberPrice;
+    
+    // Generate single bundle card with plan selector
+    const plansContainer = bundleModal.querySelector('.evt-bundle-plans-grid');
+    if (plansContainer && membershipPlans.length > 0) {
+      const eventName = event.event_name || event.title || 'Event';
+      
+      // Calculate prices for all plans
+      const planOptions = membershipPlans.map(plan => ({
+        code: plan.code,
+        name: plan.name,
+        months: plan.months,
+        price: parseFloat(plan.amount || 0),
+        bundlePrice: parseFloat(plan.amount || 0) + memberPrice
+      }));
+      
+      // Use first plan as default
+      const defaultPlan = planOptions[0];
+      
+      plansContainer.innerHTML = `
+        <div class="evt-bundle-card bundle-card" style="max-width: 500px; margin: 0 auto;">
+          ${savings > 0 ? `<div class="bundle-badge">Save £${savings.toFixed(2)}</div>` : ''}
+          <div class="bundle-label">Bundle Deal</div>
+          <h4 class="bundle-title">Membership + ${eventName}</h4>
+          
+          <div style="margin: 1.5rem 0 1rem 0;">
+            <label style="display: block; margin-bottom: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-700)); font-size: 0.875rem;">Choose membership duration:</label>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              ${planOptions.map((plan, index) => `
+                <label class="evt-plan-option" data-plan-code="${plan.code}" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.875rem; border: 2px solid rgb(var(--color-neutral-300)); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                  <input type="radio" name="bundle-plan" value="${plan.code}" ${index === 0 ? 'checked' : ''} style="width: 1.25rem; height: 1.25rem; cursor: pointer;">
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; color: rgb(var(--color-neutral-900)); font-size: 0.938rem;">${plan.name}</div>
+                    <div style="font-size: 0.813rem; color: rgb(var(--color-neutral-600)); margin-top: 0.125rem;">${plan.months} ${plan.months === 1 ? 'month' : 'months'} membership</div>
+                  </div>
+                  <div style="font-weight: 700; color: rgb(var(--color-primary-600)); font-size: 1.125rem;">£${plan.bundlePrice.toFixed(2)}</div>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          
+          <div class="bundle-breakdown" style="background: rgb(var(--color-neutral-50)); border-radius: 8px; padding: 0.875rem; margin: 1rem 0;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; color: rgb(var(--color-neutral-700)); font-size: 0.875rem;">
+              <span id="evt-plan-name">${defaultPlan.name}</span>
+              <span style="font-weight: 600;" id="evt-plan-price">£${defaultPlan.price.toFixed(2)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; color: rgb(var(--color-neutral-700)); font-size: 0.875rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgb(var(--color-neutral-200));">
+              <span>${eventName} (member price)</span>
+              <span style="font-weight: 600;">£${memberPrice.toFixed(2)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; color: rgb(var(--color-neutral-900)); font-weight: 700; font-size: 1rem;">
+              <span>Total</span>
+              <span style="color: rgb(var(--color-primary-600));" id="evt-bundle-total">£${defaultPlan.bundlePrice.toFixed(2)}</span>
+            </div>
+          </div>
+          
+          ${savings > 0 ? `
+            <div style="text-align: center; font-size: 0.813rem; color: rgb(var(--color-success-700)); font-weight: 600; margin-bottom: 0.75rem;">
+              ✓ You save £${savings.toFixed(2)} vs. non-member price
+            </div>
+          ` : ''}
+          
+          <button type="button" id="evt-select-bundle-btn" class="bundle-btn bundle-btn-secondary">Purchase Together</button>
+        </div>
+      `;
+      
+      // Add dark mode styles
+      const darkStyles = `
+        .dark .bundle-breakdown {
+          background: rgb(var(--color-neutral-900)) !important;
+        }
+        .dark .bundle-breakdown > div {
+          color: rgb(var(--color-neutral-300)) !important;
+        }
+        .dark .bundle-breakdown > div:last-child {
+          color: rgb(var(--color-neutral-100)) !important;
+        }
+        .dark .bundle-breakdown > div:last-child span:last-child {
+          color: rgb(var(--color-primary-400)) !important;
+        }
+        .dark .evt-plan-option {
+          border-color: rgb(var(--color-neutral-600)) !important;
+          background: rgb(var(--color-neutral-800)) !important;
+        }
+        .dark .evt-plan-option > div > div:first-child {
+          color: rgb(var(--color-neutral-100)) !important;
+        }
+        .dark .evt-plan-option > div > div:last-child {
+          color: rgb(var(--color-neutral-400)) !important;
+        }
+        .evt-plan-option:has(input:checked) {
+          border-color: rgb(var(--color-primary-500)) !important;
+          background: rgba(var(--color-primary-50), 0.5) !important;
+        }
+        .dark .evt-plan-option:has(input:checked) {
+          background: rgba(var(--color-primary-900), 0.3) !important;
+        }
+        .evt-plan-option:hover {
+          border-color: rgb(var(--color-primary-400)) !important;
+        }
+      `;
+      if (!document.getElementById('bundle-breakdown-styles')) {
+        const styleEl = document.createElement('style');
+        styleEl.id = 'bundle-breakdown-styles';
+        styleEl.textContent = darkStyles;
+        document.head.appendChild(styleEl);
+      }
+      
+      // Handle plan selection changes
+      const planNameEl = document.getElementById('evt-plan-name');
+      const planPriceEl = document.getElementById('evt-plan-price');
+      const bundleTotalEl = document.getElementById('evt-bundle-total');
+      
+      const radioButtons = document.querySelectorAll('input[name="bundle-plan"]');
+      radioButtons.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+          const selectedCode = e.target.value;
+          const selectedPlan = planOptions.find(p => p.code === selectedCode);
+          if (selectedPlan) {
+            planNameEl.textContent = selectedPlan.name;
+            planPriceEl.textContent = `£${selectedPlan.price.toFixed(2)}`;
+            bundleTotalEl.textContent = `£${selectedPlan.bundlePrice.toFixed(2)}`;
+          }
+        });
+      });
+      
+      // Also allow clicking the label to select
+      document.querySelectorAll('.evt-plan-option').forEach(label => {
+        label.addEventListener('click', (e) => {
+          if (e.target.tagName !== 'INPUT') {
+            const radio = label.querySelector('input[type="radio"]');
+            radio.checked = true;
+            radio.dispatchEvent(new Event('change'));
+          }
+        });
+      });
+      
+      // Handle bundle selection
+      document.getElementById('evt-select-bundle-btn').addEventListener('click', () => {
+        const selectedRadio = document.querySelector('input[name="bundle-plan"]:checked');
+        selectedMembershipPlan = selectedRadio ? selectedRadio.value : planOptions[0].code;
+        bundleModal.style.display = 'none';
+        onSelect(true);
+      });
+    }
+    
+    // Handle benefits link in header
+    const showBenefitsHeaderBtn = bundleModal.querySelector('.evt-show-benefits-header');
+    if (showBenefitsHeaderBtn) {
+      showBenefitsHeaderBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        showBenefitsPopup();
+      });
+    }
+    
+    // Handle "No thanks" button click
+    const noThanksBtn = bundleModal.querySelector('.evt-bundle-no-thanks');
+    const bundleClose = bundleModal.querySelector('.evt-bundle-close');
+    
+    const handleNoThanks = () => {
+      selectedMembershipPlan = null;
+      bundleModal.style.display = 'none';
+      onSelect(false); // false = user declined bundle
+    };
+    
+    noThanksBtn.onclick = handleNoThanks;
+    bundleClose.onclick = handleNoThanks;
+    
+    // Show the modal
+    bundleModal.style.display = 'flex';
+  }
+  
+  // Show benefits popup
+  function showBenefitsPopup() {
+    const benefitsModal = document.getElementById('evt-benefits-modal-' + eventId);
+    if (benefitsModal) {
+      benefitsModal.style.display = 'flex';
+      
+      // Close button handlers
+      const closeBtn = benefitsModal.querySelector('.evt-benefits-close');
+      const closeBtnAlt = benefitsModal.querySelector('.evt-benefits-close-btn');
+      
+      const handleClose = () => {
+        benefitsModal.style.display = 'none';
+      };
+      
+      closeBtn.onclick = handleClose;
+      closeBtnAlt.onclick = handleClose;
+      
+      // Click backdrop to close
+      benefitsModal.addEventListener('click', (e) => {
+        if (e.target === benefitsModal) {
+          handleClose();
+        }
+      });
+    }
+  }
+  
+  // Load plans if not a member
+  if (!hasActiveMembership) {
+    loadMembershipPlans();
+  }
   
   // Auto-register function for logged-in members with free access
   async function autoRegisterMember() {
@@ -335,10 +625,18 @@ window.initEventPurchase = function initEventPurchase(event) {
         
         // Check if user needs account setup and store data in sessionStorage
         if (data.needsAccountSetup && data.userEmail) {
-          sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+          const setupInfo = {
             email: data.userEmail,
             eventName: data.eventName || 'this event'
-          }));
+          };
+          
+          // For bundles, note that they also got a membership
+          if (data.isBundle) {
+            setupInfo.isBundle = true;
+            setupInfo.membershipPlan = data.membershipPlan;
+          }
+          
+          sessionStorage.setItem('pendingAccountSetup', JSON.stringify(setupInfo));
         }
         
         // Log if email failed but still redirect - payment succeeded
@@ -460,7 +758,72 @@ window.initEventPurchase = function initEventPurchase(event) {
       return;
     }
     
-    // Otherwise proceed with paid checkout
+    // Check if the email has an active membership (for non-logged-in users entering a member email)
+    if (!hasActiveMembership) {
+      try {
+        const checkResp = await fetch(API_BASE + '/membership/check?email=' + encodeURIComponent(email));
+        if (checkResp.ok) {
+          const checkData = await checkResp.json();
+          if (checkData.hasActiveMembership) {
+            // User entered a member email - update status and price
+            hasActiveMembership = true;
+            const memberPrice = parseFloat(event.membership_price || 0);
+            userApplicablePrice = memberPrice;
+            
+            // Show simple modal notification
+            const modalHtml = `
+              <div style="position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgba(0,0,0,0.6);">
+                <div style="background: white; border-radius: 12px; max-width: 400px; width: 100%; padding: 2rem; box-shadow: 0 20px 60px rgba(0,0,0,0.4);">
+                  <h3 style="margin: 0 0 1rem 0; font-size: 1.5rem; font-weight: 600; color: #1f2937;">You're Already a Member! 🎉</h3>
+                  <p style="margin: 0 0 1.5rem 0; color: #4b5563;">Great news! This email is already registered as a member, so you're getting the best price available.</p>
+                  <button id="member-modal-btn" style="width: 100%; padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+                    Continue
+                  </button>
+                </div>
+              </div>
+            `;
+            
+            const modalEl = document.createElement('div');
+            modalEl.innerHTML = modalHtml;
+            document.body.appendChild(modalEl);
+            
+            document.getElementById('member-modal-btn').addEventListener('click', async () => {
+              document.body.removeChild(modalEl);
+              if (memberPrice === 0) {
+                await startRegistration(email, name, turnstileToken);
+              } else {
+                await proceedWithRegularCheckout(email, name, privacy, turnstileToken);
+              }
+            });
+            
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('[eventPurchase] Error checking membership for email:', e);
+        // Continue with normal flow on error
+      }
+    }
+    
+    // For non-members on paid events, show bundle upsell before payment
+    if (!hasActiveMembership && membershipPlans.length > 0) {
+      showBundleUpsell((selectedBundle) => {
+        if (selectedBundle && selectedMembershipPlan) {
+          // User selected a bundle
+          startBundleCheckout(email, name, privacy, turnstileToken);
+        } else {
+          // User declined bundle, proceed with regular checkout
+          proceedWithRegularCheckout(email, name, privacy, turnstileToken);
+        }
+      });
+      return;
+    }
+    
+    // Otherwise proceed with regular paid checkout directly
+    await proceedWithRegularCheckout(email, name, privacy, turnstileToken);
+  }
+  
+  async function proceedWithRegularCheckout(email, name, privacy, turnstileToken) {
     let resp;
     try {
       resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/checkout', {
@@ -474,6 +837,97 @@ window.initEventPurchase = function initEventPurchase(event) {
           name,
           privacyConsent: privacy,
           turnstileToken
+        })
+      });
+    } catch(e) {
+      showError('Network error');
+      return;
+    }
+    
+    const data = await resp.json();
+    if (!resp.ok) {
+      showError(data?.message || data?.error || 'Checkout failed');
+      return;
+    }
+    
+    if (data.checkoutId) {
+      mountWidget(data.checkoutId, data.orderRef);
+      return;
+    }
+    
+    showError('Missing checkout ID');
+  }
+
+  async function startRegistration(email, name, turnstileToken) {
+    clearError();
+    let resp;
+    try {
+      resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email,
+          name,
+          turnstileToken
+        })
+      });
+    } catch(e) {
+      showError('Network error');
+      return;
+    }
+    const data = await resp.json();
+    if (!resp.ok) {
+      showError(data?.message || data?.error || 'Registration failed');
+      return;
+    }
+      if (data.success || data.registered || data.already_registered) {
+      // Check if user needs account setup and store data in sessionStorage
+      if (data.needsAccountSetup && data.userEmail) {
+        sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+          email: data.userEmail,
+          eventName: data.eventName || 'this event'
+        }));
+      }
+      
+      // Redirect to thank you page with registration reference
+      // Format: REG-{eventId}-{ticketId}
+      const ticketId = data.ticketId || Date.now();
+      const regRef = `REG-${eventId}-${ticketId}`;
+      window.location.href = '/thank-you?orderRef=' + encodeURIComponent(regRef);
+      return;
+    }
+    
+    showError('Registration failed');
+  }
+
+  async function startBundleCheckout(email, name, privacy, turnstileToken) {
+    clearError();
+    
+    if (!selectedMembershipPlan) {
+      showError('Please select a membership plan');
+      return;
+    }
+    
+    // Check if they want auto-renewal (we can add a checkbox for this later)
+    const autoRenew = false; // Default to false for now
+    
+    let resp;
+    try {
+      resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/checkout-with-membership', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': newIdempotencyKey()
+        },
+        body: JSON.stringify({
+          email,
+          name,
+          privacyConsent: privacy,
+          turnstileToken,
+          membershipPlan: selectedMembershipPlan,
+          autoRenew
         })
       });
     } catch(e) {
@@ -644,8 +1098,8 @@ window.initEventPurchase = function initEventPurchase(event) {
     const name = modal.querySelector('.evt-name').value.trim();
     const email = modal.querySelector('.evt-email').value.trim();
     const privacyCheckbox = modal.querySelector('.evt-privacy');
-    const privacy = privacyCheckbox ? privacyCheckbox.checked : true; // Free events don't have privacy checkbox
-    const isFreeEvent = !privacyCheckbox; // If no privacy checkbox, it's a free event
+    const privacy = privacyCheckbox ? privacyCheckbox.checked : true;
+    const isFreeEvent = !privacyCheckbox;
     
     if (!name) {
       showError('Enter your full name');

@@ -411,6 +411,8 @@
   document.head.appendChild(style);
 })();
 
+console.log('[modal.js] Styles injected, defining Modal class...');
+
 window.Modal = class Modal {
   /**
    * Create a new modal
@@ -941,3 +943,5 @@ window.Modal.form = function(options = {}) {
 
   return modal;
 };
+
+console.log('[modal.js] Modal class and helpers fully loaded. window.Modal:', typeof window.Modal);
