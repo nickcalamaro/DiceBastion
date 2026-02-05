@@ -156,9 +156,25 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await getTableTypes();
     }
 
+    // GET /api/bookings/available-slots - Get available time slots for a date/table type
+    if (path === "/api/bookings/available-slots" && request.method === "GET") {
+      const date = url.searchParams.get('date');
+      const tableTypeId = url.searchParams.get('table_type_id');
+      if (!date || !tableTypeId) {
+        return jsonResponse({ error: "Missing date or table_type_id parameter" }, 400);
+      }
+      return await getAvailableSlots(date, parseInt(tableTypeId));
+    }
+
     // POST /api/bookings - Create new booking
     if (path === "/api/bookings" && request.method === "POST") {
       return await createBooking(request);
+    }
+
+    // PATCH /api/bookings/:id/cancel - Cancel a booking
+    if (path.match(/^\/api\/bookings\/\d+\/cancel$/) && request.method === "PATCH") {
+      const bookingId = path.split("/")[3];
+      return await cancelBooking(parseInt(bookingId));
     }
 
     // GET /api/bookings/confirm/:ref - Confirm booking after payment
@@ -226,6 +242,76 @@ async function getTableTypes() {
   } catch (error) {
     console.error("Error fetching table types:", error);
     return jsonResponse({ error: "Failed to fetch table types" }, 500);
+  }
+}
+
+/**
+ * Get available time slots for a specific date and table type
+ * Returns slots with availability based on max_bookings config
+ */
+async function getAvailableSlots(date: string, tableTypeId: number) {
+  try {
+    // Validate date format
+    if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
+    }
+
+    // Get max bookings from config
+    const configResult = await client.execute(
+      "SELECT max_bookings FROM booking_config WHERE id = 1"
+    );
+    const maxBookings = configResult.rows[0]?.max_bookings || 1;
+
+    // Get booking time slots from config
+    const slotsResult = await client.execute(
+      "SELECT time_slots FROM booking_config WHERE id = 1"
+    );
+    
+    let timeSlots: Array<{start: string, end: string}> = [];
+    try {
+      timeSlots = JSON.parse(String(slotsResult.rows[0]?.time_slots || '[]'));
+    } catch (e) {
+      console.error('Error parsing time slots:', e);
+      return jsonResponse({ error: "Invalid time slots configuration" }, 500);
+    }
+
+    // Count non-cancelled bookings for each slot
+    const slotsWithAvailability = await Promise.all(
+      timeSlots.map(async (slot) => {
+        const bookingCount = await client.execute({
+          sql: `SELECT COUNT(*) as count FROM bookings 
+                WHERE booking_date = ? 
+                AND table_type_id = ? 
+                AND start_time = ? 
+                AND status != 'cancelled'
+                AND status != 'failed'`,
+          args: [date, tableTypeId, slot.start]
+        });
+        
+        const count = Number(bookingCount.rows[0]?.count || 0);
+        const spotsLeft = maxBookings - count;
+        
+        return {
+          start_time: slot.start,
+          end_time: slot.end,
+          spots_left: spotsLeft,
+          available: spotsLeft > 0
+        };
+      })
+    );
+
+    // Filter to only available slots
+    const availableSlots = slotsWithAvailability.filter(slot => slot.available);
+
+    return jsonResponse({
+      date,
+      table_type_id: tableTypeId,
+      max_bookings: maxBookings,
+      slots: availableSlots
+    });
+  } catch (error) {
+    console.error("Error fetching available slots:", error);
+    return jsonResponse({ error: "Failed to fetch available slots" }, 500);
   }
 }
 
@@ -442,5 +528,55 @@ async function getUserBookings(email: string) {
   } catch (error) {
     console.error("Error fetching user bookings:", error);
     return jsonResponse({ error: "Failed to fetch bookings" }, 500);
+  }
+}
+
+/**
+ * Cancel a booking
+ * Sets status to 'cancelled' instead of deleting the record
+ */
+async function cancelBooking(bookingId: number) {
+  try {
+    const now = new Date().toISOString();
+    
+    // Update booking status to cancelled
+    const result = await client.execute({
+      sql: `UPDATE bookings 
+            SET status = 'cancelled',
+                payment_status = 'cancelled',
+                updated_at = ?
+            WHERE id = ? AND status != 'cancelled'`,
+      args: [now, bookingId],
+    });
+
+    if (result.rowsAffected === 0) {
+      // Check if booking exists
+      const checkResult = await client.execute({
+        sql: "SELECT id, status FROM bookings WHERE id = ?",
+        args: [bookingId],
+      });
+
+      if (checkResult.rows.length === 0) {
+        return jsonResponse({ error: "Booking not found" }, 404);
+      }
+
+      const booking = checkResult.rows[0];
+      if (booking.status === 'cancelled') {
+        return jsonResponse({ 
+          success: true, 
+          message: "Booking already cancelled",
+          booking_id: bookingId
+        });
+      }
+    }
+    
+    return jsonResponse({ 
+      success: true,
+      message: "Booking cancelled successfully",
+      booking_id: bookingId
+    });
+  } catch (error) {
+    console.error("Error cancelling booking:", error);
+    return jsonResponse({ error: "Failed to cancel booking" }, 500);
   }
 }
