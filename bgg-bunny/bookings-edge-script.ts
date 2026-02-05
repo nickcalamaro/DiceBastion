@@ -89,14 +89,28 @@ async function getTableTypes() {
     );
     
     return jsonResponse({
-      table_types: result.rows.map(row => ({
-        id: row.id,
-        name: row.name,
-        member_price: Number(row.member_price),
-        non_member_price: Number(row.non_member_price),
-        available_days: JSON.parse(String(row.available_days)),
-        description: row.description || null
-      }))
+      table_types: result.rows.map(row => {
+        // Parse available_days, handling malformed JSON
+        let availableDays = [];
+        try {
+          const daysStr = String(row.available_days);
+          // Fix double commas and parse
+          const fixedJson = daysStr.replace(/,+/g, ',').replace(/,\]/g, ']');
+          availableDays = JSON.parse(fixedJson).filter(Boolean); // Remove null/empty values
+        } catch (e) {
+          console.error('Error parsing available_days:', e);
+          availableDays = [];
+        }
+        
+        return {
+          id: row.id,
+          name: row.name,
+          member_price: Number(row.member_price),
+          non_member_price: Number(row.non_member_price),
+          available_days: availableDays,
+          description: row.description || null
+        };
+      })
     });
   } catch (error) {
     console.error("Error fetching table types:", error);
