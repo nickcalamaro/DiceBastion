@@ -30,6 +30,110 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+/**
+ * Helper function to create JSON responses
+ */
+function jsonResponse(data: any, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * Replace template placeholders with actual values
+ */
+function replacePlaceholders(template: string, data: Record<string, any>): string {
+  let result = template;
+  for (const [key, value] of Object.entries(data)) {
+    const placeholder = new RegExp(`{{${key}}}`, 'g');
+    result = result.replace(placeholder, String(value ?? ''));
+  }
+  return result;
+}
+
+/**
+ * Send booking confirmation email
+ */
+async function sendBookingConfirmationEmail(params: {
+  userEmail: string;
+  userName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  tableTypeId: number;
+  amountPaid: number;
+}): Promise<void> {
+  const { userEmail, userName, bookingDate, startTime, endTime, tableTypeId, amountPaid } = params;
+  
+  try {
+    // Fetch email template from database
+    const templateResult = await client.execute({
+      sql: `SELECT subject, body_html, body_text, from_email, from_name 
+            FROM email_templates 
+            WHERE template_key = ? AND active = 1`,
+      args: ['booking_confirmation'],
+    });
+
+    if (templateResult.rows.length === 0) {
+      console.error('Email template not found: booking_confirmation');
+      return;
+    }
+
+    // Get table type name
+    const tableTypeResult = await client.execute({
+      sql: "SELECT name FROM booking_table_types WHERE id = ?",
+      args: [tableTypeId],
+    });
+    
+    const tableTypeName = tableTypeResult.rows[0]?.name || 'Table';
+    const template = templateResult.rows[0];
+
+    // Prepare template data
+    const templateData = {
+      user_name: userName,
+      table_type_name: tableTypeName,
+      booking_date: bookingDate,
+      start_time: startTime,
+      end_time: endTime,
+      amount_paid: amountPaid.toFixed(2),
+    };
+
+    // Replace placeholders in subject and body
+    const subject = replacePlaceholders(String(template.subject), templateData);
+    const html = replacePlaceholders(String(template.body_html), templateData);
+    const text = template.body_text 
+      ? replacePlaceholders(String(template.body_text), templateData)
+      : undefined;
+
+    // Send email via DiceBastionEmails edge script
+    // TODO: Update this URL once you create the script and get its URL
+    const emailApiUrl = process.env.EMAIL_API_URL || 'https://dicebastionemails-xxxxx.bunny.run/send';
+    
+    const response = await fetch(emailApiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to_email: userEmail,
+        to_name: userName,
+        from_email: String(template.from_email),
+        from_name: String(template.from_name),
+        subject,
+        html,
+        text,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Failed to send email:', response.status, errorText);
+    }
+  } catch (error) {
+    console.error('Error in sendBookingConfirmationEmail:', error);
+    throw error;
+  }
+}
+
 BunnySDK.net.http.serve(async (request: Request) => {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -194,6 +298,35 @@ async function createBooking(request: Request) {
       ],
     });
 
+    // For free bookings, send confirmation email immediately
+    if (amount_paid === 0) {
+      // Get table type name for email
+      const tableType = await client.execute({
+        sql: "SELECT name FROM booking_table_types WHERE id = ?",
+        args: [table_type_id],
+      });
+      
+      // Send email via main worker (fire and forget)
+      try {
+        fetch('https://dicebastion-memberships.ncalamaro.workers.dev/api/bookings/send-confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_email,
+            user_name,
+            booking_date,
+            start_time,
+            end_time,
+            table_type_name: tableType.rows[0]?.name || 'Table',
+            amount_paid: 0,
+            is_free: true
+          })
+        }).catch(err => console.error('Failed to send email:', err));
+      } catch (e) {
+        console.error('Error triggering email:', e);
+      }
+    }
+
     return jsonResponse({ 
       success: true,
       message: "Booking created successfully",
@@ -245,6 +378,32 @@ async function confirmBooking(orderRef: string) {
       }
     }
     
+    // Send confirmation email for paid bookings
+    try {
+      const booking = await client.execute({
+        sql: `SELECT b.user_email, b.user_name, b.booking_date, b.start_time, 
+                     b.end_time, b.amount_paid, b.table_type_id
+              FROM bookings b
+              WHERE b.order_ref = ?`,
+        args: [orderRef],
+      });
+      
+      if (booking.rows.length > 0) {
+        const row = booking.rows[0];
+        await sendBookingConfirmationEmail({
+          userEmail: String(row.user_email),
+          userName: String(row.user_name),
+          bookingDate: String(row.booking_date),
+          startTime: String(row.start_time),
+          endTime: String(row.end_time),
+          tableTypeId: Number(row.table_type_id),
+          amountPaid: Number(row.amount_paid)
+        });
+      }
+    } catch (e) {
+      console.error('Error sending confirmation email:', e);
+    }
+    
     return jsonResponse({ 
       success: true,
       message: "Booking confirmed successfully"
@@ -289,15 +448,4 @@ async function getUserBookings(email: string) {
     console.error("Error fetching user bookings:", error);
     return jsonResponse({ error: "Failed to fetch bookings" }, 500);
   }
-}
-
-function jsonResponse(data: any, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/json",
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-    },
-  });
 }
