@@ -7,6 +7,7 @@
  * Environment Variables (configured in Bunny Dashboard):
  *   - BUNNY_DATABASE_URL: Database connection URL
  *   - BUNNY_DATABASE_AUTH_TOKEN: Database access token
+ *   - EMAIL_API_URL: URL of the DiceBastionEmails edge script (e.g., https://dicebastionemails-xxxxx.bunny.run/send)
  * 
  * API Endpoints:
  *   GET    /api/bookings/table-types    - Get available table types
@@ -15,13 +16,15 @@
  *   GET    /api/bookings/user/:email    - Get user's bookings
  */
 
+/// <reference types="@bunny.net/edgescript-sdk" />
+
 import * as BunnySDK from "@bunny.net/edgescript-sdk";
 import { createClient } from "@libsql/client/web";
 
 // Initialize libSQL client with Bunny Database credentials
 const client = createClient({
-  url: process.env.BUNNY_DATABASE_URL,
-  authToken: process.env.BUNNY_DATABASE_AUTH_TOKEN,
+  url: BunnyEnv.get('BUNNY_DATABASE_URL'),
+  authToken: BunnyEnv.get('BUNNY_DATABASE_AUTH_TOKEN'),
 });
 
 const CORS_HEADERS = {
@@ -107,8 +110,12 @@ async function sendBookingConfirmationEmail(params: {
       : undefined;
 
     // Send email via DiceBastionEmails edge script
-    // TODO: Update this URL once you create the script and get its URL
-    const emailApiUrl = process.env.EMAIL_API_URL || 'https://dicebastionemails-xxxxx.bunny.run/send';
+    const emailApiUrl = BunnyEnv.get('EMAIL_API_URL');
+    
+    if (!emailApiUrl) {
+      console.error('EMAIL_API_URL not configured');
+      return;
+    }
     
     const response = await fetch(emailApiUrl, {
       method: 'POST',
@@ -300,30 +307,18 @@ async function createBooking(request: Request) {
 
     // For free bookings, send confirmation email immediately
     if (amount_paid === 0) {
-      // Get table type name for email
-      const tableType = await client.execute({
-        sql: "SELECT name FROM booking_table_types WHERE id = ?",
-        args: [table_type_id],
-      });
-      
-      // Send email via main worker (fire and forget)
       try {
-        fetch('https://dicebastion-memberships.ncalamaro.workers.dev/api/bookings/send-confirmation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_email,
-            user_name,
-            booking_date,
-            start_time,
-            end_time,
-            table_type_name: tableType.rows[0]?.name || 'Table',
-            amount_paid: 0,
-            is_free: true
-          })
-        }).catch(err => console.error('Failed to send email:', err));
+        await sendBookingConfirmationEmail({
+          userEmail: user_email,
+          userName: user_name,
+          bookingDate: booking_date,
+          startTime: start_time,
+          endTime: end_time,
+          tableTypeId: table_type_id,
+          amountPaid: 0
+        });
       } catch (e) {
-        console.error('Error triggering email:', e);
+        console.error('Error sending confirmation email:', e);
       }
     }
 
