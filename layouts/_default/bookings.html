@@ -150,10 +150,25 @@
   background: linear-gradient(90deg, rgb(var(--color-primary-50)), white);
   margin-bottom: 0.75rem;
   border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .dark .booking-item {
   background: linear-gradient(90deg, rgb(var(--color-neutral-800)), rgb(var(--color-neutral-900)));
+}
+
+.booking-item.cancelled {
+  opacity: 0.6;
+  border-left-color: rgb(var(--color-neutral-400));
+}
+
+.booking-details {
+  flex: 1;
+  min-width: 200px;
 }
 
 .booking-time {
@@ -300,6 +315,10 @@
       </button>
     </form>
     </div>
+  </div>
+
+  <!-- User's Bookings Card -->
+  <div class="card" style="margin-top: 2rem;">
     <h2 class="card-header">📋 Your Bookings</h2>
     <div id="bookings-container" class="loading">Loading bookings</div>
   </div>
@@ -309,14 +328,10 @@
 <div id="payment-modal-container"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-<script src="/js/utils.js"></script>
-<script src="/js/modal.js"></script>
-<script src="/js/auth-modal.js"></script>
 <script>
-// API endpoints
+// API endpoints (MAIN_API is set globally by footer, accessed via window.MAIN_API)
 const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run'; // Bunny Edge Script
 const PAYMENTS_API = 'https://payments.dicebastion.workers.dev'; // Cloudflare Payments Worker
-const MAIN_API = 'https://dicebastion-memberships.ncalamaro.workers.dev'; // Main worker
 const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 const IS_LOCALHOST = window.location.hostname === 'localhost' || 
                      window.location.hostname === '127.0.0.1';
@@ -332,10 +347,10 @@ let paymentModal = null;
 let authModal = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Initialize auth modal
-  authModal = new AuthModal({
-    mainApiUrl: MAIN_API,
-    onSuccess: async (type, user) => {
+  // Use the global auth modal from footer and add custom success handler
+  if (window.authModal) {
+    const originalOnSuccess = window.authModal.onSuccess;
+    window.authModal.onSuccess = async (type, user) => {
       console.log(`${type} successful:`, user);
       userSession = user;
       
@@ -348,11 +363,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('user-email').value = userSession.email || '';
         document.getElementById('user-name').value = userSession.name || '';
       }
-    }
-  });
-  
-  // Make auth modal globally available for footer login button
-  window.authModal = authModal;
+      
+      // Call original handler (which reloads the page)
+      if (originalOnSuccess) {
+        originalOnSuccess(type, user);
+      }
+    };
+  }
   
   // Check user session
   userSession = utils.session.getUser();
@@ -383,7 +400,7 @@ async function checkMembershipStatus() {
   }
 
   try {
-    const response = await fetch(`${MAIN_API}/membership/status?email=${encodeURIComponent(userSession.email)}`);
+    const response = await fetch(`${window.MAIN_API}/membership/status?email=${encodeURIComponent(userSession.email)}`);
     if (response.ok) {
       const data = await response.json();
       membershipStatus = data;
@@ -415,7 +432,7 @@ async function loadTableTypes() {
                 Login or register to get membership discounts and save your booking history.
               </p>
             </div>
-            <button type="button" class="btn btn-primary" onclick="authModal.show()">
+            <button type="button" class="btn btn-primary" onclick="window.authModal?.show()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 0.5rem;">
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                 <circle cx="12" cy="7" r="4"></circle>
@@ -584,19 +601,21 @@ async function loadAvailableSlots(date) {
   slotsInstruction.style.display = 'none';
   container.style.display = 'block';
   
-  container.innerHTML = '<div class="loading">Generating time slots</div>';
+  container.innerHTML = '<div class="loading">Checking availability...</div>';
   
   try {
-    // Generate standard time slots (10:00 - 22:00, 4-hour slots)
-    const slots = [];
-    for (let hour = 10; hour <= 18; hour += 4) {
-      const startTime = `${String(hour).padStart(2, '0')}:00`;
-      const endTime = `${String(hour + 4).padStart(2, '0')}:00`;
-      slots.push({ startTime, endTime });
+    // Fetch available slots from API (excludes fully booked slots)
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/available-slots?date=${date}&table_type_id=${selectedTableType.id}`);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to load available slots');
     }
     
+    const slots = data.slots || [];
+    
     if (slots.length === 0) {
-      container.innerHTML = '<div class="alert alert-info">📭 No available slots</div>';
+      container.innerHTML = '<div class="alert alert-info">📭 No available slots for this date. All tables are fully booked.</div>';
       return;
     }
     
@@ -607,7 +626,8 @@ async function loadAvailableSlots(date) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'slot-btn';
-      btn.innerHTML = `<div style="font-size: 1.1rem;">⏰</div><div>${slot.startTime}</div><div style="font-size: 0.8rem; opacity: 0.7;">to ${slot.endTime}</div>`;
+      const spotsLeft = slot.spots_left !== undefined ? `<div style="font-size: 0.75rem; opacity: 0.8; margin-top: 0.25rem;">${slot.spots_left} ${slot.spots_left === 1 ? 'spot' : 'spots'} left</div>` : '';
+      btn.innerHTML = `<div style="font-size: 1.1rem;">⏰</div><div>${slot.start_time}</div><div style="font-size: 0.8rem; opacity: 0.7;">to ${slot.end_time}</div>${spotsLeft}`;
       btn.onclick = () => selectSlot(slot, btn);
       grid.appendChild(btn);
     });
@@ -624,7 +644,10 @@ async function loadAvailableSlots(date) {
 function selectSlot(slot, btnElement) {
   document.querySelectorAll('.slot-btn').forEach(btn => btn.classList.remove('selected'));
   btnElement.classList.add('selected');
-  selectedSlot = slot;
+  selectedSlot = {
+    startTime: slot.start_time,
+    endTime: slot.end_time
+  };
   
   const formSection = document.getElementById('booking-form-section');
   
@@ -848,10 +871,28 @@ async function loadBookingsForDate(date) {
     data.bookings.forEach(booking => {
       const item = document.createElement('div');
       item.className = 'booking-item';
-      const statusBadge = booking.status === 'confirmed' ? '✅' : '⏳';
+      if (booking.status === 'cancelled') {
+        item.classList.add('cancelled');
+      }
+      
+      const statusBadge = booking.status === 'confirmed' ? '✅' : 
+                         booking.status === 'cancelled' ? '❌' : '⏳';
+      
       item.innerHTML = `
-        <div class="booking-time">⏰ ${booking.booking_date} ${booking.start_time} - ${booking.end_time}</div>
-        <div>🎲 ${booking.table_type} ${statusBadge}</div>
+        <div class="booking-details">
+          <div class="booking-time">⏰ ${booking.booking_date} ${booking.start_time} - ${booking.end_time}</div>
+          <div>🎲 ${booking.table_type} ${statusBadge}</div>
+          ${booking.status === 'cancelled' ? '<div style="font-size: 0.85rem; color: rgb(var(--color-neutral-600)); margin-top: 0.25rem;">Cancelled</div>' : ''}
+        </div>
+        ${booking.status === 'confirmed' ? `
+          <button 
+            onclick="cancelBooking(${booking.id}, '${booking.booking_date}', '${booking.start_time}')" 
+            class="btn btn-secondary" 
+            style="font-size: 0.875rem; padding: 0.5rem 1rem;"
+            title="Cancel this booking">
+            Cancel
+          </button>
+        ` : ''}
       `;
       list.appendChild(item);
     });
@@ -864,6 +905,31 @@ async function loadBookingsForDate(date) {
     container.innerHTML = '<div class="alert alert-error">⚠️ Failed to load bookings</div>';
   }
 }
+
+window.cancelBooking = async function(bookingId, bookingDate, startTime) {
+  if (!confirm(`Are you sure you want to cancel your booking for ${bookingDate} at ${startTime}?`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/${bookingId}/cancel`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to cancel booking');
+    }
+    
+    showAlert('✅ Booking cancelled successfully', 'success');
+    await loadBookingsForDate();
+    
+  } catch (error) {
+    console.error('Error cancelling booking:', error);
+    showAlert('⚠️ ' + error.message, 'error');
+  }
+};
 
 function showAlert(message, type = 'info') {
   const container = document.getElementById('alert-container');

@@ -80,6 +80,7 @@
   {{/* Initialize global auth modal */}}
   <script>
     const MAIN_API = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+    window.MAIN_API = MAIN_API; // Expose globally
     
     // Initialize auth modal globally
     if (!window.authModal) {
