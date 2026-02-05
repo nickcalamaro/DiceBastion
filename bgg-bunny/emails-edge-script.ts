@@ -110,16 +110,22 @@ async function sendEmail(params: {
  */
 BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
+  const pathname = url.pathname.replace(/\/$/, ''); // Remove trailing slash
 
   // CORS preflight
   if (request.method === 'OPTIONS') {
     return jsonResponse({});
   }
 
-  // POST /send - Send an email with pre-populated template data
-  if (url.pathname === '/send' && request.method === 'POST') {
+  // POST /send or POST / - Send an email with pre-populated template data
+  if ((pathname === '/send' || pathname === '') && request.method === 'POST') {
     try {
       const body = await request.json();
+      
+      console.log('Email request received:', { 
+        to: body.to_email, 
+        subject: body.subject 
+      });
       
       // Validate required fields
       const required = ['to_email', 'to_name', 'from_email', 'from_name', 'subject', 'html'];
@@ -161,5 +167,6 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
     }
   }
 
+  console.log('Path not matched:', pathname, 'Method:', request.method);
   return jsonResponse({ error: 'Not found' }, 404);
 });
