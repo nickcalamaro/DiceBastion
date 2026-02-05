@@ -1,0 +1,792 @@
+{{ define "main" }}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/material_blue.css">
+
+<style>
+.table-types-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.table-type-card {
+  background: linear-gradient(180deg, #ffffff, #f9f9f9);
+  border: 2px solid rgb(var(--color-neutral-300));
+  border-radius: 12px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.dark .table-type-card {
+  background: linear-gradient(180deg, rgb(var(--color-neutral-800)), rgb(var(--color-neutral-900)));
+  border-color: rgb(var(--color-neutral-700));
+}
+
+.table-type-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  border-color: rgb(var(--color-primary-500));
+}
+
+.table-type-card.selected {
+  border-color: rgb(var(--color-primary-600));
+  border-width: 3px;
+  background: linear-gradient(135deg, rgb(var(--color-primary-50)), white);
+}
+
+.dark .table-type-card.selected {
+  background: linear-gradient(135deg, rgba(var(--color-primary-900), 0.3), rgb(var(--color-neutral-800)));
+}
+
+.table-type-name {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: rgb(var(--color-neutral-900));
+}
+
+.dark .table-type-name {
+  color: rgb(var(--color-neutral-50));
+}
+
+.table-type-price {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: rgb(var(--color-primary-600));
+  margin: 0.5rem 0;
+}
+
+.table-type-price.free {
+  color: rgb(var(--color-success-600));
+}
+
+.slots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.slot-btn {
+  padding: 1rem;
+  border: 2px solid rgb(var(--color-neutral-300));
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 600;
+  text-align: center;
+}
+
+.dark .slot-btn {
+  background: rgb(var(--color-neutral-800));
+  border-color: rgb(var(--color-neutral-700));
+}
+
+.slot-btn:hover {
+  border-color: rgb(var(--color-primary-500));
+  background: rgb(var(--color-primary-50));
+  transform: translateY(-2px);
+}
+
+.dark .slot-btn:hover {
+  background: rgb(var(--color-neutral-700));
+}
+
+.slot-btn.selected {
+  border-color: rgb(var(--color-primary-600));
+  background: linear-gradient(135deg, rgb(var(--color-primary-500)), rgb(var(--color-primary-600)));
+  color: white;
+  transform: scale(1.05);
+}
+
+.slot-btn:disabled {
+  background: rgb(var(--color-neutral-100));
+  color: rgb(var(--color-neutral-400));
+  cursor: not-allowed;
+  border-color: rgb(var(--color-neutral-200));
+}
+
+.dark .slot-btn:disabled {
+  background: rgb(var(--color-neutral-900));
+}
+
+.booking-item {
+  padding: 1.25rem;
+  border-left: 4px solid rgb(var(--color-primary-600));
+  background: linear-gradient(90deg, rgb(var(--color-primary-50)), white);
+  margin-bottom: 0.75rem;
+  border-radius: 8px;
+}
+
+.dark .booking-item {
+  background: linear-gradient(90deg, rgb(var(--color-neutral-800)), rgb(var(--color-neutral-900)));
+}
+
+.booking-time {
+  font-weight: 700;
+  color: rgb(var(--color-primary-700));
+  margin-bottom: 0.25rem;
+}
+
+.hero-image {
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.hero-image img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+
+.loading {
+  text-align: center;
+  padding: 3rem;
+  color: rgb(var(--color-neutral-600));
+}
+
+.dark .loading {
+  color: rgb(var(--color-neutral-400));
+}
+
+.membership-upsell {
+  background: linear-gradient(135deg, rgb(var(--color-primary-500)), rgb(var(--color-primary-600)));
+  color: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.membership-upsell-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.membership-upsell-benefits {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+}
+
+.membership-upsell-benefits li {
+  padding: 0.5rem 0;
+}
+</style>
+
+<div class="page-container">
+  <h1 class="hero-cta-title" style="text-align: center; margin-bottom: 1.5rem; color: rgb(var(--color-primary-600));">{{ .Title }}</h1>
+  
+  {{ with .Params.image }}
+  <div class="hero-image">
+    <img src="{{ . }}" alt="Gaming table">
+  </div>
+  {{ end }}
+
+  <div id="alert-container"></div>
+
+  <!-- Table Type Selection Card -->
+  <div class="card">
+    <h2 class="card-header">Select Table Type</h2>
+    <div id="membership-status-container"></div>
+    <div id="table-types-container" class="loading">Loading table types...</div>
+  </div>
+
+  <!-- Date Selection Card -->
+  <div class="card hidden" id="date-section">
+    <h2 class="card-header">📅 Date</h2>
+    <div class="form-group">
+      <input type="text" id="booking-date" class="form-input" placeholder="Choose a date..." readonly>
+    </div>
+  </div>
+
+  <!-- Available Slots Card -->
+  <div class="card hidden" id="slots-section">
+    <h2 class="card-header">⏰ Available Time Slots</h2>
+    <div id="slots-container" class="loading">Select a date to see available slots</div>
+  </div>
+
+  <!-- Booking Form Card -->
+  <div class="card hidden" id="booking-form-section">
+    <h2 class="card-header">✍️ Complete Your Booking</h2>
+    
+    <div id="membership-upsell-container"></div>
+    
+    <form id="booking-form">
+      <div id="selected-details"></div>
+
+      <div class="form-group">
+        <label for="user-name" class="form-label">Your Name *</label>
+        <input type="text" id="user-name" class="form-input" placeholder="John Smith" required>
+      </div>
+
+      <div class="form-group">
+        <label for="user-email" class="form-label">Email Address *</label>
+        <input type="email" id="user-email" class="form-input" placeholder="john@example.com" required>
+      </div>
+
+      <div class="form-group">
+        <label for="notes" class="form-label">Notes (Optional)</label>
+        <textarea id="notes" class="form-textarea" rows="3" placeholder="Any special requirements or requests..."></textarea>
+      </div>
+
+      <div id="turnstile-container" class="form-group"></div>
+
+      <button type="submit" id="submit-btn" class="btn btn-primary btn-full btn-lg">
+        <span id="submit-text">✓ Confirm Booking</span>
+      </button>
+    </form>
+  </div>
+
+  <!-- User's Bookings Card -->
+  <div class="card">
+    <h2 class="card-header">📋 Your Bookings</h2>
+    <div id="bookings-container" class="loading">Loading bookings</div>
+  </div>
+</div>
+
+<!-- Payment Modal Container -->
+<div id="payment-modal-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="/js/utils.js"></script>
+<script src="/js/modal.js"></script>
+<script src="/js/auth-modal.js"></script>
+<script>
+// API endpoints
+const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run'; // Bunny Edge Script
+const PAYMENTS_API = 'https://payments.dicebastion.workers.dev'; // Cloudflare Payments Worker
+const MAIN_API = 'https://dicebastion-memberships.ncalamaro.workers.dev'; // Main worker
+const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
+const IS_LOCALHOST = window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1';
+
+let tableTypes = [];
+let selectedTableType = null;
+let selectedSlot = null;
+let currentDate = null;
+let picker = null;
+let userSession = null;
+let membershipStatus = null;
+let paymentModal = null;
+let authModal = null;
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize auth modal
+  authModal = new AuthModal({
+    mainApiUrl: MAIN_API,
+    onSuccess: async (type, user) => {
+      console.log(`${type} successful:`, user);
+      userSession = user;
+      
+      // Reload membership status and table types to update pricing
+      await checkMembershipStatus();
+      await loadTableTypes();
+      
+      // Pre-fill user details in form if visible
+      if (userSession) {
+        document.getElementById('user-email').value = userSession.email || '';
+        document.getElementById('user-name').value = userSession.name || '';
+      }
+    }
+  });
+  
+  // Check user session
+  userSession = utils.session.getUser();
+  if (userSession) {
+    document.getElementById('user-email').value = userSession.email || '';
+    document.getElementById('user-name').value = userSession.name || '';
+  }
+  
+  // Check membership status
+  await checkMembershipStatus();
+  
+  // Load table types
+  await loadTableTypes();
+  
+  // Load user's bookings
+  await loadBookingsForDate();
+  
+  document.getElementById('booking-form').addEventListener('submit', handleBookingSubmit);
+});
+
+/**
+ * Check if user is a current member
+ */
+async function checkMembershipStatus() {
+  if (!userSession || !userSession.email) {
+    membershipStatus = null;
+    return;
+  }
+
+  try {
+    const response = await fetch(`${MAIN_API}/membership/status?email=${encodeURIComponent(userSession.email)}`);
+    if (response.ok) {
+      const data = await response.json();
+      membershipStatus = data;
+    } else {
+      console.error('Failed to fetch membership status');
+      membershipStatus = null;
+    }
+  } catch (error) {
+    console.error('Error checking membership:', error);
+    membershipStatus = null;
+  }
+}
+
+async function loadTableTypes() {
+  const container = document.getElementById('table-types-container');
+  
+  // Show auth prompt for non-logged-in users at the top
+  const statusContainer = document.getElementById('membership-status-container');
+  if (!userSession) {
+    statusContainer.innerHTML = `
+      <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(var(--color-primary-50), 0.5), rgba(var(--color-primary-100), 0.3));">
+        <div class="card-body">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 250px;">
+              <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; color: rgb(var(--color-neutral-900));">
+                💡 Have an account?
+              </h3>
+              <p style="margin: 0; color: rgb(var(--color-neutral-700)); font-size: 0.95rem;">
+                Login or register to get membership discounts and save your booking history.
+              </p>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="authModal.show()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 0.5rem;">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+              Login / Register
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (membershipStatus?.active) {
+    statusContainer.innerHTML = `
+      <div class="alert alert-success" style="margin-bottom: 1.5rem;">
+        ✓ You're getting member pricing! Thank you for your support.
+      </div>
+    `;
+  }
+  
+  try {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/table-types`);
+    const data = await response.json();
+    tableTypes = data.table_types || [];
+    
+    if (tableTypes.length === 0) {
+      container.innerHTML = '<div class="alert alert-info">No table types available</div>';
+      return;
+    }
+    
+    const grid = document.createElement('div');
+    grid.className = 'table-types-grid';
+    
+    tableTypes.forEach(type => {
+      const isMember = membershipStatus?.active || false;
+      const price = isMember ? type.member_price : type.non_member_price;
+      
+      const card = document.createElement('div');
+      card.className = 'table-type-card';
+      card.innerHTML = `
+        <div class="table-type-name">${type.name}</div>
+        <div class="table-type-price ${price === 0 ? 'free' : ''}">
+          ${price === 0 ? 'FREE' : `£${price.toFixed(2)}`}
+        </div>
+        ${type.description ? `<p style="color: rgb(var(--color-neutral-600)); font-size: 0.95rem; margin-top: 0.5rem;">${type.description}</p>` : ''}
+        ${!isMember && type.member_price < type.non_member_price ? `
+          <div style="margin-top: 1rem; padding: 0.5rem; background: rgba(var(--color-warning-500), 0.1); border-radius: 6px; font-size: 0.85rem; color: rgb(var(--color-warning-700));">
+            💡 Members pay only £${type.member_price.toFixed(2)}
+          </div>
+        ` : ''}
+      `;
+      
+      card.addEventListener('click', () => selectTableType(type, card));
+      grid.appendChild(card);
+    });
+    
+    container.innerHTML = '';
+    container.appendChild(grid);
+    
+  } catch (error) {
+    console.error('Error loading table types:', error);
+    container.innerHTML = '<div class="alert alert-error">Failed to load table types</div>';
+  }
+}
+
+function selectTableType(type, cardElement) {
+  document.querySelectorAll('.table-type-card').forEach(c => c.classList.remove('selected'));
+  cardElement.classList.add('selected');
+  selectedTableType = type;
+  
+  // Show date section
+  document.getElementById('date-section').classList.remove('hidden');
+  
+  // Initialize Flatpickr if not already done
+  if (!picker) {
+    const today = new Date();
+    
+    // Parse available days (day names like "Monday", "Tuesday", etc.)
+    const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
+    const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
+    const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
+    
+    picker = flatpickr('#booking-date', {
+      minDate: 'today',
+      dateFormat: 'Y-m-d',
+      enable: [
+        function(date) {
+          return enabledDays.includes(date.getDay());
+        }
+      ],
+      onChange: (selectedDates, dateStr) => {
+        handleDateChange(dateStr);
+      }
+    });
+  } else {
+    // Update enable function for new table type
+    const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
+    const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
+    const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
+    
+    picker.set('enable', [
+      function(date) {
+        return enabledDays.includes(date.getDay());
+      }
+    ]);
+  }
+  
+  document.getElementById('date-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function handleDateChange(date) {
+  if (!date || !selectedTableType) return;
+  
+  currentDate = date;
+  selectedSlot = null;
+  document.getElementById('booking-form-section').classList.add('hidden');
+  
+  await loadAvailableSlots(date);
+}
+
+async function loadAvailableSlots(date) {
+  const container = document.getElementById('slots-container');
+  container.innerHTML = '<div class="loading">Generating time slots</div>';
+  document.getElementById('slots-section').classList.remove('hidden');
+  
+  try {
+    // Generate standard time slots (10:00 - 22:00, 4-hour slots)
+    const slots = [];
+    for (let hour = 10; hour <= 18; hour += 4) {
+      const startTime = `${String(hour).padStart(2, '0')}:00`;
+      const endTime = `${String(hour + 4).padStart(2, '0')}:00`;
+      slots.push({ startTime, endTime });
+    }
+    
+    if (slots.length === 0) {
+      container.innerHTML = '<div class="alert alert-info">📭 No available slots</div>';
+      return;
+    }
+    
+    const grid = document.createElement('div');
+    grid.className = 'slots-grid';
+    
+    slots.forEach(slot => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'slot-btn';
+      btn.innerHTML = `<div style="font-size: 1.1rem;">⏰</div><div>${slot.startTime}</div><div style="font-size: 0.8rem; opacity: 0.7;">to ${slot.endTime}</div>`;
+      btn.onclick = () => selectSlot(slot, btn);
+      grid.appendChild(btn);
+    });
+    
+    container.innerHTML = '';
+    container.appendChild(grid);
+    
+  } catch (error) {
+    console.error('Error loading slots:', error);
+    container.innerHTML = '<div class="alert alert-error">⚠️ Failed to load available slots</div>';
+  }
+}
+
+function selectSlot(slot, btnElement) {
+  document.querySelectorAll('.slot-btn').forEach(btn => btn.classList.remove('selected'));
+  btnElement.classList.add('selected');
+  selectedSlot = slot;
+  
+  const formSection = document.getElementById('booking-form-section');
+  formSection.classList.remove('hidden');
+  
+  const isMember = membershipStatus?.active || false;
+  const price = isMember ? selectedTableType.member_price : selectedTableType.non_member_price;
+  
+  document.getElementById('selected-details').innerHTML = `
+    <div class="alert alert-success" style="font-size: 1.1rem;">
+      <strong>✓ Selected:</strong><br>
+      ${selectedTableType.name}<br>
+      ${currentDate} at ${slot.startTime}<br>
+      <strong>Price: ${price === 0 ? 'FREE' : `£${price.toFixed(2)}`}</strong>
+    </div>
+  `;
+  
+  // Show membership upsell if not a member and would save money
+  if (!isMember && selectedTableType.member_price < selectedTableType.non_member_price) {
+    showMembershipUpsell();
+  } else {
+    document.getElementById('membership-upsell-container').innerHTML = '';
+  }
+  
+  // Pre-fill email if logged in
+  if (userSession?.email) {
+    document.getElementById('user-email').value = userSession.email;
+    document.getElementById('user-name').value = userSession.name || '';
+  }
+  
+  // Render Turnstile
+  setTimeout(() => {
+    utils.renderTurnstile('turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+  }, 100);
+  
+  setTimeout(() => {
+    formSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
+}
+
+function showMembershipUpsell() {
+  const savings = selectedTableType.non_member_price - selectedTableType.member_price;
+  
+  document.getElementById('membership-upsell-container').innerHTML = `
+    <div class="membership-upsell">
+      <div class="membership-upsell-title">💡 Save £${savings.toFixed(2)} with Membership!</div>
+      <p style="margin: 0.5rem 0;">Members get free table bookings!</p>
+      <a href="/memberships" class="btn btn-secondary" style="margin-top: 1rem; background: white; color: rgb(var(--color-primary-600));">View Membership Options</a>
+    </div>
+  `;
+}
+
+async function handleBookingSubmit(e) {
+  e.preventDefault();
+  
+  if (!selectedTableType || !selectedSlot || !currentDate) {
+    showAlert('⚠️ Please select a table type, date and time slot', 'error');
+    return;
+  }
+  
+  const userEmail = document.getElementById('user-email').value.trim();
+  const userName = document.getElementById('user-name').value.trim();
+  const notes = document.getElementById('notes').value.trim();
+  
+  if (!userName || !userEmail) {
+    showAlert('⚠️ Please enter your name and email', 'error');
+    return;
+  }
+  
+  const submitBtn = document.getElementById('submit-btn');
+  const submitText = document.getElementById('submit-text');
+  submitBtn.disabled = true;
+  submitText.textContent = '⏳ Processing...';
+  
+  try {
+    const turnstileToken = await utils.getTurnstileToken('turnstile-container', null, IS_LOCALHOST);
+    
+    const isMember = membershipStatus?.active || false;
+    const price = isMember ? selectedTableType.member_price : selectedTableType.non_member_price;
+    const orderRef = `BOOK-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create booking in Bunny database
+    const bookingResponse = await fetch(`${BOOKINGS_API}/api/bookings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_email: userEmail,
+        user_name: userName,
+        booking_date: currentDate,
+        start_time: selectedSlot.startTime,
+        end_time: selectedSlot.endTime,
+        table_type_id: selectedTableType.id,
+        order_ref: orderRef,
+        amount_paid: price,
+        is_member_booking: isMember,
+        notes: notes || null
+      })
+    });
+    
+    const bookingData = await bookingResponse.json();
+    
+    if (!bookingResponse.ok) {
+      console.error('Booking creation failed:', bookingResponse.status, bookingData);
+      throw new Error(bookingData.error || bookingData.details || 'Booking creation failed');
+    }
+    
+    // If free booking, it's already confirmed
+    if (price === 0) {
+      showAlert('✅ Booking confirmed!', 'success');
+      document.getElementById('booking-form').reset();
+      document.getElementById('booking-form-section').classList.add('hidden');
+      selectedTableType = null;
+      selectedSlot = null;
+      await loadBookingsForDate();
+      return;
+    }
+    
+    // Create payment checkout via Payments Worker
+    const checkoutResponse = await fetch(`${PAYMENTS_API}/internal/checkout`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Internal-Secret': 'your-internal-secret' // TODO: Get from config
+      },
+      body: JSON.stringify({
+        amount: price,
+        currency: 'GBP',
+        orderRef: orderRef,
+        description: `${selectedTableType.name} - ${currentDate} ${selectedSlot.startTime}`
+      })
+    });
+    
+    const checkoutData = await checkoutResponse.json();
+    
+    if (!checkoutResponse.ok) {
+      throw new Error(checkoutData.error || 'Payment checkout failed');
+    }
+    
+    // Show payment modal
+    await showPaymentModal(checkoutData.id, orderRef, price);
+    
+  } catch (error) {
+    console.error('Error creating booking:', error);
+    showAlert('⚠️ ' + error.message, 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitText.textContent = '✓ Confirm Booking';
+  }
+}
+
+async function showPaymentModal(checkoutId, orderRef, amount) {
+  await utils.loadSumUpSdk();
+  
+  paymentModal = new Modal({
+    title: 'Complete Payment',
+    size: 'md',
+    closeOnBackdrop: false,
+    content: `
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div style="font-size: 2rem; font-weight: 800; color: rgb(var(--color-primary-600));">£${amount.toFixed(2)}</div>
+        <div style="color: rgb(var(--color-neutral-600));">${selectedTableType.name} - ${currentDate}</div>
+      </div>
+      <div id="sumup-card-container"></div>
+      <div id="payment-error" class="alert alert-error" style="display: none; margin-top: 1rem;"></div>
+    `,
+    onClose: () => { paymentModal = null; }
+  });
+  
+  paymentModal.open();
+  
+  window.SumUpCard.mount({
+    id: 'sumup-card-container',
+    checkoutId,
+    onResponse: async (type) => {
+      if (type === 'success') {
+        await confirmBooking(orderRef);
+      } else if (type === 'error' || type === 'fail') {
+        document.getElementById('payment-error').textContent = 'Payment failed. Please try again.';
+        document.getElementById('payment-error').style.display = 'block';
+      }
+    }
+  });
+}
+
+async function confirmBooking(orderRef) {
+  const result = await utils.pollPaymentConfirmation(`${BOOKINGS_API}/api/bookings/confirm/${orderRef}`, null, {
+    pollInterval: 3000,
+    maxAttempts: 20,
+    onSuccess: (data) => {
+      if (paymentModal) paymentModal.close();
+      showAlert('✅ Booking confirmed! Check your email for details.', 'success');
+      document.getElementById('booking-form').reset();
+      document.getElementById('booking-form-section').classList.add('hidden');
+      selectedTableType = null;
+      selectedSlot = null;
+      loadBookingsForDate();
+    },
+    onError: (errorMsg) => {
+      if (paymentModal) {
+        document.getElementById('payment-error').textContent = errorMsg;
+        document.getElementById('payment-error').style.display = 'block';
+      }
+    },
+    onTimeout: () => {
+      if (paymentModal) paymentModal.close();
+      showAlert('⏳ Payment is being processed. Check your email for confirmation.', 'info');
+    }
+  });
+}
+
+async function loadBookingsForDate(date) {
+  const container = document.getElementById('bookings-container');
+  
+  // Only show user's bookings if logged in
+  if (!userSession?.email) {
+    container.innerHTML = '<div class="alert alert-info">📋 Log in to see your bookings</div>';
+    return;
+  }
+  
+  container.innerHTML = '<div class="loading">Loading your bookings</div>';
+  
+  try {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/user/${encodeURIComponent(userSession.email)}`);
+    const data = await response.json();
+    
+    if (!data.bookings || data.bookings.length === 0) {
+      container.innerHTML = '<div class="alert alert-info">📭 You have no upcoming bookings</div>';
+      return;
+    }
+    
+    const list = document.createElement('div');
+    data.bookings.forEach(booking => {
+      const item = document.createElement('div');
+      item.className = 'booking-item';
+      const statusBadge = booking.status === 'confirmed' ? '✅' : '⏳';
+      item.innerHTML = `
+        <div class="booking-time">⏰ ${booking.booking_date} ${booking.start_time} - ${booking.end_time}</div>
+        <div>🎲 ${booking.table_type} ${statusBadge}</div>
+      `;
+      list.appendChild(item);
+    });
+    
+    container.innerHTML = '<h3 style="margin: 0 0 1rem 0; font-size: 1.1rem;">Your Bookings</h3>';
+    container.appendChild(list);
+    
+  } catch (error) {
+    console.error('Error loading bookings:', error);
+    container.innerHTML = '<div class="alert alert-error">⚠️ Failed to load bookings</div>';
+  }
+}
+
+function showAlert(message, type = 'info') {
+  const container = document.getElementById('alert-container');
+  const alert = document.createElement('div');
+  alert.className = `alert alert-${type}`;
+  alert.textContent = message;
+  
+  container.innerHTML = '';
+  container.appendChild(alert);
+  
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  
+  setTimeout(() => {
+    alert.style.opacity = '0';
+    alert.style.transition = 'opacity 0.3s';
+    setTimeout(() => alert.remove(), 300);
+  }, 5000);
+}
+</script>
+{{ end }}

@@ -39,11 +39,13 @@ MAILERSEND_FROM_EMAIL = "noreply@dicebastion.com"
 ALLOW_TEST_BYPASS = "true"
 PAYMENTS_WORKER_URL = "https://dicebastion-payments.ncalamaro.workers.dev"
 R2_PUBLIC_URL = "https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev"
+BUNNY_DB_URL = "https://your-bunny-db-api-url"  # Update with your bunny.net database API URL
 
 # Production secrets (set via: wrangler secret put SECRET_NAME)
 # - INTERNAL_SECRET (must match payments worker)
 # - MAILERSEND_API_KEY
 # - ADMIN_KEY (for admin endpoints)
+# - BUNNY_DB_TOKEN (for bunny.net database access)
 # Legacy SumUp secrets (no longer used, calls go through payments worker):
 # - SUMUP_CLIENT_ID (can be deleted)
 # - SUMUP_CLIENT_SECRET (can be deleted)

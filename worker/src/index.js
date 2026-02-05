@@ -1721,6 +1721,126 @@ function getWelcomeEmail(membership, user, autoRenew) {
 // GENERAL USER LOGIN/LOGOUT ENDPOINTS (for all users)
 // ============================================================================
 
+// Public registration endpoint - creates new users or completes setup for users without passwords
+app.post('/register', async c => {
+  try {
+    console.log('[User Register] Request received')
+    const { email, name, password } = await c.req.json()
+    console.log('[User Register] Email:', email, '| Name:', name)
+    
+    if (!email || !name || !password) {
+      console.log('[User Register] Missing required fields')
+      return c.json({ error: 'email_name_and_password_required' }, 400)
+    }
+    
+    if (password.length < 8) {
+      console.log('[User Register] Password too short')
+      return c.json({ error: 'password_too_short', message: 'Password must be at least 8 characters' }, 400)
+    }
+    
+    // Check if user already exists
+    console.log('[User Register] Checking if user exists...')
+    const existingUser = await c.env.DB.prepare(`
+      SELECT user_id, email, password_hash, name, is_active
+      FROM users
+      WHERE email = ?
+    `).bind(email).first()
+    
+    if (existingUser) {
+      // If user exists with a password, they should login instead
+      if (existingUser.password_hash && existingUser.password_hash.trim() !== '') {
+        console.log('[User Register] User already exists with password')
+        return c.json({ 
+          error: 'user_already_exists', 
+          message: 'An account with this email already exists. Please login instead.' 
+        }, 409)
+      }
+      
+      // User exists but has no password - complete their setup
+      console.log('[User Register] User exists without password, completing setup')
+      const passwordHash = await bcrypt.hash(password, 10)
+      
+      await c.env.DB.prepare(`
+        UPDATE users
+        SET password_hash = ?, name = ?, is_active = 1, updated_at = ?
+        WHERE user_id = ?
+      `).bind(passwordHash, name, new Date().toISOString(), existingUser.user_id).run()
+      
+      // Create session for auto-login
+      const sessionToken = crypto.randomUUID()
+      const now = new Date()
+      const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days
+      
+      await c.env.DB.prepare(`
+        INSERT INTO user_sessions (user_id, session_token, created_at, expires_at, last_activity)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(
+        existingUser.user_id,
+        sessionToken,
+        toIso(now),
+        toIso(expiresAt),
+        toIso(now)
+      ).run()
+      
+      console.log('[User Register] Setup completed, session created')
+      return c.json({
+        success: true,
+        session_token: sessionToken,
+        user: {
+          id: existingUser.user_id,
+          email: email,
+          name: name,
+          is_admin: false
+        }
+      })
+    }
+    
+    // Create brand new user
+    console.log('[User Register] Creating new user')
+    const passwordHash = await bcrypt.hash(password, 10)
+    const now = new Date().toISOString()
+    
+    const result = await c.env.DB.prepare(`
+      INSERT INTO users (email, name, password_hash, is_admin, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, 0, 1, ?, ?)
+    `).bind(email, name, passwordHash, now, now).run()
+    
+    const userId = result.meta.last_row_id
+    
+    // Create session for auto-login
+    const sessionToken = crypto.randomUUID()
+    const sessionNow = new Date()
+    const expiresAt = new Date(sessionNow.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days
+    
+    await c.env.DB.prepare(`
+      INSERT INTO user_sessions (user_id, session_token, created_at, expires_at, last_activity)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(
+      userId,
+      sessionToken,
+      toIso(sessionNow),
+      toIso(expiresAt),
+      toIso(sessionNow)
+    ).run()
+    
+    console.log('[User Register] New user created, session created')
+    return c.json({
+      success: true,
+      session_token: sessionToken,
+      user: {
+        id: userId,
+        email: email,
+        name: name,
+        is_admin: false
+      }
+    })
+  } catch (error) {
+    console.error('[User Register] ERROR:', error)
+    console.error('[User Register] Stack:', error.stack)
+    return c.json({ error: 'internal_error', message: error.message }, 500)
+  }
+})
+
 // General login endpoint - works for both admin and non-admin users
 app.post('/login', async c => {
   try {

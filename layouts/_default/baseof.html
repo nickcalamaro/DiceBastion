@@ -34,6 +34,37 @@
     {{ end }}
   </div>
 </body>
+
+{{/* EU Tech Banner - Homepage Only */}}
+{{ if .IsHome }}
+<div style="width: 100vw; background-color: #003399; padding: 1rem; margin: 0; position: relative; left: 50%; right: 50%; margin-left: -50vw; margin-right: -50vw; box-sizing: border-box;">
+  <div class="eu-tech-banner-container" style="display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.75rem;">
+    <span style="font-weight: 600; font-size: 1rem; color: #FFCC00; white-space: nowrap;">Proudly Powered by European Tech 🇪🇺</span>
+    <div style="display: flex; flex-direction: row; flex-wrap: nowrap; gap: 1rem; align-items: center; justify-content: center;">
+      {{ $euTechPath := "img/EU_Tech" }}
+      {{ range (readDir (path.Join "assets" $euTechPath)) }}
+        {{ if not .IsDir }}
+          {{ $image := resources.Get (path.Join $euTechPath .Name) }}
+          {{ if $image }}
+            <div style="background: white; border-radius: 0.25rem; padding: 0.25rem 0.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); flex-shrink: 0; display: inline-block;">
+              <img src="{{ $image.RelPermalink }}" alt="EU Tech Logo" style="height: 4rem; width: auto; object-fit: contain; display: block;" />
+            </div>
+          {{ end }}
+        {{ end }}
+      {{ end }}
+    </div>
+  </div>
+</div>
+<style>
+  @media (min-width: 768px) {
+    .eu-tech-banner-container {
+      flex-direction: row !important;
+      gap: 1rem !important;
+    }
+  }
+</style>
+{{ end }}
+
 {{ if .Site.Params.buymeacoffee.globalWidget | default false }}
 <script data-name="BMC-Widget" data-cfasync="false" src="https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js"
   data-id="{{ .Site.Params.buymeacoffee.identifier }}" data-description="Support me on Buy me a coffee!" data-message="{{ .Site.Params.buymeacoffee.globalWidgetMessage | default "" }}"
