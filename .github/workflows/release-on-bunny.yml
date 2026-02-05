@@ -52,6 +52,6 @@ jobs:
       - name: Publish Emails Script to Bunny
         uses: "BunnyWay/actions/deploy-script@main"
         with:
-          script_id: 63560
+          script_id: 63650
           file: "bgg-bunny/dist/emails.js"
 
