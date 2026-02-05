@@ -150,10 +150,10 @@ class AuthModal {
 
                 <div class="alert alert-error" id="login-error" style="display: none;"></div>
 
-                <button type="submit" class="btn-primary" style="width: 100%;">
-                  <span class="btn-text">Login</span>
-                  <span class="btn-loading" style="display: none;">
-                    <svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
+                <button type="submit" class="btn-primary" style="width: 100%; display: flex; align-items: center; justify-content: center; min-height: 42px;">
+                  <span class="btn-text" style="white-space: nowrap;">Login</span>
+                  <span class="btn-loading" style="display: none; white-space: nowrap;">
+                    <svg class="spinner" viewBox="0 0 50 50" style="display: inline-block; width: 16px; height: 16px; margin-right: 8px;"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
                     Logging in...
                   </span>
                 </button>
@@ -188,10 +188,10 @@ class AuthModal {
                 <div class="alert alert-info" id="register-info" style="display: none;"></div>
                 <div class="alert alert-error" id="register-error" style="display: none;"></div>
 
-                <button type="submit" class="btn-primary" style="width: 100%;">
-                  <span class="btn btn-text">Create Account</span>
-                  <span class="btn-loading" style="display: none;">
-                    <svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
+                <button type="submit" class="btn-primary" style="width: 100%; display: flex; align-items: center; justify-content: center; min-height: 42px;">
+                  <span class="btn-text" style="white-space: nowrap;">Create Account</span>
+                  <span class="btn-loading" style="display: none; white-space: nowrap;">
+                    <svg class="spinner" viewBox="0 0 50 50" style="display: inline-block; width: 16px; height: 16px; margin-right: 8px;"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
                     Creating account...
                   </span>
                 </button>
@@ -213,10 +213,10 @@ class AuthModal {
                 <div class="alert alert-success" id="forgot-success" style="display: none;"></div>
                 <div class="alert alert-error" id="forgot-error" style="display: none;"></div>
 
-                <button type="submit" class="btn-primary" style="width: 100%;">
-                  <span class="btn-text">Send Reset Link</span>
-                  <span class="btn-loading" style="display: none;">
-                    <svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
+                <button type="submit" class="btn-primary" style="width: 100%; display: flex; align-items: center; justify-content: center; min-height: 42px;">
+                  <span class="btn-text" style="white-space: nowrap;">Send Reset Link</span>
+                  <span class="btn-loading" style="display: none; white-space: nowrap;">
+                    <svg class="spinner" viewBox="0 0 50 50" style="display: inline-block; width: 16px; height: 16px; margin-right: 8px;"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
                     Sending...
                   </span>
                 </button>

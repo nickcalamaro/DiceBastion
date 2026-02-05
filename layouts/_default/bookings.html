@@ -351,6 +351,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   
+  // Make auth modal globally available for footer login button
+  window.authModal = authModal;
+  
   // Check user session
   userSession = utils.session.getUser();
   if (userSession) {
@@ -511,7 +514,7 @@ function selectTableType(type, cardElement) {
   
   // Scroll to date section
   setTimeout(() => {
-    dateSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    dateSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 100);
   
   // Initialize Flatpickr if not already done
@@ -547,8 +550,6 @@ function selectTableType(type, cardElement) {
       }
     ]);
   }
-  
-  document.getElementById('date-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function handleDateChange(date) {
@@ -568,7 +569,7 @@ async function handleDateChange(date) {
   
   // Scroll to slots section
   setTimeout(() => {
-    document.getElementById('slots-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    document.getElementById('slots-section').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 100);
 }
 

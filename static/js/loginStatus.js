@@ -39,9 +39,12 @@
       } else {
         // User is not logged in
         loginContainer.innerHTML = `
-          <a href="/login" class="text-sm text-neutral-600 dark:text-neutral-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline">
+          <button 
+            onclick="window.openLoginModal()" 
+            class="text-sm text-neutral-600 dark:text-neutral-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline cursor-pointer"
+            title="Log in to your account">
             Login
-          </a>
+          </button>
         `;
       }
     }
@@ -65,7 +68,7 @@
       const searchButton = desktopNav.querySelector('#search-button');
       const linkHtml = user && user.email
         ? `<a id="nav-account-link" href="/account" class="text-base hover:text-primary-600 dark:hover:text-primary-400" title="My Account">Account</a>`
-        : `<a id="nav-account-link" href="/login" class="text-base hover:text-primary-600 dark:hover:text-primary-400" title="Log in to your account">Login</a>`;
+        : `<button id="nav-account-link" onclick="window.openLoginModal()" class="text-base hover:text-primary-600 dark:hover:text-primary-400 cursor-pointer" title="Log in to your account">Login</button>`;
       
       if (searchButton) {
         searchButton.insertAdjacentHTML('beforebegin', linkHtml);
@@ -93,7 +96,7 @@
       const closeButton = mobileMenuWrapper.querySelector('#menu-close-button');
       const linkHtml = user && user.email
         ? `<li id="nav-account-link-mobile" class="mb-1"><a href="/account" class="flex items-center text-base hover:text-primary-600 dark:hover:text-primary-400">Account</a></li>`
-        : `<li id="nav-account-link-mobile" class="mb-1"><a href="/login" class="flex items-center text-base hover:text-primary-600 dark:hover:text-primary-400">Login</a></li>`;
+        : `<li id="nav-account-link-mobile" class="mb-1"><button onclick="window.openLoginModal()" class="flex items-center text-base hover:text-primary-600 dark:hover:text-primary-400 cursor-pointer">Login</button></li>`;
       
       if (closeButton) {
         closeButton.insertAdjacentHTML('afterend', linkHtml);
@@ -125,12 +128,14 @@
     // Clear local storage
     utils.session.clear();
     
-    // Update UI
-    updateLoginUI();
-    
-    // If on admin page, reload to show login form
-    if (window.location.pathname.startsWith('/admin')) {
-      window.location.reload();
+    // Reload the page to refresh all states
+    window.location.reload();
+  };
+  
+  // Function to open login modal (to be called from footer)
+  window.openLoginModal = function() {
+    if (window.authModal && typeof window.authModal.show === 'function') {
+      window.authModal.show();
     }
   };
 

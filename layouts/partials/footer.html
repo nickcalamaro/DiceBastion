@@ -71,9 +71,28 @@
   
   {{/* Shared Utilities */}}
   <script src="/js/utils.js"></script>
+  <script src="/js/modal.js"></script>
+  <script src="/js/auth-modal.js"></script>
   
   {{/* Login Status Script */}}
   <script src="/js/loginStatus.js"></script>
+  
+  {{/* Initialize global auth modal */}}
+  <script>
+    const MAIN_API = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+    
+    // Initialize auth modal globally
+    if (!window.authModal) {
+      window.authModal = new AuthModal({
+        mainApiUrl: MAIN_API,
+        onSuccess: async (type, user) => {
+          console.log(`${type} successful:`, user);
+          // Reload page to refresh all states
+          window.location.reload();
+        }
+      });
+    }
+  </script>
   
   {{/* Extend footer - eg. for extra scripts, etc. */}}
   {{ if templates.Exists "partials/extend-footer.html" }}
