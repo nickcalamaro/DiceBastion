@@ -256,36 +256,42 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
       return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
     }
 
-    // Get max bookings from config
+    // Get config from booking_config table
     const configResult = await client.execute(
-      "SELECT max_bookings FROM booking_config WHERE id = 1"
-    );
-    const maxBookings = configResult.rows[0]?.max_bookings || 1;
-
-    // Get booking time slots from config
-    const slotsResult = await client.execute(
-      "SELECT time_slots FROM booking_config WHERE id = 1"
+      "SELECT max_bookings_per_day, start_hour, end_hour, slot_duration_hours FROM booking_config WHERE id = 1"
     );
     
-    let timeSlots: Array<{start: string, end: string}> = [];
-    try {
-      timeSlots = JSON.parse(String(slotsResult.rows[0]?.time_slots || '[]'));
-    } catch (e) {
-      console.error('Error parsing time slots:', e);
-      return jsonResponse({ error: "Invalid time slots configuration" }, 500);
+    if (configResult.rows.length === 0) {
+      return jsonResponse({ error: "Booking configuration not found" }, 500);
+    }
+    
+    const config = configResult.rows[0];
+    const maxBookings = Number(config.max_bookings_per_day) || 4;
+    const startHour = Number(config.start_hour) || 10;
+    const endHour = Number(config.end_hour) || 22;
+    const slotDuration = Number(config.slot_duration_hours) || 3;
+
+    // Generate time slots based on config
+    const timeSlots: Array<{start: string, end: string}> = [];
+    for (let hour = startHour; hour + slotDuration <= endHour; hour += slotDuration) {
+      const startTime = `${hour.toString().padStart(2, '0')}:00`;
+      const endTime = `${(hour + slotDuration).toString().padStart(2, '0')}:00`;
+      timeSlots.push({ start: startTime, end: endTime });
     }
 
-    // Count non-cancelled bookings for each slot
+    // Count non-cancelled bookings for each slot (checking for overlaps)
     const slotsWithAvailability = await Promise.all(
       timeSlots.map(async (slot) => {
+        // Check for overlapping bookings: a booking overlaps if it starts before this slot ends
+        // AND ends after this slot starts
         const bookingCount = await client.execute({
           sql: `SELECT COUNT(*) as count FROM bookings 
                 WHERE booking_date = ? 
                 AND table_type_id = ? 
-                AND start_time = ? 
-                AND status != 'cancelled'
-                AND status != 'failed'`,
-          args: [date, tableTypeId, slot.start]
+                AND start_time < ? 
+                AND end_time > ? 
+                AND status != 'cancelled'`,
+          args: [date, tableTypeId, slot.end, slot.start]
         });
         
         const count = Number(bookingCount.rows[0]?.count || 0);
