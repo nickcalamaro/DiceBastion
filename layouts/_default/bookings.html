@@ -18,6 +18,7 @@
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
+  overflow: hidden;
 }
 
 .dark .table-type-card {
@@ -46,6 +47,8 @@
   font-weight: 700;
   margin-bottom: 0.5rem;
   color: rgb(var(--color-neutral-900));
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .dark .table-type-name {
@@ -61,6 +64,25 @@
 
 .table-type-price.free {
   color: rgb(var(--color-success-600));
+}
+
+/* Mobile responsive styles */
+@media (max-width: 640px) {
+  .table-types-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .table-type-card {
+    padding: 1.25rem;
+  }
+  
+  .table-type-name {
+    font-size: 1.1rem;
+  }
+  
+  .table-type-price {
+    font-size: 1.5rem;
+  }
 }
 
 .slots-grid {
