@@ -23,8 +23,8 @@ import { createClient } from "@libsql/client/web";
 
 // Initialize libSQL client with Bunny Database credentials
 const client = createClient({
-  url: BunnyEnv.get('BUNNY_DATABASE_URL'),
-  authToken: BunnyEnv.get('BUNNY_DATABASE_AUTH_TOKEN'),
+  url: process.env.BUNNY_DATABASE_URL,
+  authToken: process.env.BUNNY_DATABASE_AUTH_TOKEN,
 });
 
 const CORS_HEADERS = {
@@ -110,7 +110,7 @@ async function sendBookingConfirmationEmail(params: {
       : undefined;
 
     // Send email via DiceBastionEmails edge script
-    const emailApiUrl = BunnyEnv.get('EMAIL_API_URL');
+    const emailApiUrl = process.env.EMAIL_API_URL;
     
     if (!emailApiUrl) {
       console.error('EMAIL_API_URL not configured');
