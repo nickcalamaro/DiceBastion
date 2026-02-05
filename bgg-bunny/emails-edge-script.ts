@@ -5,6 +5,8 @@
  * Handles all email sending via MailerSend API
  */
 
+import * as BunnySDK from "@bunny.net/edgescript-sdk";
+
 // Helper function to create JSON responses
 function jsonResponse(data: any, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -43,7 +45,7 @@ async function sendEmail(params: {
   text?: string;
   reply_to?: string;
 }): Promise<{ success: boolean; error?: string; message_id?: string }> {
-  const apiKey = BunnyEnv.get('MAILERSEND_API_KEY');
+  const apiKey = process.env.MAILERSEND_API_KEY;
   
   if (!apiKey) {
     console.error('MAILERSEND_API_KEY not configured');
@@ -106,7 +108,7 @@ async function sendEmail(params: {
 /**
  * Main request handler
  */
-BunnyEnv.serve(async (request: Request): Promise<Response> => {
+BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
 
   // CORS preflight
