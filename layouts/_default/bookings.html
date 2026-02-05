@@ -3,52 +3,57 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/material_blue.css">
 
 <style>
+/* Table type selection using responsive grid pattern */
 .table-types-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 1rem;
-  margin-bottom: 2rem;
+  margin: 1.5rem 0;
 }
 
 .table-type-card {
   background: linear-gradient(180deg, #ffffff, #f9f9f9);
-  border: 2px solid rgb(var(--color-neutral-300));
+  border: 1px solid rgb(var(--color-neutral-300));
   border-radius: 12px;
   padding: 1.5rem;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
-  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
 }
 
 .dark .table-type-card {
   background: linear-gradient(180deg, rgb(var(--color-neutral-800)), rgb(var(--color-neutral-900)));
   border-color: rgb(var(--color-neutral-700));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
 .table-type-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-2px);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
   border-color: rgb(var(--color-primary-500));
 }
 
 .table-type-card.selected {
-  border-color: rgb(var(--color-primary-600));
-  border-width: 3px;
+  border: 2px solid rgb(var(--color-primary-600));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
   background: linear-gradient(135deg, rgb(var(--color-primary-50)), white);
 }
 
 .dark .table-type-card.selected {
   background: linear-gradient(135deg, rgba(var(--color-primary-900), 0.3), rgb(var(--color-neutral-800)));
+  border-color: rgb(var(--color-primary-400));
 }
 
 .table-type-name {
-  font-size: 1.3rem;
+  font-size: 1.2rem;
   font-weight: 700;
   margin-bottom: 0.5rem;
   color: rgb(var(--color-neutral-900));
+  line-height: 1.3;
   word-wrap: break-word;
-  overflow-wrap: break-word;
 }
 
 .dark .table-type-name {
@@ -56,7 +61,7 @@
 }
 
 .table-type-price {
-  font-size: 1.8rem;
+  font-size: 1.7rem;
   font-weight: 800;
   color: rgb(var(--color-primary-600));
   margin: 0.5rem 0;
@@ -66,52 +71,53 @@
   color: rgb(var(--color-success-600));
 }
 
-/* Mobile responsive styles */
-@media (max-width: 640px) {
-  .table-types-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .table-type-card {
-    padding: 1.25rem;
-  }
-  
-  .table-type-name {
-    font-size: 1.1rem;
-  }
-  
-  .table-type-price {
-    font-size: 1.5rem;
-  }
+.table-type-description {
+  color: rgb(var(--color-neutral-600));
+  font-size: 0.95rem;
+  margin-top: 0.5rem;
+  line-height: 1.6;
 }
 
+.table-type-note {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  background: rgba(var(--color-warning-500), 0.1);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: rgb(var(--color-warning-700));
+}
+
+/* Time slots grid */
 .slots-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  margin: 1.5rem 0;
 }
 
 .slot-btn {
   padding: 1rem;
-  border: 2px solid rgb(var(--color-neutral-300));
+  border: 1px solid rgb(var(--color-neutral-300));
   border-radius: 8px;
   background: white;
   cursor: pointer;
   transition: all 0.2s;
   font-weight: 600;
   text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
 .dark .slot-btn {
   background: rgb(var(--color-neutral-800));
   border-color: rgb(var(--color-neutral-700));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 .slot-btn:hover {
   border-color: rgb(var(--color-primary-500));
   background: rgb(var(--color-primary-50));
   transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
 .dark .slot-btn:hover {
@@ -119,10 +125,10 @@
 }
 
 .slot-btn.selected {
-  border-color: rgb(var(--color-primary-600));
+  border: 2px solid rgb(var(--color-primary-600));
   background: linear-gradient(135deg, rgb(var(--color-primary-500)), rgb(var(--color-primary-600)));
   color: white;
-  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
 }
 
 .slot-btn:disabled {
@@ -130,12 +136,14 @@
   color: rgb(var(--color-neutral-400));
   cursor: not-allowed;
   border-color: rgb(var(--color-neutral-200));
+  box-shadow: none;
 }
 
 .dark .slot-btn:disabled {
   background: rgb(var(--color-neutral-900));
 }
 
+/* Booking items list */
 .booking-item {
   padding: 1.25rem;
   border-left: 4px solid rgb(var(--color-primary-600));
@@ -154,9 +162,10 @@
   margin-bottom: 0.25rem;
 }
 
+/* Hero image */
 .hero-image {
   text-align: center;
-  margin: 2rem 0;
+  margin: 1rem 0 2rem;
 }
 
 .hero-image img {
@@ -166,6 +175,7 @@
   box-shadow: 0 4px 16px rgba(0,0,0,0.1);
 }
 
+/* Loading state */
 .loading {
   text-align: center;
   padding: 3rem;
@@ -176,6 +186,7 @@
   color: rgb(var(--color-neutral-400));
 }
 
+/* Membership upsell banner */
 .membership-upsell {
   background: linear-gradient(135deg, rgb(var(--color-primary-500)), rgb(var(--color-primary-600)));
   color: white;
@@ -191,72 +202,96 @@
   margin-bottom: 0.5rem;
 }
 
-.membership-upsell-benefits {
-  list-style: none;
-  padding: 0;
-  margin: 1rem 0;
-}
-
-.membership-upsell-benefits li {
-  padding: 0.5rem 0;
+/* Mobile responsive */
+@media (max-width: 640px) {
+  .table-types-grid,
+  .slots-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .table-type-card {
+    padding: 1.25rem;
+  }
+  
+  .table-type-name {
+    font-size: 1.1rem;
+  }
+  
+  .table-type-price {
+    font-size: 1.5rem;
+  }
+  
+  .hero-image {
+    margin: 0.5rem 0 1.5rem;
+  }
 }
 </style>
 
 <div class="page-container">
-  <h1 class="hero-cta-title" style="text-align: center; margin-bottom: 1.5rem; color: rgb(var(--color-primary-600));">{{ .Title }}</h1>
+  <h1 class="hero-cta-title" style="text-align: center; margin-bottom: 1rem; color: rgb(var(--color-primary-600));">{{ .Title }}</h1>
   
-  {{ with .Params.image }}
+  {{ if .Params.image }}
   <div class="hero-image">
-    <img src="{{ . }}" alt="Gaming table">
+    <img src="{{ .Params.image }}" alt="Gaming table">
   </div>
   {{ end }}
 
   <div id="alert-container"></div>
+  
+  <div id="membership-status-container"></div>
 
-  <!-- Table Type Selection Card -->
-  <div class="card">
-    <h2 class="card-header">Select Table Type</h2>
-    <div id="membership-status-container"></div>
-    <div id="table-types-container" class="loading">Loading table types...</div>
-  </div>
+  <!-- Table Type Selection -->
+  <h2 class="card-header" style="margin: 2rem 0 0.5rem;">Select Table Type</h2>
+  <div id="table-types-container" class="loading">Loading table types...</div>
 
   <!-- Date Selection Card -->
-  <div class="card hidden" id="date-section">
-    <h2 class="card-header">📅 Date</h2>
-    <div class="form-group">
+  <div class="card" id="date-section" style="margin-top: 2rem; opacity: 0.5; pointer-events: none;">
+    <h2 class="card-header">📅 Choose a Date</h2>
+    <div id="date-instruction" style="padding: 1rem; text-align: center; color: rgb(var(--color-neutral-600)); font-size: 0.95rem;">
+      Please select a table type first
+    </div>
+    <div class="form-group" style="margin-bottom: 0; display: none;" id="date-input-wrapper">
       <input type="text" id="booking-date" class="form-input" placeholder="Choose a date..." readonly>
     </div>
   </div>
 
   <!-- Available Slots Card -->
-  <div class="card hidden" id="slots-section">
+  <div class="card" id="slots-section" style="margin-top: 2rem; opacity: 0.5; pointer-events: none;">
     <h2 class="card-header">⏰ Available Time Slots</h2>
-    <div id="slots-container" class="loading">Select a date to see available slots</div>
+    <div id="slots-instruction" style="padding: 1rem; text-align: center; color: rgb(var(--color-neutral-600)); font-size: 0.95rem;">
+      Please choose a date first
+    </div>
+    <div id="slots-container" style="display: none;"></div>
   </div>
 
   <!-- Booking Form Card -->
-  <div class="card hidden" id="booking-form-section">
+  <div class="card" id="booking-form-section" style="margin-top: 2rem; opacity: 0.5; pointer-events: none;">
     <h2 class="card-header">✍️ Complete Your Booking</h2>
     
-    <div id="membership-upsell-container"></div>
+    <div id="booking-form-instruction" style="padding: 1rem; text-align: center; color: rgb(var(--color-neutral-600)); font-size: 0.95rem;">
+      Please select a time slot first
+    </div>
     
-    <form id="booking-form">
-      <div id="selected-details"></div>
+    <div id="booking-form-wrapper" style="display: none;">
+      <div id="membership-upsell-container"></div>
+      
+      <form id="booking-form">
+        <div id="selected-details"></div>
 
-      <div class="form-group">
-        <label for="user-name" class="form-label">Your Name *</label>
-        <input type="text" id="user-name" class="form-input" placeholder="John Smith" required>
-      </div>
+        <div class="form-group">
+          <label for="user-name" class="form-label">Your Name *</label>
+          <input type="text" id="user-name" class="form-input" placeholder="John Smith" required>
+        </div>
 
-      <div class="form-group">
-        <label for="user-email" class="form-label">Email Address *</label>
-        <input type="email" id="user-email" class="form-input" placeholder="john@example.com" required>
-      </div>
+        <div class="form-group">
+          <label for="user-email" class="form-label">Email Address *</label>
+          <input type="email" id="user-email" class="form-input" placeholder="john@example.com" required>
+        </div>
 
-      <div class="form-group">
-        <label for="notes" class="form-label">Notes (Optional)</label>
-        <textarea id="notes" class="form-textarea" rows="3" placeholder="Any special requirements or requests..."></textarea>
-      </div>
+        <div class="form-group">
+          <label for="notes" class="form-label">Notes (Optional)</label>
+          <textarea id="notes" class="form-textarea" rows="3" placeholder="Any special requirements or requests..."></textarea>
+        </div>
 
       <div id="turnstile-container" class="form-group"></div>
 
@@ -264,10 +299,7 @@
         <span id="submit-text">✓ Confirm Booking</span>
       </button>
     </form>
-  </div>
-
-  <!-- User's Bookings Card -->
-  <div class="card">
+    </div>
     <h2 class="card-header">📋 Your Bookings</h2>
     <div id="bookings-container" class="loading">Loading bookings</div>
   </div>
@@ -423,9 +455,9 @@ async function loadTableTypes() {
         <div class="table-type-price ${price === 0 ? 'free' : ''}">
           ${price === 0 ? 'FREE' : `£${price.toFixed(2)}`}
         </div>
-        ${type.description ? `<p style="color: rgb(var(--color-neutral-600)); font-size: 0.95rem; margin-top: 0.5rem;">${type.description}</p>` : ''}
+        ${type.description ? `<div class="table-type-description">${type.description}</div>` : ''}
         ${!isMember && type.member_price < type.non_member_price ? `
-          <div style="margin-top: 1rem; padding: 0.5rem; background: rgba(var(--color-warning-500), 0.1); border-radius: 6px; font-size: 0.85rem; color: rgb(var(--color-warning-700));">
+          <div class="table-type-note">
             💡 ${type.member_price === 0 ? 'Free for members' : `Members pay only £${type.member_price.toFixed(2)}`}
           </div>
         ` : ''}
@@ -470,8 +502,17 @@ function selectTableType(type, cardElement) {
   cardElement.classList.add('selected');
   selectedTableType = type;
   
-  // Show date section
-  document.getElementById('date-section').classList.remove('hidden');
+  // Activate date section
+  const dateSection = document.getElementById('date-section');
+  dateSection.style.opacity = '1';
+  dateSection.style.pointerEvents = 'auto';
+  document.getElementById('date-instruction').style.display = 'none';
+  document.getElementById('date-input-wrapper').style.display = 'block';
+  
+  // Scroll to date section
+  setTimeout(() => {
+    dateSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
   
   // Initialize Flatpickr if not already done
   if (!picker) {
@@ -515,15 +556,34 @@ async function handleDateChange(date) {
   
   currentDate = date;
   selectedSlot = null;
-  document.getElementById('booking-form-section').classList.add('hidden');
+  
+  // Reset booking form to disabled state
+  const formSection = document.getElementById('booking-form-section');
+  formSection.style.opacity = '0.5';
+  formSection.style.pointerEvents = 'none';
+  document.getElementById('booking-form-instruction').style.display = 'block';
+  document.getElementById('booking-form-wrapper').style.display = 'none';
   
   await loadAvailableSlots(date);
+  
+  // Scroll to slots section
+  setTimeout(() => {
+    document.getElementById('slots-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
 }
 
 async function loadAvailableSlots(date) {
   const container = document.getElementById('slots-container');
+  const slotsSection = document.getElementById('slots-section');
+  const slotsInstruction = document.getElementById('slots-instruction');
+  
+  // Activate slots section
+  slotsSection.style.opacity = '1';
+  slotsSection.style.pointerEvents = 'auto';
+  slotsInstruction.style.display = 'none';
+  container.style.display = 'block';
+  
   container.innerHTML = '<div class="loading">Generating time slots</div>';
-  document.getElementById('slots-section').classList.remove('hidden');
   
   try {
     // Generate standard time slots (10:00 - 22:00, 4-hour slots)
@@ -566,7 +626,12 @@ function selectSlot(slot, btnElement) {
   selectedSlot = slot;
   
   const formSection = document.getElementById('booking-form-section');
-  formSection.classList.remove('hidden');
+  
+  // Activate booking form section
+  formSection.style.opacity = '1';
+  formSection.style.pointerEvents = 'auto';
+  document.getElementById('booking-form-instruction').style.display = 'none';
+  document.getElementById('booking-form-wrapper').style.display = 'block';
   
   const isMember = membershipStatus?.active || false;
   const price = isMember ? selectedTableType.member_price : selectedTableType.non_member_price;
@@ -580,12 +645,8 @@ function selectSlot(slot, btnElement) {
     </div>
   `;
   
-  // Show membership upsell if not a member and would save money
-  if (!isMember && selectedTableType.member_price < selectedTableType.non_member_price) {
-    showMembershipUpsell();
-  } else {
-    document.getElementById('membership-upsell-container').innerHTML = '';
-  }
+  // Clear any previous membership upsell
+  document.getElementById('membership-upsell-container').innerHTML = '';
   
   // Pre-fill email if logged in
   if (userSession?.email) {
@@ -598,21 +659,10 @@ function selectSlot(slot, btnElement) {
     utils.renderTurnstile('turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
   }, 100);
   
+  // Scroll to booking form
   setTimeout(() => {
     formSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, 100);
-}
-
-function showMembershipUpsell() {
-  const savings = selectedTableType.non_member_price - selectedTableType.member_price;
-  
-  document.getElementById('membership-upsell-container').innerHTML = `
-    <div class="membership-upsell">
-      <div class="membership-upsell-title">💡 Save £${savings.toFixed(2)} with Membership!</div>
-      <p style="margin: 0.5rem 0;">Members get free table bookings!</p>
-      <a href="/memberships" class="btn btn-secondary" style="margin-top: 1rem; background: white; color: rgb(var(--color-primary-600));">View Membership Options</a>
-    </div>
-  `;
 }
 
 async function handleBookingSubmit(e) {
