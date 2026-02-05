@@ -372,7 +372,7 @@ async function loadTableTypes() {
   } else if (membershipStatus?.active) {
     statusContainer.innerHTML = `
       <div class="alert alert-success" style="margin-bottom: 1.5rem;">
-        ✓ You're getting member pricing! Thank you for your support.
+        ✓ You're getting free bookings as a GWC Member. Thank you for your support!
       </div>
     `;
   }
@@ -404,7 +404,7 @@ async function loadTableTypes() {
         ${type.description ? `<p style="color: rgb(var(--color-neutral-600)); font-size: 0.95rem; margin-top: 0.5rem;">${type.description}</p>` : ''}
         ${!isMember && type.member_price < type.non_member_price ? `
           <div style="margin-top: 1rem; padding: 0.5rem; background: rgba(var(--color-warning-500), 0.1); border-radius: 6px; font-size: 0.85rem; color: rgb(var(--color-warning-700));">
-            💡 Members pay only £${type.member_price.toFixed(2)}
+            💡 ${type.member_price === 0 ? 'Free for members' : `Members pay only £${type.member_price.toFixed(2)}`}
           </div>
         ` : ''}
       `;
@@ -415,6 +415,27 @@ async function loadTableTypes() {
     
     container.innerHTML = '';
     container.appendChild(grid);
+    
+    // Show membership promo if not logged in or not a member
+    if (!userSession || !membershipStatus?.active) {
+      const promoDiv = document.createElement('div');
+      promoDiv.style.cssText = 'margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, rgba(var(--color-primary-500), 0.1), rgba(var(--color-primary-600), 0.05)); border-radius: 12px; text-align: center; border: 2px solid rgba(var(--color-primary-500), 0.3);';
+      promoDiv.innerHTML = `
+        <div style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.75rem; color: rgb(var(--color-primary-700));">
+          💎 Want free table bookings?
+        </div>
+        <p style="margin: 0 0 1rem 0; color: rgb(var(--color-neutral-700)); font-size: 1rem;">
+          Sign up now as a member for as low as £7.50 / month*
+        </p>
+        <a href="/memberships" class="btn btn-primary" style="display: inline-block;">
+          View Membership Options →
+        </a>
+        <div style="margin-top: 0.75rem; font-size: 0.85rem; color: rgb(var(--color-neutral-600)); font-style: italic;">
+          * based on an annual membership
+        </div>
+      `;
+      container.appendChild(promoDiv);
+    }
     
   } catch (error) {
     console.error('Error loading table types:', error);

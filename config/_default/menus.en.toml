@@ -20,6 +20,13 @@ identifier = "MU5KHCnt3y"
 weight = 9999
 
 [[main]]
+name = "Book a Table"
+pageRef = "Bookings"
+identifier = "qwkjjnq"
+weight = 133
+
+
+[[main]]
 name = "FAQs"
 pageRef = "FAQs"
 parent = "MU5KHCnt3y"
