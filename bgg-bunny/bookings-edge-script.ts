@@ -262,14 +262,17 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
     );
     
     if (configResult.rows.length === 0) {
-      return jsonResponse({ error: "Booking configuration not found" }, 500);
+      console.error("No booking config found, using defaults");
+      // Use defaults if config not found
     }
     
-    const config = configResult.rows[0];
-    const maxBookings = Number(config.max_bookings_per_day) || 4;
-    const startHour = Number(config.start_hour) || 10;
-    const endHour = Number(config.end_hour) || 22;
-    const slotDuration = Number(config.slot_duration_hours) || 3;
+    const config = configResult.rows[0] || {};
+    const maxBookings = Number(config.max_bookings_per_day || 4);
+    const startHour = Number(config.start_hour || 10);
+    const endHour = Number(config.end_hour || 22);
+    const slotDuration = Number(config.slot_duration_hours || 3);
+
+    console.log('Slot config:', { maxBookings, startHour, endHour, slotDuration });
 
     // Generate time slots based on config
     const timeSlots: Array<{start: string, end: string}> = [];
@@ -278,6 +281,8 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
       const endTime = `${(hour + slotDuration).toString().padStart(2, '0')}:00`;
       timeSlots.push({ start: startTime, end: endTime });
     }
+    
+    console.log('Generated time slots:', timeSlots);
 
     // Count non-cancelled bookings for each slot (checking for overlaps)
     const slotsWithAvailability = await Promise.all(
@@ -308,6 +313,9 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
 
     // Filter to only available slots
     const availableSlots = slotsWithAvailability.filter(slot => slot.available);
+    
+    console.log('Slots with availability:', slotsWithAvailability);
+    console.log('Available slots:', availableSlots);
 
     return jsonResponse({
       date,
