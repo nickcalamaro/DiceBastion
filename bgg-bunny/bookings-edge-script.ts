@@ -197,7 +197,7 @@ async function createBooking(request: Request) {
     return jsonResponse({ 
       success: true,
       message: "Booking created successfully",
-      booking_id: insertResult.lastInsertRowid,
+      booking_id: Number(insertResult.lastInsertRowid),
       order_ref,
       payment_required: amount_paid > 0
     }, 201);
@@ -240,7 +240,7 @@ async function confirmBooking(orderRef: string) {
         return jsonResponse({ 
           success: true, 
           message: "Booking already confirmed",
-          booking_id: booking.id 
+          booking_id: Number(booking.id)
         });
       }
     }
