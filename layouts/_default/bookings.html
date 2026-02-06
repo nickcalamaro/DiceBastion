@@ -806,6 +806,7 @@ async function showPaymentModal(checkoutId, orderRef, amount) {
 }
 
 async function confirmBooking(orderRef) {
+  console.log('[confirmBooking] Starting confirmation for orderRef:', orderRef);
   // Note: pollPaymentConfirmation prepends the API base, so we pass the full URL directly
   // by setting a temporary override
   const originalApiBase = window.__DB_API_BASE;
@@ -815,11 +816,14 @@ async function confirmBooking(orderRef) {
     pollInterval: 3000,
     maxAttempts: 20,
     onSuccess: (data) => {
+      console.log('[confirmBooking] Success callback triggered!', data);
       window.__DB_API_BASE = originalApiBase;
       // Redirect to thank-you page with booking details
+      console.log('[confirmBooking] Redirecting to thank-you page...');
       window.location.href = '/thank-you?orderRef=' + encodeURIComponent(orderRef) + '&type=booking';
     },
     onError: (errorMsg) => {
+      console.log('[confirmBooking] Error callback triggered:', errorMsg);
       window.__DB_API_BASE = originalApiBase;
       if (paymentModal) {
         document.getElementById('payment-error').textContent = errorMsg;
@@ -827,11 +831,13 @@ async function confirmBooking(orderRef) {
       }
     },
     onTimeout: () => {
+      console.log('[confirmBooking] Timeout callback triggered');
       window.__DB_API_BASE = originalApiBase;
       // Redirect to thank-you with processing flag
       window.location.href = '/thank-you?orderRef=' + encodeURIComponent(orderRef) + '&type=booking&processing=1';
     }
   });
+  console.log('[confirmBooking] Poll result:', result);
 }
 
 async function loadBookingsForDate(date) {

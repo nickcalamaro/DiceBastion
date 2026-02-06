@@ -345,10 +345,43 @@ return;
 // - EVT-{eventId}-{uuid} = paid event ticket
 // - REG-{eventId}-{ticketId} = free event registration
   // - BUNDLE-{eventId}-{uuid} = membership + event bundle
+  // - BOOK-{timestamp}-{uuid} = table booking
   // - MEM-... = membership
   const isEvent = /^EVT-\d+-[0-9a-f\-]{36}$/i.test(orderRef);
   const isRegistration = /^REG-\d+-\d+$/i.test(orderRef);
   const isBundle = /^BUNDLE-\d+-[0-9a-f\-]{36}$/i.test(orderRef);
+  const isBooking = /^BOOK-\d+-[a-z0-9]+$/i.test(orderRef);
+  
+  // Bookings are already confirmed by the bookings API, just show success
+  if (isBooking) {
+    container.innerHTML = `
+<h1>🎲 Table Booking Confirmed!</h1>
+<div class="status-badge status-success">Booking Confirmed</div>
+
+<div class="info-box">
+<h3>Your Table is Reserved</h3>
+<p>Your table booking has been confirmed. A confirmation email with all the details has been sent to your registered email address.</p>
+</div>
+
+<div class="details-grid">
+<div class="detail-row">
+<span class="detail-label">Booking Reference:</span>
+<span class="detail-value">${orderRef}</span>
+</div>
+</div>
+
+<div style="margin-top: 24px;">
+<a href="/bookings" class="action-button">View My Bookings</a>
+<a href="/account" class="action-button secondary-button">My Account</a>
+</div>
+
+<p style="margin-top: 24px; color: #666;">
+Please check your email for booking details and any additional information.
+</p>
+`;
+    return;
+  }
+  
   const type = (isEvent || isRegistration || isBundle) ? 'event' : 'membership';
   const endpoint = (isEvent || isRegistration || isBundle)
     ? `/events/confirm?orderRef=${encodeURIComponent(orderRef)}`
