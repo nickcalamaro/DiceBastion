@@ -156,6 +156,7 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
+<button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 </div>
 
@@ -531,6 +532,22 @@ Loading memberships...
 </tr>
 </tbody>
 </table>
+</div>
+</div>
+</div>
+
+<!-- Bookings Tab -->
+<div id="bookings-tab" class="tab-content" style="display: none;">
+<div class="admin-flex-between admin-mb-2">
+<h2 class="admin-m-0">Upcoming Table Bookings</h2>
+<button id="refresh-bookings-btn" class="admin-btn-secondary-sm" onclick="loadBookings()">
+🔄 Refresh
+</button>
+</div>
+
+<div id="bookings-list" style="display: grid; gap: 1rem;">
+<div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
+Click refresh to load bookings
 </div>
 </div>
 </div>
@@ -1267,6 +1284,11 @@ btn.style.color = 'rgb(var(--color-primary-600))';
 
 document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
 document.getElementById(tab + '-tab').style.display = 'block';
+
+// Auto-load data when switching to bookings tab
+if (tab === 'bookings') {
+  loadBookings();
+}
 });
 });
 
@@ -2491,6 +2513,126 @@ function showCronDetails(logId, details) {
     alert(`Job Details (ID: ${logId}):\n\n${JSON.stringify(parsed, null, 2)}`);
   } catch {
     alert(`Job Details (ID: ${logId}):\n\n${details}`);
+  }
+}
+
+async function loadBookings() {
+  const container = document.getElementById('bookings-list');
+  
+  try {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
+        Loading bookings...
+      </div>
+    `;
+    
+    const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', {
+      headers: {
+        'Authorization': `Bearer ${sessionToken}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch bookings');
+    }
+    
+    const data = await response.json();
+    const bookings = data.bookings || [];
+    
+    if (bookings.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
+          📅 No upcoming bookings found.
+        </div>
+      `;
+      return;
+    }
+    
+    container.innerHTML = bookings.map(booking => {
+      const statusColor = booking.status === 'confirmed' ? '#10b981' : booking.status === 'cancelled' ? '#ef4444' : '#f59e0b';
+      const statusIcon = booking.status === 'confirmed' ? '✓' : booking.status === 'cancelled' ? '✕' : '⏳';
+      
+      return `
+        <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 1.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+            <div style="flex: 1;">
+              <h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">${booking.table_type || 'Table Booking'}</h3>
+              <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
+                📅 ${formatDate(booking.booking_date)} • 🕐 ${booking.start_time} - ${booking.end_time}
+              </div>
+            </div>
+            <span style="background: ${statusColor}; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;">
+              ${statusIcon} ${booking.status.toUpperCase()}
+            </span>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 8px; margin-bottom: 1rem;">
+            <div>
+              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Customer</div>
+              <div style="font-weight: 600;">${booking.user_name || 'N/A'}</div>
+            </div>
+            <div>
+              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Email</div>
+              <div style="font-weight: 500; font-size: 0.875rem;">${booking.user_email}</div>
+            </div>
+          </div>
+          
+          ${booking.notes ? `
+            <div style="padding: 1rem; background: rgb(var(--color-neutral-50)); border-left: 3px solid rgb(var(--color-primary-600)); border-radius: 4px; margin-bottom: 1rem;">
+              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Notes</div>
+              <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-700));">${booking.notes}</div>
+            </div>
+          ` : ''}
+          
+          ${booking.status !== 'cancelled' ? `
+            <div style="text-align: right;">
+              <button onclick="cancelBookingAdmin(${booking.id})" class="admin-btn-secondary-sm" style="background: #ef4444; color: white;">
+                Cancel Booking
+              </button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+    
+  } catch (err) {
+    console.error('Error loading bookings:', err);
+    container.innerHTML = `
+      <div style="text-align: center; padding: 3rem; color: #f44336;">
+        ❌ Error loading bookings: ${err.message}
+      </div>
+    `;
+  }
+}
+
+async function cancelBookingAdmin(bookingId) {
+  if (!confirm('Are you sure you want to cancel this booking?')) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`https://dicebastionbookings-ofbbu.bunny.run/api/bookings/${bookingId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${sessionToken}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to cancel booking');
+    }
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      alert('Booking cancelled successfully');
+      loadBookings(); // Reload the list
+    } else {
+      throw new Error(data.error || 'Unknown error');
+    }
+  } catch (err) {
+    console.error('Error cancelling booking:', err);
+    alert(`Failed to cancel booking: ${err.message}`);
   }
 }
 

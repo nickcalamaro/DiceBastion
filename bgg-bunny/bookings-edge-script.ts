@@ -621,7 +621,7 @@ async function getAllBookings() {
     
     const result = await client.execute({
       sql: `SELECT b.id, b.user_email, b.user_name, b.booking_date, b.start_time, b.end_time, 
-                   b.status, b.payment_status, b.amount_paid, b.created_at,
+                   b.status, b.payment_status, b.amount_paid, b.notes, b.created_at,
                    t.name as table_type_name
             FROM bookings b
             LEFT JOIN booking_table_types t ON b.table_type_id = t.id
@@ -643,6 +643,7 @@ async function getAllBookings() {
         status: row.status,
         payment_status: row.payment_status,
         amount_paid: Number(row.amount_paid),
+        notes: row.notes,
         created_at: row.created_at
       }))
     });

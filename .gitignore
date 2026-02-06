@@ -37,3 +37,7 @@ node_modules
 .idea
 .Ulysses-Group.plist
 .Ulysses-Settings.plist
+
+
+# ReferenceDocs
+.github/instructions/ReferenceDocs/
