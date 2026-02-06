@@ -379,7 +379,8 @@ async function createBooking(request: Request) {
       }, 409);
     }
 
-    // Create the booking with pending status
+    // Create the booking
+    // Note: status is always 'confirmed' due to DB constraint, but payment_status tracks payment
     const now = new Date().toISOString();
     const insertResult = await client.execute({
       sql: `INSERT INTO bookings 
@@ -397,11 +398,11 @@ async function createBooking(request: Request) {
         order_ref,
         amount_paid || 0,
         is_member_booking ? 1 : 0,
-        amount_paid > 0 ? 'pending' : 'confirmed', // Free bookings confirmed immediately
+        amount_paid > 0 ? 'pending' : 'confirmed', // Track payment status separately
         notes || null,
         now,
         now,
-        amount_paid > 0 ? 'pending' : 'confirmed'
+        'confirmed' // Status is always confirmed (CHECK constraint only allows confirmed/cancelled)
       ],
     });
 
