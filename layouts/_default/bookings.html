@@ -331,7 +331,7 @@
 <script>
 // API endpoints (MAIN_API is set globally by footer, accessed via window.MAIN_API)
 const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run'; // Bunny Edge Script
-const PAYMENTS_API = 'https://payments.dicebastion.workers.dev'; // Cloudflare Payments Worker
+const PAYMENTS_API = 'https://dicebastion-payments.ncalamaro.workers.dev'; // Cloudflare Payments Worker
 const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 const IS_LOCALHOST = window.location.hostname === 'localhost' || 
                      window.location.hostname === '127.0.0.1';
@@ -744,7 +744,7 @@ async function handleBookingSubmit(e) {
     }
     
     // If free booking, it's already confirmed
-    if (price === 0) {
+    if (!bookingData.payment_required) {
       showAlert('✅ Booking confirmed!', 'success');
       document.getElementById('booking-form').reset();
       document.getElementById('booking-form-section').classList.add('hidden');
@@ -754,29 +754,13 @@ async function handleBookingSubmit(e) {
       return;
     }
     
-    // Create payment checkout via Payments Worker
-    const checkoutResponse = await fetch(`${PAYMENTS_API}/internal/checkout`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-Internal-Secret': 'your-internal-secret' // TODO: Get from config
-      },
-      body: JSON.stringify({
-        amount: price,
-        currency: 'GBP',
-        orderRef: orderRef,
-        description: `${selectedTableType.name} - ${currentDate} ${selectedSlot.startTime}`
-      })
-    });
-    
-    const checkoutData = await checkoutResponse.json();
-    
-    if (!checkoutResponse.ok) {
-      throw new Error(checkoutData.error || 'Payment checkout failed');
+    // For paid bookings, checkout_id is already created by the bookings API
+    if (!bookingData.checkout_id) {
+      throw new Error('Payment checkout ID not received');
     }
     
-    // Show payment modal
-    await showPaymentModal(checkoutData.id, orderRef, price);
+    // Show payment modal with the checkout ID from booking response
+    await showPaymentModal(bookingData.checkout_id, orderRef, price);
     
   } catch (error) {
     console.error('Error creating booking:', error);
@@ -822,27 +806,30 @@ async function showPaymentModal(checkoutId, orderRef, amount) {
 }
 
 async function confirmBooking(orderRef) {
-  const result = await utils.pollPaymentConfirmation(`${BOOKINGS_API}/api/bookings/confirm/${orderRef}`, null, {
+  // Note: pollPaymentConfirmation prepends the API base, so we pass the full URL directly
+  // by setting a temporary override
+  const originalApiBase = window.__DB_API_BASE;
+  window.__DB_API_BASE = BOOKINGS_API;
+  
+  const result = await utils.pollPaymentConfirmation(`/api/bookings/confirm/${orderRef}`, null, {
     pollInterval: 3000,
     maxAttempts: 20,
     onSuccess: (data) => {
-      if (paymentModal) paymentModal.close();
-      showAlert('✅ Booking confirmed! Check your email for details.', 'success');
-      document.getElementById('booking-form').reset();
-      document.getElementById('booking-form-section').classList.add('hidden');
-      selectedTableType = null;
-      selectedSlot = null;
-      loadBookingsForDate();
+      window.__DB_API_BASE = originalApiBase;
+      // Redirect to thank-you page with booking details
+      window.location.href = '/thank-you?orderRef=' + encodeURIComponent(orderRef) + '&type=booking';
     },
     onError: (errorMsg) => {
+      window.__DB_API_BASE = originalApiBase;
       if (paymentModal) {
         document.getElementById('payment-error').textContent = errorMsg;
         document.getElementById('payment-error').style.display = 'block';
       }
     },
     onTimeout: () => {
-      if (paymentModal) paymentModal.close();
-      showAlert('⏳ Payment is being processed. Check your email for confirmation.', 'info');
+      window.__DB_API_BASE = originalApiBase;
+      // Redirect to thank-you with processing flag
+      window.location.href = '/thank-you?orderRef=' + encodeURIComponent(orderRef) + '&type=booking&processing=1';
     }
   });
 }

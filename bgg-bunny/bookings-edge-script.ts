@@ -525,7 +525,8 @@ async function confirmBooking(orderRef: string) {
       const booking = checkResult.rows[0];
       if (booking.status === 'confirmed') {
         return jsonResponse({ 
-          success: true, 
+          ok: true,
+          status: 'already_active',
           message: "Booking already confirmed",
           booking_id: Number(booking.id)
         });
@@ -559,7 +560,8 @@ async function confirmBooking(orderRef: string) {
     }
     
     return jsonResponse({ 
-      success: true,
+      ok: true,
+      status: 'active',
       message: "Booking confirmed successfully"
     });
   } catch (error) {
