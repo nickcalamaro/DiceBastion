@@ -282,7 +282,7 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
       timeSlots.push({ start: startTime, end: endTime });
     }
     
-    console.log('Generated time slots::', timeSlots);
+    console.log('Generated time slots:', timeSlots);
 
     // Count non-cancelled bookings for each slot (checking for overlaps)
     const slotsWithAvailability = await Promise.all(
