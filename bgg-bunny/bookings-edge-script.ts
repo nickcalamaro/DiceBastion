@@ -440,6 +440,12 @@ async function createBooking(request: Request) {
         throw new Error('INTERNAL_SECRET not configured');
       }
 
+      // Get table type name for description
+      const tableTypeResult = await client.execute({
+        sql: "SELECT name FROM booking_table_types WHERE id = ?",
+        args: [table_type_id],
+      });
+
       const tableTypeName = tableTypeResult.rows.length > 0 ? tableTypeResult.rows[0].name : 'Table Booking';
       const description = `${tableTypeName} - ${booking_date} ${start_time}`;
 
