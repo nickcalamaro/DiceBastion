@@ -421,15 +421,67 @@ async function createBooking(request: Request) {
       } catch (e) {
         console.error('Error sending confirmation email:', e);
       }
+      
+      return jsonResponse({ 
+        success: true,
+        message: "Booking created successfully",
+        booking_id: Number(insertResult.lastInsertRowid),
+        order_ref,
+        payment_required: false
+      }, 201);
     }
 
-    return jsonResponse({ 
-      success: true,
-      message: "Booking created successfully",
-      booking_id: Number(insertResult.lastInsertRowid),
-      order_ref,
-      payment_required: amount_paid > 0
-    }, 201);
+    // For paid bookings, create payment checkout
+    try {
+      const paymentsApiUrl = process.env.PAYMENTS_API_URL || 'https://dicebastion-payments.ncalamaro.workers.dev';
+      const internalSecret = process.env.INTERNAL_SECRET;
+      
+      if (!internalSecret) {
+        throw new Error('INTERNAL_SECRET not configured');
+      }
+
+      const tableTypeName = tableTypeResult.rows.length > 0 ? tableTypeResult.rows[0].name : 'Table Booking';
+      const description = `${tableTypeName} - ${booking_date} ${start_time}`;
+
+      const checkoutResponse = await fetch(`${paymentsApiUrl}/internal/checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Secret': internalSecret
+        },
+        body: JSON.stringify({
+          amount: amount_paid,
+          currency: 'GBP',
+          orderRef: order_ref,
+          description
+        })
+      });
+
+      const checkoutData = await checkoutResponse.json();
+
+      if (!checkoutResponse.ok) {
+        throw new Error(checkoutData.error || 'Payment checkout failed');
+      }
+
+      return jsonResponse({
+        success: true,
+        message: "Booking created, payment required",
+        booking_id: Number(insertResult.lastInsertRowid),
+        order_ref,
+        payment_required: true,
+        checkout_id: checkoutData.id
+      }, 201);
+
+    } catch (paymentError) {
+      console.error('Error creating payment checkout:', paymentError);
+      // Booking was created but payment checkout failed - return error but keep booking
+      return jsonResponse({ 
+        error: "Booking created but payment setup failed. Please contact support.",
+        booking_id: Number(insertResult.lastInsertRowid),
+        order_ref
+      }, 500);
+    }
+
   } catch (error) {
     console.error("Error creating booking:", error);
     return jsonResponse({ error: "Failed to create booking" }, 500);
