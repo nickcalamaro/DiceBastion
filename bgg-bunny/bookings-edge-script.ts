@@ -189,6 +189,11 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await getUserBookings(email);
     }
 
+    // GET /api/bookings/all - Get all bookings (admin endpoint)
+    if (path === "/api/bookings/all" && request.method === "GET") {
+      return await getAllBookings();
+    }
+
     // Default 404
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
@@ -602,6 +607,47 @@ async function getUserBookings(email: string) {
     });
   } catch (error) {
     console.error("Error fetching user bookings:", error);
+    return jsonResponse({ error: "Failed to fetch bookings" }, 500);
+  }
+}
+
+/**
+ * Get all bookings (admin endpoint)
+ * Returns upcoming bookings sorted by date
+ */
+async function getAllBookings() {
+  try {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    const result = await client.execute({
+      sql: `SELECT b.id, b.user_email, b.user_name, b.booking_date, b.start_time, b.end_time, 
+                   b.status, b.payment_status, b.amount_paid, b.created_at,
+                   t.name as table_type_name
+            FROM bookings b
+            LEFT JOIN booking_table_types t ON b.table_type_id = t.id
+            WHERE b.booking_date >= ?
+            ORDER BY b.booking_date ASC, b.start_time ASC
+            LIMIT 100`,
+      args: [today],
+    });
+    
+    return jsonResponse({
+      bookings: result.rows.map(row => ({
+        id: row.id,
+        user_email: row.user_email,
+        user_name: row.user_name,
+        booking_date: row.booking_date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        table_type: row.table_type_name,
+        status: row.status,
+        payment_status: row.payment_status,
+        amount_paid: Number(row.amount_paid),
+        created_at: row.created_at
+      }))
+    });
+  } catch (error) {
+    console.error("Error fetching all bookings:", error);
     return jsonResponse({ error: "Failed to fetch bookings" }, 500);
   }
 }
