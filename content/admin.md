@@ -156,7 +156,7 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
-<button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings</button>
+<button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings & Calendar</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 </div>
 
@@ -536,18 +536,43 @@ Loading memberships...
 </div>
 </div>
 
-<!-- Bookings Tab -->
+<!-- Bookings & Calendar Tab -->
 <div id="bookings-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">Upcoming Table Bookings</h2>
-<button id="refresh-bookings-btn" class="admin-btn-secondary-sm" onclick="loadBookings()">
+<h2 class="admin-m-0">📅 Bookings & Calendar</h2>
+<div class="admin-flex">
+<button id="create-block-btn" class="admin-btn-primary" onclick="showCreateBlockModal()">
++ Block Time
+</button>
+<button id="refresh-bookings-btn" class="admin-btn-secondary-sm" onclick="loadBookingsAndCalendar()">
 🔄 Refresh
 </button>
 </div>
+</div>
 
-<div id="bookings-list" style="display: grid; gap: 1rem;">
-<div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
-Click refresh to load bookings
+<!-- Calendar Week View -->
+<div class="admin-card-sm">
+<div id="calendar-nav" class="admin-flex-between admin-mb-1">
+<button id="prev-week-btn" class="admin-btn-secondary-sm" onclick="changeWeek(-1)">
+← Previous
+</button>
+<h3 id="week-display" class="admin-m-0" style="font-size: 1.1rem;"></h3>
+<button id="next-week-btn" class="admin-btn-secondary-sm" onclick="changeWeek(1)">
+Next →
+</button>
+</div>
+<div id="calendar-grid" style="display: grid; gap: 1rem;">
+<!-- Days will be populated by JavaScript -->
+</div>
+</div>
+
+<!-- Active Time Blocks -->
+<div class="admin-card-sm">
+<h3 class="admin-mt-0">⛔ Active Time Blocks</h3>
+<div id="blocks-list" style="display: grid; gap: 0.75rem;">
+<div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">
+Loading time blocks...
+</div>
 </div>
 </div>
 </div>
@@ -1282,9 +1307,9 @@ btn.style.color = 'rgb(var(--color-primary-600))';
 document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
 document.getElementById(tab + '-tab').style.display = 'block';
 
-// Auto-load data when switching to bookings tab
+// Auto-load data when switching to specific tabs
 if (tab === 'bookings') {
-  loadBookings();
+  loadBookingsAndCalendar();
 }
 });
 });
@@ -2631,6 +2656,240 @@ async function cancelBookingAdmin(bookingId) {
     console.error('Error cancelling booking:', err);
     alert(`Failed to cancel booking: ${err.message}`);
   }
+}
+
+// ====== CALENDAR & TIME BLOCKS ======
+
+let currentWeekStart = new Date();
+currentWeekStart.setHours(0, 0, 0, 0);
+// Set to Monday of current week
+const day = currentWeekStart.getDay();
+const diff = currentWeekStart.getDate() - day + (day === 0 ? -6 : 1);
+currentWeekStart.setDate(diff);
+
+async function loadTimeBlocks() {
+  try {
+    const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks');
+    const data = await response.json();
+    
+    const container = document.getElementById('blocks-list');
+    
+    if (!data.blocks || data.blocks.length === 0) {
+      container.innerHTML = '<div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">No time blocks active</div>';
+      return;
+    }
+    
+    container.innerHTML = data.blocks.map(block => `
+      <div class="card" style="padding: 1rem; display: flex; justify-content: space-between; align-items: center;">
+        <div style="flex: 1;">
+          <div style="font-weight: 600; color: rgb(var(--color-neutral-900)); margin-bottom: 0.25rem;">
+            ${block.block_date} • ${block.start_time} - ${block.end_time}
+          </div>
+          ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">${block.reason}</div>` : ''}
+        </div>
+        <button onclick="deleteTimeBlock(${block.id})" class="btn btn-secondary btn-sm" style="background: rgb(var(--color-danger-600)); color: white;">
+          Delete
+        </button>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error('Error loading time blocks:', err);
+  }
+}
+
+async function deleteTimeBlock(blockId) {
+  if (!confirm('Delete this time block?')) return;
+  
+  try {
+    const response = await fetch(`https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks/${blockId}`, {
+      method: 'DELETE'
+    });
+    
+    if (response.ok) {
+      await loadTimeBlocks();
+      await loadCalendarWeek();
+    }
+  } catch (err) {
+    console.error('Error deleting block:', err);
+    alert('Failed to delete time block');
+  }
+}
+
+function showCreateBlockModal() {
+  const userStatus = utils.session.getUserStatus();
+  
+  const modal = new Modal({
+    title: 'Block Time Slot',
+    size: 'md',
+    content: `
+      <form id="block-form" class="form-container">
+        <div class="form-group">
+          <label for="block-date" class="form-label">Date *</label>
+          <input type="date" id="block-date" required class="form-input">
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="block-start-time" class="form-label">Start Time *</label>
+            <input type="time" id="block-start-time" required class="form-input">
+          </div>
+          <div class="form-group">
+            <label for="block-end-time" class="form-label">End Time *</label>
+            <input type="time" id="block-end-time" required class="form-input">
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="block-reason" class="form-label">Reason (Optional)</label>
+          <input type="text" id="block-reason" placeholder="e.g., Staff meeting, Maintenance" class="form-input">
+        </div>
+        
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-full">Create Block</button>
+        </div>
+      </form>
+    `
+  });
+  
+  modal.open();
+  
+  document.getElementById('block-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const blockData = {
+      block_date: document.getElementById('block-date').value,
+      start_time: document.getElementById('block-start-time').value,
+      end_time: document.getElementById('block-end-time').value,
+      reason: document.getElementById('block-reason').value,
+      created_by: userStatus.user?.email || 'admin'
+    };
+    
+    try {
+      const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(blockData)
+      });
+      
+      if (response.ok) {
+        modal.close();
+        await loadTimeBlocks();
+        await loadCalendarWeek();
+      } else {
+        const data = await response.json();
+        alert('Failed to create block: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error('Error creating block:', err);
+      alert('Failed to create time block');
+    }
+  });
+}
+
+async function loadCalendarWeek() {
+  const weekDisplay = document.getElementById('week-display');
+  const calendarGrid = document.getElementById('calendar-grid');
+  
+  if (!weekDisplay || !calendarGrid) return; // Guard for when tab isn't loaded
+  
+  // Format week display
+  const endDate = new Date(currentWeekStart);
+  endDate.setDate(endDate.getDate() + 6);
+  weekDisplay.textContent = `${currentWeekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} - ${endDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  
+  // Load bookings and blocks for the week
+  try {
+    const bookingsResponse = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all');
+    const blocksResponse = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks');
+    
+    const bookingsData = await bookingsResponse.json();
+    const blocksData = await blocksResponse.json();
+    
+    // Generate 7 day cards
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(currentWeekStart);
+      date.setDate(date.getDate() + i);
+      // Use local date string to avoid timezone issues
+      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      
+      const dayBookings = bookingsData.bookings?.filter(b => b.booking_date === dateStr && b.status !== 'cancelled') || [];
+      const dayBlocks = blocksData.blocks?.filter(b => b.block_date === dateStr) || [];
+      
+      days.push({ date, dateStr, bookings: dayBookings, blocks: dayBlocks });
+    }
+    
+    calendarGrid.innerHTML = days.map(day => {
+      const isToday = day.date.toDateString() === new Date().toDateString();
+      
+      return `
+        <div class="card" style="padding: 1.5rem; ${isToday ? 'border: 2px solid rgb(var(--color-primary-600));' : ''}">
+          <div style="font-weight: 700; margin-bottom: 1rem; color: rgb(var(--color-primary-700)); font-size: 1.1rem;">
+            ${day.date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}
+            ${isToday ? '<span style="margin-left: 0.5rem; font-size: 0.875rem; background: rgb(var(--color-primary-100)); padding: 0.25rem 0.5rem; border-radius: 4px;">Today</span>' : ''}
+          </div>
+          
+          ${day.blocks.length > 0 ? day.blocks.map(block => `
+            <div style="padding: 1rem; background: rgb(var(--color-danger-50)); border-left: 4px solid rgb(var(--color-danger-600)); border-radius: 6px; margin-bottom: 1rem;">
+              <div style="font-weight: 600; color: rgb(var(--color-danger-900)); margin-bottom: 0.25rem;">
+                ⛔ BLOCKED • ${block.start_time} - ${block.end_time}
+              </div>
+              ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-danger-700));">${block.reason}</div>` : ''}
+            </div>
+          `).join('') : ''}
+          
+          ${day.bookings.length > 0 ? day.bookings.map(booking => `
+            <div class="card" style="padding: 1rem; margin-bottom: 1rem; background: rgb(var(--color-neutral-50)); border-left: 4px solid rgb(var(--color-primary-600));">
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; margin-bottom: 0.75rem;">
+                <div>
+                  <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Time</div>
+                  <div style="font-weight: 600; font-size: 0.9rem;">⏰ ${booking.start_time} - ${booking.end_time}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Table</div>
+                  <div style="font-weight: 600; font-size: 0.9rem;">${booking.table_type || 'N/A'}</div>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;">
+                <div>
+                  <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Name</div>
+                  <div style="font-weight: 500; font-size: 0.875rem;">${booking.user_name}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Email</div>
+                  <div style="font-weight: 500; font-size: 0.875rem;">${booking.user_email}</div>
+                </div>
+              </div>
+              ${booking.notes ? `
+                <div style="padding: 0.75rem; background: white; border-radius: 4px; margin-top: 0.75rem; font-size: 0.875rem;">
+                  💬 ${booking.notes}
+                </div>
+              ` : ''}
+            </div>
+          `).join('') : ''}
+          
+          ${day.bookings.length === 0 && day.blocks.length === 0 ? `
+            <div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-400)); font-size: 0.875rem;">
+              No bookings or blocks
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Error loading calendar:', err);
+    calendarGrid.innerHTML = '<div style="text-align: center; padding: 2rem; color: rgb(var(--color-danger-600));">Failed to load calendar</div>';
+  }
+}
+
+function changeWeek(direction) {
+  currentWeekStart.setDate(currentWeekStart.getDate() + (direction * 7));
+  loadCalendarWeek();
+}
+
+function loadBookingsAndCalendar() {
+  loadTimeBlocks();
+  loadCalendarWeek();
 }
 
 // Initialize
