@@ -263,7 +263,7 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
 
     // Get config from booking_config table
     const configResult = await client.execute(
-      "SELECT max_bookings_per_day, start_hour, end_hour, slot_duration_hours FROM booking_config WHERE id = 1"
+      "SELECT max_bookings, start_hour, end_hour, slot_duration_hours FROM booking_config WHERE id = 1"
     );
     
     if (configResult.rows.length === 0) {
@@ -272,7 +272,7 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
     }
     
     const config = configResult.rows[0] || {};
-    const maxBookings = Number(config.max_bookings_per_day || 4);
+    const maxBookings = Number(config.max_bookings || 4);
     const startHour = Number(config.start_hour || 10);
     const endHour = Number(config.end_hour || 22);
     const slotDuration = Number(config.slot_duration_hours || 3);
@@ -289,19 +289,20 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
     
     console.log('Generated time slots:', timeSlots);
 
-    // Count non-cancelled bookings for each slot (checking for overlaps)
+    // Count non-cancelled bookings for each slot across ALL table types
+    // max_bookings applies to total simultaneous bookings, not per table type
     const slotsWithAvailability = await Promise.all(
       timeSlots.map(async (slot) => {
         // Check for overlapping bookings: a booking overlaps if it starts before this slot ends
         // AND ends after this slot starts
+        // Count across ALL table types (removed table_type_id filter)
         const bookingCount = await client.execute({
           sql: `SELECT COUNT(*) as count FROM bookings 
                 WHERE booking_date = ? 
-                AND table_type_id = ? 
                 AND start_time < ? 
                 AND end_time > ? 
                 AND status != 'cancelled'`,
-          args: [date, tableTypeId, slot.end, slot.start]
+          args: [date, slot.end, slot.start]
         });
         
         const count = Number(bookingCount.rows[0]?.count || 0);
@@ -381,6 +382,30 @@ async function createBooking(request: Request) {
       return jsonResponse({ 
         error: "Booking already exists",
         booking_id: existingResult.rows[0].id
+      }, 409);
+    }
+
+    // Check max_bookings limit across ALL table types for this time slot
+    const configResult = await client.execute(
+      "SELECT max_bookings FROM booking_config WHERE id = 1"
+    );
+    const maxBookings = Number(configResult.rows[0]?.max_bookings || 4);
+
+    const bookingCountResult = await client.execute({
+      sql: `SELECT COUNT(*) as count FROM bookings 
+            WHERE booking_date = ? 
+            AND start_time < ? 
+            AND end_time > ? 
+            AND status != 'cancelled'`,
+      args: [booking_date, end_time, start_time]
+    });
+
+    const currentBookings = Number(bookingCountResult.rows[0]?.count || 0);
+    
+    if (currentBookings >= maxBookings) {
+      return jsonResponse({ 
+        error: "Time slot fully booked",
+        message: `This time slot has reached the maximum of ${maxBookings} simultaneous bookings.`
       }, 409);
     }
 
