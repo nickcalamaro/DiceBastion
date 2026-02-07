@@ -137,10 +137,8 @@
       }
     }
     
-    // Clear local storage
-    localStorage.removeItem('admin_session');
-    localStorage.removeItem('admin_user');
-    localStorage.removeItem('admin_token');
+    // Clear local storage (includes membership cache)
+    utils.session.clear();
     
     // Update UI
     updateLoginUI();

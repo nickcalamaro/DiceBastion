@@ -397,6 +397,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function checkMembershipStatus() {
   if (!userSession || !userSession.email) {
     membershipStatus = null;
+    utils.session.setMembershipStatus(null);
     return;
   }
 
@@ -405,13 +406,17 @@ async function checkMembershipStatus() {
     if (response.ok) {
       const data = await response.json();
       membershipStatus = data;
+      // Cache membership status for menu visibility
+      utils.session.setMembershipStatus(data);
     } else {
       console.error('Failed to fetch membership status');
       membershipStatus = null;
+      utils.session.setMembershipStatus(null);
     }
   } catch (error) {
     console.error('Error checking membership:', error);
     membershipStatus = null;
+    utils.session.setMembershipStatus(null);
   }
 }
 
@@ -420,37 +425,52 @@ async function loadTableTypes() {
   
   // Show auth prompt for non-logged-in users at the top
   const statusContainer = document.getElementById('membership-status-container');
-  if (!userSession) {
-    statusContainer.innerHTML = `
-      <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(var(--color-primary-50), 0.5), rgba(var(--color-primary-100), 0.3));">
-        <div class="card-body">
-          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 250px;">
-              <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; color: rgb(var(--color-neutral-900));">
-                💡 Have an account?
-              </h3>
-              <p style="margin: 0; color: rgb(var(--color-neutral-700)); font-size: 0.95rem;">
-                Login or register to get membership discounts and save your booking history.
-              </p>
-            </div>
-            <button type="button" class="btn btn-primary" onclick="window.authModal?.show()">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 0.5rem;">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                <circle cx="12" cy="7" r="4"></circle>
-              </svg>
-              Login / Register
-            </button>
+  statusContainer.innerHTML = ''; // Clear first
+  
+  // Create login prompt for non-logged-in users
+  const loginPrompt = document.createElement('div');
+  loginPrompt.setAttribute('data-visibility', utils.USER_LEVELS.LOGGED_OUT);
+  loginPrompt.classList.add('menu-item');
+  loginPrompt.innerHTML = `
+    <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(var(--color-primary-50), 0.5), rgba(var(--color-primary-100), 0.3));">
+      <div class="card-body">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 250px;">
+            <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; color: rgb(var(--color-neutral-900));">
+              💡 Have an account?
+            </h3>
+            <p style="margin: 0; color: rgb(var(--color-neutral-700)); font-size: 0.95rem;">
+              Login or register to get membership discounts and save your booking history.
+            </p>
           </div>
+          <button type="button" class="btn btn-primary" onclick="window.authModal?.show()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 0.5rem;">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            Login / Register
+          </button>
         </div>
       </div>
-    `;
-  } else if (membershipStatus?.active) {
-    statusContainer.innerHTML = `
-      <div class="alert alert-success" style="margin-bottom: 1.5rem;">
-        ✓ You're getting free bookings as a GWC Member. Thank you for your support!
-      </div>
-    `;
-  }
+    </div>
+  `;
+  
+  // Create member success message
+  const memberMessage = document.createElement('div');
+  memberMessage.setAttribute('data-visibility', utils.USER_LEVELS.MEMBER);
+  memberMessage.setAttribute('data-hide-style', 'display');
+  memberMessage.classList.add('menu-item');
+  memberMessage.innerHTML = `
+    <div class="alert alert-success" style="margin-bottom: 1.5rem;">
+      ✓ You're getting free bookings as a GWC Member. Thank you for your support!
+    </div>
+  `;
+  
+  statusContainer.appendChild(loginPrompt);
+  statusContainer.appendChild(memberMessage);
+  
+  // Apply visibility controls for these dynamic elements
+  utils.applyVisibilityControls();
   
   try {
     const response = await fetch(`${BOOKINGS_API}/api/bookings/table-types`);

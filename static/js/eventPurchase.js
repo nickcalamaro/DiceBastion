@@ -57,7 +57,7 @@ window.renderEventPurchase = function renderEventPurchase(event) {
         <p class="mt-0 mb-4 text-sm text-neutral-700 dark:text-neutral-300">Member discount is applied automatically if an active membership is found for your email.</p>
         <button type="button" class="evt-buy-btn w-full py-3 px-6 border-0 rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 text-base font-bold cursor-pointer shadow-md hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors" data-member-price="${event.membership_price}" data-nonmember-price="${event.non_membership_price}">Get Your Ticket</button>
       </div>
-      <div class="event-membership-promo mt-3 max-w-xl text-sm text-neutral-800 dark:text-neutral-200 bg-neutral-50 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 py-3 px-4 rounded-lg">
+      <div class="event-membership-promo mt-3 max-w-xl text-sm text-neutral-800 dark:text-neutral-200 bg-neutral-50 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 py-3 px-4 rounded-lg" data-visibility="${utils.USER_LEVELS.NON_MEMBER}" data-hide-style="display">
         <strong>Not a member yet?</strong> <span>Check out the list of benefits and sign up today!</span>
         <br>
         <a href="/memberships/" class="inline-block mt-2 py-1.5 px-4 font-semibold text-primary-700 dark:text-primary-400 bg-primary-50 dark:bg-primary-800/50 border border-primary-300 dark:border-primary-600 rounded-md hover:bg-primary-100 dark:hover:bg-primary-700/60 transition-colors">Become a member!</a>
@@ -199,6 +199,11 @@ window.initEventPurchase = function initEventPurchase(event) {
   let selectedMembershipPlan = null; // Currently selected plan for bundle
   
   if (!root || !modal) return;
+  
+  // Apply visibility controls now that the HTML is in the DOM
+  if (window.utils && window.utils.applyVisibilityControls) {
+    utils.applyVisibilityControls();
+  }
   
   // Check membership status and update button text if needed
   async function checkMembershipAndUpdateButton() {

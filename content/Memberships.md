@@ -332,10 +332,13 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     try { 
       const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}`); 
       const d = await r.json(); 
-      if (d && d.active && d.endDate) { 
+      if (d && d.active && d.endDate) {
+        // Cache membership status for other pages
+        utils.session.setMembershipStatus(d);
         return { active:true, endDate:d.endDate, plan:d.plan }; 
       } 
     } catch(_){} 
+    utils.session.setMembershipStatus(null);
     return { active:false }; 
   }
 

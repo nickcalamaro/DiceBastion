@@ -793,8 +793,7 @@ headers: { 'X-Session-Token': sessionToken }
 
 if (!res.ok) {
 // Session expired or invalid - redirect to login
-localStorage.removeItem('admin_session');
-localStorage.removeItem('admin_user');
+utils.session.clear();
 sessionToken = null;
 currentUser = null;
 document.getElementById('login-container').style.display = 'block';
@@ -858,9 +857,7 @@ headers: { 'X-Session-Token': sessionToken }
 });
 }
 
-localStorage.removeItem('admin_session');
-localStorage.removeItem('admin_user');
-localStorage.removeItem('admin_token');
+utils.session.clear();
 sessionToken = null;
 currentUser = null;
 

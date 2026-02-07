@@ -1,29 +1,38 @@
 [[main]]
 none = "none"
 
+# Visibilty options: 0 = admin only, 1 = members only, 2 = logged-in users, 3 = everyone, 5 = logged-out users only
 [[main]]
 name = "Events"
 pageRef = "Events"
 identifier = "MU5KHCnt3x"
 weight = 9997
+[main.params]
+visibility = 3
 
 [[main]]
 name = "Memberships"
 pageRef = "Memberships"
 identifier = "MU5KHCnt3z"
 weight = 9998
+[main.params]
+visibility = 3
 
 [[main]]
 name = "About Us"
 pageRef = "About"
 identifier = "MU5KHCnt3y"
 weight = 9999
+[main.params]
+visibility = 3
 
 [[main]]
 name = "Book a Table"
 pageRef = "Bookings"
 identifier = "qwkjjnq"
 weight = 133
+[main.params]
+visibility = 3
 
 
 [[main]]
@@ -31,18 +40,41 @@ name = "FAQs"
 pageRef = "FAQs"
 parent = "MU5KHCnt3y"
 weight = 1
+[main.params]
+visibility = 3
 
 [[main]]
 name = "Team"
 pageRef = "team"
 parent = "MU5KHCnt3y"
 weight = 2
+[main.params]
+visibility = 3
 
 [[main]]
 name = "Shop"
 url = "https://shop.dicebastion.com"
 identifier = "MU5KHCnt3yaa"
 weight = 10000
+[main.params]
+visibility = 3
+
+[[main]]
+name = "Login"
+url = "#"
+identifier = "login"
+weight = 10001
+[main.params]
+visibility = 5
+onclick = "window.openLoginModal()"
+
+[[main]]
+name = "Account"
+pageRef = "account"
+identifier = "account"
+weight = 10002
+[main.params]
+visibility = 2
 
 [[footer]]
 none = "none"

@@ -8,6 +8,19 @@ window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.
 
 window.utils = {
   /**
+   * User Access Levels - Centralized Definition
+   * Lower numbers = higher privileges
+   */
+  USER_LEVELS: {
+    ADMIN: 0,           // Full admin access
+    MEMBER: 1,          // Active paying member
+    LOGGED_IN: 2,       // Authenticated user (no active membership)
+    PUBLIC: 3,          // Anyone (logged in or out)
+    NON_MEMBER: 4,      // Explicitly non-members (logged in without membership OR logged out)
+    LOGGED_OUT: 5       // Only visible when NOT logged in
+  },
+
+  /**
    * Get API base URL (with optional trailing slash removal)
    */
   getApiBase: (removeTrailingSlash = false) => {
@@ -77,8 +90,30 @@ window.utils = {
       localStorage.removeItem('admin_session');
       localStorage.removeItem('admin_user');
       localStorage.removeItem('admin_token');
+      localStorage.removeItem('user_membership_status');
     },
-    isLoggedIn: () => !!localStorage.getItem('admin_session')
+    isLoggedIn: () => !!localStorage.getItem('admin_session'),
+    
+    /**
+     * Get user info and role flags (no level calculation)
+     * @returns {Object} { user, isMember, isAdmin, isLoggedIn }
+     */
+    getUserStatus: () => {
+      const user = JSON.parse(localStorage.getItem('admin_user') || 'null');
+      const isLoggedIn = !!user;
+      const isAdmin = user?.is_admin === true;
+      const membershipCache = JSON.parse(localStorage.getItem('user_membership_status') || 'null');
+      const isMember = membershipCache && membershipCache.status === 'active';
+      
+      return { user, isMember, isAdmin, isLoggedIn };
+    },
+    
+    /**
+     * Update membership status cache
+     */
+    setMembershipStatus: (membershipData) => {
+      localStorage.setItem('user_membership_status', JSON.stringify(membershipData));
+    }
   },
 
   /**
@@ -399,6 +434,48 @@ window.utils = {
     }
     
     return token;
+  },
+
+  /**
+   * Apply visibility controls to elements based on user access level
+   * ALL visibility logic is centralized here - no duplication
+   * 
+   * @param {string} selector - CSS selector for elements with data-visibility attribute
+   */
+  applyVisibilityControls: (selector = '[data-visibility]') => {
+    const { isLoggedIn, isMember, isAdmin } = utils.session.getUserStatus();
+    const elements = document.querySelectorAll(selector);
+    
+    elements.forEach(element => {
+      const level = parseInt(element.dataset.visibility || utils.USER_LEVELS.PUBLIC);
+      let shouldShow = false;
+      
+      switch(level) {
+        case utils.USER_LEVELS.ADMIN:       // 0: Admin only
+          shouldShow = isAdmin;
+          break;
+        case utils.USER_LEVELS.MEMBER:      // 1: Members (+ admins)
+          shouldShow = isAdmin || isMember;
+          break;
+        case utils.USER_LEVELS.LOGGED_IN:   // 2: Any logged-in user
+          shouldShow = isLoggedIn;
+          break;
+        case utils.USER_LEVELS.PUBLIC:      // 3: Everyone
+          shouldShow = true;
+          break;
+        case utils.USER_LEVELS.NON_MEMBER:  // 4: Non-members only (upsells)
+          shouldShow = !isMember;
+          break;
+        case utils.USER_LEVELS.LOGGED_OUT:  // 5: Logged-out only (login buttons)
+          shouldShow = !isLoggedIn;
+          break;
+      }
+      
+      element.classList.toggle('hidden', !shouldShow);
+      if (element.dataset.hideStyle === 'display') {
+        element.style.display = shouldShow ? '' : 'none';
+      }
+    });
   },
 
   /**

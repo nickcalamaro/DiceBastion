@@ -2,20 +2,66 @@
  * Login Status Manager
  * Shared across main site and shop to display login state
  * Depends on: utils.js
+ * 
+ * VISIBILITY SYSTEM:
+ * Use data-visibility attribute on any element to control role-based access.
+ * Values correspond to utils.USER_LEVELS:
+ * 
+ *   0 (ADMIN)       = Admins only
+ *   1 (MEMBER)      = Admins + Active Members
+ *   2 (LOGGED_IN)   = Admins + Members + Any logged-in user
+ *   3 (PUBLIC)      = Everyone (default - no restrictions)
+ *   4 (NON_MEMBER)  = Non-members only (includes logged-out users AND logged-in non-members)
+ *   5 (LOGGED_OUT)  = Logged-out users only
+ * 
+ * Best Practice: Use named constants from utils.USER_LEVELS when setting values in JavaScript
+ * 
+ * HTML Examples:
+ *   <div data-visibility="0">Admin dashboard link</div>
+ *   <div data-visibility="1">Member exclusive perks</div>
+ *   <button data-visibility="2">Account settings (any logged-in user)</button>
+ *   <div data-visibility="3">Public content (no restrictions)</div>
+ *   <div data-visibility="4">Membership upsell promo</div>
+ *   <button data-visibility="5">Login/Register button</button>
+ * 
+ * JavaScript Example:
+ *   promoDiv.setAttribute('data-visibility', utils.USER_LEVELS.NON_MEMBER);
+ * 
+ * After dynamically adding elements with data-visibility, call:
+ *   utils.applyVisibilityControls();
  */
 
 (function() {
   'use strict';
 
-  // Check if user is logged in by checking localStorage
-  function checkLoginStatus() {
-    return utils.session.getUser();
+  // Fetch and cache membership status on page load
+  async function initializeMembershipStatus() {
+    const sessionToken = localStorage.getItem('admin_session');
+    if (!sessionToken) return;
+    
+    try {
+      const API_BASE = utils.getApiBase();
+      const resp = await fetch(`${API_BASE}/account/info`, {
+        headers: { 'X-Session-Token': sessionToken }
+      });
+      
+      if (resp.ok) {
+        const data = await resp.json();
+        const membershipData = data.membership !== null && data.membership !== undefined ? data.membership : null;
+        utils.session.setMembershipStatus(membershipData);
+      }
+    } catch (e) {
+      console.log('[loginStatus] Could not fetch membership status:', e);
+    }
   }
 
   // Update login status in the UI
-  function updateLoginUI() {
+  async function updateLoginUI() {
+    // Fetch membership first if logged in
+    await initializeMembershipStatus();
+    
     const loginContainer = document.getElementById('login-status-container');
-    const user = checkLoginStatus();
+    const { user, isAdmin } = utils.session.getUserStatus();
     
     // Update footer login/account link
     if (loginContainer) {
@@ -24,7 +70,7 @@
         loginContainer.innerHTML = `
           <span class="text-sm text-neutral-600 dark:text-neutral-400">
             <span class="hidden sm:inline">Logged in as </span>
-            <a href="${user.is_admin ? '/admin' : '/account'}" class="font-medium hover:text-primary-600 dark:hover:text-primary-400 hover:underline" title="${user.is_admin ? 'Go to Admin Dashboard' : 'Go to Account'}">
+            <a href="${isAdmin ? '/admin' : '/account'}" class="font-medium hover:text-primary-600 dark:hover:text-primary-400 hover:underline" title="${isAdmin ? 'Go to Admin Dashboard' : 'Go to Account'}">
               ${utils.escapeHtml(user.email)}
             </a>
             <span class="mx-2">|</span>
@@ -49,62 +95,10 @@
       }
     }
     
-    // Update main navigation menu
-    updateNavigationMenu(user);
+    // Update all visibility-controlled elements (menus, promos, etc.)
+    utils.applyVisibilityControls();
   }
   
-  // Update navigation menu to show Login or Account
-  function updateNavigationMenu(user) {
-    // Desktop menu
-    const desktopNav = document.querySelector('nav.hidden.md\\:flex');
-    if (desktopNav) {
-      // Remove existing login/account link
-      const existingLink = desktopNav.querySelector('#nav-account-link');
-      if (existingLink) {
-        existingLink.remove();
-      }
-      
-      // Add new link before search/appearance switcher
-      const searchButton = desktopNav.querySelector('#search-button');
-      const linkHtml = user && user.email
-        ? `<a id="nav-account-link" href="/account" class="text-base hover:text-primary-600 dark:hover:text-primary-400" title="My Account">Account</a>`
-        : `<button id="nav-account-link" onclick="window.openLoginModal()" class="text-base hover:text-primary-600 dark:hover:text-primary-400 cursor-pointer" title="Log in to your account">Login</button>`;
-      
-      if (searchButton) {
-        searchButton.insertAdjacentHTML('beforebegin', linkHtml);
-      } else {
-        // If no search button, add before appearance switcher or at the end
-        const appearanceSwitcher = desktopNav.querySelector('#appearance-switcher');
-        if (appearanceSwitcher && appearanceSwitcher.parentElement) {
-          appearanceSwitcher.parentElement.insertAdjacentHTML('beforebegin', linkHtml);
-        } else {
-          desktopNav.insertAdjacentHTML('beforeend', linkHtml);
-        }
-      }
-    }
-    
-    // Mobile menu
-    const mobileMenuWrapper = document.querySelector('#menu-wrapper ul');
-    if (mobileMenuWrapper) {
-      // Remove existing login/account link
-      const existingMobileLink = mobileMenuWrapper.querySelector('#nav-account-link-mobile');
-      if (existingMobileLink) {
-        existingMobileLink.remove();
-      }
-      
-      // Add new link after close button
-      const closeButton = mobileMenuWrapper.querySelector('#menu-close-button');
-      const linkHtml = user && user.email
-        ? `<li id="nav-account-link-mobile" class="mb-1"><a href="/account" class="flex items-center text-base hover:text-primary-600 dark:hover:text-primary-400">Account</a></li>`
-        : `<li id="nav-account-link-mobile" class="mb-1"><button onclick="window.openLoginModal()" class="flex items-center text-base hover:text-primary-600 dark:hover:text-primary-400 cursor-pointer">Login</button></li>`;
-      
-      if (closeButton) {
-        closeButton.insertAdjacentHTML('afterend', linkHtml);
-      }
-    }
-  }
-
-  // Escape HTML to prevent XSS
   // Logout function
   window.logoutUser = async function() {
     const sessionToken = utils.session.get();
@@ -132,7 +126,7 @@
     window.location.reload();
   };
   
-  // Function to open login modal (to be called from footer)
+  // Function to open login modal
   window.openLoginModal = function() {
     if (window.authModal && typeof window.authModal.show === 'function') {
       window.authModal.show();

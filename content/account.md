@@ -184,9 +184,7 @@ if (!response.ok) {
 if (response.status === 401) {
     // Session expired
     console.log('Session expired, logging out');
-    localStorage.removeItem('admin_session');
-    localStorage.removeItem('admin_user');
-    localStorage.removeItem('admin_token');
+    utils.session.clear(); // Use centralized clear method
     loadingState.style.display = 'none';
     notLoggedInState.style.display = 'block';
     return;

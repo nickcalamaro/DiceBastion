@@ -18,8 +18,8 @@
     <p class="mt-0 mb-4 text-sm text-neutral-700 dark:text-neutral-300">Member discount is applied automatically if an active membership is found for your email.</p>
     <button type="button" class="evt-buy-btn w-full py-3 px-6 border-0 rounded-lg bg-primary-600 dark:bg-primary-500 text-neutral-50 text-base font-bold cursor-pointer shadow-md hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors" data-event-id="{{ .Get "id" }}">Buy Ticket</button>
   </div>
-  <!-- New membership promo block -->
-  <div class="event-membership-promo mt-3 max-w-xl text-sm text-neutral-800 dark:text-neutral-200 bg-neutral-50 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 py-3 px-4 rounded-lg opacity-100">
+  <!-- Membership promo (visibility controlled by JS) -->
+  <div class="event-membership-promo menu-item mt-3 max-w-xl text-sm text-neutral-800 dark:text-neutral-200 bg-neutral-50 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 py-3 px-4 rounded-lg" data-visibility="4" data-hide-style="display" data-event-id="{{ .Get "id" }}">
     <strong>Not a member yet?</strong> <span>Check out the list of benefits and sign up today!</span>
     <br>
     <a href="/memberships/" class="inline-block mt-2 py-1.5 px-4 font-semibold text-primary-700 dark:text-primary-400 bg-primary-50 dark:bg-primary-800/50 border border-primary-300 dark:border-primary-600 rounded-md hover:bg-primary-100 dark:hover:bg-primary-700/60 transition-colors">Become a member!</a>
@@ -96,31 +96,9 @@
 
   async function loadEvent(){
     try {
-      // Check if user has active membership
-      const sessionToken = localStorage.getItem('admin_session');
-      if (sessionToken) {
-        try {
-          const accountResp = await fetch(API_BASE + '/account/info', {
-            headers: { 'X-Session-Token': sessionToken }
-          });
-          if (accountResp.ok) {
-            const accountData = await accountResp.json();
-            hasActiveMembership = accountData.membership !== null && accountData.membership !== undefined;
-            console.log('[eventPurchase] Membership check:', { 
-              hasMembership: hasActiveMembership, 
-              email: accountData.user?.email,
-              membershipData: accountData.membership 
-            });
-          } else {
-            const errorData = await accountResp.json();
-            console.log('[eventPurchase] Account info failed:', accountResp.status, errorData);
-          }
-        } catch (e) {
-          console.log('[eventPurchase] Could not check membership status:', e);
-        }
-      } else {
-        console.log('[eventPurchase] No session token found');
-      }
+      // Use cached membership status from session
+      const { isMember } = utils.session.getUserStatus();
+      hasActiveMembership = isMember;
       
       const r = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId));
       const j = await r.json();
@@ -138,6 +116,9 @@
       
       // Determine applicable price for this user
       userApplicablePrice = hasActiveMembership ? Number(ev.membership_price || 0) : Number(ev.non_membership_price || 0);
+      
+      // Apply visibility controls after membership status is determined
+      utils.applyVisibilityControls();
       
       // Update button text based on price
       const buyBtn = root && root.querySelector('.evt-buy-btn');
@@ -291,6 +272,17 @@
     });
   }
 
+  // Wait for membership status to be ready before applying visibility
+  async function initializeVisibility() {
+    // Wait a bit for loginStatus.js to fetch membership
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    if (window.utils && window.utils.applyVisibilityControls) {
+      utils.applyVisibilityControls();
+    }
+  }
+  
+  initializeVisibility();
   loadEvent();
 })();
 </script>
