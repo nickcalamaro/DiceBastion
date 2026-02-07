@@ -11,6 +11,7 @@ var openMenu = function (e) {
     menuButton.style.visibility = "hidden";
     menuWrapper.style.visibility = "visible";
     menuWrapper.style.opacity = "1";
+    menuWrapper.style.pointerEvents = "auto";
     window.onbeforeunload = function (event) {
       closeMenu()
     }
@@ -24,6 +25,7 @@ var closeMenu = function (e) {
     menuButton.style.visibility = "visible";
     menuWrapper.style.visibility = "hidden";
     menuWrapper.style.opacity = "0";
+    menuWrapper.style.pointerEvents = "none";
     window.onbeforeunload = function (event) { }
     e.stopPropagation();
   }
