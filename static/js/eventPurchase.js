@@ -224,9 +224,8 @@ window.initEventPurchase = function initEventPurchase(event) {
             // Update applicable price
             userApplicablePrice = hasActiveMembership ? memberPrice : nonMemberPrice;
             
-            // If member price is 0, update button text but DON'T auto-register without user interaction
+            // Track if this is free for member, but don't change button text
             if (hasActiveMembership && memberPrice === 0) {
-              buyBtn.textContent = 'Register for Free';
               buyBtn.dataset.isFreeForMember = 'true';
             }
           }
@@ -1023,7 +1022,12 @@ window.initEventPurchase = function initEventPurchase(event) {
         if (btnEl) btnEl.textContent = 'Complete Registration';
         
         // Render Turnstile
-        renderTurnstileForLoggedIn();
+        turnstileRenderTimeout = setTimeout(() => {
+          turnstileRenderTimeout = null;
+          renderTurnstile(true).catch((e) => {
+            console.error('Failed to render Turnstile:', e);
+          });
+        }, 50);
       }
       return;
     }
