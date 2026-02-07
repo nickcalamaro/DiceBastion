@@ -1089,11 +1089,8 @@ window.initEventPurchase = function initEventPurchase(event) {
         console.log('Cancelled pending Turnstile render');
       }
       
-      // Clean up both Turnstile widgets
-      window.utils.cleanupTurnstile(turnstileWidgetId, 'evt-ts-' + eventId);
+      // Note: Turnstile cleanup happens automatically on next render via element replacement
       turnstileWidgetId = null;
-      
-      window.utils.cleanupTurnstile(turnstileLoggedWidgetId, 'evt-ts-logged-' + eventId);
       turnstileLoggedWidgetId = null;
       
       // Use the unmount helper to properly clean up SumUp widget

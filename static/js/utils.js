@@ -310,48 +310,41 @@ window.utils = {
       try {
         window.turnstile.remove(widgetState.widgetId);
         console.log('Turnstile widget removed:', widgetState.widgetId);
+        widgetState.widgetId = null;
       } catch(e) {
         console.log('Turnstile remove failed:', e);
       }
     }
 
-    // Clear container and reset state
-    element.innerHTML = '';
+    // Aggressive cleanup: remove any widgets from this container
     try {
-      if (window.turnstile.getResponse) {
-        const existingResponse = window.turnstile.getResponse(element);
-        if (existingResponse !== undefined) {
-          console.log('Found orphaned Turnstile widget, attempting cleanup');
-          window.turnstile.reset(element);
-        }
-      }
+      // Try to remove by element reference
+      window.turnstile.remove(element);
+      console.log('Removed any existing widget from element');
     } catch(e) {
       // Expected if no widget exists
     }
 
-    // Small delay to ensure DOM is ready
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // Render new widget
-    try {
-      const widgetId = window.turnstile.render(element, {
-        sitekey,
-        size: 'flexible'
-      });
+    // Clear container completely - replace it with a fresh clone
+    const parent = element.parentNode;
+    if (parent) {
+      const newElement = element.cloneNode(false);
+      parent.replaceChild(newElement, element);
+      console.log('Replaced Turnstile container with fresh clone');
       
-      if (widgetState) {
-        widgetState.widgetId = widgetId;
+      // Update reference to new element
+      const freshElement = document.getElementById(elementId);
+      if (!freshElement) {
+        console.error('Failed to get fresh element after replacement');
+        return null;
       }
-      
-      console.log('Turnstile widget rendered with ID:', widgetId);
-      return widgetId;
-    } catch(e) {
-      console.error('Turnstile render failed:', e);
-      // Retry once with fresh container
-      element.innerHTML = '';
+
+      // Small delay to ensure DOM is ready
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Render new widget in fresh container
       try {
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const widgetId = window.turnstile.render(element, {
+        const widgetId = window.turnstile.render(freshElement, {
           sitekey,
           size: 'flexible'
         });
@@ -360,15 +353,18 @@ window.utils = {
           widgetState.widgetId = widgetId;
         }
         
-        console.log('Turnstile widget rendered (retry):', widgetId);
+        console.log('Turnstile widget rendered with ID:', widgetId);
         return widgetId;
-      } catch(e2) {
-        console.error('Turnstile render failed again:', e2);
+      } catch(e) {
+        console.error('Turnstile render failed:', e);
         if (widgetState) {
           widgetState.widgetId = null;
         }
         return null;
       }
+    } else {
+      console.error('Element has no parent, cannot replace');
+      return null;
     }
   },
 

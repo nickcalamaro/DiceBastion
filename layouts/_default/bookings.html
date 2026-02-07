@@ -345,6 +345,7 @@ let userSession = null;
 let membershipStatus = null;
 let paymentModal = null;
 let authModal = null;
+let bookingTurnstileWidgetId = null; // Track Turnstile widget for cleanup
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Use the global auth modal from footer and add custom success handler
@@ -678,9 +679,15 @@ function selectSlot(slot, btnElement) {
     document.getElementById('user-name').value = userSession.name || '';
   }
   
-  // Render Turnstile
+  // Render Turnstile (cleanup handled automatically by utils)
   setTimeout(() => {
-    utils.renderTurnstile('turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+    utils.renderTurnstile('turnstile-container', TS_SITE_KEY, { 
+      skipOnLocalhost: IS_LOCALHOST 
+    });
+  }, 100);
+      skipOnLocalhost: IS_LOCALHOST,
+      widgetState
+    }).catch(e => console.error('Turnstile render failed:', e));
   }, 100);
   
   // Scroll to booking form

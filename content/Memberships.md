@@ -134,9 +134,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
       const sumupCardEl = membershipModal.querySelector('#sumup-card');
       if (sumupCardEl) sumupCardEl.innerHTML = '';
       
-      // Clean up Turnstile widgets using shared utility
-      window.utils.cleanupTurnstile(null, 'mship-ts');
-      window.utils.cleanupTurnstile(null, 'mship-ts-logged');
+      // Note: Turnstile cleanup happens automatically on next render via element replacement
       
       membershipModal.close();
       membershipModal = null;
