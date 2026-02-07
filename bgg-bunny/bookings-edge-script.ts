@@ -194,6 +194,22 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await getAllBookings();
     }
 
+    // GET /api/bookings/blocks - Get all booking blocks
+    if (path === "/api/bookings/blocks" && request.method === "GET") {
+      return await getBlockedTimes();
+    }
+
+    // POST /api/bookings/blocks - Create a new time block (admin only)
+    if (path === "/api/bookings/blocks" && request.method === "POST") {
+      return await createTimeBlock(request);
+    }
+
+    // DELETE /api/bookings/blocks/:id - Delete a time block (admin only)
+    if (path.match(/^\/api\/bookings\/blocks\/\d+$/) && request.method === "DELETE") {
+      const blockId = parseInt(path.split("/")[4]);
+      return await deleteTimeBlock(blockId);
+    }
+
     // Default 404
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
@@ -293,6 +309,28 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
     // max_bookings applies to total simultaneous bookings, not per table type
     const slotsWithAvailability = await Promise.all(
       timeSlots.map(async (slot) => {
+        // Check if this slot is blocked by a time block
+        const blockCheck = await client.execute({
+          sql: `SELECT COUNT(*) as count FROM booking_blocks
+                WHERE block_date = ?
+                AND start_time < ?
+                AND end_time > ?`,
+          args: [date, slot.end, slot.start]
+        });
+        
+        const isBlocked = Number(blockCheck.rows[0]?.count || 0) > 0;
+        
+        // If blocked, mark as unavailable with 0 spots
+        if (isBlocked) {
+          return {
+            start_time: slot.start,
+            end_time: slot.end,
+            spots_left: 0,
+            available: false,
+            blocked: true
+          };
+        }
+        
         // Check for overlapping bookings: a booking overlaps if it starts before this slot ends
         // AND ends after this slot starts
         // Count across ALL table types (removed table_type_id filter)
@@ -312,7 +350,8 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
           start_time: slot.start,
           end_time: slot.end,
           spots_left: spotsLeft,
-          available: spotsLeft > 0
+          available: spotsLeft > 0,
+          blocked: false
         };
       })
     );
@@ -725,5 +764,95 @@ async function cancelBooking(bookingId: number) {
   } catch (error) {
     console.error("Error cancelling booking:", error);
     return jsonResponse({ error: "Failed to cancel booking" }, 500);
+  }
+}
+
+/**
+ * Get all blocked time periods
+ */
+async function getBlockedTimes() {
+  try {
+    const result = await client.execute(
+      `SELECT id, block_date, start_time, end_time, reason, created_at, created_by
+       FROM booking_blocks 
+       ORDER BY block_date ASC, start_time ASC`
+    );
+
+    return jsonResponse({
+      blocks: result.rows
+    });
+  } catch (error) {
+    console.error("Error fetching blocked times:", error);
+    return jsonResponse({ error: "Failed to fetch blocked times" }, 500);
+  }
+}
+
+/**
+ * Create a new time block (prevents bookings during specified period)
+ */
+async function createTimeBlock(request: Request) {
+  try {
+    const data = await request.json();
+    const { block_date, start_time, end_time, reason, created_by } = data;
+
+    // Validate required fields
+    if (!block_date || !start_time || !end_time) {
+      return jsonResponse({ 
+        error: "Missing required fields: block_date, start_time, end_time" 
+      }, 400);
+    }
+
+    // Validate date format
+    if (!block_date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
+    }
+
+    // Validate time formats
+    if (!start_time.match(/^\d{2}:\d{2}$/) || !end_time.match(/^\d{2}:\d{2}$/)) {
+      return jsonResponse({ error: "Invalid time format. Use HH:MM" }, 400);
+    }
+
+    const now = new Date().toISOString();
+
+    // Insert the block
+    const result = await client.execute({
+      sql: `INSERT INTO booking_blocks 
+            (block_date, start_time, end_time, reason, created_at, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [block_date, start_time, end_time, reason || null, now, created_by || null],
+    });
+
+    return jsonResponse({ 
+      success: true,
+      message: "Time block created successfully",
+      block_id: Number(result.lastInsertRowid)
+    }, 201);
+  } catch (error) {
+    console.error("Error creating time block:", error);
+    return jsonResponse({ error: "Failed to create time block" }, 500);
+  }
+}
+
+/**
+ * Delete a time block
+ */
+async function deleteTimeBlock(blockId: number) {
+  try {
+    const result = await client.execute({
+      sql: "DELETE FROM booking_blocks WHERE id = ?",
+      args: [blockId],
+    });
+
+    if (result.rowsAffected === 0) {
+      return jsonResponse({ error: "Block not found" }, 404);
+    }
+
+    return jsonResponse({ 
+      success: true,
+      message: "Time block deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting time block:", error);
+    return jsonResponse({ error: "Failed to delete time block" }, 500);
   }
 }
