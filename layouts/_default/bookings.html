@@ -685,10 +685,6 @@ function selectSlot(slot, btnElement) {
       skipOnLocalhost: IS_LOCALHOST 
     });
   }, 100);
-      skipOnLocalhost: IS_LOCALHOST,
-      widgetState
-    }).catch(e => console.error('Turnstile render failed:', e));
-  }, 100);
   
   // Scroll to booking form
   setTimeout(() => {
