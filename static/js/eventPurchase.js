@@ -300,9 +300,8 @@ window.initEventPurchase = function initEventPurchase(event) {
                   <input type="radio" name="bundle-plan" value="${plan.code}" ${index === 0 ? 'checked' : ''} style="width: 1.25rem; height: 1.25rem; cursor: pointer;">
                   <div style="flex: 1;">
                     <div style="font-weight: 600; color: rgb(var(--color-neutral-900)); font-size: 0.938rem;">${plan.name}</div>
-                    <div style="font-size: 0.813rem; color: rgb(var(--color-neutral-600)); margin-top: 0.125rem;">${plan.months} ${plan.months === 1 ? 'month' : 'months'} membership</div>
                   </div>
-                  <div style="font-weight: 700; color: rgb(var(--color-primary-600)); font-size: 1.125rem;">£${plan.bundlePrice.toFixed(2)}</div>
+                  <div style="font-weight: 700; color: rgb(var(--color-primary-600)); font-size: 1.125rem;">£${plan.price.toFixed(2)}</div>
                 </label>
               `).join('')}
             </div>
