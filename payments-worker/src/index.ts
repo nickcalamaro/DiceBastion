@@ -269,25 +269,21 @@ app.post('/internal/checkout', async (c) => {
 		}
 
 		// For card tokenization, use minimal amount with SETUP_RECURRING_PAYMENT purpose
-		if (savePaymentInstrument && customerId && amount === 0) {
+		// When savePaymentInstrument is requested, ALWAYS use the tokenization path
+		// The real charge is made separately after the card is saved
+		if (savePaymentInstrument && customerId) {
 			// SumUp requires amount and currency even for tokenization
-			// Use minimal amount (0.01) for verification
+			// Use minimal amount (0.01) — SumUp auths and instantly releases this
 			checkoutBody.amount = 0.01
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
 			checkoutBody.customer_id = customerId
-			console.log('[Checkout] Creating tokenization checkout with minimal amount:', JSON.stringify(checkoutBody))
+			console.log('[Checkout] Creating tokenization-only checkout (£0.01 auth):', JSON.stringify(checkoutBody))
 		} else {
-			// For regular payments, use the provided amount
+			// Regular payment (no card saving) — use the provided amount
 			checkoutBody.amount = Number(amount)
 			checkoutBody.currency = currency
-			
-			// If saving payment instrument with a payment, add the customer info
-			if (savePaymentInstrument && customerId) {
-				checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
-				checkoutBody.customer_id = customerId
-				console.log('[Checkout] Creating payment checkout:', JSON.stringify(checkoutBody))
-			}
+			console.log('[Checkout] Creating regular payment checkout:', JSON.stringify(checkoutBody))
 		}
 
 		const res = await fetch('https://api.sumup.com/v0.1/checkouts', {
@@ -351,10 +347,13 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 		})
 
 		if (!res.ok) {
-			throw new Error('Failed to fetch payment')
+			const txt = await res.text()
+			console.error('[Payment] SumUp API error:', res.status, txt)
+			throw new Error(`Failed to fetch payment (${res.status}): ${txt}`)
 		}
 
 		const payment = await res.json()
+		console.log('[Payment] Retrieved checkout:', checkoutId, 'status:', payment.status)
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Fetch payment error:', error)

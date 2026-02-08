@@ -1741,58 +1741,17 @@ app.post('/register', async c => {
     // Check if user already exists
     console.log('[User Register] Checking if user exists...')
     const existingUser = await c.env.DB.prepare(`
-      SELECT user_id, email, password_hash, name, is_active
+      SELECT user_id, email, name, is_active
       FROM users
       WHERE email = ?
     `).bind(email).first()
     
     if (existingUser) {
-      // If user exists with a password, they should login instead
-      if (existingUser.password_hash && existingUser.password_hash.trim() !== '') {
-        console.log('[User Register] User already exists with password')
-        return c.json({ 
-          error: 'user_already_exists', 
-          message: 'An account with this email already exists. Please login instead.' 
-        }, 409)
-      }
-      
-      // User exists but has no password - complete their setup
-      console.log('[User Register] User exists without password, completing setup')
-      const passwordHash = await bcrypt.hash(password, 10)
-      
-      await c.env.DB.prepare(`
-        UPDATE users
-        SET password_hash = ?, name = ?, is_active = 1, updated_at = ?
-        WHERE user_id = ?
-      `).bind(passwordHash, name, new Date().toISOString(), existingUser.user_id).run()
-      
-      // Create session for auto-login
-      const sessionToken = crypto.randomUUID()
-      const now = new Date()
-      const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days
-      
-      await c.env.DB.prepare(`
-        INSERT INTO user_sessions (user_id, session_token, created_at, expires_at, last_activity)
-        VALUES (?, ?, ?, ?, ?)
-      `).bind(
-        existingUser.user_id,
-        sessionToken,
-        toIso(now),
-        toIso(expiresAt),
-        toIso(now)
-      ).run()
-      
-      console.log('[User Register] Setup completed, session created')
-      return c.json({
-        success: true,
-        session_token: sessionToken,
-        user: {
-          id: existingUser.user_id,
-          email: email,
-          name: name,
-          is_admin: false
-        }
-      })
+      console.log('[User Register] User already exists')
+      return c.json({ 
+        error: 'user_already_exists', 
+        message: 'An account with this email already exists. Please login instead.' 
+      }, 409)
     }
     
     // Create brand new user
@@ -2073,7 +2032,7 @@ app.get('/account-setup/check', async c => {
     
     // Find user by email
     const user = await c.env.DB.prepare(`
-      SELECT user_id, email, name, password_hash
+      SELECT user_id, email, name
       FROM users
       WHERE email = ? AND is_active = 1
     `).bind(email).first()
@@ -2082,11 +2041,9 @@ app.get('/account-setup/check', async c => {
       return c.json({ needsSetup: false, reason: 'user_not_found' })
     }
     
-    // Check if user already has a password
-    const needsSetup = !user.password_hash || user.password_hash === null || user.password_hash.trim() === ''
-    
+    // All users now have passwords - no setup needed via this flow
     return c.json({ 
-      needsSetup,
+      needsSetup: false,
       email: user.email,
       name: user.name
     })
@@ -2105,55 +2062,9 @@ app.post('/account-setup/request', async c => {
       return c.json({ error: 'email_required' }, 400)
     }
     
-    // Find user by email
-    const user = await c.env.DB.prepare(`
-      SELECT user_id, email, name, password_hash
-      FROM users
-      WHERE email = ? AND is_active = 1
-    `).bind(email).first()
-    
+    // This endpoint is deprecated - all users must register with passwords
     // Always return success for security (don't reveal if user exists)
-    if (user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')) {
-      console.log('[Account Setup Request] User found without password, generating setup token')
-      
-      // Generate a secure setup token (similar to password reset)
-      const setupToken = crypto.randomUUID() + '-' + crypto.randomUUID()
-      const expiresAt = new Date(Date.now() + 30* 24 * 60 * 60 * 1000) // 30 days expiry (longer than password reset)
-      
-      // Store the setup token in password_reset_tokens table (reusing for account setup)
-      // If source is 'modal', don't send email immediately (email_sent = 0)
-      const sendEmailNow = source !== 'modal'
-      await c.env.DB.prepare(`
-        INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at, email_sent, source)
-        VALUES (?, ?, ?, 0, ?, ?, ?)
-      `).bind(user.user_id, setupToken, expiresAt.toISOString(), new Date().toISOString(), sendEmailNow ? 1 : 0, source || 'direct').run()
-      
-      // Generate setup link
-      const setupLink = `https://dicebastion.com/account-setup?token=${setupToken}`
-      
-      // Only send email immediately if not from modal
-      if (sendEmailNow) {
-        const emailHtml = getAccountCreationInviteEmail(user.name || user.email, user.email, setupLink)
-        
-        await sendEmail(c.env, {
-          to: user.email,
-          subject: '🎉 One More Step - Create Your Dice Bastion Account',
-          html: emailHtml,
-          emailType: 'account_setup_invite',
-          relatedId: user.user_id,
-          relatedType: 'user'
-        })
-        
-        console.log('[Account Setup Request] Setup email sent to', user.email)
-      } else {
-        console.log('[Account Setup Request] Email sending delayed for modal flow')
-      }
-      
-      // Return the token so frontend can display password form immediately
-      return c.json({ success: true, token: setupToken, email: user.email, name: user.name })
-    } else {
-      console.log('[Account Setup Request] User not found or already has password, but returning success for security')
-    }
+    console.log('[Account Setup Request] Endpoint deprecated - users must register with passwords')
     
     return c.json({ success: true })
   } catch (error) {
@@ -2165,84 +2076,9 @@ app.post('/account-setup/request', async c => {
 // Complete account setup (set password)
 app.post('/account-setup/complete', async c => {
   try {
-    const { token, password, consent_essential, consent_marketing } = await c.req.json()
-    
-    if (!token || !password) {
-      return c.json({ error: 'token_and_password_required' }, 400)
-    }
-    
-    if (password.length < 8) {
-      return c.json({ error: 'password_too_short' }, 400)
-    }
-    
-    // Find valid setup token
-    const setupRecord = await c.env.DB.prepare(`
-      SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.name, u.password_hash
-      FROM password_reset_tokens prt
-      JOIN users u ON prt.user_id = u.user_id
-      WHERE prt.token = ? AND prt.used = 0
-    `).bind(token).first()
-    
-    if (!setupRecord) {
-      console.log('[Account Setup Complete] Invalid or already used token')
-      return c.json({ error: 'invalid_token' }, 404)
-    }
-    
-    // Check if token has expired
-    const expiresAt = new Date(setupRecord.expires_at)
-    if (expiresAt < new Date()) {
-      console.log('[Account Setup Complete] Token has expired')
-      return c.json({ error: 'token_expired' }, 400)
-    }
-    
-    // Check if user already has a password (shouldn't happen, but just in case)
-    if (setupRecord.password_hash && setupRecord.password_hash.trim() !== '') {
-      console.log('[Account Setup Complete] User already has a password')
-      return c.json({ error: 'already_has_password' }, 400)
-    }
-    
-    console.log('[Account Setup Complete] Token valid, hashing password')
-    
-    // Hash the password
-    const passwordHash = await bcrypt.hash(password, 10)
-    
-    // Update user's password
-    await c.env.DB.prepare(`
-      UPDATE users
-      SET password_hash = ?, updated_at = ?
-      WHERE user_id = ?
-    `).bind(passwordHash, new Date().toISOString(), setupRecord.user_id).run()
-
-    // Store email consent preferences
-    // Always store essential consent as true
-    const now = new Date().toISOString();
-    await c.env.DB.prepare(`
-      INSERT OR REPLACE INTO email_preferences 
-      (user_id, essential_emails, marketing_emails, consent_given, consent_date, last_updated)
-      VALUES (?, 1, ?, 1, ?, ?)
-    `).bind(setupRecord.user_id, consent_marketing ? 1 : 0, now, now).run()
-    
-    // Mark token as used
-    await c.env.DB.prepare(`
-      UPDATE password_reset_tokens
-      SET used = 1
-      WHERE id = ?
-    `).bind(setupRecord.id).run()
-    
-    // Send welcome email
-    const welcomeHtml = getNewAccountWelcomeEmail(setupRecord.name || setupRecord.email)
-    await sendEmail(c.env, {
-      to: setupRecord.email,
-      subject: '🎉 Welcome to Dice Bastion!',
-      html: welcomeHtml,
-      emailType: 'new_account_welcome',
-      relatedId: setupRecord.user_id,
-      relatedType: 'user'
-    })
-    
-    console.log('[Account Setup Complete] Account setup successful for', setupRecord.email)
-    
-    return c.json({ success: true, email: setupRecord.email })
+    // This endpoint is deprecated - all users must register with passwords
+    console.log('[Account Setup Complete] Endpoint deprecated - users should use password reset if needed')
+    return c.json({ error: 'endpoint_deprecated', message: 'Please use the password reset flow' }, 410)
   } catch (error) {
     console.error('[Account Setup Complete] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
@@ -2912,12 +2748,15 @@ app.post('/membership/checkout', async (c) => {
         console.log('Using SumUp customer ID for auto-renewal:', customerId)
       }
       
+      // For auto-renewal: use amount 0 for tokenization-only checkout
+      // SumUp's SETUP_RECURRING_PAYMENT auths a minimal amount (0.01) and instantly releases it
+      // The real membership charge is made after card tokenization using the saved instrument
       checkout = await createCheckout(c.env, { 
-        amount, 
+        amount: autoRenewValue === 1 ? 0 : amount, 
         currency, 
         orderRef: order_ref, 
         title: `Dice Bastion ${plan} membership`, 
-        description: `Membership for ${plan}`,
+        description: autoRenewValue === 1 ? `Card setup for ${plan} membership` : `Membership for ${plan}`,
         savePaymentInstrument: autoRenewValue === 1,
         customerId
       })
@@ -3020,8 +2859,7 @@ app.get('/membership/confirm', async (c) => {
       cardLast4 = instrument?.last_4 || null
     }
     
-    // Check if user needs account setup (no password set)
-    const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
+    // All users now have passwords from registration
     
     return c.json({ 
       ok: true, 
@@ -3032,7 +2870,6 @@ app.get('/membership/confirm', async (c) => {
       currency: transaction.currency || 'GBP',
       autoRenew: pending.auto_renew === 1,
       cardLast4,
-      needsAccountSetup: needsAccountSetup,
       userEmail: user?.email || transaction.email
     })
   }
@@ -3056,9 +2893,15 @@ app.get('/membership/confirm', async (c) => {
     })
   }
   
-  // Verify amount/currency
-  if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
-    return c.json({ ok:false, error:'payment_mismatch' },400)
+  // For tokenization checkouts (SETUP_RECURRING_PAYMENT), the payment amount is a minimal auth (0.01)
+  // The real amount will be charged separately using the saved payment instrument
+  const isTokenizationCheckout = payment.purpose === 'SETUP_RECURRING_PAYMENT'
+  
+  // Verify amount/currency (skip for tokenization - real charge happens after card is saved)
+  if (!isTokenizationCheckout) {
+    if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
+      return c.json({ ok:false, error:'payment_mismatch' },400)
+    }
   }
     const s = await getSchema(c.env.DB)
   const identityId = pending.user_id
@@ -3196,8 +3039,7 @@ app.get('/membership/confirm', async (c) => {
     cardLast4 = instrument?.last_4 || null
   }
   
-  // Check if user needs account setup (no password set)
-  const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
+  // All users now have passwords from registration
   
   return c.json({ 
     ok: true, 
@@ -3208,7 +3050,6 @@ app.get('/membership/confirm', async (c) => {
     currency: transaction.currency || 'GBP',
     autoRenew: pending.auto_renew === 1,
     cardLast4,
-    needsAccountSetup: needsAccountSetup,
     userEmail: user?.email || transaction.email,
     emailSent  // Let frontend know if welcome email was sent
   })
@@ -3258,21 +3099,68 @@ app.post('/webhooks/sumup', async (c) => {
   const months = Number(svc.months || 0)
   const start = baseStart
   const end = addMonths(baseStart, months)
-  await c.env.DB.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ? WHERE id = ?').bind(toIso(start), toIso(end), paymentId, pending.id).run()
+  // Get the transaction record to find the real payment amount
+  const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "membership"').bind(orderRef).first()
   
-  // Save payment instrument if auto-renewal is enabled
+  let actualPaymentId = paymentId
+  let instrumentId = null
+  
+  // Save payment instrument and charge actual amount if auto-renewal is enabled
   if (pending.auto_renew === 1) {
-    console.log('Auto-renewal enabled, attempting to save payment instrument for checkout:', paymentId)
-    const instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
+    console.log('[webhook] Auto-renewal enabled, saving payment instrument for checkout:', paymentId)
+    instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
     if (instrumentId) {
-      console.log('Payment instrument saved successfully:', instrumentId)
-      // Store instrument ID in membership record for reference
-      await c.env.DB.prepare('UPDATE memberships SET payment_instrument_id = ? WHERE id = ?')
-        .bind(instrumentId, pending.id).run()
+      console.log('[webhook] Payment instrument saved successfully:', instrumentId)
+      
+      // If tokenization checkout, charge the real amount with the saved instrument
+      if (payment.purpose === 'SETUP_RECURRING_PAYMENT' && transaction) {
+        console.log('[webhook] Tokenization detected - charging saved instrument for actual membership payment')
+        try {
+          const chargeResult = await chargePaymentInstrument(
+            c.env,
+            identityId,
+            instrumentId,
+            transaction.amount,
+            transaction.currency || 'GBP',
+            `${orderRef}-charge`,
+            `Dice Bastion ${pending.plan} membership payment`
+          )
+          
+          if (chargeResult && chargeResult.id) {
+            actualPaymentId = chargeResult.id
+            console.log('[webhook] Successfully charged saved instrument:', actualPaymentId)
+            
+            // Create a transaction record for the actual charge
+            await c.env.DB.prepare(`
+              INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
+                                        payment_id, amount, currency, payment_status, created_at)
+              VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
+            `).bind(
+              pending.id,
+              identityId,
+              transaction.email,
+              transaction.name,
+              `${orderRef}-charge`,
+              actualPaymentId,
+              transaction.amount,
+              transaction.currency || 'GBP',
+              toIso(new Date())
+            ).run()
+          } else {
+            console.error('[webhook] Failed to charge saved instrument - tokenization succeeded but real payment failed')
+          }
+        } catch (chargeError) {
+          console.error('[webhook] Error charging saved instrument:', chargeError)
+        }
+      }
     } else {
-      console.warn('Failed to save payment instrument, but membership activation will continue')
+      console.warn('[webhook] Failed to save payment instrument, but membership activation will continue')
     }
   }
+  
+  // Activate membership with correct payment ID and instrument
+  await c.env.DB.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ?, payment_instrument_id = ? WHERE id = ?')
+    .bind(toIso(start), toIso(end), actualPaymentId, instrumentId, pending.id).run()
   
   // Send welcome email (critical - works even if user closed browser)
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
@@ -3297,7 +3185,7 @@ app.post('/webhooks/sumup', async (c) => {
       plan: pending.plan,
       customerName: user?.name || 'Customer',
       customerEmail: user?.email || 'unknown@example.com',
-      amount: payment.amount,
+      amount: transaction ? transaction.amount : payment.amount,
       autoRenew: pending.auto_renew === 1,
       membershipId: pending.id,
       orderRef: orderRef
@@ -3309,7 +3197,7 @@ app.post('/webhooks/sumup', async (c) => {
       emailType: 'admin_membership_notification',
       relatedId: pending.id,
       relatedType: 'membership',
-      metadata: { plan: pending.plan, amount: payment.amount }
+      metadata: { plan: pending.plan, amount: transaction ? transaction.amount : payment.amount }
     }).catch(err => {
       console.error('Webhook admin email failed:', err)
       // Don't fail webhook if admin email fails
@@ -3659,7 +3547,7 @@ app.get('/events/confirm', async c => {
         console.error('[Bundle Confirm] Failed to send admin notification:', adminEmailError)
       }
       
-      const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
+      // All users now have passwords from registration
       
       return c.json({ 
         ok: true, 
@@ -3672,7 +3560,6 @@ app.get('/events/confirm', async c => {
         eventDate: ev.event_datetime,
         amount: transaction.amount,
         currency: transaction.currency || 'GBP',
-        needsAccountSetup: needsAccountSetup,
         userEmail: user?.email || transaction.email
       })
     }
@@ -3873,8 +3760,7 @@ app.get('/events/confirm', async c => {
       // Don't fail the main transaction if admin email fails
     }
     
-    // Check if user needs account setup (no password set)
-    const needsAccountSetup = user && (!user.password_hash || user.password_hash === null || user.password_hash.trim() === '')
+    // All users now have passwords from registration
     
     // For recurring events, calculate and return the next occurrence date
     let displayDate = ev.event_datetime
@@ -3893,7 +3779,6 @@ app.get('/events/confirm', async c => {
       ticketCount: 1,
       amount: transaction.amount,
       currency: transaction.currency || 'GBP',
-      needsAccountSetup: needsAccountSetup,
       userEmail: user?.email || transaction.email,
       emailSent  // Let frontend know if confirmation email was sent
     })
@@ -4074,8 +3959,7 @@ app.post('/events/:id/register', async c => {
     }
       console.log('[FREE EVENT REGISTRATION] Registration complete, returning ticketId:', ticketId)
     
-    // Check if user needs account setup (no password set)
-    const needsAccountSetup = !ident.password_hash || ident.password_hash === null || ident.password_hash.trim() === ''
+    // All users now have passwords from registration
     
     return c.json({ 
       success: true,
@@ -4083,7 +3967,6 @@ app.post('/events/:id/register', async c => {
       eventName: ev.event_name,
       eventDate: ev.event_datetime,
       ticketId: ticketId,
-      needsAccountSetup: needsAccountSetup,
       userEmail: email
     })
   } catch (e) {

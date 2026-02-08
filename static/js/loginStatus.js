@@ -132,6 +132,18 @@
       window.authModal.show();
     }
   };
+  
+  // Handle menu items with data-action attribute
+  document.addEventListener('click', function(e) {
+    const actionElement = e.target.closest('[data-action]');
+    if (actionElement) {
+      const action = actionElement.getAttribute('data-action');
+      if (action === 'login') {
+        e.preventDefault();
+        window.openLoginModal();
+      }
+    }
+  });
 
   // Listen for storage events to sync across tabs
   window.addEventListener('storage', function(e) {

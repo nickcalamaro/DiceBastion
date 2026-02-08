@@ -61,12 +61,12 @@ visibility = 3
 
 [[main]]
 name = "Login"
-url = "#"
+url = "#login"
 identifier = "login"
 weight = 10001
 [main.params]
 visibility = 5
-onclick = "window.openLoginModal()"
+action = "login"
 
 [[main]]
 name = "Account"
@@ -76,5 +76,12 @@ weight = 10002
 [main.params]
 visibility = 2
 
+[[main]]
+name = "Admin"
+pageRef = "a"
+identifier = "admin"
+weight = 10003
+[main.params]
+visibility = 0
 [[footer]]
 none = "none"
