@@ -15,102 +15,113 @@ showDate: false
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
 
 <style>
-/* Admin Dashboard Standardized Styles */
+/* Admin Dashboard - Minimal Custom Styles */
+/* Inherits from forms.css, only unique admin components */
 
-/* Containers */
-.admin-container { max-width: 400px; margin: 5rem auto; }
-.admin-wide-container { max-width: 600px; margin: 5rem auto; }
-.admin-card { background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; }
-.admin-card-sm { background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem; }
-
-/* Form Groups */
-.admin-form-group { margin-bottom: 1.5rem; }
-.admin-form-group-mb { margin-bottom: 1rem; }
-
-/* Labels */
-.admin-label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
-.admin-label-inline { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
-
-/* Inputs */
-.admin-input { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; }
-.admin-input-text { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 1rem; }
-.admin-textarea { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit; }
-.admin-select { width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; }
-
-/* Buttons */
-.admin-btn-primary { padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
-.admin-btn-primary-full { width: 100%; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; }
-.admin-btn-secondary { padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
-.admin-btn-secondary-sm { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
-.admin-btn-link { padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block; }
-
-/* Rich Text Editor */
-.admin-editor { border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; min-height: 200px; }
-.admin-editor-toolbar { border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 0.5rem; background: rgb(var(--color-neutral-50)); display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.admin-editor-btn { padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; }
-.admin-editor-content { padding: 1rem; min-height: 150px; outline: none; font-family: inherit; }
-
-/* Grid Layouts */
+.admin-container { max-width: 450px; margin: 5rem auto; padding: 0 1rem; }
+.admin-wide-container { max-width: 600px; margin: 5rem auto; padding: 0 1rem; }
 .admin-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .admin-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
-
-/* Flex Layouts */
 .admin-flex { display: flex; gap: 1rem; }
 .admin-flex-center { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
 .admin-flex-between { display: flex; justify-content: space-between; align-items: center; }
-
-/* Typography */
 .admin-text-center { text-align: center; }
 .admin-text-small { color: rgb(var(--color-neutral-500)); font-size: 0.875rem; }
-.admin-text-mono { font-family: monospace; }
-
-/* Spacing */
+.dark .admin-text-small { color: rgb(var(--color-neutral-400)); }
 .admin-mb-1 { margin-bottom: 1rem; }
 .admin-mb-2 { margin-bottom: 2rem; }
 .admin-mt-0 { margin-top: 0; }
 .admin-m-0 { margin: 0; }
+.admin-icon-lg { font-size: 3rem; margin-bottom: 1rem; }
+
+/* Rich Text Editor */
+.admin-editor { border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; min-height: 200px; background: white; }
+.dark .admin-editor { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); }
+.admin-editor-toolbar { border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 0.5rem; background: rgb(var(--color-neutral-50)); display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.dark .admin-editor-toolbar { background: rgb(var(--color-neutral-900)); border-bottom-color: rgb(var(--color-neutral-700)); }
+.admin-editor-btn { padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
+.dark .admin-editor-btn { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-200)); }
+.admin-editor-btn:hover { background: rgb(var(--color-neutral-100)); }
+.dark .admin-editor-btn:hover { background: rgb(var(--color-neutral-700)); }
+.admin-editor-content { padding: 1rem; min-height: 150px; outline: none; font-family: inherit; color: rgb(var(--color-neutral-900)); }
+.dark .admin-editor-content { color: rgb(var(--color-neutral-100)); }
 
 /* Tabs */
 .admin-tab-bar { border-bottom: 2px solid rgb(var(--color-neutral-200)); margin-bottom: 2rem; }
-.admin-tab-btn { padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600)); }
+.dark .admin-tab-bar { border-bottom-color: rgb(var(--color-neutral-700)); }
+.admin-tab-btn { padding: 1rem 2rem; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-600)); transition: color 0.2s, border-color 0.2s; }
+.dark .admin-tab-btn { color: rgb(var(--color-neutral-400)); }
+.admin-tab-btn:hover { color: rgb(var(--color-neutral-800)); }
+.dark .admin-tab-btn:hover { color: rgb(var(--color-neutral-200)); }
 .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-600)); color: rgb(var(--color-primary-600)); }
+.dark .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-400)); color: rgb(var(--color-primary-400)); }
 
-/* Alerts */
-.admin-error { display: none; margin-top: 1rem; padding: 0.75rem; background: #fee; color: #c00; border-radius: 6px; font-size: 0.875rem; }
+/* Info/category containers */
 .admin-info-box { background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
-.admin-info-highlight { background: rgb(var(--color-neutral-50)); padding: 1rem; border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200)); }
-
-/* Category Tags */
+.dark .admin-info-box { background: rgb(var(--color-neutral-900)); }
 .admin-category-container { display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 2rem; padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral-50)); }
+.dark .admin-category-container { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
 
-/* Misc */
-.admin-icon-lg { font-size: 3rem; margin-bottom: 1rem; }
-.admin-link { color: rgb(var(--color-primary-600)); text-decoration: none; font-weight: 500; display: flex; align-items: center; gap: 0.5rem; }
+/* Item cards (extends forms.css .card) */
+.item-card { background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+.dark .item-card { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-700)); }
+.item-card h3 { margin-top: 0; margin-bottom: 0.5rem; color: rgb(var(--color-neutral-900)); }
+.dark .item-card h3 { color: rgb(var(--color-neutral-100)); }
+.item-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+
+/* Recurring fields container */
+.recurring-container { padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200)); }
+.dark .recurring-container { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+
+/* Stat cards */
+.stat-card { border-radius: 12px; padding: 1.5rem; color: white; }
+.stat-card-label { font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem; }
+.stat-card-value { font-size: 2rem; font-weight: 700; }
+
+/* Table container */
+.table-wrapper { background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; overflow: hidden; }
+.dark .table-wrapper { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-700)); }
+.table-wrapper table { width: 100%; border-collapse: collapse; }
+.table-wrapper thead { background: rgb(var(--color-neutral-100)); }
+.dark .table-wrapper thead { background: rgb(var(--color-neutral-900)); }
+.table-wrapper th { padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-900)); }
+.dark .table-wrapper th { border-bottom-color: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-100)); }
+.table-wrapper td { padding: 1rem; border-bottom: 1px solid rgb(var(--color-neutral-100)); color: rgb(var(--color-neutral-900)); }
+.dark .table-wrapper td { border-bottom-color: rgb(var(--color-neutral-800)); color: rgb(var(--color-neutral-100)); }
+
+/* Image cropper */
+.image-preview { max-width: 200px; max-height: 200px; border-radius: 6px; margin-top: 0.5rem; }
+#crop-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 9999; align-items: center; justify-content: center; }
+#crop-modal.is-open { display: flex; }
+.crop-container { background: white; border-radius: 12px; padding: 1rem 2rem 2rem 2rem; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; overflow-y: auto; }
+.dark .crop-container { background: rgb(var(--color-neutral-800)); color: rgb(var(--color-neutral-100)); }
+.crop-container h2 { margin-top: 0; margin-bottom: 1rem; }
+.crop-image-container { max-height: 50vh; margin: 1rem 0; overflow: hidden; }
 </style>
 
 <div id="admin-page">
 <!-- Login Form -->
 <div id="login-container" class="admin-container">
 <h1 class="admin-text-center admin-mb-2">Admin Login</h1>
-<form id="login-form" class="admin-card">
-<div class="admin-form-group">
-<label for="admin-email" class="admin-label">Email</label>
-<input type="email" id="admin-email" required autocomplete="email" class="admin-input-text">
+<form id="login-form" class="card card-centered">
+<div class="form-group">
+<label for="admin-email" class="form-label">Email</label>
+<input type="email" id="admin-email" required autocomplete="email" class="form-input">
 </div>
-<div class="admin-form-group">
-<label for="admin-password" class="admin-label">Password</label>
-<input type="password" id="admin-password" required autocomplete="current-password" class="admin-input-text">
+<div class="form-group">
+<label for="admin-password" class="form-label">Password</label>
+<input type="password" id="admin-password" required autocomplete="current-password" class="form-input">
 </div>
-<button type="submit" class="admin-btn-primary-full">
+<button type="submit" class="btn btn-primary btn-full">
 Login
 </button>
-<div id="login-error" class="admin-error"></div>
+<div id="login-error" class="alert alert-error" style="display: none;"></div>
 </form>
 </div>
 
 <!-- Non-Admin Message -->
 <div id="non-admin-container" class="admin-wide-container" style="display: none;">
-<div class="admin-card admin-text-center">
+<div class="card card-centered admin-text-center">
 <div class="admin-icon-lg">🔒</div>
 <h2 class="admin-mt-0 admin-mb-1">Admin Access Required</h2>
 <p style="color: rgb(var(--color-neutral-600)); margin-bottom: 1.5rem;">
@@ -118,17 +129,17 @@ You're logged in as <strong id="non-admin-email-display"></strong>, but you don'
 </p>
 <div class="admin-info-box">
 <p class="admin-m-0" style="color: rgb(var(--color-neutral-700));">
-If you need to manage products, events, or orders, please contact our team to request admin access.
+<span class="dark:text-neutral-300">If you need to manage products, events, or orders, please contact our team to request admin access.</span>
 </p>
 </div>
 <div class="admin-flex-center">
-<a href="/" class="admin-btn-link">
+<a href="/" class="btn btn-primary" style="text-decoration: none;">
 Go to Home
 </a>
-<a href="/events" class="admin-btn-secondary">
+<a href="/events" class="btn btn-secondary" style="text-decoration: none;">
 Browse Events
 </a>
-<button id="non-admin-logout-btn" class="admin-btn-secondary">
+<button id="non-admin-logout-btn" class="btn btn-secondary">
 Logout
 </button>
 </div>
@@ -140,10 +151,10 @@ Logout
 <div class="admin-flex-between admin-mb-2">
   <h1 class="admin-m-0">Admin Dashboard</h1>
   <div class="admin-flex">
-    <a href="/admin/docs/" class="admin-link">
+    <a href="/admin/docs/" class="link" style="display: flex; align-items: center; gap: 0.5rem;">
       📚 <span>Developer Docs</span>
     </a>
-    <button id="logout-btn" class="admin-btn-secondary-sm">
+    <button id="logout-btn" class="btn btn-secondary btn-sm">
       Logout
     </button>
   </div>
@@ -162,31 +173,31 @@ Logout
 
 <!-- Products Tab -->
 <div id="products-tab" class="tab-content">
-<div class="admin-card-sm">
+<div class="card card-compact">
 <h2 id="product-form-title">Add New Product</h2>
 <form id="product-form">
 <input type="hidden" id="product-id">
 
 <div class="admin-grid-2 admin-mb-1">
 <div>
-<label class="admin-label">Product Name *</label>
-<input type="text" id="product-name" required class="admin-input">
+<label class="form-label">Product Name *</label>
+<input type="text" id="product-name" required class="form-input">
 </div>
 <div>
-<label class="admin-label">URL Slug *</label>
-<input type="text" id="product-slug" required class="admin-input">
+<label class="form-label">URL Slug *</label>
+<input type="text" id="product-slug" required class="form-input">
 <small class="admin-text-small">Auto-generated from name</small>
 </div>
 </div>
 
 <div class="admin-mb-1">
-<label class="admin-label">Summary</label>
-<textarea id="product-summary" rows="2" placeholder="Brief description shown on product cards" class="admin-textarea"></textarea>
+<label class="form-label">Summary</label>
+<textarea id="product-summary" rows="2" placeholder="Brief description shown on product cards" class="form-textarea"></textarea>
 <small class="admin-text-small">Short text displayed on product cards</small>
 </div>
 
 <div class="admin-mb-1">
-<label class="admin-label">Full Description</label>
+<label class="form-label">Full Description</label>
 <div class="admin-editor">
 <div class="admin-editor-toolbar">
 <button type="button" onclick="formatText('bold')" class="admin-editor-btn" style="font-weight: bold;">B</button>
@@ -202,62 +213,58 @@ Logout
 
 <div class="admin-grid-3 admin-mb-1">
 <div>
-<label class="admin-label">Price (£) *</label>
-<input type="number" id="product-price" step="0.01" required class="admin-input">
+<label class="form-label">Price (£) *</label>
+<input type="number" id="product-price" step="0.01" required class="form-input">
 </div>
 <div>
-<label class="admin-label">Stock Quantity *</label>
-<input type="number" id="product-stock" required class="admin-input">
+<label class="form-label">Stock Quantity *</label>
+<input type="number" id="product-stock" required class="form-input">
 </div>
 </div>
 
 <div class="admin-mb-1">
-<label class="admin-label">Categories (up to 3)</label>
+<label class="form-label">Categories (up to 3)</label>
 <div id="category-tags" class="admin-category-container"></div>
 <div class="admin-flex">
-<input type="text" id="category-input" placeholder="Type category name..." class="admin-input" style="flex: 1;">
-<button type="button" onclick="addCategory()" class="admin-btn-primary" style="padding: 0.75rem 1.5rem;">Add</button>
+<input type="text" id="category-input" placeholder="Type category name..." class="form-input" style="flex: 1;">
+<button type="button" onclick="addCategory()" class="btn btn-primary" style="padding: 0.75rem 1.5rem;">Add</button>
 </div>
 <div id="existing-categories" class="admin-flex" style="margin-top: 0.5rem;"></div>
 <small class="admin-text-small">Click existing categories below to add them, or type a new one</small>
 </div>
 
 <div class="admin-mb-1">
-<label class="admin-label">Image URL</label>
-<input type="url" id="product-image" placeholder="https://..." class="admin-input">
+<label class="form-label">Image URL</label>
+<input type="url" id="product-image" placeholder="https://..." class="form-input">
 <small class="admin-text-small">Or upload an image below</small>
 </div>
 
 <div class="admin-mb-1">
-<label class="admin-label">Upload Image</label>
-<input type="file" id="product-image-upload" accept="image/*" class="admin-input">
+<label class="form-label">Upload Image</label>
+<input type="file" id="product-image-upload" accept="image/*" class="form-input">
 <div id="product-image-preview" style="margin-top: 0.5rem;"></div>
 </div>
 
-<div class="admin-mb-1">
-<label class="admin-label-inline">
-<input type="checkbox" id="product-active" checked>
-<span>Active (visible in shop)</span>
-</label>
+<div class="checkbox-group admin-mb-1">
+<input type="checkbox" id="product-active" checked class="checkbox-input">
+<label for="product-active" class="checkbox-label">Active (visible in shop)</label>
 </div>
 
-<div class="admin-mb-1">
-<label class="admin-label-inline">
-<input type="checkbox" id="product-preorder" onchange="togglePreorderDate()">
-<span>This is a pre-order item</span>
-</label>
+<div class="checkbox-group admin-mb-1">
+<input type="checkbox" id="product-preorder" onchange="togglePreorderDate()" class="checkbox-input">
+<label for="product-preorder" class="checkbox-label">This is a pre-order item</label>
 </div>
 
 <div id="preorder-date-container" class="admin-mb-1" style="display: none;">
-<label class="admin-label">Expected Release Date</label>
-<input type="date" id="product-release-date" class="admin-input" style="background: rgb(var(--color-neutral)); color: rgb(var(--color-neutral-900));">
+<label class="form-label">Expected Release Date</label>
+<input type="date" id="product-release-date" class="form-input">
 </div>
 
 <div class="admin-flex">
-<button type="submit" class="admin-btn-primary" style="flex: 1;">
+<button type="submit" class="btn btn-primary" style="flex: 1;">
 <span id="product-submit-text">Add Product</span>
 </button>
-<button type="button" id="cancel-product-edit" class="admin-btn-secondary" style="display: none;">Cancel</button>
+<button type="button" id="cancel-product-edit" class="btn btn-secondary" style="display: none;">Cancel</button>
 </div>
 </form>
 </div>
@@ -268,85 +275,85 @@ Logout
 
 <!-- Events Tab -->
 <div id="events-tab" class="tab-content" style="display: none;">
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
+<div class="card card-compact">
 <h2 id="event-form-title">Add New Event</h2>
 <form id="event-form">
 <input type="hidden" id="event-id">
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Event Title *</label>
-<input type="text" id="event-title" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<div class="form-group">
+<label class="form-label">Event Title *</label>
+<input type="text" id="event-title" required class="form-input">
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Organised By</label>
-<input type="text" id="event-organiser" placeholder="e.g., John Smith, Gaming Club" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Person or group organising this event (optional)</small>
+<div class="form-group">
+<label class="form-label">Organised By</label>
+<input type="text" id="event-organiser" placeholder="e.g., John Smith, Gaming Club" class="form-input">
+<small class="admin-text-small">Person or group organising this event (optional)</small>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
-<input type="text" id="event-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: monospace;">
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Auto-generated from title, used in URL</small>
+<div class="form-group">
+<label class="form-label">URL Slug *</label>
+<input type="text" id="event-slug" required class="form-input" style="font-family: monospace;">
+<small class="admin-text-small">Auto-generated from title, used in URL</small>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Summary</label>
-<textarea id="event-description" rows="3" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="Short description for event cards..."></textarea>
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Brief summary shown on events listing</small>
+<div class="form-group">
+<label class="form-label">Summary</label>
+<textarea id="event-description" rows="3" class="form-textarea" placeholder="Short description for event cards..."></textarea>
+<small class="admin-text-small">Brief summary shown on events listing</small>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Full Description</label>
-<div id="event-description-editor" style="border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; min-height: 200px;">
-<div style="border-bottom: 1px solid rgb(var(--color-neutral-200)); padding: 0.5rem; background: rgb(var(--color-neutral-50)); display: flex; gap: 0.5rem; flex-wrap: wrap;">
-<button type="button" onclick="formatEventText('bold')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; font-weight: bold;">B</button>
-<button type="button" onclick="formatEventText('italic')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; font-style: italic;">I</button>
-<button type="button" onclick="formatEventText('underline')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; text-decoration: underline;">U</button>
-<button type="button" onclick="formatEventText('insertUnorderedList')" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer;">• List</button>
-<button type="button" onclick="insertEventLink()" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer;">🔗 Link</button>
+<div class="form-group">
+<label class="form-label">Full Description</label>
+<div id="event-description-editor" class="admin-editor">
+<div class="admin-editor-toolbar">
+<button type="button" onclick="formatEventText('bold')" class="admin-editor-btn" style="font-weight: bold;">B</button>
+<button type="button" onclick="formatEventText('italic')" class="admin-editor-btn" style="font-style: italic;">I</button>
+<button type="button" onclick="formatEventText('underline')" class="admin-editor-btn" style="text-decoration: underline;">U</button>
+<button type="button" onclick="formatEventText('insertUnorderedList')" class="admin-editor-btn">• List</button>
+<button type="button" onclick="insertEventLink()" class="admin-editor-btn">🔗 Link</button>
 </div>
-<div id="event-full-description" contenteditable="true" style="padding: 1rem; min-height: 150px; outline: none; font-family: inherit;" placeholder="Detailed event information..."></div>
+<div id="event-full-description" contenteditable="true" class="admin-editor-content" placeholder="Detailed event information..."></div>
 </div>
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Rich text shown on event detail page</small>
+<small class="admin-text-small">Rich text shown on event detail page</small>
 </div>
 
-<div id="one-time-date-fields" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-  <div>
-    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Date *</label>
-    <input type="date" id="event-date" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<div id="one-time-date-fields" class="admin-grid-2 admin-mb-1">
+  <div class="form-group">
+    <label class="form-label">Date *</label>
+    <input type="date" id="event-date" required class="form-input">
   </div>
-  <div>
-    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Time</label>
-    <input type="time" id="event-time" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  <div class="form-group">
+    <label class="form-label">Time</label>
+    <input type="time" id="event-time" class="form-input">
   </div>
 </div>
 
-<div style="margin-bottom: 1rem;">
-  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 1rem;">
-    <input type="checkbox" id="event-is-recurring" onchange="toggleRecurringFields()">
-    <span style="font-weight: 600;">Recurring Event</span>
-  </label>
+<div class="form-group">
+  <div class="checkbox-group admin-mb-1">
+    <input type="checkbox" id="event-is-recurring" onchange="toggleRecurringFields()" class="checkbox-input">
+    <label for="event-is-recurring" class="checkbox-label" style="font-weight: 600;">Recurring Event</label>
+  </div>
   
-  <div id="recurring-fields" style="display: none; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200));">
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-      <div>
-        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Recurrence Type</label>
-        <select id="recurrence-type" onchange="updateRecurrenceFields()" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  <div id="recurring-fields" class="recurring-container" style="display: none;">
+    <div class="admin-grid-2 admin-mb-1">
+      <div class="form-group">
+        <label class="form-label">Recurrence Type</label>
+        <select id="recurrence-type" onchange="updateRecurrenceFields()" class="form-select">
           <option value="weekly">Weekly</option>
           <option value="monthly_day">Monthly (by day)</option>
           <option value="monthly_date">Monthly (by date)</option>
         </select>
       </div>
-      <div>
-        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Time *</label>
-        <input type="time" id="recurring-time" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+      <div class="form-group">
+        <label class="form-label">Time *</label>
+        <input type="time" id="recurring-time" class="form-input">
       </div>
     </div>
 
-<div id="weekly-fields" style="display: none;">
-    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Day of Week</label>
-    <select id="weekly-day" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; margin-bottom: 1rem;">
+<div id="weekly-fields" class="form-group" style="display: none;">
+    <label class="form-label">Day of Week</label>
+    <select id="weekly-day" class="form-select">
     <option value="1">Monday</option>
     <option value="2">Tuesday</option>
     <option value="3">Wednesday</option>
@@ -358,10 +365,10 @@ Logout
 </div>
 
 <div id="monthly-day-fields" style="display: none;">
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-    <div>
-        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Week of Month</label>
-        <select id="monthly-week" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <div class="admin-grid-2 admin-mb-1">
+    <div class="form-group">
+        <label class="form-label">Week of Month</label>
+        <select id="monthly-week" class="form-select">
         <option value="1">First</option>
         <option value="2">Second</option>
         <option value="3">Third</option>
@@ -369,9 +376,9 @@ Logout
         <option value="5">Last</option>
         </select>
     </div>
-    <div>
-        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Day of Week</label>
-        <select id="monthly-day" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <div class="form-group">
+        <label class="form-label">Day of Week</label>
+        <select id="monthly-day" class="form-select">
         <option value="1">Monday</option>
         <option value="2">Tuesday</option>
         <option value="3">Wednesday</option>
@@ -384,72 +391,68 @@ Logout
     </div>
 </div>
 
-<div id="monthly-date-fields" style="display: none;">
-    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Day of Month</label>
-    <input type="number" id="monthly-date" min="1" max="31" placeholder="15" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; margin-bottom: 1rem;">
+<div id="monthly-date-fields" class="form-group" style="display: none;">
+    <label class="form-label">Day of Month</label>
+    <input type="number" id="monthly-date" min="1" max="31" placeholder="15" class="form-input">
 </div>
 
-<div>
-    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">End Date (optional)</label>
-    <input type="date" id="recurrence-end-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Leave empty for indefinite recurrence</small>
+<div class="form-group">
+    <label class="form-label">End Date (optional)</label>
+    <input type="date" id="recurrence-end-date" class="form-input">
+    <small class="admin-text-small">Leave empty for indefinite recurrence</small>
 </div>
 </div>
 </div>
 
-<div style="margin-bottom: 1rem;">
-  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 1rem;">
-    <input type="checkbox" id="event-requires-purchase" checked onchange="toggleEventPricing()">
-    <span style="font-weight: 600;">Requires Ticket Purchase</span>
-  </label>
+<div class="checkbox-group admin-mb-1">
+  <input type="checkbox" id="event-requires-purchase" checked onchange="toggleEventPricing()" class="checkbox-input">
+  <label for="event-requires-purchase" class="checkbox-label" style="font-weight: 600;">Requires Ticket Purchase</label>
 </div>
 
 <div id="event-pricing-fields">
-<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+<div class="admin-grid-3 admin-mb-1">
 <div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Member Price (£) *</label>
-<input type="number" id="event-member-price" step="0.01" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<label class="form-label">Member Price (£) *</label>
+<input type="number" id="event-member-price" step="0.01" required class="form-input">
 </div>
 <div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Non-Member Price (£) *</label>
-<input type="number" id="event-nonmember-price" step="0.01" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<label class="form-label">Non-Member Price (£) *</label>
+<input type="number" id="event-nonmember-price" step="0.01" required class="form-input">
 </div>
 <div>
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Max Attendees</label>
-<input type="number" id="event-max-attendees" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<label class="form-label">Max Attendees</label>
+<input type="number" id="event-max-attendees" class="form-input">
 </div>
 </div>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Location</label>
-<input type="text" id="event-location" placeholder="Gibraltar Warhammer Club" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<div class="form-group">
+<label class="form-label">Location</label>
+<input type="text" id="event-location" placeholder="Gibraltar Warhammer Club" class="form-input">
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Image URL</label>
-<input type="url" id="event-image" placeholder="https://..." style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-<small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">Or upload an image below</small>
+<div class="form-group">
+<label class="form-label">Image URL</label>
+<input type="url" id="event-image" placeholder="https://..." class="form-input">
+<small class="admin-text-small">Or upload an image below</small>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Upload Image</label>
-<input type="file" id="event-image-upload" accept="image/*" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<div class="form-group">
+<label class="form-label">Upload Image</label>
+<input type="file" id="event-image-upload" accept="image/*" class="form-input">
 <div id="event-image-preview" style="margin-top: 0.5rem;"></div>
 </div>
 
-<div style="margin-bottom: 1rem;">
-<label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-<input type="checkbox" id="event-active" checked>
-<span>Active (visible on website)</span>
-</label>
+<div class="checkbox-group admin-mb-1">
+<input type="checkbox" id="event-active" checked class="checkbox-input">
+<label for="event-active" class="checkbox-label">Active (visible on website)</label>
 </div>
 
-<div style="display: flex; gap: 1rem;">
-<button type="submit" style="flex: 1; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+<div class="admin-flex">
+<button type="submit" class="btn btn-primary" style="flex: 1;">
 <span id="event-submit-text">Add Event</span>
 </button>
-<button type="button" id="cancel-event-edit" style="display: none; padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">Cancel</button>
+<button type="button" id="cancel-event-edit" class="btn btn-secondary" style="display: none;">Cancel</button>
 </div>
 </form>
 </div>
@@ -473,16 +476,16 @@ Logout
 
 <!-- Memberships Tab -->
 <div id="memberships-tab" class="tab-content" style="display: none;">
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-<h2 style="margin: 0;">Active Memberships</h2>
-<div style="display: flex; gap: 1rem; align-items: center;">
-<select id="membership-filter" onchange="loadMemberships()" style="padding: 0.5rem 1rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-size: 0.875rem;">
+<div class="admin-flex-between admin-mb-2">
+<h2 class="admin-m-0">Active Memberships</h2>
+<div class="admin-flex">
+<select id="membership-filter" onchange="loadMemberships()" class="form-select" style="padding: 0.5rem 1rem; font-size: 0.875rem;">
 <option value="all">All Memberships</option>
 <option value="active">Active Only</option>
 <option value="expiring">Expiring Soon (30 days)</option>
 <option value="expired">Expired</option>
 </select>
-<button id="refresh-memberships-btn" onclick="loadMemberships()" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+<button id="refresh-memberships-btn" onclick="loadMemberships()" class="btn btn-primary btn-sm">
 🔄 Refresh
 </button>
 </div>
@@ -490,38 +493,38 @@ Logout
 
 <!-- Membership Stats -->
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
-<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 1.5rem; color: white;">
-<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Total Active</div>
-<div style="font-size: 2rem; font-weight: 700;" id="stat-active">-</div>
+<div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+<div class="stat-card-label">Total Active</div>
+<div class="stat-card-value" id="stat-active">-</div>
 </div>
-<div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 12px; padding: 1.5rem; color: white;">
-<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Expiring Soon</div>
-<div style="font-size: 2rem; font-weight: 700;" id="stat-expiring">-</div>
+<div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+<div class="stat-card-label">Expiring Soon</div>
+<div class="stat-card-value" id="stat-expiring">-</div>
 </div>
-<div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border-radius: 12px; padding: 1.5rem; color: white;">
-<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Monthly Revenue</div>
-<div style="font-size: 2rem; font-weight: 700;" id="stat-monthly-revenue">-</div>
+<div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+<div class="stat-card-label">Monthly Revenue</div>
+<div class="stat-card-value" id="stat-monthly-revenue">-</div>
 </div>
-<div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 12px; padding: 1.5rem; color: white;">
-<div style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem;">Auto-Renewal</div>
-<div style="font-size: 2rem; font-weight: 700;" id="stat-auto-renew">-</div>
+<div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+<div class="stat-card-label">Auto-Renewal</div>
+<div class="stat-card-value" id="stat-auto-renew">-</div>
 </div>
 </div>
 
 <!-- Memberships Table -->
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; overflow: hidden;">
+<div class="table-wrapper">
 <div style="overflow-x: auto;">
-<table style="width: 100%; border-collapse: collapse;">
-<thead style="background: rgb(var(--color-neutral-100));">
+<table>
+<thead>
 <tr>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Member</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Email</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Plan</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Start Date</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Expiry Date</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Days Left</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Status</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid rgb(var(--color-neutral-200));">Auto-Renew</th>
+<th>Member</th>
+<th>Email</th>
+<th>Plan</th>
+<th>Start Date</th>
+<th>Expiry Date</th>
+<th>Days Left</th>
+<th>Status</th>
+<th>Auto-Renew</th>
 </tr>
 </thead>
 <tbody id="memberships-list">
@@ -541,23 +544,23 @@ Loading memberships...
 <div class="admin-flex-between admin-mb-2">
 <h2 class="admin-m-0">📅 Bookings & Calendar</h2>
 <div class="admin-flex">
-<button id="create-block-btn" class="admin-btn-primary" onclick="showCreateBlockModal()">
+<button id="create-block-btn" class="btn btn-primary" onclick="showCreateBlockModal()">
 + Block Time
 </button>
-<button id="refresh-bookings-btn" class="admin-btn-secondary-sm" onclick="loadBookingsAndCalendar()">
+<button id="refresh-bookings-btn" class="btn btn-secondary btn-sm" onclick="loadBookingsAndCalendar()">
 🔄 Refresh
 </button>
 </div>
 </div>
 
 <!-- Calendar Week View -->
-<div class="admin-card-sm">
+<div class="card card-compact">
 <div id="calendar-nav" class="admin-flex-between admin-mb-1">
-<button id="prev-week-btn" class="admin-btn-secondary-sm" onclick="changeWeek(-1)">
+<button id="prev-week-btn" class="btn btn-secondary btn-sm" onclick="changeWeek(-1)">
 ← Previous
 </button>
 <h3 id="week-display" class="admin-m-0" style="font-size: 1.1rem;"></h3>
-<button id="next-week-btn" class="admin-btn-secondary-sm" onclick="changeWeek(1)">
+<button id="next-week-btn" class="btn btn-secondary btn-sm" onclick="changeWeek(1)">
 Next →
 </button>
 </div>
@@ -567,7 +570,7 @@ Next →
 </div>
 
 <!-- Active Time Blocks -->
-<div class="admin-card-sm">
+<div class="card card-compact">
 <h3 class="admin-mt-0">⛔ Active Time Blocks</h3>
 <div id="blocks-list" style="display: grid; gap: 0.75rem;">
 <div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">
@@ -579,22 +582,22 @@ Loading time blocks...
 
 <!-- Cron Jobs Tab -->
 <div id="cron-tab" class="tab-content" style="display: none;">
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-<h2 style="margin: 0;">Automated Jobs</h2>
-<div style="display: flex; gap: 0.5rem;">
-<button id="sync-board-games-btn" onclick="syncBoardGames()" style="padding: 0.5rem 1rem; background: rgb(var(--color-secondary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+<div class="admin-flex-between admin-mb-2">
+<h2 class="admin-m-0">Automated Jobs</h2>
+<div class="admin-flex">
+<button id="sync-board-games-btn" onclick="syncBoardGames()" class="btn btn-sm" style="background: rgb(var(--color-secondary-600));">
 🎲 Sync Board Games
 </button>
-<button id="refresh-cron-btn" onclick="loadCronLogs()" style="padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+<button id="refresh-cron-btn" onclick="loadCronLogs()" class="btn btn-primary btn-sm">
 🔄 Refresh
 </button>
 </div>
 </div>
 
 <!-- Job Filter -->
-<div style="margin-bottom: 1.5rem;">
-<label for="cron-job-filter" style="font-weight: 600; margin-right: 0.5rem;">Filter by Job:</label>
-<select id="cron-job-filter" onchange="loadCronLogs()" style="padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<div class="form-group">
+<label for="cron-job-filter" class="form-label" style="display: inline; margin-right: 0.5rem;">Filter by Job:</label>
+<select id="cron-job-filter" onchange="loadCronLogs()" class="form-select" style="display: inline-block; width: auto;">
 <option value="">All Jobs</option>
 <option value="auto_renewals">Auto Renewals</option>
 <option value="event_reminders">Event Reminders</option>
@@ -609,19 +612,19 @@ Loading time blocks...
 </div>
 
 <!-- Cron Logs Table -->
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; overflow: hidden;">
+<div class="table-wrapper">
 <div style="overflow-x: auto;">
-<table style="width: 100%; border-collapse: collapse;">
+<table>
 <thead>
-<tr style="background: rgb(var(--color-neutral-100)); border-bottom: 2px solid rgb(var(--color-neutral-200));">
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Job Name</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Started</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Duration</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Status</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Processed</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Success</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Failed</th>
-<th style="padding: 1rem; text-align: left; font-weight: 600;">Details</th>
+<tr>
+<th>Job Name</th>
+<th>Started</th>
+<th>Duration</th>
+<th>Status</th>
+<th>Processed</th>
+<th>Success</th>
+<th>Failed</th>
+<th>Details</th>
 </tr>
 </thead>
 <tbody id="cron-logs-table">
@@ -643,99 +646,16 @@ Loading cron job logs...
 </div>
 </div>
 
-<button id="logout-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">Logout</button>
-
 <style>
-.tab-btn {
-transition: all 0.2s;
-}
-.tab-btn:hover {
-color: rgb(var(--color-primary-600));
-}
-.tab-btn.active {
-color: rgb(var(--color-primary-600));
-border-bottom-color: rgb(var(--color-primary-600)) !important;
-}
-.item-card {
-background: rgb(var(--color-neutral));
-border: 1px solid rgb(var(--color-neutral-200));
-border-radius: 8px;
-padding: 1.5rem;
-margin-bottom: 1rem;
-}
-.item-card h3 {
-margin-top: 0;
-margin-bottom: 0.5rem;
-}
-.item-actions {
-display: flex;
-gap: 0.5rem;
-margin-top: 1rem;
-}
-.btn-edit {
-padding: 0.5rem 1rem;
-background: rgb(var(--color-primary-600));
-color: white;
-border: none;
-border-radius: 6px;
-cursor: pointer;
-}
-.btn-delete {
-padding: 0.5rem 1rem;
-background: rgb(var(--color-neutral-200));
-border: none;
-border-radius: 6px;
-cursor: pointer;
-}
-.btn-delete:hover {
-background: #fee;
-color: #c00;
-}
-.image-preview {
-max-width: 200px;
-max-height: 200px;
-border-radius: 6px;
-margin-top: 0.5rem;
-}
-#crop-modal {
-display: none;
-position: fixed;
-top: 0;
-left: 0;
-right: 0;
-bottom: 0;
-background: rgba(0,0,0,0.8);
-z-index: 9999;
-align-items: center;
-justify-content: center;
-}
-#crop-modal.is-open {
-display: flex;
-}
-.crop-container {
-background: white;
-border-radius: 12px;
-padding: 1rem 2rem 2rem 2rem;
-max-width: 90vw;
-max-height: 90vh;
-display: flex;
-flex-direction: column;
-overflow-y: auto;
-}
-.crop-container h2 {
-margin-top: 0;
-margin-bottom: 1rem;
-}
-.crop-image-container {
-max-height: 50vh;
-margin: 1rem 0;
-overflow: hidden;
-}
-.crop-actions {
-display: flex;
-gap: 1rem;
-justify-content: flex-end;
-}
+/* Button styles for dynamically generated items */
+.btn-edit { padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.dark .btn-edit { background: rgb(var(--color-primary-500)); }
+.btn-edit:hover { background: rgb(var(--color-primary-700)); }
+.dark .btn-edit:hover { background: rgb(var(--color-primary-600)); }
+.btn-delete { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.dark .btn-delete { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
+.btn-delete:hover { background: #fee; color: #c00; }
+.dark .btn-delete:hover { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
 </style>
 
 <!-- Image Crop Modal -->

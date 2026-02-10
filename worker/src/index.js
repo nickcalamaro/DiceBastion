@@ -2236,6 +2236,67 @@ app.post('/account/email-preferences', async c => {
   }
 })
 
+// Change password
+app.post('/account/change-password', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    
+    if (!sessionToken) {
+      return c.json({ error: 'no_session_token' }, 401)
+    }
+    
+    // Get session and user
+    const session = await c.env.DB.prepare(`
+      SELECT us.user_id, u.email, u.password_hash
+      FROM user_sessions us
+      JOIN users u ON us.user_id = u.user_id
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    
+    if (!session) {
+      return c.json({ error: 'invalid_session' }, 401)
+    }
+    
+    const { currentPassword, newPassword } = await c.req.json()
+    
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return c.json({ error: 'Missing required fields' }, 400)
+    }
+    
+    if (newPassword.length < 8) {
+      return c.json({ error: 'New password must be at least 8 characters long' }, 400)
+    }
+    
+    // Verify current password
+    const currentPasswordMatch = await bcrypt.compare(currentPassword, session.password_hash)
+    if (!currentPasswordMatch) {
+      return c.json({ error: 'Current password is incorrect' }, 400)
+    }
+    
+    // Hash new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 10)
+    const now = new Date().toISOString()
+    
+    // Update password
+    await c.env.DB.prepare(`
+      UPDATE users 
+      SET password_hash = ?, updated_at = ?
+      WHERE user_id = ?
+    `).bind(newPasswordHash, now, session.user_id).run()
+    
+    console.log('[Password Change] Password updated for user:', session.email)
+    
+    return c.json({ 
+      success: true, 
+      message: 'Password updated successfully!' 
+    })
+  } catch (error) {
+    console.error('[Password Change] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // Enable auto-renewal for user's active membership
 app.post('/account/enable-auto-renewal', async c => {
   try {

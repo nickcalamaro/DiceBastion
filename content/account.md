@@ -36,6 +36,7 @@ Go to Login
 <div id="account-content" style="display: none;">
 <!-- Header -->
 <div style="margin-bottom: 2rem;">
+<h1 style="margin: 0 0 0.5rem 0;">My Account</h1>
 <p id="user-email" class="text-muted" style="margin: 0;"></p>
 </div>
 
@@ -116,6 +117,10 @@ Go to Login
 </div>
 </div>
 
+<!-- Protected Sections (Email, Password, Tickets, Orders) -->
+<!-- These sections are only rendered after successful authentication -->
+<div id="protected-content" style="display: none;">
+
 <!-- Email Preferences -->
 <div class="card">
 <h2 class="card-header">Email Preferences</h2>
@@ -140,6 +145,54 @@ Go to Login
 <div id="email-prefs-message" style="display: none; margin-top: 1rem; padding: 0.75rem; border-radius: 6px; font-size: 0.875rem;"></div>
 </div>
 
+<!-- Change Password -->
+<div class="card">
+<h2 class="card-header">Change Password</h2>
+<form id="change-password-form">
+<div class="form-group">
+    <label for="current-password" class="form-label">Current Password</label>
+    <input 
+    type="password" 
+    id="current-password" 
+    required 
+    autocomplete="current-password"
+    class="form-input">
+</div>
+
+<div class="form-group">
+    <label for="new-password" class="form-label">New Password</label>
+    <input 
+    type="password" 
+    id="new-password" 
+    required 
+    minlength="8"
+    autocomplete="new-password"
+    class="form-input">
+    <small class="admin-text-small">Must be at least 8 characters long</small>
+</div>
+
+<div class="form-group">
+    <label for="confirm-new-password" class="form-label">Confirm New Password</label>
+    <input 
+    type="password" 
+    id="confirm-new-password" 
+    required 
+    minlength="8"
+    autocomplete="new-password"
+    class="form-input">
+</div>
+
+<button 
+    type="submit" 
+    id="change-password-btn"
+    class="btn btn-primary">
+    Update Password
+</button>
+
+<div id="password-change-message" style="display: none; margin-top: 1rem; padding: 0.75rem; border-radius: 6px; font-size: 0.875rem;"></div>
+</form>
+</div>
+
 <!-- Event Tickets -->
 <div class="card">
 <h2 class="card-header">My Event Tickets</h2>
@@ -151,6 +204,9 @@ Go to Login
 <h2 class="card-header">Shop Orders</h2>
 <div id="orders-list"></div>
 </div>
+
+</div>
+<!-- End Protected Content -->
 </div>
 </div>
 
@@ -194,6 +250,11 @@ console.error('API error:', errorData);
 throw new Error('Failed to load account data');
 }
 
+// Show protected content only after successful authentication
+const protectedContent = document.getElementById('protected-content');
+if (protectedContent) {
+    protectedContent.style.display = 'block';
+}
 const data = await response.json();
 console.log('Account data received:', data);
 
@@ -726,6 +787,111 @@ try {
 });
 }
 }
+
+// Password change functionality
+function setupPasswordChangeListener() {
+const form = document.getElementById('change-password-form');
+const messageEl = document.getElementById('password-change-message');
+const submitBtn = document.getElementById('change-password-btn');
+
+if (!form || !messageEl || !submitBtn) return;
+
+form.addEventListener('submit', async (e) => {
+e.preventDefault();
+messageEl.style.display = 'none';
+
+const currentPassword = document.getElementById('current-password').value;
+const newPassword = document.getElementById('new-password').value;
+const confirmNewPassword = document.getElementById('confirm-new-password').value;
+
+// Validation
+if (newPassword.length < 8) {
+    messageEl.textContent = 'New password must be at least 8 characters long';
+    messageEl.style.background = '#fee2e2';
+    messageEl.style.color = '#991b1b';
+    messageEl.style.display = 'block';
+    return;
+}
+
+if (newPassword !== confirmNewPassword) {
+    messageEl.textContent = 'New passwords do not match';
+    messageEl.style.background = '#fee2e2';
+    messageEl.style.color = '#991b1b';
+    messageEl.style.display = 'block';
+    return;
+}
+
+if (currentPassword === newPassword) {
+    messageEl.textContent = 'New password must be different from current password';
+    messageEl.style.background = '#fee2e2';
+    messageEl.style.color = '#991b1b';
+    messageEl.style.display = 'block';
+    return;
+}
+
+const sessionToken = utils.session.get();
+const originalText = submitBtn.textContent;
+
+try {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Updating...';
+
+    const response = await fetch(`${API_BASE}/account/change-password`, {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': sessionToken
+    },
+    body: JSON.stringify({
+        currentPassword,
+        newPassword
+    })
+    });
+
+    // Handle non-JSON responses
+    let data;
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+    data = await response.json();
+    } else {
+    // Not JSON - likely an error page or the endpoint doesn't exist
+    const text = await response.text();
+    console.error('Non-JSON response:', text);
+    throw new Error('This feature is not yet available. Please contact support to change your password.');
+    }
+
+    if (response.ok && data.success) {
+    messageEl.textContent = data.message || 'Password updated successfully!';
+    messageEl.style.background = '#d1fae5';
+    messageEl.style.color = '#065f46';
+    messageEl.style.display = 'block';
+
+    // Clear form
+    form.reset();
+
+    // Re-enable button after delay
+    setTimeout(() => {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+    }, 2000);
+    } else {
+    throw new Error(data.error || 'Failed to update password');
+    }
+} catch (error) {
+    console.error('Error changing password:', error);
+    messageEl.textContent = error.message || 'Failed to update password. Please try again.';
+    messageEl.style.background = '#fee2e2';
+    messageEl.style.color = '#991b1b';
+    messageEl.style.display = 'block';
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalText;
+}
+});
+}
+
+// Initialize password change listener
+setupPasswordChangeListener();
 
 // Event modal functions - reuse existing modal with modifications
 window.openAccountEventModal = async function(eventSlug) {

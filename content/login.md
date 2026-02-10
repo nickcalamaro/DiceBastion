@@ -107,8 +107,8 @@ errorEl.style.display = 'block';
 }
 });
 
-// Check on page load
-checkExistingLogin();
+// Note: Removed automatic redirect check to allow logged-in users to view the login page
+// Users will still be redirected after successful login
 </script>
 
 <style>

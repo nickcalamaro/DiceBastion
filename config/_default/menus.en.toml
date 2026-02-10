@@ -78,7 +78,7 @@ visibility = 2
 
 [[main]]
 name = "Admin"
-pageRef = "a"
+pageRef = "admin"
 identifier = "admin"
 weight = 10003
 [main.params]
