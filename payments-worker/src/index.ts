@@ -268,17 +268,15 @@ app.post('/internal/checkout', async (c) => {
 			description
 		}
 
-		// For card tokenization, use minimal amount with SETUP_RECURRING_PAYMENT purpose
-		// When savePaymentInstrument is requested, ALWAYS use the tokenization path
-		// The real charge is made separately after the card is saved
+		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose with the real amount.
+		// Per SumUp docs, the authorization amount is "instantly reimbursed" (auth hold released).
+		// The real charge is made separately after the card is saved.
 		if (savePaymentInstrument && customerId) {
-			// SumUp requires amount and currency even for tokenization
-			// Use minimal amount (0.01) — SumUp auths and instantly releases this
-			checkoutBody.amount = 0.01
+			checkoutBody.amount = Number(amount) || 1.00
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
 			checkoutBody.customer_id = customerId
-			console.log('[Checkout] Creating tokenization-only checkout (£0.01 auth):', JSON.stringify(checkoutBody))
+			console.log('[Checkout] Creating tokenization checkout (auth + instant reimburse):', JSON.stringify(checkoutBody))
 		} else {
 			// Regular payment (no card saving) — use the provided amount
 			checkoutBody.amount = Number(amount)
@@ -352,8 +350,13 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 			throw new Error(`Failed to fetch payment (${res.status}): ${txt}`)
 		}
 
-		const payment = await res.json()
-		console.log('[Payment] Retrieved checkout:', checkoutId, 'status:', payment.status)
+		const payment: any = await res.json()
+		console.log('[Payment] Retrieved checkout:', checkoutId, 'status:', payment.status,
+			'purpose:', payment.purpose || 'none',
+			'transactions:', payment.transactions?.length || 0,
+			'txStatuses:', payment.transactions?.map((t: any) => t.status) || [],
+			'hasInstrument:', !!payment.payment_instrument
+		)
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Fetch payment error:', error)

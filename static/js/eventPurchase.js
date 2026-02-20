@@ -915,7 +915,7 @@ window.initEventPurchase = function initEventPurchase(event) {
     }
     
     // Check if they want auto-renewal (we can add a checkbox for this later)
-    const autoRenew = false; // Default to false for now
+    const autoRenew = true; // Auto-renewal is always enabled
     
     let resp;
     try {

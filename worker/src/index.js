@@ -407,6 +407,266 @@ async function getServiceForPlan(db, planCode) {
 }
 
 // ============================================================================
+// SHARED PAYMENT CONFIRMATION HELPERS
+// ============================================================================
+
+/**
+ * Check if a SumUp checkout is paid/completed.
+ * For SETUP_RECURRING_PAYMENT checkouts, the top-level status may stay 'PENDING'
+ * while the actual transaction status is inside the transactions[] array.
+ */
+function isCheckoutPaid(payment) {
+  if (!payment) return false
+  // Standard check: top-level status
+  if (payment.status === 'PAID' || payment.status === 'SUCCESSFUL') return true
+  // For tokenization checkouts, check transactions array for a successful entry
+  if (payment.transactions && Array.isArray(payment.transactions)) {
+    const hasSuccessfulTx = payment.transactions.some(
+      t => t.status === 'SUCCESSFUL' || t.status === 'PAID'
+    )
+    if (hasSuccessfulTx) {
+      console.log('[isCheckoutPaid] Top-level status is', payment.status, 'but found successful transaction in transactions[]')
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Activate a membership: compute dates, update DB, optionally save payment instrument
+ * and charge the real amount (tokenization flow).
+ * Returns { endDate, instrumentId, actualPaymentId } on success.
+ */
+async function activateMembership(db, env, { membershipId, membership, paymentId, checkoutId, transaction }) {
+  const svc = await getServiceForPlan(db, membership.plan)
+  if (!svc) throw new Error('plan_not_configured')
+  
+  const identityId = membership.user_id
+  const memberActive = await getActiveMembership(db, identityId)
+  const baseStart = memberActive ? new Date(memberActive.end_date) : new Date()
+  const months = Number(svc.months || 0)
+  const end = addMonths(baseStart, months)
+  
+  let instrumentId = null
+  let actualPaymentId = paymentId
+  if (membership.auto_renew === 1) {
+    instrumentId = await savePaymentInstrument(db, identityId, checkoutId || paymentId, env)
+    if (instrumentId) console.log('[activateMembership] Saved payment instrument:', instrumentId)
+    
+    // After tokenization, charge the real amount using the saved instrument.
+    // The SETUP_RECURRING_PAYMENT checkout authorized and instantly reimbursed the amount —
+    // this is the actual charge that collects payment.
+    if (instrumentId && transaction) {
+      const chargeAmount = transaction.amount
+      const chargeCurrency = transaction.currency || 'GBP'
+      const chargeOrderRef = `${transaction.order_ref}-charge`
+      const chargeDesc = `Dice Bastion ${membership.plan} membership payment`
+      
+      console.log(`[activateMembership] Charging real amount £${chargeAmount} via instrument ${instrumentId}`)
+      try {
+        const chargeResult = await chargePaymentInstrument(
+          env, identityId, instrumentId, chargeAmount, chargeCurrency, chargeOrderRef, chargeDesc
+        )
+        if (chargeResult && chargeResult.id) {
+          actualPaymentId = chargeResult.id
+          console.log('[activateMembership] Real charge successful:', actualPaymentId)
+          
+          // Record the actual charge as a separate transaction
+          await db.prepare(`
+            INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                                      payment_id, amount, currency, payment_status, created_at)
+            VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
+          `).bind(
+            membershipId, identityId, transaction.email, transaction.name,
+            chargeOrderRef, actualPaymentId, chargeAmount, chargeCurrency, toIso(new Date())
+          ).run()
+        } else {
+          console.error('[activateMembership] Charge returned no id — membership still activates but payment may be refunded')
+        }
+      } catch (chargeError) {
+        console.error('[activateMembership] Error charging saved instrument:', chargeError)
+        // Continue with activation — the setup payment was successful even if actual charge failed
+      }
+    }
+  }
+  
+  await db.prepare(
+    'UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ?, payment_instrument_id = ? WHERE id = ?'
+  ).bind(toIso(baseStart), toIso(end), actualPaymentId, instrumentId, membershipId).run()
+  
+  return { startDate: toIso(baseStart), endDate: toIso(end), instrumentId, actualPaymentId }
+}
+
+/**
+ * Activate a ticket and increment event ticket count.
+ * Also updates the related transaction row.
+ */
+async function activateTicket(db, { ticketId, eventId, transactionId, paymentId }) {
+  await db.batch([
+    db.prepare('UPDATE tickets SET status = "active" WHERE id = ?').bind(ticketId),
+    db.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
+      .bind(paymentId, toIso(new Date()), transactionId),
+    db.prepare('UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)')
+      .bind(eventId)
+  ])
+}
+
+/**
+ * Send membership welcome + event ticket emails for a bundle purchase.
+ * Returns true if both sent successfully.
+ */
+async function sendBundleEmails(env, db, { membership, membershipId, endDate, ticket, event, transaction, user }) {
+  if (!user) return false
+  try {
+    // Membership welcome email
+    const updatedMembership = { ...membership, end_date: endDate }
+    const membershipEmailContent = getWelcomeEmail(updatedMembership, user, membership.auto_renew === 1)
+    await sendEmail(env, {
+      to: user.email,
+      ...membershipEmailContent,
+      emailType: 'membership_welcome',
+      relatedId: membershipId,
+      relatedType: 'membership',
+      metadata: { plan: membership.plan, auto_renew: membership.auto_renew }
+    })
+    
+    // Event ticket confirmation email
+    const eventForEmail = { ...event }
+    if (event.is_recurring === 1) {
+      const nextOccurrence = calculateNextOccurrence(event, new Date())
+      if (nextOccurrence) eventForEmail.event_datetime = nextOccurrence.toISOString()
+    }
+    const ticketEmailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
+    await sendEmail(env, {
+      to: user.email,
+      ...ticketEmailContent,
+      emailType: 'event_ticket_confirmation',
+      relatedId: ticket.id,
+      relatedType: 'ticket',
+      metadata: { event_id: event.event_id, event_name: event.event_name }
+    })
+    
+    console.log('[sendBundleEmails] Both emails sent to:', user.email)
+    return true
+  } catch (err) {
+    console.error('[sendBundleEmails] Failed:', err)
+    return false
+  }
+}
+
+/**
+ * Send admin notification for a bundle purchase.
+ */
+async function sendBundleAdminNotification(env, { membership, membershipId, event, ticket, transaction, user }) {
+  try {
+    const adminEmailContent = getAdminNotificationEmail('bundle_purchase', {
+      membershipPlan: membership.plan,
+      eventName: event.event_name,
+      customerName: user?.name || 'Customer',
+      customerEmail: user?.email || transaction.email,
+      amount: transaction.amount,
+      autoRenew: membership.auto_renew === 1,
+      membershipId,
+      ticketId: ticket.id,
+      orderRef: transaction.order_ref
+    })
+    await sendEmail(env, {
+      to: 'admin@dicebastion.com',
+      ...adminEmailContent,
+      emailType: 'admin_bundle_notification',
+      relatedId: membershipId,
+      relatedType: 'membership',
+      metadata: { ticket_id: ticket.id, event_id: event.event_id }
+    })
+  } catch (err) {
+    console.error('[sendBundleAdminNotification] Failed:', err)
+  }
+}
+
+/**
+ * Resolve the bundle records (transaction, membership, ticket, event) from an orderRef.
+ * Returns null on error, otherwise { transaction, membership, ticket, event, identityId, membershipId, eventId }.
+ */
+async function resolveBundleRecords(db, orderRef) {
+  const transaction = await db.prepare(
+    'SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "event_membership_bundle"'
+  ).bind(orderRef).first()
+  if (!transaction) return null
+  
+  const membershipId = transaction.reference_id
+  const identityId = transaction.user_id
+  
+  const membership = await db.prepare('SELECT * FROM memberships WHERE id = ?').bind(membershipId).first()
+  if (!membership) return null
+  
+  // Extract event_id from order_ref (format: BUNDLE-{eventId}-{uuid})
+  const orderParts = orderRef.split('-')
+  const eventId = orderParts[1] ? parseInt(orderParts[1]) : null
+  if (!eventId) return null
+  
+  const ticket = await db.prepare(
+    'SELECT * FROM tickets WHERE event_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1'
+  ).bind(eventId, identityId).first()
+  if (!ticket) return null
+  
+  const event = await db.prepare('SELECT * FROM events WHERE event_id = ?').bind(eventId).first()
+  if (!event) return null
+  
+  return { transaction, membership, ticket, event, identityId, membershipId, eventId }
+}
+
+/**
+ * Full bundle confirmation: activate membership + ticket, send emails, send admin notification.
+ * Returns { ok, endDate, emailSent, user } or throws.
+ */
+async function confirmBundlePurchase(db, env, { bundle, paymentId, checkoutId }) {
+  const { transaction, membership, ticket, event, identityId, membershipId, eventId } = bundle
+  
+  // Activate membership (pass transaction for charge-after-tokenization)
+  const { endDate, instrumentId, actualPaymentId } = await activateMembership(db, env, {
+    membershipId,
+    membership,
+    paymentId,
+    checkoutId: checkoutId || paymentId,
+    transaction: {
+      amount: transaction.amount,
+      currency: transaction.currency || 'GBP',
+      order_ref: transaction.order_ref,
+      email: transaction.email,
+      name: transaction.name
+    }
+  })
+  
+  // Activate ticket + update transaction + increment tickets_sold
+  // Use actualPaymentId so the ticket references the real charge, not the £0.01 tokenization
+  await activateTicket(db, {
+    ticketId: ticket.id,
+    eventId,
+    transactionId: transaction.id,
+    paymentId: actualPaymentId || paymentId
+  })
+  
+  console.log(`[confirmBundlePurchase] Activated membership ${membershipId} and ticket ${ticket.id} for user ${identityId}`)
+  
+  // Get user for emails
+  const user = await db.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
+  
+  // Send customer emails
+  const emailSent = await sendBundleEmails(env, db, {
+    membership, membershipId, endDate,
+    ticket, event, transaction, user
+  })
+  
+  // Send admin notification
+  await sendBundleAdminNotification(env, { membership, membershipId, event, ticket, transaction, user })
+  
+  // User needs account setup if they don't have a password yet (created via checkout, not registration)
+  const needsAccountSetup = !user?.password_hash
+  
+  return { ok: true, endDate, emailSent, user, instrumentId, needsAccountSetup }
+}
+
+// ============================================================================
 // PAYMENT INSTRUMENT MANAGEMENT
 // ============================================================================
 
@@ -1052,15 +1312,21 @@ function getAdminNotificationEmail(purchaseType, details) {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount
     return `£${num.toFixed(2)}`
   }
+
+  // Format plan code (e.g. 'monthly') to display name (e.g. 'Monthly Membership')
+  const formatPlanName = (plan) => {
+    if (!plan) return 'Membership'
+    return plan.charAt(0).toUpperCase() + plan.slice(1) + ' Membership'
+  }
   
   let subject, htmlContent, textContent
   
   switch (purchaseType) {
     case 'membership':
-      subject = `📈 New Membership Purchase: ${details.plan} Plan`
+      subject = `📈 New Membership Purchase: ${formatPlanName(details.plan)}`
       htmlContent = `
         <h2>New Membership Purchase</h2>
-        <p><strong>Plan:</strong> ${details.plan}</p>
+        <p><strong>Plan:</strong> ${formatPlanName(details.plan)}</p>
         <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
         <p><strong>Amount:</strong> ${formatPrice(details.amount)}</p>
         <p><strong>Auto-Renewal:</strong> ${details.autoRenew ? 'Yes' : 'No'}</p>
@@ -1071,7 +1337,7 @@ function getAdminNotificationEmail(purchaseType, details) {
       textContent = `
 New Membership Purchase
 
-Plan: ${details.plan}
+Plan: ${formatPlanName(details.plan)}
 Customer: ${details.customerName} (${details.customerEmail})
 Amount: ${formatPrice(details.amount)}
 Auto-Renewal: ${details.autoRenew ? 'Yes' : 'No'}
@@ -1159,10 +1425,10 @@ Ticket ID: ${details.ticketId}
       break
     
     case 'bundle_purchase':
-      subject = `🎁 New Bundle Purchase: ${details.membershipPlan} + ${details.eventName}`
+      subject = `🎁 New Bundle Purchase: ${formatPlanName(details.membershipPlan)} + ${details.eventName}`
       htmlContent = `
         <h2>New Membership + Event Bundle Purchase</h2>
-        <p><strong>Membership Plan:</strong> ${details.membershipPlan}</p>
+        <p><strong>Membership Plan:</strong> ${formatPlanName(details.membershipPlan)}</p>
         <p><strong>Event:</strong> ${details.eventName}</p>
         <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
         <p><strong>Total Amount:</strong> ${formatPrice(details.amount)}</p>
@@ -1175,7 +1441,7 @@ Ticket ID: ${details.ticketId}
       textContent = `
 New Membership + Event Bundle Purchase
 
-Membership Plan: ${details.membershipPlan}
+Membership Plan: ${formatPlanName(details.membershipPlan)}
 Event: ${details.eventName}
 Customer: ${details.customerName} (${details.customerEmail})
 Total Amount: ${formatPrice(details.amount)}
@@ -2791,7 +3057,8 @@ app.post('/membership/checkout', async (c) => {
       if (existing && existing.checkout_id){
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
-    }    const autoRenewValue = autoRenew ? 1 : 0
+    }    // Auto-renewal is always enabled — users get a 7-day reminder email before renewal
+    const autoRenewValue = 1
     
     // Insert minimal membership record (business logic only)
     const cols = ['user_id', 'plan','status','auto_renew','order_ref']
@@ -2809,11 +3076,11 @@ app.post('/membership/checkout', async (c) => {
         console.log('Using SumUp customer ID for auto-renewal:', customerId)
       }
       
-      // For auto-renewal: use amount 0 for tokenization-only checkout
-      // SumUp's SETUP_RECURRING_PAYMENT auths a minimal amount (0.01) and instantly releases it
-      // The real membership charge is made after card tokenization using the saved instrument
+      // For auto-renewal: use SETUP_RECURRING_PAYMENT checkout with the real amount.
+      // SumUp auths the amount and instantly reimburses it (auth hold released).
+      // The real membership charge is made after card tokenization using the saved instrument.
       checkout = await createCheckout(c.env, { 
-        amount: autoRenewValue === 1 ? 0 : amount, 
+        amount, 
         currency, 
         orderRef: order_ref, 
         title: `Dice Bastion ${plan} membership`, 
@@ -2940,16 +3207,18 @@ app.get('/membership/confirm', async (c) => {
   try { payment = await fetchPayment(c.env, transaction.checkout_id) } 
   catch { return c.json({ ok:false, error:'verify_failed' },400) }
   
-  const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
-  if (!paid) {
+  if (!isCheckoutPaid(payment)) {
     const currentStatus = payment?.status || 'PENDING'
-    console.log('[membership/confirm] Payment not yet paid, status:', currentStatus)
+    const txStatuses = payment?.transactions?.map(t => t.status) || []
+    const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+    const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    console.log('[membership/confirm] Payment not yet paid, status:', currentStatus, 'txStatuses:', txStatuses)
     
     return c.json({ 
       ok: false, 
-      status: currentStatus,
-      message: currentStatus === 'FAILED' ? 'Payment failed. Please check your card details and try again.' :
-               currentStatus === 'DECLINED' ? 'Your card was declined. Please use a different payment method.' :
+      status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+      message: hasFailed ? 'Payment failed. Please check your card details and try again.' :
+               hasDeclined ? 'Your card was declined. Please use a different payment method.' :
                'Payment is still processing.'
     })
   }
@@ -3112,7 +3381,8 @@ app.get('/membership/confirm', async (c) => {
     autoRenew: pending.auto_renew === 1,
     cardLast4,
     userEmail: user?.email || transaction.email,
-    emailSent  // Let frontend know if welcome email was sent
+    emailSent,  // Let frontend know if welcome email was sent
+    needsAccountSetup: !user?.password_hash
   })
 })
 
@@ -3134,18 +3404,50 @@ app.post('/webhooks/sumup', async (c) => {
   
   if (!paymentId || !orderRef) return c.json({ ok: false }, 400)
 
+  // Detect if this is a bundle purchase (BUNDLE-{eventId}-{uuid})
+  const isBundle = orderRef.startsWith('BUNDLE-')
+
   // Check for duplicate webhook processing
-  const webhookId = `${paymentId}-${orderRef}` // Create unique webhook ID
-  const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, 'membership', orderRef)
+  const webhookId = `${paymentId}-${orderRef}`
+  const entityType = isBundle ? 'bundle' : 'membership'
+  const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, entityType, orderRef)
   if (isDuplicate) {
-    console.log('Duplicate membership webhook received, skipping processing')
+    console.log(`Duplicate ${entityType} webhook received, skipping processing`)
     return c.json({ ok: true, status: 'already_processed' })
   }
 
   let payment
   try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
-  if (!payment || payment.status !== 'PAID') return c.json({ ok: true })
+  if (!isCheckoutPaid(payment)) return c.json({ ok: true })
 
+  // ==================== BUNDLE PURCHASE WEBHOOK ====================
+  if (isBundle) {
+    console.log('[webhook-bundle] Processing bundle order:', orderRef)
+
+    const bundle = await resolveBundleRecords(c.env.DB, orderRef)
+    if (!bundle) {
+      console.error('[webhook-bundle] Could not resolve bundle records for:', orderRef)
+      return c.json({ ok: false, error: 'bundle_records_not_found' }, 404)
+    }
+
+    // If already fully activated, skip
+    if (bundle.membership.status === 'active' && bundle.ticket.status === 'active') {
+      console.log('[webhook-bundle] Already active, skipping')
+      return c.json({ ok: true, status: 'already_active' })
+    }
+
+    try {
+      await confirmBundlePurchase(c.env.DB, c.env, { bundle, paymentId, checkoutId: bundle.transaction.checkout_id })
+      console.log('[webhook-bundle] Bundle confirmed for order:', orderRef)
+    } catch (err) {
+      console.error('[webhook-bundle] Failed to confirm bundle:', err)
+      return c.json({ ok: false, error: err.message }, 400)
+    }
+
+    return c.json({ ok: true })
+  }
+
+  // ==================== REGULAR MEMBERSHIP WEBHOOK ====================
   const pending = await c.env.DB.prepare('SELECT * FROM memberships WHERE order_ref = ?').bind(orderRef).first()
   if (!pending) return c.json({ ok: false, error: 'order_not_found' }, 404)
 
@@ -3452,43 +3754,26 @@ app.get('/events/confirm', async c => {
     
     if (isBundle) {
       // Handle membership + event bundle confirmation
-      const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "event_membership_bundle"').bind(orderRef).first()
-      if (!transaction) return c.json({ ok:false, error:'order_not_found' },404)
-      
-      // Extract event_id from order_ref (format: BUNDLE-{eventId}-{uuid})
-      const orderParts = orderRef.split('-')
-      const eventId = orderParts[1] ? parseInt(orderParts[1]) : null
-      if (!eventId) return c.json({ ok:false, error:'invalid_order_ref' },400)
-      
-      const membershipId = transaction.reference_id
-      
-      // Get membership
-      const membership = await c.env.DB.prepare('SELECT * FROM memberships WHERE id = ?').bind(membershipId).first()
-      if (!membership) return c.json({ ok:false, error:'membership_not_found' },404)
-      
-      // Find the pending ticket for this user and event
-      const ticket = await c.env.DB.prepare(
-        'SELECT * FROM tickets WHERE event_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1'
-      ).bind(eventId, transaction.user_id).first()
-      
-      if (!ticket) return c.json({ ok:false, error:'ticket_not_found' },404)
-      
-      // If already activated, return success
+      const bundle = await resolveBundleRecords(c.env.DB, orderRef)
+      if (!bundle) return c.json({ ok:false, error:'bundle_records_not_found' },404)
+
+      const { transaction, membership, ticket, event, membershipId } = bundle
+
+      // If already activated, return success with details for the thank-you page
       if (membership.status === 'active' && ticket.status === 'active') {
-        const ev = await c.env.DB.prepare('SELECT event_name, event_datetime FROM events WHERE event_id = ?').bind(ticket.event_id).first()
         return c.json({ 
           ok: true, 
           status: 'already_active',
           isBundle: true,
           membershipPlan: membership.plan,
           membershipEndDate: membership.end_date,
-          eventName: ev?.event_name,
-          eventDate: ev?.event_datetime,
+          eventName: event.event_name,
+          eventDate: event.event_datetime,
           amount: transaction.amount,
           currency: transaction.currency || 'GBP'
         })
       }
-      
+
       // Verify payment
       let payment
       try { 
@@ -3496,133 +3781,47 @@ app.get('/events/confirm', async c => {
       } catch (err) { 
         return c.json({ ok:false, error:'verify_failed' },400) 
       }
-      
-      const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
-      if (!paid) {
+
+      if (!isCheckoutPaid(payment)) {
         const currentStatus = payment?.status || 'PENDING'
+        // Check if any transaction has a terminal failure state
+        const txStatuses = payment?.transactions?.map(t => t.status) || []
+        const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+        const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
         return c.json({ 
           ok: false, 
-          status: currentStatus,
-          message: currentStatus === 'FAILED' ? 'Payment failed. Please try again.' :
-                   currentStatus === 'DECLINED' ? 'Your card was declined. Please use a different payment method.' :
+          status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+          message: hasFailed ? 'Payment failed. Please try again.' :
+                   hasDeclined ? 'Your card was declined. Please use a different payment method.' :
                    'Payment is still processing.'
         })
       }
-      
-      // Activate membership
-      const svc = await getServiceForPlan(c.env.DB, membership.plan)
-      if (!svc) return c.json({ ok:false, error:'plan_not_configured' },400)
-      
-      const identityId = membership.user_id
-      const memberActive = await getActiveMembership(c.env.DB, identityId)
-      const baseStart = memberActive ? new Date(memberActive.end_date) : new Date()
-      const months = Number(svc.months || 0)
-      const start = baseStart
-      const end = addMonths(baseStart, months)
-      
-      // Save payment instrument if auto-renewal is enabled
-      let instrumentId = null
-      if (membership.auto_renew === 1) {
-        instrumentId = await savePaymentInstrument(c.env.DB, identityId, transaction.checkout_id, c.env)
-        if (instrumentId) {
-          console.log('[Bundle Confirm] Saved payment instrument:', instrumentId)
-        }
-      }
-      
-      // Get event
-      const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(ticket.event_id).first()
-      if (!ev) return c.json({ ok:false, error:'event_not_found' },404)
-      
-      // Update both membership and ticket to active
-      await c.env.DB.batch([
-        c.env.DB.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_instrument_id = ? WHERE id = ?')
-          .bind(toIso(start), toIso(end), instrumentId, membershipId),
-        c.env.DB.prepare('UPDATE tickets SET status = "active" WHERE id = ?').bind(ticket.id),
-        c.env.DB.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
-          .bind(payment.id, toIso(new Date()), transaction.id),
-        c.env.DB.prepare('UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)')
-          .bind(ticket.event_id)
-      ])
-      
-      // Send both emails
-      const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
-      if (user) {
-        try {
-          // Send membership welcome email
-          const updatedMembership = { ...membership, end_date: toIso(end) }
-          const membershipEmailContent = getWelcomeEmail(updatedMembership, user, membership.auto_renew === 1)
-          await sendEmail(c.env, { 
-            to: user.email, 
-            ...membershipEmailContent,
-            emailType: 'membership_welcome',
-            relatedId: membershipId,
-            relatedType: 'membership',
-            metadata: { plan: membership.plan, auto_renew: membership.auto_renew }
-          })
-          
-          // Send event ticket confirmation email
-          const eventForEmail = { ...ev }
-          if (ev.is_recurring === 1) {
-            const nextOccurrence = calculateNextOccurrence(ev, new Date())
-            if (nextOccurrence) eventForEmail.event_datetime = nextOccurrence.toISOString()
-          }
-          const ticketEmailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
-          await sendEmail(c.env, { 
-            to: user.email, 
-            ...ticketEmailContent,
-            emailType: 'event_ticket_confirmation',
-            relatedId: ticket.id,
-            relatedType: 'ticket',
-            metadata: { event_id: ev.event_id, event_name: ev.event_name }
-          })
-          
-          console.log('[Bundle Confirm] Both confirmation emails sent to:', user.email)
-        } catch (emailError) {
-          console.error('[Bundle Confirm] Failed to send emails:', emailError)
-        }
-      }
-      
-      // Send admin notification
+
+      // Activate membership + ticket, send emails, admin notification
       try {
-        const adminEmailContent = getAdminNotificationEmail('bundle_purchase', {
+        const result = await confirmBundlePurchase(c.env.DB, c.env, {
+          bundle, paymentId: payment.id, checkoutId: transaction.checkout_id
+        })
+
+        return c.json({ 
+          ok: true, 
+          status: 'active',
+          isBundle: true,
           membershipPlan: membership.plan,
-          eventName: ev.event_name,
-          customerName: user?.name || 'Customer',
-          customerEmail: user?.email || transaction.email,
-          amount: transaction.amount,
+          membershipEndDate: result.endDate,
           autoRenew: membership.auto_renew === 1,
-          membershipId: membershipId,
-          ticketId: ticket.id,
-          orderRef: transaction.order_ref
+          eventName: event.event_name,
+          eventDate: event.event_datetime,
+          amount: transaction.amount,
+          currency: transaction.currency || 'GBP',
+          userEmail: result.user?.email || transaction.email,
+          emailSent: result.emailSent,
+          needsAccountSetup: result.needsAccountSetup
         })
-        
-        await sendEmail(c.env, { 
-          to: 'admin@dicebastion.com',
-          ...adminEmailContent,
-          emailType: 'admin_bundle_notification',
-          relatedId: membershipId,
-          relatedType: 'membership',
-          metadata: { ticket_id: ticket.id, event_id: ev.event_id }
-        })
-      } catch (adminEmailError) {
-        console.error('[Bundle Confirm] Failed to send admin notification:', adminEmailError)
+      } catch (err) {
+        console.error('[events/confirm] Bundle confirmation failed:', err)
+        return c.json({ ok:false, error: err.message },400)
       }
-      
-      // All users now have passwords from registration
-      
-      return c.json({ 
-        ok: true, 
-        status: 'active',
-        isBundle: true,
-        membershipPlan: membership.plan,
-        membershipEndDate: toIso(end),
-        autoRenew: membership.auto_renew === 1,
-        eventName: ev.event_name,
-        eventDate: ev.event_datetime,
-        amount: transaction.amount,
-        currency: transaction.currency || 'GBP',
-        userEmail: user?.email || transaction.email
-      })
     }
     
     // Check if this is a free event registration (REG-{eventId}-{ticketId}) or paid ticket (EVT-{eventId}-{uuid})
@@ -3841,7 +4040,8 @@ app.get('/events/confirm', async c => {
       amount: transaction.amount,
       currency: transaction.currency || 'GBP',
       userEmail: user?.email || transaction.email,
-      emailSent  // Let frontend know if confirmation email was sent
+      emailSent,  // Let frontend know if confirmation email was sent
+      needsAccountSetup: !user?.password_hash
     })
   } catch (error) {
     console.error('[events/confirm] EXCEPTION:', error)
@@ -4028,7 +4228,8 @@ app.post('/events/:id/register', async c => {
       eventName: ev.event_name,
       eventDate: ev.event_datetime,
       ticketId: ticketId,
-      userEmail: email
+      userEmail: email,
+      needsAccountSetup: !ident.password_hash
     })
   } catch (e) {
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
@@ -4670,7 +4871,8 @@ app.post('/events/:id/checkout-with-membership', async c => {
       }
     }
 
-    const autoRenewValue = autoRenew ? 1 : 0
+    // Auto-renewal is always enabled — users get a 7-day reminder email before renewal
+    const autoRenewValue = 1
     
     // Create pending membership record
     const membershipResult = await c.env.DB.prepare(`
@@ -4687,13 +4889,22 @@ app.post('/events/:id/checkout-with-membership', async c => {
     const ticketId = ticketResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
 
     let checkout
+    let customerId = null
     try {
+      // Create or get SumUp customer for card tokenization (auto-renewal is always enabled)
+      customerId = await getOrCreateSumUpCustomer(c.env, ident)
+      console.log('[Bundle Checkout] Using SumUp customer ID:', customerId)
+
+      // Use tokenization checkout — SumUp auths the real amount and instantly reimburses it.
+      // The real bundle amount is charged separately after the card is saved.
       checkout = await createCheckout(c.env, { 
         amount: totalAmount, 
         currency, 
         orderRef: order_ref, 
         title: `${membershipPlan} Membership + ${ev.event_name}`,
-        description: `Membership bundle with event ticket`
+        description: `Card setup for ${membershipPlan} membership + ${ev.event_name} bundle`,
+        savePaymentInstrument: true,
+        customerId
       })
     } catch (e) {
       console.error('SumUp checkout failed for bundle', e)

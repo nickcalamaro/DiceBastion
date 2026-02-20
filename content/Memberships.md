@@ -77,7 +77,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 <div class="footer-info">
   <span>Secure checkout powered by SumUp</span>
   <span class="footer-divider" aria-hidden="true"></span>
-  <span>Auto-renewal is optional</span>
+  <span>Auto-renewal included · Cancel anytime</span>
 </div>
 
 <!-- Simple footer with member login placeholder -->
@@ -166,11 +166,8 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
           </label>
         </div>
 
-        <div class="modal-checkbox-group">
-          <input id="modal-auto-renew" type="checkbox" class="modal-checkbox">
-          <label for="modal-auto-renew" class="modal-checkbox-label">
-            Enable auto-renewal (saves your payment method for automatic renewal before expiry)
-          </label>
+        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
+          <p style="margin: 0;">🔄 <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -189,11 +186,8 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
           <p style="margin: 0; font-weight: 600; font-size: 1.05em;" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
         </div>
         
-        <div class="modal-checkbox-group">
-          <input id="modal-auto-renew-logged" type="checkbox" class="modal-checkbox">
-          <label for="modal-auto-renew-logged" class="modal-checkbox-label">
-            Enable auto-renewal (saves your payment method for automatic renewal before expiry)
-          </label>
+        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
+          <p style="margin: 0;">🔄 <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -242,10 +236,9 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     const modalNameEl = membershipModal.querySelector('#modal-name');
     const modalEmailEl = membershipModal.querySelector('#modal-email');
     const privacyEl = membershipModal.querySelector('#modal-privacy');
-    const autoRenewEl = membershipModal.querySelector('#modal-auto-renew');
     const modalContinueBtn = membershipModal.querySelector('#modal-continue');
     
-    [modalNameEl, modalEmailEl, privacyEl, autoRenewEl].forEach(el=>{
+    [modalNameEl, modalEmailEl, privacyEl].forEach(el=>{
       if(!el) return;
       const ev = el.type==='checkbox' ? 'change' : 'input';
       el.addEventListener(ev, clearError);
@@ -255,11 +248,9 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     if (modalNameEl && !isLoggedIn) modalNameEl.focus();
     
     // Setup event listeners for logged-in flow
-    const autoRenewLoggedEl = membershipModal.querySelector('#modal-auto-renew-logged');
     const modalContinueLoggedBtn = membershipModal.querySelector('#modal-continue-logged');
     const useDifferentBtn = membershipModal.querySelector('#modal-use-different');
     
-    if (autoRenewLoggedEl) autoRenewLoggedEl.addEventListener('change', clearError);
     if (modalContinueLoggedBtn) modalContinueLoggedBtn.addEventListener('click', handleContinueLogged);
     if (useDifferentBtn) {
       useDifferentBtn.addEventListener('click', () => {
@@ -407,12 +398,10 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
     const modalNameEl = membershipModal ? membershipModal.querySelector('#modal-name') : null;
     const modalEmailEl = membershipModal ? membershipModal.querySelector('#modal-email') : null;
     const privacyEl = membershipModal ? membershipModal.querySelector('#modal-privacy') : null;
-    const autoRenewEl = membershipModal ? membershipModal.querySelector('#modal-auto-renew') : null;
-    
     const email=(modalEmailEl&&modalEmailEl.value||'').trim();
     const name=(modalNameEl&&modalNameEl.value||'').trim();
     const consent=!!(privacyEl&&privacyEl.checked);
-    const autoRenew=!!(autoRenewEl&&autoRenewEl.checked);
+    const autoRenew = true; // Always enabled
     
     if(!name){ showError('Please enter your full name.'); return; }
     if(!email || !/^\S+@\S+\.\S+$/.test(email)){ showError('Please enter a valid email.'); return; }
@@ -433,8 +422,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
       return;
     }
     
-    const autoRenewLoggedEl = membershipModal ? membershipModal.querySelector('#modal-auto-renew-logged') : null;
-    const autoRenew = !!(autoRenewLoggedEl && autoRenewLoggedEl.checked);
+    const autoRenew = true; // Always enabled
     
     if(!pendingPlan){ showError('Please select a membership plan.'); return; }
     

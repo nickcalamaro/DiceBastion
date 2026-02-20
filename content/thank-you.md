@@ -12,80 +12,74 @@ layout: "simple"
 <script src="/js/accountSetup.js"></script>
 
 <div id="thank-you-content">
-<div id="loading-state">
-<h1>Processing Your Payment...</h1>
+<div id="loading-state" class="card" style="max-width:640px; margin:0 auto; text-align:center;">
+<h2 class="card-header">Processing Your Payment...</h2>
 <div class="spinner"></div>
-<p>Please wait while we confirm your transaction.</p>
+<p class="ty-note" style="margin-top:0;">Please wait while we confirm your transaction.</p>
 </div>
 </div>
 
 <style>
 .spinner {
-border: 4px solid rgba(0,0,0,0.1);
-border-left-color: #09f;
-border-radius: 50%;
-width: 40px;
-height: 40px;
-animation: spin 1s linear infinite;
-margin: 20px auto;
+  border: 4px solid rgba(128,128,128,0.2);
+  border-left-color: rgb(var(--color-primary-500));
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 20px auto;
 }
 @keyframes spin {
-to { transform: rotate(360deg); }
+  to { transform: rotate(360deg); }
 }
-.status-badge {
-display: inline-block;
-padding: 6px 12px;
-border-radius: 4px;
-font-weight: 600;
-font-size: 14px;
-margin: 12px 0;
+.ty-badge {
+  display: inline-block;
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin: 0.75rem 0;
 }
-.status-success { background: #d4edda; color: #155724; }
-.status-pending { background: #fff3cd; color: #856404; }
-.status-failed { background: #f8d7da; color: #721c24; }
-.info-box {
-background: #f8f9fa;
-border-left: 4px solid #09f;
-padding: 16px;
-margin: 20px 0;
-border-radius: 4px;
+.ty-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 1.25rem 0;
 }
-.details-grid {
-display: grid;
-gap: 12px;
-margin: 20px 0;
+.ty-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgb(var(--color-neutral-200));
 }
-.detail-row {
-display: flex;
-justify-content: space-between;
-padding: 8px 0;
-border-bottom: 1px solid #eee;
+.dark .ty-row {
+  border-bottom-color: rgb(var(--color-neutral-700));
 }
-.detail-label {
-font-weight: 600;
-color: #666;
+.ty-row:last-child {
+  border-bottom: none;
 }
-.detail-value {
-text-align: right;
+.ty-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
 }
-.action-button {
-display: inline-block;
-background: #09f;
-color: white;
-padding: 12px 24px;
-border-radius: 4px;
-text-decoration: none;
-margin: 12px 8px 12px 0;
-font-weight: 600;
+.ty-note {
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+  color: rgb(var(--color-neutral-600));
 }
-.action-button:hover {
-background: #0077cc;
+.dark .ty-note {
+  color: rgb(var(--color-neutral-400));
 }
-.secondary-button {
-background: #6c757d;
+.ty-list {
+  line-height: 1.8;
+  padding-left: 1.25rem;
+  color: rgb(var(--color-neutral-700));
 }
-.secondary-button:hover {
-background: #5a6268;
+.dark .ty-list {
+  color: rgb(var(--color-neutral-300));
 }
 </style>
 
@@ -150,46 +144,50 @@ const urlParams = new URLSearchParams(window.location.search);
 const emailPending = urlParams.get('emailPending') === '1' || emailSent === false;
 
 container.innerHTML = `
-<h1>✅ Welcome to Dice Bastion!</h1>
-<div class="status-badge status-success">Payment Confirmed</div>
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">✅ Welcome to Dice Bastion!</h2>
+<div style="text-align:center;"><span class="ty-badge alert-success">Payment Confirmed</span></div>
 
-<div class="info-box">
-<h3>Your ${plan === 'monthly' ? 'Monthly' : 'Annual'} Membership is Active</h3>
-<p>You now have full access to all club facilities and member benefits.</p>
+<div class="alert alert-info" style="margin:1.25rem 0;">
+<strong>Your ${plan === 'monthly' ? 'Monthly' : 'Annual'} Membership is Active</strong><br>
+You now have full access to all club facilities and member benefits.
 </div>
 
-<div class="details-grid">
-<div class="detail-row">
-<span class="detail-label">Membership Plan:</span>
-<span class="detail-value">${plan === 'monthly' ? 'Monthly' : 'Annual'}</span>
+<div class="card-section">
+<div class="ty-details">
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Membership Plan</span>
+<span class="card-value">${plan === 'monthly' ? 'Monthly' : 'Annual'}</span>
 </div>
-<div class="detail-row">
-<span class="detail-label">Amount Paid:</span>
-<span class="detail-value">${formatCurrency(amount, currency)}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Amount Paid</span>
+<span class="card-value">${formatCurrency(amount, currency)}</span>
 </div>
-<div class="detail-row">
-<span class="detail-label">Valid Until:</span>
-<span class="detail-value">${formatDate(endDate)}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Valid Until</span>
+<span class="card-value">${formatDate(endDate)}</span>
 </div>
 ${autoRenew ? `
-<div class="detail-row">
-<span class="detail-label">Auto-Renewal:</span>
-<span class="detail-value">✓ Enabled${cardLast4 ? ` (•••• ${cardLast4})` : ''}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Auto-Renewal</span>
+<span class="card-value">✓ Enabled${cardLast4 ? ` (•••• ${cardLast4})` : ''}</span>
 </div>
 ` : ''}
 </div>
-
-<div style="margin-top: 24px;">
-<a href="/events" class="action-button">Browse Events</a>
-<a href="/memberships" class="action-button secondary-button">Manage Membership</a>
 </div>
 
-<p style="margin-top: 24px; color: #666;">
+<div class="ty-actions">
+<a href="/events" class="btn btn-primary">Browse Events</a>
+<a href="/memberships" class="btn btn-secondary">Manage Membership</a>
+</div>
+
+<p class="ty-note">
 ${emailPending 
-  ? '<strong style="color: #f59e0b;">⚠️ Your confirmation email is being processed and will arrive shortly.</strong><br>' 
+  ? '<strong class="alert-warning" style="padding:0.35rem 0.6rem; border-radius:4px; display:inline-block;">⚠️ Your confirmation email is being processed and will arrive shortly.</strong><br>' 
   : 'A confirmation email has been sent to your registered email address.'}
 ${autoRenew ? ' Your membership will automatically renew before expiration.' : ''}
 </p>
+</div>
 `;
 };
 
@@ -200,137 +198,146 @@ const amountNum = parseFloat(amount) || 0;
 const isActuallyFree = isFree || amountNum === 0;
 
 container.innerHTML = `
-<h1>${isActuallyFree ? '✅ Registration Confirmed!' : '🎟️ Ticket Confirmed!'}</h1>
-<div class="status-badge status-success">${isActuallyFree ? 'Registration' : 'Payment'} Confirmed</div>
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">${isActuallyFree ? '✅ Registration Confirmed!' : '🎟️ Ticket Confirmed!'}</h2>
+<div style="text-align:center;"><span class="ty-badge alert-success">${isActuallyFree ? 'Registration' : 'Payment'} Confirmed</span></div>
 
-<div class="info-box">
-<h3>${eventName || 'Event Ticket'}</h3>
-<p>${isActuallyFree 
+<div class="alert alert-info" style="margin:1.25rem 0;">
+<strong>${eventName || 'Event Ticket'}</strong><br>
+${isActuallyFree 
   ? 'Your registration has been confirmed. We look forward to seeing you there!' 
   : `Your ticket${ticketCount > 1 ? 's have' : ' has'} been confirmed and reserved.`}
-</p>
 </div>
 
-<div class="details-grid">
+<div class="card-section">
+<div class="ty-details">
 ${eventName ? `
-<div class="detail-row">
-<span class="detail-label">Event:</span>
-<span class="detail-value">${eventName}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Event</span>
+<span class="card-value">${eventName}</span>
 </div>
 ` : ''}
 ${eventDate ? `
-<div class="detail-row">
-<span class="detail-label">Date:</span>
-<span class="detail-value">${formatDate(eventDate)}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Date</span>
+<span class="card-value">${formatDate(eventDate)}</span>
 </div>
 ` : ''}
-<div class="detail-row">
-<span class="detail-label">${isActuallyFree ? 'Registration' : 'Ticket'}${ticketCount > 1 ? 's' : ''}:</span>
-<span class="detail-value">${ticketCount || 1}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">${isActuallyFree ? 'Registration' : 'Ticket'}${ticketCount > 1 ? 's' : ''}</span>
+<span class="card-value">${ticketCount || 1}</span>
 </div>
 ${!isActuallyFree ? `
-<div class="detail-row">
-<span class="detail-label">Amount Paid:</span>
-<span class="detail-value">${formatCurrency(amount, currency)}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Amount Paid</span>
+<span class="card-value">${formatCurrency(amount, currency)}</span>
 </div>
 ` : ''}
 </div>
-
-<div style="margin-top: 24px;">
-<a href="/events" class="action-button">View All Events</a>
 </div>
 
-<p style="margin-top: 24px; color: #666;">
+<div class="ty-actions">
+<a href="/events" class="btn btn-primary">View All Events</a>
+</div>
+
+<p class="ty-note">
 A confirmation email with ${isActuallyFree ? 'event details and a calendar attachment' : 'your ticket and event details'} has been sent to your registered email address.
 </p>
+</div>
 `;
 };
 
 // Render pending/processing state
 const renderPending = (type) => {
 container.innerHTML = `
-<h1>⏳ Payment Processing</h1>
-<div class="status-badge status-pending">Payment Pending</div>
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">⏳ Payment Processing</h2>
+<div style="text-align:center;"><span class="ty-badge alert-warning">Payment Pending</span></div>
 
-<div class="info-box">
-<h3>Your payment is being processed</h3>
-<p>Some payment methods take a few moments to confirm. This is normal and usually completes within a few seconds.</p>
-<p><strong>You will receive a confirmation email once your payment is approved.</strong></p>
+<div class="alert alert-info" style="margin:1.25rem 0;">
+<strong>Your payment is being processed</strong><br>
+Some payment methods take a few moments to confirm. This is normal and usually completes within a few seconds.
+<br><strong>You will receive a confirmation email once your payment is approved.</strong>
 </div>
 
-<p><strong>What happens next?</strong></p>
-<ul style="line-height: 1.8;">
+<p class="card-label" style="font-size:0.9rem; text-transform:none; letter-spacing:0;"><strong>What happens next?</strong></p>
+<ul class="ty-list">
 <li>Your payment is being verified by the payment provider</li>
 <li><strong>You'll receive a confirmation email once approved</strong> (even if you close this page)</li>
-<li>You can safely close this tab - we'll email you when ready</li>
+<li>You can safely close this tab — we'll email you when ready</li>
 ${type === 'membership' ? '<li>Your membership will activate automatically upon confirmation</li>' : ''}
 ${type === 'event' ? '<li>Your ticket will be reserved once payment clears</li>' : ''}
 </ul>
 
-<div style="margin-top: 24px;">
-<button onclick="location.reload()" class="action-button">Check Status Now</button>
-<a href="/" class="action-button secondary-button">Close Tab</a>
+<div class="ty-actions">
+<button onclick="location.reload()" class="btn btn-primary">Check Status Now</button>
+<a href="/" class="btn btn-secondary">Close Tab</a>
 </div>
 
-<p style="margin-top: 24px; color: #666; font-size: 14px;">
+<p class="ty-note" style="font-size:0.85rem;">
 <strong>Still no email after 10 minutes?</strong> Check your spam folder or contact us at support@dicebastion.com with your order reference.
 </p>
+</div>
 `;
 };
 
 // Render failed state
 const renderFailed = (type, errorMsg) => {
 container.innerHTML = `
-<h1>❌ Payment Not Completed</h1>
-<div class="status-badge status-failed">Payment Failed</div>
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">❌ Payment Not Completed</h2>
+<div style="text-align:center;"><span class="ty-badge alert-error">Payment Failed</span></div>
 
-<div class="info-box" style="border-left-color: #dc3545;">
-<h3>We couldn't process your payment</h3>
-<p>${errorMsg || 'Your payment was declined or cancelled. No charges have been made to your account.'}</p>
+<div class="alert alert-error" style="margin:1.25rem 0;">
+<strong>We couldn't process your payment</strong><br>
+${errorMsg || 'Your payment was declined or cancelled. No charges have been made to your account.'}
 </div>
 
-<p><strong>Common reasons for payment failure:</strong></p>
-<ul style="line-height: 1.8;">
+<p class="card-label" style="font-size:0.9rem; text-transform:none; letter-spacing:0;"><strong>Common reasons for payment failure:</strong></p>
+<ul class="ty-list">
 <li>Payment was cancelled before completion</li>
 <li>Insufficient funds in account</li>
 <li>Card details were incorrect</li>
 <li>Bank declined the transaction</li>
 </ul>
 
-<div style="margin-top: 24px;">
-<a href="/${type === 'event' ? 'events' : 'memberships'}" class="action-button">Try Again</a>
-<a href="/" class="action-button secondary-button">Return Home</a>
+<div class="ty-actions">
+<a href="/${type === 'event' ? 'events' : 'memberships'}" class="btn btn-primary">Try Again</a>
+<a href="/" class="btn btn-secondary">Return Home</a>
 </div>
 
-<p style="margin-top: 24px; color: #666;">
+<p class="ty-note">
 Need help? Contact us at support@dicebastion.com
 </p>
+</div>
 `;
 };
 
 // Render no order reference state
 const renderNoOrder = () => {
 container.innerHTML = `
-<h1>Thank You</h1>
-<p>We didn't detect a specific order reference. If you just completed a payment, it should be confirmed shortly.</p>
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">Thank You</h2>
+<p class="ty-note" style="margin-top:0;">We didn't detect a specific order reference. If you just completed a payment, it should be confirmed shortly.</p>
 
-<div class="info-box">
-<p><strong>What to do:</strong></p>
-<ul style="line-height: 1.8;">
+<div class="alert alert-info" style="margin:1.25rem 0;">
+<strong>What to do:</strong>
+<ul class="ty-list" style="margin:0.5rem 0 0;">
 <li>Check your email for a confirmation message</li>
 <li>If you purchased a membership, visit the Memberships page to check your status</li>
 <li>If you purchased a ticket, visit the Events page for details</li>
 </ul>
 </div>
 
-<div style="margin-top: 24px;">
-<a href="/memberships" class="action-button">Check Membership</a>
-<a href="/events" class="action-button secondary-button">View Events</a>
+<div class="ty-actions">
+<a href="/memberships" class="btn btn-primary">Check Membership</a>
+<a href="/events" class="btn btn-secondary">View Events</a>
 </div>
 
-<p style="margin-top: 24px; color: #666;">
+<p class="ty-note">
 Questions? Email support@dicebastion.com
 </p>
+</div>
 `;
 };
 
@@ -355,29 +362,33 @@ return;
   // Bookings are already confirmed by the bookings API, just show success
   if (isBooking) {
     container.innerHTML = `
-<h1>🎲 Table Booking Confirmed!</h1>
-<div class="status-badge status-success">Booking Confirmed</div>
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">🎲 Table Booking Confirmed!</h2>
+<div style="text-align:center;"><span class="ty-badge alert-success">Booking Confirmed</span></div>
 
-<div class="info-box">
-<h3>Your Table is Reserved</h3>
-<p>Your table booking has been confirmed. A confirmation email with all the details has been sent to your registered email address.</p>
+<div class="alert alert-info" style="margin:1.25rem 0;">
+<strong>Your Table is Reserved</strong><br>
+Your table booking has been confirmed. A confirmation email with all the details has been sent to your registered email address.
 </div>
 
-<div class="details-grid">
-<div class="detail-row">
-<span class="detail-label">Booking Reference:</span>
-<span class="detail-value">${orderRef}</span>
+<div class="card-section">
+<div class="ty-details">
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Booking Reference</span>
+<span class="card-value">${orderRef}</span>
 </div>
 </div>
-
-<div style="margin-top: 24px;">
-<a href="/bookings" class="action-button">View My Bookings</a>
-<a href="/account" class="action-button secondary-button">My Account</a>
 </div>
 
-<p style="margin-top: 24px; color: #666;">
+<div class="ty-actions">
+<a href="/bookings" class="btn btn-primary">View My Bookings</a>
+<a href="/account" class="btn btn-secondary">My Account</a>
+</div>
+
+<p class="ty-note">
 Please check your email for booking details and any additional information.
 </p>
+</div>
 `;
     return;
   }
@@ -432,47 +443,51 @@ for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           : 'Membership';
         
         container.innerHTML = `
-<h1>🎉 Bundle Purchase Complete!</h1>
-<div class="status-badge status-success">Payment Confirmed</div>
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">🎉 Bundle Purchase Complete!</h2>
+<div style="text-align:center;"><span class="ty-badge alert-success">Payment Confirmed</span></div>
 
-<div class="info-box">
-<h3>${planName} + ${data.eventName || 'Event Ticket'}</h3>
-<p>Your membership and event ticket have both been confirmed. Welcome to Dice Bastion!</p>
+<div class="alert alert-info" style="margin:1.25rem 0;">
+<strong>${planName} + ${data.eventName || 'Event Ticket'}</strong><br>
+Your membership and event ticket have both been confirmed. Welcome to Dice Bastion!
 </div>
 
-<div class="details-grid">
-<div class="detail-row">
-<span class="detail-label">Membership Plan:</span>
-<span class="detail-value">${data.membershipPlan || 'Standard'}</span>
+<div class="card-section">
+<div class="ty-details">
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Membership Plan</span>
+<span class="card-value">${data.membershipPlan || 'Standard'}</span>
 </div>
-<div class="detail-row">
-<span class="detail-label">Valid Until:</span>
-<span class="detail-value">${formatDate(data.membershipEndDate)}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Valid Until</span>
+<span class="card-value">${formatDate(data.membershipEndDate)}</span>
 </div>
-<div class="detail-row">
-<span class="detail-label">Event:</span>
-<span class="detail-value">${data.eventName || 'Event'}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Event</span>
+<span class="card-value">${data.eventName || 'Event'}</span>
 </div>
 ${data.eventDate ? `
-<div class="detail-row">
-<span class="detail-label">Event Date:</span>
-<span class="detail-value">${formatDate(data.eventDate)}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Event Date</span>
+<span class="card-value">${formatDate(data.eventDate)}</span>
 </div>
 ` : ''}
-<div class="detail-row">
-<span class="detail-label">Total Paid:</span>
-<span class="detail-value">${formatCurrency(data.amount, data.currency)}</span>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Total Paid</span>
+<span class="card-value">${formatCurrency(data.amount, data.currency)}</span>
 </div>
 </div>
-
-<div style="margin-top: 24px;">
-<a href="/events" class="action-button">Browse Events</a>
-<a href="/account" class="action-button secondary-button">View Account</a>
 </div>
 
-<p style="margin-top: 24px; color: #666;">
+<div class="ty-actions">
+<a href="/events" class="btn btn-primary">Browse Events</a>
+<a href="/account" class="btn btn-secondary">View Account</a>
+</div>
+
+<p class="ty-note">
 Confirmation emails for your membership and event ticket have been sent to your registered email address.
 </p>
+</div>
 `;
         // Check for pending account setup
         checkPendingAccountSetup();
