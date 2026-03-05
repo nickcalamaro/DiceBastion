@@ -168,6 +168,60 @@
   color: rgb(var(--color-neutral-100));
 }
 
+.event-share-section {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1rem 0 1.5rem 0;
+  flex-wrap: wrap;
+}
+
+.event-share-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  background: rgb(var(--color-primary-500));
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.event-share-button:hover {
+  background: rgb(var(--color-primary-600));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(var(--color-primary-500), 0.3);
+}
+
+.event-share-url {
+  flex: 1;
+  min-width: 200px;
+  padding: 0.625rem 1rem;
+  border: 1px solid rgb(var(--color-neutral-300));
+  border-radius: 8px;
+  background: rgb(var(--color-neutral-50));
+  font-size: 0.875rem;
+  font-family: 'Monaco', 'Courier New', monospace;
+  color: rgb(var(--color-neutral-700));
+  cursor: pointer;
+}
+
+.dark .event-share-url {
+  background: rgb(var(--color-neutral-700));
+  border-color: rgb(var(--color-neutral-600));
+  color: rgb(var(--color-neutral-200));
+}
+
+.event-share-url:focus {
+  outline: 2px solid rgb(var(--color-primary-500));
+  outline-offset: 2px;
+}
+
 .event-detail-meta {
   display: flex;
   flex-wrap: wrap;
@@ -341,6 +395,22 @@ function openEventModal(eventId, allEvents) {
   if (isFree) html += '<span class="free-badge">Free Event</span>';
   html += '</h1>';
   
+  // Add share button with shareable URL
+  if (event.slug) {
+    const shareUrl = `${window.location.origin}/events/${event.slug}`;
+    html += `
+      <div class="event-share-section">
+        <button onclick="copyEventLink('${shareUrl}')" class="event-share-button" id="share-btn-${event.id}">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.499 2.499 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/>
+          </svg>
+          Share Event
+        </button>
+        <input type="text" readonly value="${shareUrl}" class="event-share-url" id="share-url-${event.id}" onclick="this.select()">
+      </div>
+    `;
+  }
+  
   html += '<div class="event-detail-meta">';
   html += `<div class="event-detail-meta-item"><strong>📅 Date:</strong> ${dateStr}</div>`;
   html += `<div class="event-detail-meta-item"><strong>🕒 Time:</strong> ${timeStr}</div>`;
@@ -386,6 +456,34 @@ function formatEventDate(datetime) {
   const month = datetime.toLocaleDateString('en-GB', { month: 'long' });
   const suffix = day > 3 && day < 21 ? 'th' : ['th', 'st', 'nd', 'rd'][day % 10] || 'th';
   return `${weekday} ${day}${suffix} ${month}`;
+}
+
+// Copy event link to clipboard
+function copyEventLink(url) {
+  navigator.clipboard.writeText(url).then(() => {
+    // Find the button that was clicked
+    const buttons = document.querySelectorAll('.event-share-button');
+    buttons.forEach(btn => {
+      if (btn.onclick && btn.onclick.toString().includes(url)) {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = `
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
+          </svg>
+          Copied!
+        `;
+        btn.style.background = 'rgb(var(--color-primary-600))';
+        
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+          btn.style.background = '';
+        }, 2000);
+      }
+    });
+  }).catch(err => {
+    console.error('Failed to copy link:', err);
+    alert('Failed to copy link. Please copy manually from the text field below.');
+  });
 }
 
 // Close on escape key

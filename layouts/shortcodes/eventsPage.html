@@ -448,10 +448,54 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Load events on page ready
+// Check URL for event slug to auto-open
+function checkAndOpenEventFromURL() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const slug = urlParams.get('open');
+  const hash = window.location.hash.replace('#', '');
+  
+  const eventIdentifier = slug || hash || window.eventSlugToOpen;
+  
+  if (eventIdentifier && allEvents && allEvents.length > 0) {
+    // Find event by slug
+    const event = allEvents.find(e => e.slug === eventIdentifier);
+    
+    if (event) {
+      console.log('Auto-opening event from URL:', event.title);
+      
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        openEventModal(event.id, allEvents);
+        
+        // Update URL to clean version (remove query param but keep in history)
+        if (slug) {
+          const newUrl = new URL(window.location.href);
+          newUrl.searchParams.delete('open');
+          window.history.replaceState({}, '', newUrl.toString());
+        }
+      }, 100);
+    } else if (window.eventIdToOpen) {
+      // Fallback to event ID if provided
+      const eventById = allEvents.find(e => e.id === window.eventIdToOpen);
+      if (eventById) {
+        setTimeout(() => {
+          openEventModal(eventById.id, allEvents);
+        }, 100);
+      }
+    }
+  }
+}
+
+// Load events and then check for URL parameters
+async function initializeEventsPage() {
+  await loadEvents();
+  checkAndOpenEventFromURL();
+}
+
+// Initialize on page ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', loadEvents);
+  document.addEventListener('DOMContentLoaded', initializeEventsPage);
 } else {
-  loadEvents();
+  initializeEventsPage();
 }
 </script>

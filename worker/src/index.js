@@ -65,6 +65,7 @@ const toIso = (d) => new Date(d).toISOString()
 const checkoutRateLimits = new Map()
 const membershipCheckoutRateLimits = new Map()
 const eventCheckoutRateLimits = new Map()
+const donationCheckoutRateLimits = new Map()
 
 // Rate limiting helper function
 function checkRateLimit(ip, rateLimitMap, limit, windowMinutes) {
@@ -786,9 +787,13 @@ async function processMembershipRenewal(db, membership, env) {
   const amount = Number(svc.amount)
   const currency = svc.currency || env.CURRENCY || 'GBP'
   const orderRef = `RENEWAL-${membership.id}-${crypto.randomUUID()}`
+
+  // ── Step 1: Attempt the charge ──────────────────────────────────────────
+  // Keep charge in its own try/catch so that post-success DB/email errors
+  // can never accidentally trigger a "Payment failed" email.
+  let payment
   try {
-    // Charge the payment instrument via payments worker
-    const payment = await chargePaymentInstrument(
+    payment = await chargePaymentInstrument(
       env,
       userId,
       instrument.instrument_id,
@@ -797,120 +802,149 @@ async function processMembershipRenewal(db, membership, env) {
       orderRef,
       `Renewal: Dice Bastion ${membership.plan} membership`
     )
-    
-    // If successful, extend membership
-    if (payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')) {
-      const months = Number(svc.months || 0)
-      const currentEnd = new Date(membership.end_date)
-      const newEnd = addMonths(currentEnd, months)
-      
-      // Update membership
-      await db.prepare(`
-        UPDATE memberships 
-        SET end_date = ?, 
-            renewal_failed_at = NULL, 
-            renewal_attempts = 0,
-            renewal_warning_sent = 0
-        WHERE id = ?
-      `).bind(toIso(newEnd), membership.id).run()
-      
-      // Create transaction record for renewal
-      const user = await db.prepare('SELECT email, name FROM users WHERE user_id = ?').bind(userId).first()
-      await db.prepare(`
-        INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
-                                  payment_id, amount, currency, payment_status)
-        VALUES ('renewal', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID')
-      `).bind(membership.id, userId, user?.email, user?.name, orderRef, payment.id, String(amount), currency).run()
-      
-      // Log renewal attempt
-      await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, payment_id, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(membership.id, toIso(new Date()), 'success', payment.id, String(amount), currency).run()
-      
-      // Send renewal success email
-      if (user) {
-        const emailContent = getRenewalSuccessEmail(membership, user, toIso(newEnd))
-        await sendEmail(env, { 
-          to: user.email, 
-          ...emailContent,
-          emailType: 'membership_renewal_success',
-          relatedId: membership.id,
-          relatedType: 'membership',
-          metadata: { plan: membership.plan, new_end_date: toIso(newEnd) }
-        }).catch(err => {
-          console.error('Renewal success email error:', err)
-        })
-      }
-      
-      return { success: true, newEndDate: toIso(newEnd), paymentId: payment.id }
-    } else {
-      throw new Error(`Payment not successful: ${payment?.status || 'UNKNOWN'}`)
+  } catch (e) {
+    // Charge itself failed – handle as a genuine payment failure
+    return await handleRenewalFailure(db, env, membership, instrument, amount, currency, e)
+  }
+
+  // Charge returned but status is not paid
+  if (!payment || (payment.status !== 'PAID' && payment.status !== 'SUCCESSFUL')) {
+    const statusErr = new Error(`Payment not successful: ${payment?.status || 'UNKNOWN'}`)
+    return await handleRenewalFailure(db, env, membership, instrument, amount, currency, statusErr)
+  }
+
+  // ── Step 2: Payment succeeded – extend membership & notify ─────────────
+  // Errors here are logged but must NEVER send a failure email because the
+  // money has already been collected.
+  const months = Number(svc.months || 0)
+  const currentEnd = new Date(membership.end_date)
+  const newEnd = addMonths(currentEnd, months)
+
+  try {
+    // Update membership
+    await db.prepare(`
+      UPDATE memberships 
+      SET end_date = ?, 
+          renewal_failed_at = NULL, 
+          renewal_attempts = 0,
+          renewal_warning_sent = 0
+      WHERE id = ?
+    `).bind(toIso(newEnd), membership.id).run()
+  } catch (e) {
+    console.error(`[renewal] CRITICAL – payment ${payment.id} succeeded but membership ${membership.id} update failed:`, e)
+  }
+
+  try {
+    // Create transaction record for renewal
+    const user = await db.prepare('SELECT email, name FROM users WHERE user_id = ?').bind(userId).first()
+    await db.prepare(`
+      INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                                payment_id, amount, currency, payment_status)
+      VALUES ('renewal', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID')
+    `).bind(membership.id, userId, user?.email, user?.name, orderRef, payment.id, String(amount), currency).run()
+  } catch (e) {
+    console.error(`[renewal] Failed to insert transaction record for payment ${payment.id}:`, e)
+  }
+
+  try {
+    // Log renewal attempt
+    await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, payment_id, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(membership.id, toIso(new Date()), 'success', payment.id, String(amount), currency).run()
+  } catch (e) {
+    console.error(`[renewal] Failed to insert renewal_log for payment ${payment.id}:`, e)
+  }
+
+  // Send renewal success email
+  try {
+    const user = await db.prepare('SELECT email, name FROM users WHERE user_id = ?').bind(userId).first()
+    if (user) {
+      const emailContent = getRenewalSuccessEmail(membership, user, toIso(newEnd))
+      await sendEmail(env, { 
+        to: user.email, 
+        ...emailContent,
+        emailType: 'membership_renewal_success',
+        relatedId: membership.id,
+        relatedType: 'membership',
+        metadata: { plan: membership.plan, new_end_date: toIso(newEnd) }
+      })
     }
   } catch (e) {
-    const currentAttempts = (membership.renewal_attempts || 0) + 1
-    const errorMessage = String(e.message || e)
-    
-    // Check if error is due to invalid/expired token
-    const isTokenError = errorMessage.toLowerCase().includes('invalid') || 
-                         errorMessage.toLowerCase().includes('expired') ||
-                         errorMessage.toLowerCase().includes('token') ||
-                         errorMessage.toLowerCase().includes('card')
-    
-    // Log the error
-    await db.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = ? WHERE id = ?')
-      .bind(toIso(new Date()), currentAttempts, membership.id).run()
-    await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(membership.id, toIso(new Date()), 'failed', errorMessage, String(amount), currency).run()
-    
-    // If token error, deactivate the instrument
-    if (isTokenError) {
-      console.log(`Deactivating expired/invalid payment instrument ${instrument.instrument_id} for user ${userId}`)
-      await db.prepare('UPDATE payment_instruments SET is_active = 0 WHERE instrument_id = ?')
-        .bind(instrument.instrument_id).run()
-      
-      // Disable auto-renewal since payment method is invalid
-      await db.prepare('UPDATE memberships SET auto_renew = 0 WHERE id = ?')
-        .bind(membership.id).run()
-    }
-    
-    // Get user for email notification
-    const user = await db.prepare('SELECT * FROM users WHERE user_id = ?').bind(userId).first()
-    
-    // If token error or 3rd failure, send final notice
-    if ((isTokenError || currentAttempts >= 3) && user) {
-      // Ensure auto-renew is disabled
-      await db.prepare('UPDATE memberships SET auto_renew = 0 WHERE id = ?').bind(membership.id).run()
-      
-      const emailContent = isTokenError 
-        ? getExpiredPaymentMethodEmail(membership, user)
-        : getRenewalFailedFinalEmail(membership, user)
-        
-      await sendEmail(env, { 
-        to: user.email, 
-        ...emailContent,
-        emailType: isTokenError ? 'payment_method_expired' : 'membership_renewal_final_failed',
-        relatedId: membership.id,
-        relatedType: 'membership',
-        metadata: { plan: membership.plan, attempts: currentAttempts, token_error: isTokenError }
-      }).catch(err => {
-        console.error('Renewal failure email error:', err)
-      })
-    } else if (user) {
-      // Send regular failure notification (attempts 1 or 2)
-      const emailContent = getRenewalFailedEmail(membership, user, currentAttempts)
-      await sendEmail(env, { 
-        to: user.email, 
-        ...emailContent,
-        emailType: 'membership_renewal_failed',
-        relatedId: membership.id,
-        relatedType: 'membership',
-        metadata: { plan: membership.plan, attempt_number: currentAttempts }
-      }).catch(err => {
-        console.error('Renewal failed email error:', err)
-      })
-    }
-    
-    return { success: false, error: errorMessage, attempts: currentAttempts, token_error: isTokenError }
+    console.error(`[renewal] Failed to send success email for payment ${payment.id}:`, e)
   }
+
+  return { success: true, newEndDate: toIso(newEnd), paymentId: payment.id }
+}
+
+/**
+ * Handle a genuine renewal charge failure
+ * Only called when the charge itself fails or returns a non-paid status.
+ */
+async function handleRenewalFailure(db, env, membership, instrument, amount, currency, error) {
+  const userId = membership.user_id
+  const currentAttempts = (membership.renewal_attempts || 0) + 1
+  const errorMessage = String(error.message || error)
+
+  // Check if error is due to invalid/expired token
+  const isTokenError = errorMessage.toLowerCase().includes('invalid') || 
+                       errorMessage.toLowerCase().includes('expired') ||
+                       errorMessage.toLowerCase().includes('token') ||
+                       errorMessage.toLowerCase().includes('card')
+
+  // Log the error
+  await db.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = ? WHERE id = ?')
+    .bind(toIso(new Date()), currentAttempts, membership.id).run()
+  await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(membership.id, toIso(new Date()), 'failed', errorMessage, String(amount), currency).run()
+
+  // If token error, deactivate the instrument
+  if (isTokenError) {
+    console.log(`Deactivating expired/invalid payment instrument ${instrument.instrument_id} for user ${userId}`)
+    await db.prepare('UPDATE payment_instruments SET is_active = 0 WHERE instrument_id = ?')
+      .bind(instrument.instrument_id).run()
+
+    // Disable auto-renewal since payment method is invalid
+    await db.prepare('UPDATE memberships SET auto_renew = 0 WHERE id = ?')
+      .bind(membership.id).run()
+  }
+
+  // Get user for email notification
+  const user = await db.prepare('SELECT * FROM users WHERE user_id = ?').bind(userId).first()
+
+  // If token error or 3rd failure, send final notice
+  if ((isTokenError || currentAttempts >= 3) && user) {
+    // Ensure auto-renew is disabled
+    await db.prepare('UPDATE memberships SET auto_renew = 0 WHERE id = ?').bind(membership.id).run()
+
+    const emailContent = isTokenError 
+      ? getExpiredPaymentMethodEmail(membership, user)
+      : getRenewalFailedFinalEmail(membership, user)
+
+    await sendEmail(env, { 
+      to: user.email, 
+      ...emailContent,
+      emailType: isTokenError ? 'payment_method_expired' : 'membership_renewal_final_failed',
+      relatedId: membership.id,
+      relatedType: 'membership',
+      metadata: { plan: membership.plan, attempts: currentAttempts, token_error: isTokenError }
+    }).catch(err => {
+      console.error('Renewal failure email error:', err)
+    })
+  } else if (user) {
+    // Send regular failure notification (attempts 1 or 2)
+    const emailContent = getRenewalFailedEmail(membership, user, currentAttempts)
+    await sendEmail(env, { 
+      to: user.email, 
+      ...emailContent,
+      emailType: 'membership_renewal_failed',
+      relatedId: membership.id,
+      relatedType: 'membership',
+      metadata: { plan: membership.plan, attempt_number: currentAttempts }
+    }).catch(err => {
+      console.error('Renewal failed email error:', err)
+    })
+  }
+
+  return { success: false, error: errorMessage, attempts: currentAttempts, token_error: isTokenError }
 }
 
 // ============================================================================
@@ -5538,7 +5572,7 @@ async function logCronJob(db, jobName, status, details = {}) {
 /**
  * Process auto-renewals and membership warnings
  * This function handles:
- * 1. Sending renewal warnings (7 days before)
+ * 1. Sending renewal warnings (2 days before)
  * 2. Processing renewals for expiring memberships
  * 3. Marking expired memberships
  */
@@ -5559,8 +5593,8 @@ async function processAutoRenewals(env) {
     const now = new Date()
     const today = toIso(now)
     
-    // Calculate dates for warnings (7 days from now)
-    const warningDate = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000))
+    // Calculate dates for warnings (2 days from now)
+    const warningDate = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000))
     const warningDateStr = toIso(warningDate)
     
     // Grace period: allow renewals for memberships that expired in the last 1 day
@@ -5568,7 +5602,7 @@ async function processAutoRenewals(env) {
     const gracePeriodStartStr = toIso(gracePeriodStart)
     
     // ========================================================================
-    // STEP 1: Send renewal warnings (7 days before expiry)
+    // STEP 1: Send renewal warnings (2 days before expiry)
     // ========================================================================
     console.log(`[CRON] Step 1: Checking for memberships needing renewal warnings...`)
     
@@ -5599,14 +5633,14 @@ async function processAutoRenewals(env) {
           payment_instrument_last_4: instrument?.last_4 || null
         }
         
-        const emailContent = getUpcomingRenewalEmail(membershipWithInstrument, membership, 7)
+        const emailContent = getUpcomingRenewalEmail(membershipWithInstrument, membership, 2)
         await sendEmail(env, {
           to: membership.email,
           ...emailContent,
           emailType: 'membership_renewal_reminder',
           relatedId: membership.id,
           relatedType: 'membership',
-          metadata: { plan: membership.plan, days_until_renewal: 7 }
+          metadata: { plan: membership.plan, days_until_renewal: 2 }
         })
         
         // Mark warning as sent
@@ -6056,6 +6090,257 @@ async function processDelayedAccountSetupEmails(env) {
     }
   }
 }
+
+// ==================== DONATION ENDPOINTS ====================
+
+/**
+ * Get donation totals and public messages for a campaign
+ * GET /donations/wall?campaign=pokemon-day-2026
+ */
+app.get('/donations/wall', async c => {
+  try {
+    const campaign = c.req.query('campaign') || 'pokemon-day-2026'
+
+    // Get total raised
+    const totalResult = await c.env.DB.prepare(`
+      SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) as total_raised,
+             COUNT(*) as donation_count
+      FROM donations
+      WHERE campaign = ? AND payment_status = 'PAID'
+    `).bind(campaign).first()
+
+    // Get public messages (only where donor opted in)
+    const messages = await c.env.DB.prepare(`
+      SELECT
+        CASE WHEN show_name = 1 THEN donor_name ELSE NULL END as name,
+        CASE WHEN show_message = 1 THEN message ELSE NULL END as message,
+        amount,
+        currency,
+        created_at
+      FROM donations
+      WHERE campaign = ? AND payment_status = 'PAID'
+        AND (show_name = 1 OR show_message = 1)
+      ORDER BY created_at DESC
+      LIMIT 50
+    `).bind(campaign).all()
+
+    return c.json({
+      ok: true,
+      campaign,
+      total_raised: Number(totalResult?.total_raised || 0).toFixed(2),
+      donation_count: totalResult?.donation_count || 0,
+      messages: messages?.results || []
+    })
+  } catch (error) {
+    console.error('[donations/wall] Error:', error)
+    return c.json({ ok: false, error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * Create a donation checkout
+ * POST /donations/checkout
+ */
+app.post('/donations/checkout', async c => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+
+    // Rate limiting: 5 requests per minute per IP
+    if (!checkRateLimit(ip, donationCheckoutRateLimits, 5, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many donation requests. Please try again in a minute.' }, 429)
+    }
+
+    const idem = c.req.header('Idempotency-Key')?.trim()
+    const { amount, name, email, message, showName, showMessage, privacyConsent, turnstileToken } = await c.req.json()
+
+    // Validate amount
+    const donationAmount = Number(amount)
+    if (!donationAmount || donationAmount < 1 || donationAmount > 10000) {
+      return c.json({ error: 'invalid_amount', message: 'Please enter an amount between £1 and £10,000.' }, 400)
+    }
+
+    // Privacy consent required
+    if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
+
+    // Validate optional fields
+    if (name && name.length > 200) return c.json({ error: 'name_too_long' }, 400)
+    if (email && !EMAIL_RE.test(email)) return c.json({ error: 'invalid_email' }, 400)
+    if (message && message.length > 500) return c.json({ error: 'message_too_long' }, 400)
+
+    // Turnstile verification
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
+    if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
+
+    const currency = c.env.CURRENCY || 'GBP'
+    const campaign = 'pokemon-day-2026'
+    const order_ref = `DON-${campaign}-${crypto.randomUUID()}`
+
+    // Idempotency check
+    if (idem) {
+      const existing = await c.env.DB.prepare(`
+        SELECT * FROM donations WHERE order_ref LIKE 'DON-%' AND donor_email = ? AND payment_status = 'pending'
+        ORDER BY id DESC LIMIT 1
+      `).bind(email || '').first()
+      if (existing && existing.checkout_id) {
+        return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
+      }
+    }
+
+    // Create SumUp checkout
+    let checkout
+    try {
+      checkout = await createCheckout(c.env, {
+        amount: donationAmount,
+        currency,
+        orderRef: order_ref,
+        title: 'Pokémon Day Fundraiser Donation',
+        description: `Donation of £${donationAmount.toFixed(2)} for Pokémon Day Fundraiser`
+      })
+    } catch (e) {
+      console.error('[donations/checkout] SumUp checkout failed:', e)
+      return c.json({ error: 'sumup_checkout_failed', message: String(e?.message || e) }, 502)
+    }
+
+    if (!checkout.id) {
+      console.error('[donations/checkout] Missing checkout ID:', checkout)
+      return c.json({ error: 'sumup_missing_id' }, 502)
+    }
+
+    // Insert donation record
+    await c.env.DB.prepare(`
+      INSERT INTO donations (donor_name, donor_email, message, amount, currency, order_ref,
+                             checkout_id, payment_status, show_name, show_message, campaign, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+    `).bind(
+      clampStr(name, 200) || null,
+      email || null,
+      clampStr(message, 500) || null,
+      String(donationAmount.toFixed(2)),
+      currency,
+      order_ref,
+      checkout.id,
+      showName ? 1 : 0,
+      showMessage ? 1 : 0,
+      campaign,
+      toIso(new Date())
+    ).run()
+
+    // Also store in transactions table for unified tracking
+    await c.env.DB.prepare(`
+      INSERT INTO transactions (transaction_type, user_id, email, name, order_ref,
+                                checkout_id, amount, currency, payment_status, idempotency_key, created_at)
+      VALUES ('donation', NULL, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).bind(
+      email || null,
+      clampStr(name, 200) || null,
+      order_ref,
+      checkout.id,
+      String(donationAmount.toFixed(2)),
+      currency,
+      idem || null,
+      toIso(new Date())
+    ).run()
+
+    return c.json({ orderRef: order_ref, checkoutId: checkout.id })
+  } catch (e) {
+    console.error('[donations/checkout] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * Confirm a donation payment
+ * GET /donations/confirm?orderRef=DON-...
+ */
+app.get('/donations/confirm', async c => {
+  try {
+    const orderRef = c.req.query('orderRef')
+    if (!orderRef || !orderRef.startsWith('DON-')) {
+      return c.json({ ok: false, error: 'invalid_orderRef' }, 400)
+    }
+
+    // Look up donation
+    const donation = await c.env.DB.prepare('SELECT * FROM donations WHERE order_ref = ?').bind(orderRef).first()
+    if (!donation) {
+      return c.json({ ok: false, error: 'donation_not_found' }, 404)
+    }
+
+    // Already confirmed
+    if (donation.payment_status === 'PAID') {
+      return c.json({
+        ok: true,
+        status: 'already_active',
+        amount: donation.amount,
+        currency: donation.currency || 'GBP',
+        donorName: donation.show_name ? donation.donor_name : null
+      })
+    }
+
+    // Verify payment with SumUp
+    let payment
+    try {
+      payment = await fetchPayment(c.env, donation.checkout_id)
+      console.log('[donations/confirm] SumUp payment status:', payment?.status, 'checkout_id:', donation.checkout_id)
+    } catch (err) {
+      console.error('[donations/confirm] Failed to fetch payment:', err)
+      return c.json({ ok: false, error: 'verify_failed' }, 400)
+    }
+
+    const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
+    if (!paid) {
+      const currentStatus = payment?.status || 'PENDING'
+      return c.json({
+        ok: false,
+        status: currentStatus,
+        message: currentStatus === 'FAILED' ? 'Payment failed. Please try again.' :
+                 currentStatus === 'DECLINED' ? 'Your card was declined. Please try a different payment method.' :
+                 'Payment is still processing.'
+      })
+    }
+
+    console.log('[donations/confirm] Payment verified as PAID')
+
+    // Update donation and transaction records
+    await c.env.DB.batch([
+      c.env.DB.prepare('UPDATE donations SET payment_status = ?, payment_id = ?, updated_at = ? WHERE id = ?')
+        .bind('PAID', payment.id, toIso(new Date()), donation.id),
+      c.env.DB.prepare('UPDATE transactions SET payment_status = ?, payment_id = ?, updated_at = ? WHERE order_ref = ?')
+        .bind('PAID', payment.id, toIso(new Date()), orderRef)
+    ])
+
+    // Send admin notification
+    try {
+      await sendEmail(c.env, {
+        to: 'admin@dicebastion.com',
+        subject: `💰 New Donation: £${donation.amount} - Pokémon Day Fundraiser`,
+        html: `<h2>New Donation Received!</h2>
+               <p><strong>Amount:</strong> £${donation.amount}</p>
+               <p><strong>Donor:</strong> ${donation.donor_name || 'Anonymous'}</p>
+               <p><strong>Email:</strong> ${donation.donor_email || 'Not provided'}</p>
+               <p><strong>Message:</strong> ${donation.message || 'No message'}</p>
+               <p><strong>Order Ref:</strong> ${orderRef}</p>`,
+        text: `New Donation: £${donation.amount} from ${donation.donor_name || 'Anonymous'}`,
+        emailType: 'admin_donation_notification',
+        relatedId: donation.id,
+        relatedType: 'donation'
+      })
+    } catch (emailError) {
+      console.error('[donations/confirm] Failed to send admin notification:', emailError)
+    }
+
+    return c.json({
+      ok: true,
+      status: 'active',
+      amount: donation.amount,
+      currency: donation.currency || 'GBP',
+      donorName: donation.show_name ? donation.donor_name : null
+    })
+  } catch (error) {
+    console.error('[donations/confirm] Error:', error)
+    return c.json({ ok: false, error: 'internal_error' }, 500)
+  }
+})
 
 /**
  * Main scheduled handler - runs all cron jobs
