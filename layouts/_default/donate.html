@@ -7,17 +7,8 @@
   <div class="page-container" style="max-width: 900px;">
 
     <!-- Hero Banner -->
-    <div class="donate-hero">
-      <div class="donate-hero-badge">🎉 Fundraiser</div>
-      <h1 class="donate-hero-title">Pokémon Day Fundraiser</h1>
-      <p class="donate-hero-subtitle">Supporting Childline Gibraltar & our gaming community</p>
-      <div class="donate-hero-event-info">
-        <span>📅 Saturday 14th March</span>
-        <span class="footer-divider"></span>
-        <span>🕚 From 11AM</span>
-        <span class="footer-divider"></span>
-        <span>📍 Gibraltar Warhammer Club</span>
-      </div>
+    <div class="donate-hero-banner">
+      <img src="/img/childline/ChildlineDonationBanner.png" alt="Pokémon Day Fundraiser - Supporting Childline Gibraltar & our gaming community" class="donate-hero-img">
     </div>
 
     <!-- Progress Tracker -->
@@ -34,18 +25,6 @@
       <div class="donate-progress-bar-container">
         <div class="donate-progress-bar" id="progress-bar" style="width: 0%"></div>
       </div>
-      <div class="donate-progress-splits">
-        <div class="donate-split">
-          <div class="donate-split-icon">❤️</div>
-          <div class="donate-split-label">Childline Gibraltar</div>
-          <div class="donate-split-amount" id="childline-amount">£0.00</div>
-        </div>
-        <div class="donate-split">
-          <div class="donate-split-icon">🏠</div>
-          <div class="donate-split-label">Space & AC Fund</div>
-          <div class="donate-split-amount" id="space-amount">£0.00</div>
-        </div>
-      </div>
     </div>
 
     <!-- About Section -->
@@ -53,12 +32,12 @@
       <h2 class="card-header" style="font-size: 1.25rem;">Where does the money go?</h2>
       <div class="donate-about-grid">
         <div class="donate-about-item">
-          <div class="donate-about-icon">❤️</div>
+          <img src="/img/childline/childlinelogo.png" alt="Childline Gibraltar" class="donate-about-logo">
           <h3>Childline Gibraltar</h3>
           <p>Half of all proceeds go directly to Childline Gibraltar, who run a confidential helpline, support services for families, and a 24/7 appropriate adult service for young people without representation.</p>
         </div>
         <div class="donate-about-item">
-          <div class="donate-about-icon">❄️</div>
+          <img src="/img/childline/Club%20logo.png" alt="Gibraltar Warhammer Club" class="donate-about-logo">
           <h3>Club Improvements</h3>
           <p>The other half goes towards refurbishing our space and getting some much-needed AC before the summer heat makes the club unusable!</p>
         </div>
@@ -83,12 +62,12 @@
             <span class="donate-popular-tag">Popular</span>
           </button>
           <button class="donate-amount-btn" data-amount="50">£50</button>
+          <button class="donate-amount-btn" id="custom-amount-toggle">Other</button>
         </div>
-        <div class="donate-custom-amount">
-          <label class="form-label" for="custom-amount">Or enter a custom amount</label>
+        <div class="donate-custom-amount" id="custom-amount-wrapper" style="display:none;">
           <div class="donate-input-prefix">
             <span class="donate-currency-symbol">£</span>
-            <input type="number" id="custom-amount" class="form-input" min="1" max="10000" step="0.01" placeholder="Enter amount">
+            <input type="number" id="custom-amount" class="form-input" min="1" max="10000" step="0.01" placeholder="Enter your amount">
           </div>
         </div>
         <div id="amount-error" class="alert alert-error" style="display:none;"></div>
@@ -177,11 +156,26 @@
 
     <!-- Donation Wall -->
     <div class="card" id="donation-wall-card">
-      <h2 class="card-header" style="font-size:1.25rem;">💬 Donation Wall</h2>
+      <h2 class="card-header" style="font-size:1.25rem;">Donation Wall</h2>
       <div id="donation-wall-empty" class="card-empty">
         <p>Be the first to donate and leave a message! ✨</p>
       </div>
       <div id="donation-wall-list"></div>
+    </div>
+
+    <!-- Childline Photos -->
+    <div class="card">
+      <div class="donate-photo-grid donate-photo-grid-3">
+        <div class="donate-photo-item">
+          <img src="/img/childline/childline%20photo%201.jpg" alt="Childline Gibraltar community outreach">
+        </div>
+        <div class="donate-photo-item">
+          <img src="/img/childline/childline%20photo%202.jpg" alt="Childline Gibraltar supporting young people">
+        </div>
+        <div class="donate-photo-item">
+          <img src="/img/childline/Childline%20photo%203.png" alt="Childline Gibraltar certificate of appreciation presented to the Warhammer Club">
+        </div>
+      </div>
     </div>
 
   </div>

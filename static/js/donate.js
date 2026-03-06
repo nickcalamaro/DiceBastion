@@ -24,8 +24,6 @@
   const $totalRaised = document.getElementById('total-raised');
   const $donationCount = document.getElementById('donation-count');
   const $progressBar = document.getElementById('progress-bar');
-  const $childlineAmount = document.getElementById('childline-amount');
-  const $spaceAmount = document.getElementById('space-amount');
   const $customAmount = document.getElementById('custom-amount');
   const $donorName = document.getElementById('donor-name');
   const $donorEmail = document.getElementById('donor-email');
@@ -67,10 +65,6 @@
       const pct = Math.min((total / GOAL_AMOUNT) * 100, 100);
       setTimeout(() => { $progressBar.style.width = pct + '%'; }, 200);
 
-      const half = total / 2;
-      animateValue($childlineAmount, 0, half, 1200, v => `£${v.toFixed(2)}`);
-      animateValue($spaceAmount, 0, half, 1200, v => `£${v.toFixed(2)}`);
-
       // Render messages
       const msgs = data.messages || [];
       if (msgs.length === 0) {
@@ -108,19 +102,37 @@
   // ───────── Amount Selection ─────────
   function initAmountButtons() {
     const btns = document.querySelectorAll('.donate-amount-btn');
+    const $customToggle = document.getElementById('custom-amount-toggle');
+    const $customWrapper = document.getElementById('custom-amount-wrapper');
+
     btns.forEach(btn => {
       btn.addEventListener('click', () => {
+        // Skip the "Other" toggle – handled separately
+        if (btn === $customToggle) return;
+
         btns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         selectedAmount = Number(btn.dataset.amount);
         $customAmount.value = '';
+        $customWrapper.style.display = 'none';
         hideError($amountError);
         updateDonateButton();
       });
     });
 
-    $customAmount.addEventListener('input', () => {
+    // "Other" button toggles the custom input
+    $customToggle.addEventListener('click', () => {
       btns.forEach(b => b.classList.remove('active'));
+      $customToggle.classList.add('active');
+      $customWrapper.style.display = '';
+      selectedAmount = null;
+      $customAmount.value = '';
+      $customAmount.focus();
+      hideError($amountError);
+      updateDonateButton();
+    });
+
+    $customAmount.addEventListener('input', () => {
       const val = parseFloat($customAmount.value);
       selectedAmount = (val && val >= 1) ? val : null;
       hideError($amountError);
