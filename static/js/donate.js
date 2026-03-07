@@ -13,7 +13,7 @@
 
   const API_BASE = window.utils.getApiBase();
   const CAMPAIGN = 'pokemon-day-2026';
-  const GOAL_AMOUNT = 500; // £500 fundraiser goal for progress bar
+  const GOAL_MILESTONES = [100, 200, 300, 500, 750, 1000];
   const TURNSTILE_KEY = typeof TURNSTILE_SITE_KEY !== 'undefined' ? TURNSTILE_SITE_KEY : '0x4AAAAAACAB4xlOnW3S8K0k';
 
   let selectedAmount = null;
@@ -24,6 +24,7 @@
   const $totalRaised = document.getElementById('total-raised');
   const $donationCount = document.getElementById('donation-count');
   const $progressBar = document.getElementById('progress-bar');
+  const $progressGoal = document.getElementById('progress-goal');
   const $customAmount = document.getElementById('custom-amount');
   const $donorName = document.getElementById('donor-name');
   const $donorEmail = document.getElementById('donor-email');
@@ -59,10 +60,12 @@
 
       // Update progress
       const total = parseFloat(data.total_raised) || 0;
+      const currentGoal = getGoalForAmount(total);
       animateValue($totalRaised, 0, total, 1200, v => `£${v.toFixed(2)}`);
+      $progressGoal.textContent = `/ £${currentGoal.toLocaleString()} goal`;
       $donationCount.textContent = data.donation_count || 0;
 
-      const pct = Math.min((total / GOAL_AMOUNT) * 100, 100);
+      const pct = Math.min((total / currentGoal) * 100, 100);
       setTimeout(() => { $progressBar.style.width = pct + '%'; }, 200);
 
       // Render messages
@@ -319,6 +322,14 @@
   }
 
   // ───────── Helpers ─────────
+  function getGoalForAmount(total) {
+    for (const milestone of GOAL_MILESTONES) {
+      if (total < milestone) return milestone;
+    }
+    // Past all milestones – return the highest one
+    return GOAL_MILESTONES[GOAL_MILESTONES.length - 1];
+  }
+
   function showError(el, msg) {
     el.textContent = msg;
     el.style.display = '';

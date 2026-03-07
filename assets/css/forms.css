@@ -1093,6 +1093,22 @@
   color: rgb(var(--color-primary-400));
 }
 
+.donate-progress-amount-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.donate-progress-goal {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-500));
+}
+
+.dark .donate-progress-goal {
+  color: rgb(var(--color-neutral-400));
+}
+
 .donate-progress-label {
   font-size: 0.9rem;
   color: rgb(var(--color-neutral-600));
