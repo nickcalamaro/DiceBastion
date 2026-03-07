@@ -1,5 +1,4 @@
 {{ define "main" }}
-<script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
 <script src="/js/utils.js"></script>
 <link rel="stylesheet" href="{{ "css/forms.css" | relURL }}">
 
@@ -15,10 +14,7 @@
     <div class="card" id="donation-progress-card">
       <div class="donate-progress-header">
         <div>
-          <div class="donate-progress-amount-row">
-            <span class="donate-progress-amount" id="total-raised">£0.00</span>
-            <span class="donate-progress-goal" id="progress-goal">/ £100 goal</span>
-          </div>
+          <div class="donate-progress-amount" id="total-raised">£0.00</div>
           <div class="donate-progress-label">raised so far</div>
         </div>
         <div class="donate-progress-count">
