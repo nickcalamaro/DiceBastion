@@ -13,8 +13,15 @@
 
   const API_BASE = window.utils.getApiBase();
   const CAMPAIGN = 'pokemon-day-2026';
-  const GOAL_AMOUNT = 500;
+  const MILESTONES = [100, 200, 300, 500, 750, 1000];
   const TURNSTILE_KEY = typeof TURNSTILE_SITE_KEY !== 'undefined' ? TURNSTILE_SITE_KEY : '0x4AAAAAACAB4xlOnW3S8K0k';
+
+  function getCurrentGoal(total) {
+    for (const m of MILESTONES) {
+      if (total < m) return m;
+    }
+    return MILESTONES[MILESTONES.length - 1];
+  }
 
   let selectedAmount = null;
   let turnstileState = { widgetId: null };
@@ -59,10 +66,15 @@
 
       // Update progress
       const total = parseFloat(data.total_raised) || 0;
+      const goal = getCurrentGoal(total);
       animateValue($totalRaised, 0, total, 1200, v => `£${v.toFixed(2)}`);
       $donationCount.textContent = data.donation_count || 0;
 
-      const pct = Math.min((total / GOAL_AMOUNT) * 100, 100);
+      // Show current goal
+      const $goalLabel = document.getElementById('goal-label');
+      if ($goalLabel) $goalLabel.textContent = `Goal: £${goal}`;
+
+      const pct = Math.min((total / goal) * 100, 100);
       setTimeout(() => { $progressBar.style.width = pct + '%'; }, 200);
 
       // Render messages
