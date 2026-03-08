@@ -1322,15 +1322,16 @@
 }
 
 .donate-reg-donate-intro {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: rgb(var(--color-neutral-700));
-  margin: 0 0 1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: rgb(var(--color-neutral-800));
+  margin: 0.5rem 0 1.25rem;
   text-align: center;
+  line-height: 1.5;
 }
 
 .dark .donate-reg-donate-intro {
-  color: rgb(var(--color-neutral-200));
+  color: rgb(var(--color-neutral-100));
 }
 
 .donate-modal-amount-grid {
