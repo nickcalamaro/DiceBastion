@@ -6168,9 +6168,11 @@ app.post('/donations/checkout', async c => {
     if (email && !EMAIL_RE.test(email)) return c.json({ error: 'invalid_email' }, 400)
     if (message && message.length > 500) return c.json({ error: 'message_too_long' }, 400)
 
-    // Turnstile verification
-    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
-    if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
+    // Turnstile verification (optional – donate page skips it)
+    if (turnstileToken) {
+      const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
+      if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
+    }
 
     const currency = c.env.CURRENCY || 'GBP'
     const campaign = 'pokemon-day-2026'

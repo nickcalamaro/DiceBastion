@@ -15,7 +15,6 @@
   const CAMPAIGN = 'pokemon-day-2026';
   const MILESTONES = [100, 200, 300, 500, 750, 1000];
   const EVENT_ID = 51;
-  const TURNSTILE_KEY = typeof TURNSTILE_SITE_KEY !== 'undefined' ? TURNSTILE_SITE_KEY : '0x4AAAAAACAB4xlOnW3S8K0k';
 
   function getCurrentGoal(total) {
     for (const m of MILESTONES) {
@@ -25,7 +24,6 @@
   }
 
   let selectedAmount = null;
-  let turnstileState = { widgetId: null };
   let currentCheckoutId = null;
 
   // ───────── DOM refs ─────────
@@ -56,7 +54,6 @@
   loadDonationWall();
   initAmountButtons();
   initFormEvents();
-  initTurnstile();
   initSaveTheDate();
 
   // ───────── Donation Wall & Progress ─────────
@@ -177,17 +174,6 @@
     }
   }
 
-  // ───────── Turnstile ─────────
-  async function initTurnstile() {
-    try {
-      await window.utils.renderTurnstile('donation-turnstile', TURNSTILE_KEY, {
-        widgetState: turnstileState
-      });
-    } catch (e) {
-      console.warn('[donate] Turnstile init failed:', e);
-    }
-  }
-
   // ───────── Donate Handler ─────────
   async function handleDonate() {
     hideError($donationError);
@@ -204,15 +190,6 @@
       return;
     }
 
-    // Get Turnstile token
-    let turnstileToken;
-    try {
-      turnstileToken = await window.utils.getTurnstileToken('donation-turnstile', turnstileState.widgetId);
-    } catch (e) {
-      showError($donationError, e.message || 'Please complete the security check.');
-      return;
-    }
-
     $donateBtn.disabled = true;
     $donateBtn.textContent = 'Processing...';
 
@@ -226,7 +203,7 @@
         showName: $showName.checked,
         showMessage: $showMessage.checked,
         privacyConsent: true,
-        turnstileToken
+        turnstileToken: null
       };
 
       const res = await fetch(`${API_BASE}/donations/checkout`, {
@@ -259,8 +236,6 @@
       showError($donationError, err.message || 'Something went wrong. Please try again.');
       $donateBtn.disabled = false;
       updateDonateButton();
-      // Re-render Turnstile
-      initTurnstile();
     }
   }
 
@@ -297,7 +272,6 @@
               $formCard.style.display = '';
               showError($donationError, msg);
               updateDonateButton();
-              initTurnstile();
             },
             onTimeout: () => {
               showThankYou(String(selectedAmount), 'GBP');
@@ -308,13 +282,11 @@
           $formCard.style.display = '';
           showError($donationError, 'Payment failed. Please check your card details and try again.');
           updateDonateButton();
-          initTurnstile();
         } else if (type === 'cancel') {
           $paymentSection.style.display = 'none';
           $formCard.style.display = '';
           showInfo($donationStatus, 'Payment cancelled. You can try again when you\'re ready.');
           updateDonateButton();
-          initTurnstile();
         }
       }
     });
@@ -408,9 +380,6 @@
     const $modalPrivacy = document.getElementById('modal-privacy');
     const $modalDonateError = document.getElementById('modal-donate-error');
     let modalSelectedAmount = null;
-    let modalTurnstileState = { widgetId: null };
-
-    let regTurnstileState = { widgetId: null };
 
     if (!$btn) return;
 
@@ -427,11 +396,9 @@
         $userEmail.textContent = user.email;
         $loggedIn.style.display = '';
         $guest.style.display = 'none';
-        renderRegTurnstile('reg-ts-logged');
       } else {
         $loggedIn.style.display = 'none';
         $guest.style.display = '';
-        renderRegTurnstile('reg-ts-guest');
       }
     });
 
@@ -445,7 +412,6 @@
     $switchAccount.addEventListener('click', () => {
       $loggedIn.style.display = 'none';
       $guest.style.display = '';
-      renderRegTurnstile('reg-ts-guest');
     });
 
     // Logged-in user confirm
@@ -453,16 +419,9 @@
       $regError.style.display = 'none';
       const user = window.utils.session.getUser();
       const name = user.name || user.email.split('@')[0];
-      let token;
-      try {
-        token = await getTurnstileTokenFromContainer('reg-ts-logged');
-      } catch (e) {
-        showRegError(e.message || 'Please complete the security check.');
-        return;
-      }
       $confirmLogged.disabled = true;
       $confirmLogged.textContent = 'Registering…';
-      await submitRegistration(user.email, name, token);
+      await submitRegistration(user.email, name);
       $confirmLogged.disabled = false;
       $confirmLogged.textContent = 'Complete Registration';
     });
@@ -476,26 +435,19 @@
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         showRegError('Please enter a valid email.'); return;
       }
-      let token;
-      try {
-        token = await getTurnstileTokenFromContainer('reg-ts-guest');
-      } catch (e) {
-        showRegError(e.message || 'Please complete the security check.');
-        return;
-      }
       $confirmGuest.disabled = true;
       $confirmGuest.textContent = 'Registering…';
-      await submitRegistration(email, name, token);
+      await submitRegistration(email, name);
       $confirmGuest.disabled = false;
       $confirmGuest.textContent = 'Complete Registration';
     });
 
-    async function submitRegistration(email, name, turnstileToken) {
+    async function submitRegistration(email, name) {
       try {
         const resp = await fetch(`${API_BASE}/events/${EVENT_ID}/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, name, turnstileToken })
+          body: JSON.stringify({ email, name, turnstileToken: null })
         });
         const data = await resp.json();
         if (!resp.ok) {
@@ -503,42 +455,145 @@
           return;
         }
         if (data.success || data.registered || data.already_registered) {
-          // Store account setup info if needed
           if (data.needsAccountSetup && data.userEmail) {
             sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
               email: data.userEmail,
               eventName: data.eventName || 'Pokémon Day Fundraiser'
             }));
           }
-          // Build the thank-you URL for "no thanks"
           const ticketId = data.ticketId || Date.now();
           const regRef = `REG-${EVENT_ID}-${ticketId}`;
           const thankYouUrl = '/thank-you?orderRef=' + encodeURIComponent(regRef);
 
-          // Hide form screens, show donation prompt
+          // Hide registration screens, show donation form
           $regError.style.display = 'none';
           $loggedIn.style.display = 'none';
           $guest.style.display = 'none';
-          $regSuccessScreen.style.display = '';
+          $regDonateScreen.style.display = '';
 
-          // "Yes" — close modal, scroll to donation form
-          $regDonateYes.onclick = () => {
-            closeRegModal();
-            $btn.style.display = 'none';
-            $registered.style.display = '';
-            const formCard = document.getElementById('donation-form-card');
-            if (formCard) formCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          };
+          // Pre-fill name/email from registration
+          $modalDonorName.value = name || '';
+          $modalDonorEmail.value = email || '';
 
-          // "No thanks" — redirect to thank-you page
-          $regDonateNo.onclick = () => {
-            window.location.href = thankYouUrl;
-          };
+          // Update the save-the-date button behind the modal
+          $btn.style.display = 'none';
+          $registered.style.display = '';
+
+          // Wire up "No thanks"
+          $regNoThanks.onclick = () => { window.location.href = thankYouUrl; };
+
+          // Init the modal donation form
+          initModalDonationForm(thankYouUrl);
         } else {
           showRegError('Registration failed. Please try again.');
         }
       } catch (err) {
         showRegError('Network error. Please check your connection.');
+      }
+    }
+
+    function initModalDonationForm(thankYouUrl) {
+      const amtBtns = document.querySelectorAll('.donate-modal-amt');
+
+      amtBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (btn === $modalCustomToggle) return;
+          amtBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          modalSelectedAmount = Number(btn.dataset.amount);
+          $modalCustomAmount.value = '';
+          $modalCustomWrapper.style.display = 'none';
+          hideError($modalDonateError);
+          updateModalDonateButton();
+        });
+      });
+
+      $modalCustomToggle.addEventListener('click', () => {
+        amtBtns.forEach(b => b.classList.remove('active'));
+        $modalCustomToggle.classList.add('active');
+        $modalCustomWrapper.style.display = '';
+        modalSelectedAmount = null;
+        $modalCustomAmount.value = '';
+        $modalCustomAmount.focus();
+        updateModalDonateButton();
+      });
+
+      $modalCustomAmount.addEventListener('input', () => {
+        const val = parseFloat($modalCustomAmount.value);
+        modalSelectedAmount = (val && val >= 1) ? val : null;
+        updateModalDonateButton();
+      });
+
+      $modalPrivacy.addEventListener('change', updateModalDonateButton);
+      $modalDonateBtn.addEventListener('click', handleModalDonate);
+    }
+
+    function updateModalDonateButton() {
+      const hasAmount = modalSelectedAmount && modalSelectedAmount >= 1;
+      const hasConsent = $modalPrivacy.checked;
+      $modalDonateBtn.disabled = !(hasAmount && hasConsent);
+      if (hasAmount) {
+        $modalDonateBtn.textContent = `🎁 Donate £${Number(modalSelectedAmount).toFixed(2)}`;
+      } else {
+        $modalDonateBtn.textContent = '🎁 Donate Now';
+      }
+    }
+
+    async function handleModalDonate() {
+      hideError($modalDonateError);
+
+      if (!modalSelectedAmount || modalSelectedAmount < 1) {
+        showError($modalDonateError, 'Please select or enter a donation amount.');
+        return;
+      }
+      if (!$modalPrivacy.checked) {
+        showError($modalDonateError, 'Please accept the privacy policy to continue.');
+        return;
+      }
+
+      $modalDonateBtn.disabled = true;
+      $modalDonateBtn.textContent = 'Processing...';
+
+      try {
+        const idemKey = window.utils.generateIdempotencyKey();
+        const body = {
+          amount: modalSelectedAmount,
+          name: $modalDonorName.value.trim() || null,
+          email: $modalDonorEmail.value.trim() || null,
+          message: $modalDonorMessage.value.trim() || null,
+          showName: $modalShowName.checked,
+          showMessage: $modalShowMessage.checked,
+          privacyConsent: true,
+          turnstileToken: null
+        };
+
+        const res = await fetch(`${API_BASE}/donations/checkout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idemKey
+          },
+          body: JSON.stringify(body)
+        });
+
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.message || data.error || 'Failed to create checkout');
+        }
+
+        // Close the registration modal, switch to the main-page payment section
+        closeRegModal();
+        $formCard.style.display = 'none';
+        $paymentSection.style.display = '';
+        $paymentSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        await mountSumUpWidget(data.checkoutId, data.orderRef);
+
+      } catch (err) {
+        console.error('[donate] Modal checkout error:', err);
+        showError($modalDonateError, err.message || 'Something went wrong. Please try again.');
+        $modalDonateBtn.disabled = false;
+        updateModalDonateButton();
       }
     }
 
@@ -549,28 +604,6 @@
     function showRegError(msg) {
       $regError.textContent = msg;
       $regError.style.display = '';
-    }
-
-    async function renderRegTurnstile(containerId) {
-      try {
-        const container = document.getElementById(containerId);
-        if (container) container.innerHTML = '';
-        await window.utils.renderTurnstile(containerId, TURNSTILE_KEY, {
-          widgetState: regTurnstileState
-        });
-      } catch (e) {
-        console.warn('[donate] Reg turnstile failed:', e);
-      }
-    }
-
-    async function getTurnstileTokenFromContainer(containerId) {
-      const iframe = document.querySelector(`#${containerId} iframe`);
-      if (!iframe) throw new Error('Security check not loaded. Please wait a moment.');
-      const widgetId = regTurnstileState.widgetId;
-      if (widgetId == null) throw new Error('Security check not ready.');
-      const token = turnstile.getResponse(widgetId);
-      if (!token) throw new Error('Please complete the security check.');
-      return token;
     }
   }
 })();
