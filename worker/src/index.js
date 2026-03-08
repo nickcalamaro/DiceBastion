@@ -4150,9 +4150,12 @@ app.post('/events/:id/register', async c => {
     if (!EMAIL_RE.test(email)) return c.json({ error:'invalid_email' },400)
     if (!name || name.trim().length === 0) return c.json({ error:'name_required' },400)
     if (name && name.length > 200) return c.json({ error:'name_too_long' },400)
-    
-    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
-    if (!tsOk) return c.json({ error:'turnstile_failed' },403)
+
+    // Turnstile verification (optional – donate page skips it)
+    if (turnstileToken) {
+      const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
+      if (!tsOk) return c.json({ error:'turnstile_failed' },403)
+    }
 
     const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
     if (!ev) return c.json({ error:'event_not_found' },404)
