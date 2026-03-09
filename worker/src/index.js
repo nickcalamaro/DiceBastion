@@ -6334,6 +6334,34 @@ app.get('/donations/confirm', async c => {
       console.error('[donations/confirm] Failed to send admin notification:', emailError)
     }
 
+    // Send thank-you email to the donor (only if they provided an email)
+    if (donation.donor_email) {
+      try {
+        const donorDisplayName = donation.donor_name || 'there'
+        await sendEmail(c.env, {
+          to: donation.donor_email,
+          subject: `Thank you for your donation to Dice Bastion`,
+          html: `<h2>Thank you for your generosity, ${donorDisplayName}!</h2>
+                 <p>We've received your donation of <strong>&pound;${donation.amount}</strong> to the Pokemon Day Fundraiser.</p>
+                 <p>Your support means a lot to the Dice Bastion community and helps us keep running great events for everyone.</p>
+                 <p><strong>Donation details:</strong></p>
+                 <ul>
+                   <li>Amount: &pound;${donation.amount}</li>
+                   <li>Campaign: Pokemon Day Fundraiser</li>
+                   <li>Reference: ${orderRef}</li>
+                 </ul>
+                 <p>If you have any questions, feel free to get in touch at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+                 <p>Thanks again,<br>The Dice Bastion Team</p>`,
+          text: `Thank you for your generosity, ${donorDisplayName}!\n\nWe've received your donation of £${donation.amount} to the Pokemon Day Fundraiser.\n\nYour support means a lot to the Dice Bastion community and helps us keep running great events for everyone.\n\nDonation details:\n- Amount: £${donation.amount}\n- Campaign: Pokemon Day Fundraiser\n- Reference: ${orderRef}\n\nIf you have any questions, feel free to get in touch at admin@dicebastion.com.\n\nThanks again,\nThe Dice Bastion Team`,
+          emailType: 'donation_thank_you',
+          relatedId: donation.id,
+          relatedType: 'donation'
+        })
+      } catch (emailError) {
+        console.error('[donations/confirm] Failed to send donor thank-you email:', emailError)
+      }
+    }
+
     return c.json({
       ok: true,
       status: 'active',
