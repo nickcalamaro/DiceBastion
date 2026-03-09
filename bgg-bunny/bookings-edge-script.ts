@@ -141,6 +141,122 @@ async function sendBookingConfirmationEmail(params: {
   }
 }
 
+/**
+ * Send admin notification email when a new booking is created
+ */
+async function sendAdminBookingNotificationEmail(params: {
+  userEmail: string;
+  userName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  tableTypeId: number;
+  amountPaid: number;
+  orderRef: string;
+  isMemberBooking: boolean;
+  notes?: string;
+}): Promise<void> {
+  const { userEmail, userName, bookingDate, startTime, endTime, tableTypeId, amountPaid, orderRef, isMemberBooking, notes } = params;
+
+  try {
+    // Get table type name
+    const tableTypeResult = await client.execute({
+      sql: "SELECT name FROM booking_table_types WHERE id = ?",
+      args: [tableTypeId],
+    });
+    const tableTypeName = String(tableTypeResult.rows[0]?.name || 'Table');
+
+    // Try to fetch email template from database
+    const templateResult = await client.execute({
+      sql: `SELECT subject, body_html, body_text, from_email, from_name 
+            FROM email_templates 
+            WHERE template_key = ? AND active = 1`,
+      args: ['admin_booking_notification'],
+    });
+
+    const templateData = {
+      user_name: userName,
+      user_email: userEmail,
+      table_type_name: tableTypeName,
+      booking_date: bookingDate,
+      start_time: startTime,
+      end_time: endTime,
+      amount_paid: amountPaid.toFixed(2),
+      order_ref: orderRef,
+      is_member: isMemberBooking ? 'Yes' : 'No',
+      notes: notes || 'None',
+    };
+
+    let subject: string;
+    let html: string;
+    let text: string | undefined;
+    let fromEmail: string;
+    let fromName: string;
+
+    if (templateResult.rows.length > 0) {
+      // Use database template
+      const template = templateResult.rows[0];
+      subject = replacePlaceholders(String(template.subject), templateData);
+      html = replacePlaceholders(String(template.body_html), templateData);
+      text = template.body_text
+        ? replacePlaceholders(String(template.body_text), templateData)
+        : undefined;
+      fromEmail = String(template.from_email);
+      fromName = String(template.from_name);
+    } else {
+      // Fallback to inline template if DB template not found
+      console.warn('Email template not found: admin_booking_notification — using fallback');
+      fromEmail = 'noreply@dicebastion.com';
+      fromName = 'DiceBastion Bookings';
+      subject = `New Booking: ${tableTypeName} on ${bookingDate}`;
+      html = `
+        <h2>New Booking Received</h2>
+        <table style="border-collapse:collapse;width:100%;max-width:500px;">
+          <tr><td style="padding:6px 12px;font-weight:bold;">Customer</td><td style="padding:6px 12px;">${userName} (${userEmail})</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:bold;">Table Type</td><td style="padding:6px 12px;">${tableTypeName}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:bold;">Date</td><td style="padding:6px 12px;">${bookingDate}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:bold;">Time</td><td style="padding:6px 12px;">${startTime} – ${endTime}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:bold;">Amount</td><td style="padding:6px 12px;">£${amountPaid.toFixed(2)}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:bold;">Member Booking</td><td style="padding:6px 12px;">${isMemberBooking ? 'Yes' : 'No'}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:bold;">Order Ref</td><td style="padding:6px 12px;">${orderRef}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:bold;">Notes</td><td style="padding:6px 12px;">${notes || 'None'}</td></tr>
+        </table>
+      `.trim();
+      text = `New Booking Received\nCustomer: ${userName} (${userEmail})\nTable Type: ${tableTypeName}\nDate: ${bookingDate}\nTime: ${startTime} – ${endTime}\nAmount: £${amountPaid.toFixed(2)}\nMember: ${isMemberBooking ? 'Yes' : 'No'}\nOrder Ref: ${orderRef}\nNotes: ${notes || 'None'}`;
+    }
+
+    // Send email via DiceBastionEmails edge script
+    const emailApiUrl = process.env.EMAIL_API_URL;
+
+    if (!emailApiUrl) {
+      console.error('EMAIL_API_URL not configured');
+      return;
+    }
+
+    const response = await fetch(emailApiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to_email: 'admin@dicebastion.com',
+        to_name: 'DiceBastion Admin',
+        from_email: fromEmail,
+        from_name: fromName,
+        subject,
+        html,
+        text,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Failed to send admin notification email:', response.status, errorText);
+    }
+  } catch (error) {
+    console.error('Error in sendAdminBookingNotificationEmail:', error);
+    // Don't throw — admin notification failure should not block the booking
+  }
+}
+
 BunnySDK.net.http.serve(async (request: Request) => {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -474,6 +590,24 @@ async function createBooking(request: Request) {
         'confirmed' // Status is always confirmed (CHECK constraint only allows confirmed/cancelled)
       ],
     });
+
+    // Send admin notification email for every new booking
+    try {
+      await sendAdminBookingNotificationEmail({
+        userEmail: user_email,
+        userName: user_name,
+        bookingDate: booking_date,
+        startTime: start_time,
+        endTime: end_time,
+        tableTypeId: table_type_id,
+        amountPaid: amount_paid || 0,
+        orderRef: order_ref,
+        isMemberBooking: !!is_member_booking,
+        notes: notes || undefined,
+      });
+    } catch (e) {
+      console.error('Error sending admin notification email:', e);
+    }
 
     // For free bookings, send confirmation email immediately
     if (amount_paid === 0) {
