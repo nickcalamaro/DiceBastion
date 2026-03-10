@@ -242,53 +242,56 @@
   // ───────── SumUp Widget ─────────
   async function mountSumUpWidget(checkoutId, orderRef) {
     try {
-      await window.utils.mountSumUpWidget({
+      await window.utils.loadSumUpSdk();
+      await SumUpCard.mount({
         id: 'donation-sumup-card',
         checkoutId: checkoutId,
+        locale: 'en-GB',
+        country: 'GB',
         onResponse: async function (type, body) {
-        console.log('[donate] SumUp response:', type, body);
+          console.log('[donate] SumUp response:', type, body);
 
-        if (type === 'sent' || type === 'success') {
-          $paymentProcessing.style.display = '';
+          if (type === 'sent' || type === 'success') {
+            $paymentProcessing.style.display = '';
 
-          // Poll for confirmation
-          await window.utils.pollPaymentConfirmation('/donations/confirm', orderRef, {
-            maxAttempts: 80,
-            pollInterval: 2000,
-            onSuccess: (data) => {
-              showThankYou(data.amount, data.currency);
-            },
-            onError: (msg) => {
-              $paymentProcessing.style.display = 'none';
-              $paymentSection.style.display = 'none';
-              $formCard.style.display = '';
-              showError($donationError, msg);
-              updateDonateButton();
-            },
-            onTimeout: () => {
-              showThankYou(String(selectedAmount), 'GBP');
-            }
-          });
-        } else if (type === 'error' || type === 'fail') {
-          $paymentSection.style.display = 'none';
-          $formCard.style.display = '';
-          showError($donationError, 'Payment failed. Please check your card details and try again.');
-          updateDonateButton();
-        } else if (type === 'cancel') {
-          $paymentSection.style.display = 'none';
-          $formCard.style.display = '';
-          showInfo($donationStatus, 'Payment cancelled. You can try again when you\'re ready.');
-          updateDonateButton();
+            // Poll for confirmation
+            await window.utils.pollPaymentConfirmation('/donations/confirm', orderRef, {
+              maxAttempts: 80,
+              pollInterval: 2000,
+              onSuccess: (data) => {
+                showThankYou(data.amount, data.currency);
+              },
+              onError: (msg) => {
+                $paymentProcessing.style.display = 'none';
+                $paymentSection.style.display = 'none';
+                $formCard.style.display = '';
+                showError($donationError, msg);
+                updateDonateButton();
+              },
+              onTimeout: () => {
+                showThankYou(String(selectedAmount), 'GBP');
+              }
+            });
+          } else if (type === 'error' || type === 'fail') {
+            $paymentSection.style.display = 'none';
+            $formCard.style.display = '';
+            showError($donationError, 'Payment failed. Please check your card details and try again.');
+            updateDonateButton();
+          } else if (type === 'cancel') {
+            $paymentSection.style.display = 'none';
+            $formCard.style.display = '';
+            showInfo($donationStatus, 'Payment cancelled. You can try again when you\'re ready.');
+            updateDonateButton();
+          }
         }
-      }
-    });
-  } catch (e) {
-    console.error('[donate] SumUp widget error:', e);
-    $paymentSection.style.display = 'none';
-    $formCard.style.display = '';
-    showError($donationError, 'Could not load payment widget. Please try again.');
-    updateDonateButton();
-  }
+      });
+    } catch (e) {
+      console.error('[donate] SumUp widget error:', e);
+      $paymentSection.style.display = 'none';
+      $formCard.style.display = '';
+      showError($donationError, 'Could not load payment widget. Please try again.');
+      updateDonateButton();
+    }
   }
 
   // ───────── Thank You ─────────
