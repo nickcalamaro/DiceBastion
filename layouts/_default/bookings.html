@@ -795,8 +795,6 @@ async function handleBookingSubmit(e) {
 }
 
 async function showPaymentModal(checkoutId, orderRef, amount) {
-  await utils.loadSumUpSdk();
-  
   paymentModal = new Modal({
     title: 'Complete Payment',
     size: 'md',
@@ -814,7 +812,7 @@ async function showPaymentModal(checkoutId, orderRef, amount) {
   
   paymentModal.open();
   
-  window.SumUpCard.mount({
+  await window.utils.mountSumUpWidget({
     id: 'sumup-card-container',
     checkoutId,
     onResponse: async (type) => {

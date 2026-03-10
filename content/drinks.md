@@ -122,21 +122,22 @@ showPagination: false
   }
 
   async function mountWidget(checkoutId, ref) {
-    try { await utils.loadSumUpSdk(); } catch (e) { showErr('Could not load payment widget.'); return; }
-    utils.hideError('pay-error');
-    var widget = modal && modal.querySelector('#pay-widget');
-    if (widget) widget.innerHTML = '';
-    SumUpCard.mount({
-      id: 'pay-widget',
-      checkoutId: checkoutId,
-      onResponse: async function (type) {
-        utils.hideError('pay-error');
-        var t = String(type || '').toLowerCase();
-        if (t === 'success') await confirmOrder(ref);
-        else if (t === 'error' || t === 'fail') showErr('Payment failed. Please try again.');
-        else if (t === 'cancel') showErr('Payment cancelled.');
-      }
-    });
+    try {
+      utils.hideError('pay-error');
+      var widget = modal && modal.querySelector('#pay-widget');
+      if (widget) widget.innerHTML = '';
+      await utils.mountSumUpWidget({
+        id: 'pay-widget',
+        checkoutId: checkoutId,
+        onResponse: async function (type) {
+          utils.hideError('pay-error');
+          var t = String(type || '').toLowerCase();
+          if (t === 'success') await confirmOrder(ref);
+          else if (t === 'error' || t === 'fail') showErr('Payment failed. Please try again.');
+          else if (t === 'cancel') showErr('Payment cancelled.');
+        }
+      });
+    } catch (e) { showErr('Could not load payment widget.'); }
   }
 
   async function confirmOrder(ref) {

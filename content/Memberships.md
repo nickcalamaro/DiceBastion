@@ -334,7 +334,6 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   }
 
   async function mountSumUpWidget(checkoutId, ref){
-    try { await window.utils.loadSumUpSdk(); } catch(e){ showError('Could not load payment widget.'); return; }
     try {
       clearError();
       const emailStepEl = membershipModal ? membershipModal.querySelector('#sumup-email-step') : null;
@@ -343,16 +342,13 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
       if (emailStepEl) emailStepEl.style.display = 'none';
       if (loggedStepEl) loggedStepEl.style.display = 'none';
       if (sumupCardEl) { sumupCardEl.style.display = 'block'; sumupCardEl.innerHTML = ''; }
-      window.SumUpCard.mount({
+      await window.utils.mountSumUpWidget({
         id:'sumup-card',
         checkoutId,
         onResponse: async (type)=>{
-          // Clear any previous errors when user tries again
           clearError();
-          
           const t = String(type||'').toLowerCase();
           if (t === 'success') {
-            // Payment succeeded - use reduced polling (3s intervals, 20 attempts = 1 min)
             await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
           } else if (t === 'error' || t === 'fail') {
             showError('Payment failed. Please try again.');
@@ -361,7 +357,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
           }
         }
       });
-    } catch (e) { showError('Could not start payment.'); }
+    } catch (e) { showError('Could not load payment widget.'); }
   }
 
   function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }

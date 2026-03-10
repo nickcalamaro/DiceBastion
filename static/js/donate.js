@@ -242,18 +242,10 @@
   // ───────── SumUp Widget ─────────
   async function mountSumUpWidget(checkoutId, orderRef) {
     try {
-      await window.utils.loadSumUpSdk();
-    } catch (e) {
-      showError($donationError, 'Failed to load payment system. Please refresh and try again.');
-      $formCard.style.display = '';
-      $paymentSection.style.display = 'none';
-      return;
-    }
-
-    window.SumUpCard.mount({
-      id: 'donation-sumup-card',
-      checkoutId: checkoutId,
-      onResponse: async function (type, body) {
+      await window.utils.mountSumUpWidget({
+        id: 'donation-sumup-card',
+        checkoutId: checkoutId,
+        onResponse: async function (type, body) {
         console.log('[donate] SumUp response:', type, body);
 
         if (type === 'sent' || type === 'success') {

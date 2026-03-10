@@ -687,13 +687,6 @@ window.initEventPurchase = function initEventPurchase(event) {
   
   async function mountWidget(checkoutId, orderRef) {
     try {
-      await window.utils.loadSumUpSdk();
-    } catch(e) {
-      showError('Payment widget failed.');
-      return;
-    }
-    
-    try {
       clearError();
       
       // First unmount any existing widget to ensure clean state
@@ -706,37 +699,21 @@ window.initEventPurchase = function initEventPurchase(event) {
       if (confirmLoggedEl) confirmLoggedEl.style.display = 'none';
       cardEl.style.display = 'block';
         // Mount fresh widget
-      window.SumUpCard.mount({
+      await window.utils.mountSumUpWidget({
         id: 'evt-card-'+eventId,
         checkoutId,
         onResponse: async (type, body) => {
           console.log('SumUp onResponse:', type, body);
-          
-          // Clear any previous errors when user tries again
           clearError();
-          
-          // Handle final states only - intermediate states like verification should not trigger actions
           if (type === 'success') {
-            // Payment succeeded! Try immediate verification (should be instant)
-            // Use reduced polling: 3s intervals, only 20 attempts (1 minute)
-            // Webhook will handle it if user closes browser
             await confirmPayment(orderRef, { pollInterval: 3000, maxAttempts: 20 });
           } else if (type === 'error' || type === 'fail') {
-            // Payment failed
             showError(body.message || 'Payment failed. Please try again.');
           } else if (type === 'cancel') {
-            // User cancelled the payment
             showError('Payment cancelled. You can try again when ready.');
           } else {
-            // Intermediate state (e.g., verification check) - don't do anything, let user complete it
             console.log('SumUp intermediate state:', type, body);
           }
-        },
-        onBack: () => {
-          console.log('SumUp onBack triggered');
-          // User clicked back button in widget - return to details
-          unmountWidget();
-          modal.querySelector('.evt-details').style.display = 'block';
         }
       });
     } catch(e) {

@@ -298,6 +298,48 @@ window.utils = {
   },
 
   /**
+   * Mount the SumUp Payment Widget with Apple Pay & Google Pay support.
+   * Centralises all SumUpCard.mount() calls so APM config is in one place.
+   *
+   * Apple Pay: works automatically once domain is verified in the SumUp dashboard.
+   * Google Pay: enabled via the googlePay config below — set your Google merchantId
+   *             after completing domain registration in the Google Pay & SumUp dashboards.
+   *
+   * @param {Object} opts
+   * @param {string} opts.id          - DOM element id to render the widget in
+   * @param {string} opts.checkoutId  - SumUp checkout id
+   * @param {Function} opts.onResponse - callback(type, body)
+   * @param {Function} [opts.onLoad]  - optional callback when widget loads
+   * @returns {Promise<Object|null>}  - the widget instance (has .submit(), .unmount(), .update())
+   */
+  mountSumUpWidget: async (opts) => {
+    await window.utils.loadSumUpSdk();
+
+    const mountOpts = {
+      id: opts.id,
+      checkoutId: opts.checkoutId,
+      onResponse: opts.onResponse,
+      locale: 'en-GB',
+      country: 'GB',
+      // Google Pay — fill in merchantId once registered with Google
+      // https://developer.sumup.com/online-payments/apm/google-pay
+      googlePay: {
+        merchantId: window.__DB_GOOGLE_PAY_MERCHANT_ID || '',
+        merchantName: 'Dice Bastion'
+      }
+    };
+
+    // Only include googlePay config if a merchantId is actually set
+    if (!mountOpts.googlePay.merchantId) {
+      delete mountOpts.googlePay;
+    }
+
+    if (opts.onLoad) mountOpts.onLoad = opts.onLoad;
+
+    return window.SumUpCard.mount(mountOpts);
+  },
+
+  /**
    * Load Cloudflare Turnstile SDK dynamically
    * @returns {Promise<boolean>} - Resolves when SDK is loaded
    */

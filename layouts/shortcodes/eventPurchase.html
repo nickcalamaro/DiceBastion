@@ -162,14 +162,12 @@
   }
 
   async function mountWidget(checkoutId, orderRef){
-    try { await window.utils.loadSumUpSdk(); } catch(e){ showError('Payment widget failed.'); return; }
     try {
       clearError();
       cardEl.style.display='block';
       modal.querySelector('.evt-details').style.display='none';
       cardEl.innerHTML='';
-      window.SumUpCard.mount({ id: 'evt-card-'+eventId, checkoutId, onResponse: async (type) => {
-        // Clear any previous errors
+      await window.utils.mountSumUpWidget({ id: 'evt-card-'+eventId, checkoutId, onResponse: async (type) => {
         clearError();
         const t = String(type||'').toLowerCase();
         if (t === 'success') {
@@ -180,7 +178,7 @@
           showError('Payment cancelled.');
         }
       }});
-    } catch(e){ showError('Could not start payment'); }
+    } catch(e){ showError('Could not load payment widget.'); }
   }
 
   function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now()) + '-' + Math.random().toString(36).slice(2); } }

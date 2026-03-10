@@ -588,9 +588,7 @@ try {
     
     // Mount SumUp card widget
     try {
-        if (typeof SumUpCard === 'undefined') {
-        throw new Error('SumUp SDK not loaded');
-        }        window.sumUpCardInstance = SumUpCard.mount({
+        window.sumUpCardInstance = await window.utils.mountSumUpWidget({
         id: 'sumup-card-widget',
         checkoutId: data.checkout_id,
         onResponse: async (type, body) => {

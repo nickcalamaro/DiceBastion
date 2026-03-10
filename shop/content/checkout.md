@@ -605,12 +605,11 @@ throw new Error(result.error || 'Failed to create checkout');
 currentOrderNumber = result.order_number;
 
 // Mount SumUp widget with checkoutId
-SumUpCard.mount({
+await utils.mountSumUpWidget({
 id: 'sumup-card',
 checkoutId: result.checkoutId,
 onResponse: async function(type, body) {
 if (type === 'success') {
-// Clear cart and redirect to confirmation
 localStorage.removeItem('shop_cart');
 window.location.href = `/order-confirmation?order=${currentOrderNumber}&status=success`;
 } else if (type === 'error') {
