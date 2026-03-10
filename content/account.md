@@ -588,9 +588,12 @@ try {
     
     // Mount SumUp card widget
     try {
-        window.sumUpCardInstance = await window.utils.mountSumUpWidget({
+        await window.utils.loadSumUpSdk();
+        window.sumUpCardInstance = await SumUpCard.mount({
         id: 'sumup-card-widget',
         checkoutId: data.checkout_id,
+        locale: 'en-GB',
+        country: 'GB',
         onResponse: async (type, body) => {
             console.log('SumUp response:', type, body);
             

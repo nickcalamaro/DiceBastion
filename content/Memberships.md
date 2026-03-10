@@ -342,9 +342,12 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
       if (emailStepEl) emailStepEl.style.display = 'none';
       if (loggedStepEl) loggedStepEl.style.display = 'none';
       if (sumupCardEl) { sumupCardEl.style.display = 'block'; sumupCardEl.innerHTML = ''; }
-      await window.utils.mountSumUpWidget({
+      await window.utils.loadSumUpSdk();
+      await SumUpCard.mount({
         id:'sumup-card',
         checkoutId,
+        locale: 'en-GB',
+        country: 'GB',
         onResponse: async (type)=>{
           clearError();
           const t = String(type||'').toLowerCase();

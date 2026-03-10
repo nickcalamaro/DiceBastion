@@ -813,9 +813,12 @@ async function showPaymentModal(checkoutId, orderRef, amount) {
   paymentModal.open();
   
   try {
-    await window.utils.mountSumUpWidget({
+    await window.utils.loadSumUpSdk();
+    await SumUpCard.mount({
       id: 'sumup-card-container',
       checkoutId,
+      locale: 'en-GB',
+      country: 'GB',
       onResponse: async (type) => {
         if (type === 'success') {
           await confirmBooking(orderRef);

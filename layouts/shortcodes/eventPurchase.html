@@ -167,7 +167,8 @@
       cardEl.style.display='block';
       modal.querySelector('.evt-details').style.display='none';
       cardEl.innerHTML='';
-      await window.utils.mountSumUpWidget({ id: 'evt-card-'+eventId, checkoutId, onResponse: async (type) => {
+      await window.utils.loadSumUpSdk();
+      await SumUpCard.mount({ id: 'evt-card-'+eventId, checkoutId, locale: 'en-GB', country: 'GB', onResponse: async (type) => {
         clearError();
         const t = String(type||'').toLowerCase();
         if (t === 'success') {

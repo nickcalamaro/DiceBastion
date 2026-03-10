@@ -699,9 +699,12 @@ window.initEventPurchase = function initEventPurchase(event) {
       if (confirmLoggedEl) confirmLoggedEl.style.display = 'none';
       cardEl.style.display = 'block';
         // Mount fresh widget
-      await window.utils.mountSumUpWidget({
+      await window.utils.loadSumUpSdk();
+      await SumUpCard.mount({
         id: 'evt-card-'+eventId,
         checkoutId,
+        locale: 'en-GB',
+        country: 'GB',
         onResponse: async (type, body) => {
           console.log('SumUp onResponse:', type, body);
           clearError();
