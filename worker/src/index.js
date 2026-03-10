@@ -5280,16 +5280,17 @@ app.get('/test/delayed-emails', async (c) => {
 // PRODUCT & SHOP API ENDPOINTS
 // ============================================================================
 
-// Get all active products (public)
+// Get all active products (public), optionally filtered by category
 app.get('/products', async (c) => {
   try {
-    const products = await c.env.DB.prepare(`
-      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
-      FROM products
-      WHERE is_active = 1
-      ORDER BY name ASC
-    `).all()
-    
+    const category = c.req.query('category')
+    let sql = `SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
+      FROM products WHERE is_active = 1`
+    const binds = []
+    if (category) { sql += ' AND category = ?'; binds.push(category) }
+    else { sql += ' AND COALESCE(show_in_shop, 1) = 1' }
+    sql += ' ORDER BY name ASC'
+    const products = await c.env.DB.prepare(sql).bind(...binds).all()
     return c.json(products.results || [])
   } catch (e) {
     console.error('Get products error:', e)
@@ -6373,6 +6374,63 @@ app.get('/donations/confirm', async c => {
     console.error('[donations/confirm] Error:', error)
     return c.json({ ok: false, error: 'internal_error' }, 500)
   }
+})
+
+// ==================== PRODUCT ORDERS ====================
+
+app.post('/orders/checkout', async c => {
+  const { email, name, items } = await c.req.json()
+  if (!items?.length) return c.json({ error: 'invalid_request' }, 400)
+
+  // Let the DB do the math — one query to validate items and compute the total
+  const ids = items.map(i => parseInt(i.id)).filter(n => n > 0)
+  if (!ids.length) return c.json({ error: 'no_items' }, 400)
+
+  // Build a temp map of requested quantities (capped 1-10)
+  const qtyMap = {}
+  for (const { id, qty } of items) { qtyMap[parseInt(id)] = Math.min(10, Math.max(1, parseInt(qty) || 0)) }
+
+  const { results: products } = await c.env.DB.prepare(
+    `SELECT id, name, price, currency FROM products WHERE id IN (${ids.map(() => '?').join(',')}) AND is_active = 1`
+  ).bind(...ids).all()
+  if (!products.length) return c.json({ error: 'no_valid_items' }, 400)
+
+  const currency = products[0].currency
+  const orderNumber = `ORD-${crypto.randomUUID()}`
+  const orderItems = products.map(p => ({ product_id: p.id, product_name: p.name, quantity: qtyMap[p.id], unit_price: p.price, subtotal: p.price * qtyMap[p.id] }))
+  const total = orderItems.reduce((s, r) => s + r.subtotal, 0)
+  const desc = orderItems.map(r => `${r.quantity}x ${r.product_name}`).join(', ')
+
+  const checkout = await createCheckout(c.env, { amount: total / 100, currency, orderRef: orderNumber, description: desc })
+  if (!checkout?.id) return c.json({ error: 'checkout_failed' }, 502)
+
+  const batch = [
+    c.env.DB.prepare('INSERT INTO orders (order_number, email, name, subtotal, total, currency, checkout_id, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(orderNumber, email || null, clampStr(name || '', 200) || null, total, total, currency, checkout.id, 'pending'),
+    ...orderItems.map(r =>
+      c.env.DB.prepare('INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal) VALUES ((SELECT id FROM orders WHERE order_number = ?), ?, ?, ?, ?, ?)')
+        .bind(orderNumber, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal))
+  ]
+  await c.env.DB.batch(batch)
+
+  return c.json({ orderNumber, checkoutId: checkout.id })
+})
+
+app.get('/orders/confirm', async c => {
+  const ref = c.req.query('orderRef')
+  if (!ref) return c.json({ error: 'missing_ref' }, 400)
+
+  const order = await c.env.DB.prepare('SELECT checkout_id, payment_status FROM orders WHERE order_number = ?').bind(ref).first()
+  if (!order) return c.json({ error: 'not_found' }, 404)
+  if (order.payment_status === 'PAID') return c.json({ ok: true, status: 'active' })
+
+  const payment = await fetchPayment(c.env, order.checkout_id)
+  if (payment?.status !== 'PAID' && payment?.status !== 'SUCCESSFUL') return c.json({ ok: false, status: payment?.status || 'PENDING' })
+
+  await c.env.DB.prepare('UPDATE orders SET payment_status = ?, payment_id = ?, status = ?, updated_at = ? WHERE order_number = ?')
+    .bind('PAID', payment.id, 'completed', toIso(new Date()), ref).run()
+
+  return c.json({ ok: true, status: 'active' })
 })
 
 /**
