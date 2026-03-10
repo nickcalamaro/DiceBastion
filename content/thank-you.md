@@ -358,6 +358,7 @@ return;
   const isRegistration = /^REG-\d+-\d+$/i.test(orderRef);
   const isBundle = /^BUNDLE-\d+-[0-9a-f\-]{36}$/i.test(orderRef);
   const isBooking = /^BOOK-\d+-[a-z0-9]+$/i.test(orderRef);
+  const isOrder = /^ORD-[0-9a-f\-]{36}$/i.test(orderRef);
   
   // Bookings are already confirmed by the bookings API, just show success
   if (isBooking) {
@@ -388,6 +389,57 @@ Your table booking has been confirmed. A confirmation email with all the details
 <p class="ty-note">
 Please check your email for booking details and any additional information.
 </p>
+</div>
+`;
+    return;
+  }
+
+  // Drinks / general orders — confirm via /orders/confirm
+  if (isOrder) {
+    const orderEndpoint = `/orders/confirm?orderRef=${encodeURIComponent(orderRef)}`;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const res = await fetch(API_BASE + orderEndpoint);
+        const data = await res.json().catch(() => ({}));
+        if (data.ok && (data.status === 'active' || data.status === 'already_active')) {
+          container.innerHTML = `
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">☕ Order Confirmed!</h2>
+<div style="text-align:center;"><span class="ty-badge alert-success">Payment Confirmed</span></div>
+<div class="alert alert-info" style="margin:1.25rem 0;">
+Your order has been placed and payment received. Please collect your items at the counter.
+</div>
+<div class="card-section">
+<div class="ty-details">
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Order Reference</span>
+<span class="card-value">${orderRef}</span>
+</div>
+</div>
+</div>
+<div class="ty-actions">
+<a href="/drinks" class="btn btn-primary">Order Again</a>
+<a href="/" class="btn btn-secondary">Home</a>
+</div>
+</div>
+`;
+          return;
+        }
+        if (data.status === 'FAILED' || data.status === 'DECLINED') {
+          renderFailed('order', data.error || data.message);
+          return;
+        }
+      } catch (e) { console.error('Order confirmation error:', e); }
+      if (attempt < 5) await new Promise(r => setTimeout(r, 2000));
+    }
+    // After all attempts, show pending
+    container.innerHTML = `
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">⏳ Processing Order</h2>
+<div style="text-align:center;"><span class="ty-badge" style="background:var(--color-warning,#f59e0b);color:#fff;">Processing</span></div>
+<div class="alert alert-info" style="margin:1.25rem 0;">Your payment is still being processed. Your order will be ready shortly.</div>
+<div class="card-section"><div class="ty-details"><div class="ty-row"><span class="card-label" style="margin:0;">Order Reference</span><span class="card-value">${orderRef}</span></div></div></div>
+<div class="ty-actions"><a href="/drinks" class="btn btn-primary">Back to Drinks</a></div>
 </div>
 `;
     return;
