@@ -812,18 +812,24 @@ async function showPaymentModal(checkoutId, orderRef, amount) {
   
   paymentModal.open();
   
-  await window.utils.mountSumUpWidget({
-    id: 'sumup-card-container',
-    checkoutId,
-    onResponse: async (type) => {
-      if (type === 'success') {
-        await confirmBooking(orderRef);
-      } else if (type === 'error' || type === 'fail') {
-        document.getElementById('payment-error').textContent = 'Payment failed. Please try again.';
-        document.getElementById('payment-error').style.display = 'block';
+  try {
+    await window.utils.mountSumUpWidget({
+      id: 'sumup-card-container',
+      checkoutId,
+      onResponse: async (type) => {
+        if (type === 'success') {
+          await confirmBooking(orderRef);
+        } else if (type === 'error' || type === 'fail') {
+          document.getElementById('payment-error').textContent = 'Payment failed. Please try again.';
+          document.getElementById('payment-error').style.display = 'block';
+        }
       }
-    }
-  });
+    });
+  } catch (e) {
+    console.error('[bookings] SumUp widget error:', e);
+    document.getElementById('payment-error').textContent = 'Could not load payment widget. Please try again.';
+    document.getElementById('payment-error').style.display = 'block';
+  }
 }
 
 async function confirmBooking(orderRef) {

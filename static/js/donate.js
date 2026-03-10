@@ -282,6 +282,13 @@
         }
       }
     });
+  } catch (e) {
+    console.error('[donate] SumUp widget error:', e);
+    $paymentSection.style.display = 'none';
+    $formCard.style.display = '';
+    showError($donationError, 'Could not load payment widget. Please try again.');
+    updateDonateButton();
+  }
   }
 
   // ───────── Thank You ─────────
