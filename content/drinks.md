@@ -5,7 +5,7 @@ showDate: false
 showPagination: false
 ---
 
-<script src="/js/utils.js"></script>
+<script src="/js/utils.js?v=2"></script>
 <script src="/js/modal.js"></script>
 
 <section class="page-container">
