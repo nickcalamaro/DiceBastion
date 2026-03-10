@@ -137,7 +137,7 @@ showPagination: false
           else if (t === 'cancel') showErr('Payment cancelled.');
         }
       });
-    } catch (e) { showErr('Could not load payment widget.'); }
+    } catch (e) { console.error('mountWidget error:', e); showErr('Could not load payment widget.'); }
   }
 
   async function confirmOrder(ref) {

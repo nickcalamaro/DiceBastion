@@ -314,6 +314,7 @@ window.utils = {
    */
   mountSumUpWidget: async (opts) => {
     await window.utils.loadSumUpSdk();
+    if (!window.SumUpCard) throw new Error('SumUp SDK loaded but SumUpCard not available');
 
     const mountOpts = {
       id: opts.id,

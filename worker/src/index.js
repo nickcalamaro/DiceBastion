@@ -6379,41 +6379,51 @@ app.get('/donations/confirm', async c => {
 // ==================== PRODUCT ORDERS ====================
 
 app.post('/orders/checkout', async c => {
-  const { email, name, items } = await c.req.json()
-  if (!items?.length) return c.json({ error: 'invalid_request' }, 400)
+  try {
+    const { email, name, items } = await c.req.json()
+    if (!items?.length) return c.json({ error: 'invalid_request' }, 400)
 
-  // Let the DB do the math — one query to validate items and compute the total
-  const ids = items.map(i => parseInt(i.id)).filter(n => n > 0)
-  if (!ids.length) return c.json({ error: 'no_items' }, 400)
+    // Let the DB do the math — one query to validate items and compute the total
+    const ids = items.map(i => parseInt(i.id)).filter(n => n > 0)
+    if (!ids.length) return c.json({ error: 'no_items' }, 400)
 
-  // Build a temp map of requested quantities (capped 1-10)
-  const qtyMap = {}
-  for (const { id, qty } of items) { qtyMap[parseInt(id)] = Math.min(10, Math.max(1, parseInt(qty) || 0)) }
+    // Build a temp map of requested quantities (capped 1-10)
+    const qtyMap = {}
+    for (const { id, qty } of items) { qtyMap[parseInt(id)] = Math.min(10, Math.max(1, parseInt(qty) || 0)) }
 
-  const { results: products } = await c.env.DB.prepare(
-    `SELECT id, name, price, currency FROM products WHERE id IN (${ids.map(() => '?').join(',')}) AND is_active = 1`
-  ).bind(...ids).all()
-  if (!products.length) return c.json({ error: 'no_valid_items' }, 400)
+    const { results: products } = await c.env.DB.prepare(
+      `SELECT id, name, price, currency FROM products WHERE id IN (${ids.map(() => '?').join(',')}) AND is_active = 1`
+    ).bind(...ids).all()
+    if (!products.length) return c.json({ error: 'no_valid_items' }, 400)
 
-  const currency = products[0].currency
-  const orderNumber = `ORD-${crypto.randomUUID()}`
-  const orderItems = products.map(p => ({ product_id: p.id, product_name: p.name, quantity: qtyMap[p.id], unit_price: p.price, subtotal: p.price * qtyMap[p.id] }))
-  const total = orderItems.reduce((s, r) => s + r.subtotal, 0)
-  const desc = orderItems.map(r => `${r.quantity}x ${r.product_name}`).join(', ')
+    const currency = products[0].currency
+    const orderNumber = `ORD-${crypto.randomUUID()}`
+    const orderItems = products.map(p => ({ product_id: p.id, product_name: p.name, quantity: qtyMap[p.id], unit_price: p.price, subtotal: p.price * qtyMap[p.id] }))
+    const total = orderItems.reduce((s, r) => s + r.subtotal, 0)
+    const desc = orderItems.map(r => `${r.quantity}x ${r.product_name}`).join(', ')
 
-  const checkout = await createCheckout(c.env, { amount: total / 100, currency, orderRef: orderNumber, description: desc })
-  if (!checkout?.id) return c.json({ error: 'checkout_failed' }, 502)
+    const checkout = await createCheckout(c.env, { amount: total / 100, currency, orderRef: orderNumber, description: desc })
+    if (!checkout?.id) return c.json({ error: 'checkout_failed' }, 502)
 
-  const batch = [
-    c.env.DB.prepare('INSERT INTO orders (order_number, email, name, subtotal, total, currency, checkout_id, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(orderNumber, email || null, clampStr(name || '', 200) || null, total, total, currency, checkout.id, 'pending'),
-    ...orderItems.map(r =>
-      c.env.DB.prepare('INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal) VALUES ((SELECT id FROM orders WHERE order_number = ?), ?, ?, ?, ?, ?)')
-        .bind(orderNumber, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal))
-  ]
-  await c.env.DB.batch(batch)
+    // Use defaults for email/name since orders table has NOT NULL constraints
+    // (drinks orders don't collect customer info)
+    const orderEmail = email || 'walk-in'
+    const orderName = clampStr(name || '', 200) || 'Walk-in'
 
-  return c.json({ orderNumber, checkoutId: checkout.id })
+    const batch = [
+      c.env.DB.prepare('INSERT INTO orders (order_number, email, name, subtotal, total, currency, checkout_id, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(orderNumber, orderEmail, orderName, total, total, currency, checkout.id, 'pending'),
+      ...orderItems.map(r =>
+        c.env.DB.prepare('INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal) VALUES ((SELECT id FROM orders WHERE order_number = ?), ?, ?, ?, ?, ?)')
+          .bind(orderNumber, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal))
+    ]
+    await c.env.DB.batch(batch)
+
+    return c.json({ orderNumber, checkoutId: checkout.id })
+  } catch (e) {
+    console.error('orders/checkout error', e)
+    return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
+  }
 })
 
 app.get('/orders/confirm', async c => {
