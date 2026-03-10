@@ -125,25 +125,17 @@ showPagination: false
     try {
       utils.hideError('pay-error');
       var widget = document.getElementById('pay-widget');
-      console.log('[drinks] pay-widget element:', widget);
       if (widget) {
         widget.style.display = 'block';
-        widget.style.minHeight = '300px';
-        widget.innerHTML = '<p style="text-align:center;color:#888;padding:2rem;">Loading payment form…</p>';
+        widget.innerHTML = '';
       }
       await utils.loadSumUpSdk();
-      console.log('[drinks] SumUpCard available:', typeof SumUpCard);
-      console.log('[drinks] checkoutId:', checkoutId);
-      var result = await SumUpCard.mount({
+      await SumUpCard.mount({
         id: 'pay-widget',
         checkoutId: checkoutId,
         locale: 'en-GB',
         country: 'GB',
-        onLoad: function () {
-          console.log('[drinks] SumUp widget loaded');
-        },
         onResponse: function (type, body) {
-          console.log('[drinks] SumUp response:', type, body);
           utils.hideError('pay-error');
           var t = String(type || '').toLowerCase();
           if (t === 'success') confirmOrder(ref);
@@ -151,9 +143,7 @@ showPagination: false
           else if (t === 'cancel') showErr('Payment cancelled.');
         }
       });
-      console.log('[drinks] SumUpCard.mount result:', result);
-      console.log('[drinks] pay-widget innerHTML length:', widget ? widget.innerHTML.length : 'N/A');
-    } catch (e) { console.error('[drinks] mountWidget error:', e); showErr('Could not load payment widget.'); }
+    } catch (e) { console.error('mountWidget error:', e); showErr('Could not load payment widget.'); }
   }
 
   async function confirmOrder(ref) {
