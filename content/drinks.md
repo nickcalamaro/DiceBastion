@@ -126,13 +126,16 @@ showPagination: false
       utils.hideError('pay-error');
       var widget = modal && modal.querySelector('#pay-widget');
       if (widget) widget.innerHTML = '';
-      await utils.mountSumUpWidget({
+      await utils.loadSumUpSdk();
+      await SumUpCard.mount({
         id: 'pay-widget',
         checkoutId: checkoutId,
-        onResponse: async function (type) {
+        locale: 'en-GB',
+        country: 'GB',
+        onResponse: function (type, body) {
           utils.hideError('pay-error');
           var t = String(type || '').toLowerCase();
-          if (t === 'success') await confirmOrder(ref);
+          if (t === 'success') confirmOrder(ref);
           else if (t === 'error' || t === 'fail') showErr('Payment failed. Please try again.');
           else if (t === 'cancel') showErr('Payment cancelled.');
         }
