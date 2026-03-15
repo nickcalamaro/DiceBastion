@@ -6777,8 +6777,51 @@ export default {
       }
 
       // Everything else (/events/, /events/index.html, /events/page/2, etc.)
-      // → pass straight through to origin (GitHub Pages)
-      return fetch(request)
+      // → fetch from origin, inject crawlable event links for SEO
+      try {
+        const [originRes, { results: activeEvents }] = await Promise.all([
+          fetch(request),
+          env.DB.prepare(`
+            SELECT slug, event_name FROM events
+            WHERE is_active = 1
+              AND slug IS NOT NULL
+              AND (event_datetime >= datetime('now') OR is_recurring = 1)
+            ORDER BY event_datetime ASC
+          `).all()
+        ])
+
+        // Only inject into HTML responses
+        const ct = originRes.headers.get('content-type') || ''
+        if (!ct.includes('text/html') || !activeEvents || activeEvents.length === 0) {
+          return originRes
+        }
+
+        let html = await originRes.text()
+
+        // Build a crawlable nav block (visible, unobtrusive footer nav)
+        const links = activeEvents.map(e =>
+          `<a href="/events/${encodeURIComponent(e.slug)}">${e.event_name}</a>`
+        ).join('\n          ')
+
+        const navBlock = `
+      <nav aria-label="Upcoming events" style="padding:1.5rem 1rem;text-align:center;font-size:0.85rem;color:#888;border-top:1px solid rgba(128,128,128,0.2)">
+        <p style="margin-bottom:0.5rem;font-weight:600;color:#aaa">Upcoming Events</p>
+        <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0.5rem 1.25rem">
+          ${links}
+        </div>
+      </nav>`
+
+        // Inject before </body>
+        html = html.replace('</body>', navBlock + '\n</body>')
+
+        return new Response(html, {
+          status: originRes.status,
+          headers: originRes.headers
+        })
+      } catch (e) {
+        // On any failure, fall through to origin without modification
+        return fetch(request)
+      }
     }
 
     // Non-route requests (workers.dev API calls, etc.) → normal Hono handling
