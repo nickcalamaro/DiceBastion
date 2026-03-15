@@ -362,9 +362,9 @@ Logout
 <div class="form-group" style="margin-bottom: 0;">
 <label class="form-label">Location Preview</label>
 <div style="padding: 0.5rem 0.75rem; background: rgb(var(--color-neutral-100)); border-radius: 6px; font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
-<span id="seo-location-preview">Gibraltar Warhammer Club</span> · 14 Cannon Lane, Gibraltar, GX11 1AA
+<span id="seo-location-preview">Gibraltar Warhammer Club</span> · Unit 23a Casemates Vaults, Gibraltar, GX11 1AA
 </div>
-<small class="admin-text-small">Location name comes from the Location field below (defaults to "Gibraltar Warhammer Club"). Address is fixed to 14 Cannon Lane.</small>
+<small class="admin-text-small">Location name comes from the Location field below (defaults to "Gibraltar Warhammer Club"). Address is fixed to Unit 23a Casemates Vaults.</small>
 </div>
 </div>
 </div>

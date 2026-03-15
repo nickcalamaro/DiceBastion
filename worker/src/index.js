@@ -3794,7 +3794,7 @@ function generateEventSeoPage(event) {
       'name': loc,
       'address': {
         '@type': 'PostalAddress',
-        'streetAddress': '14 Cannon Lane',
+        'streetAddress': 'Unit 23a Casemates Vaults',
         'addressLocality': 'Gibraltar',
         'postalCode': 'GX11 1AA',
         'addressCountry': 'GI'
