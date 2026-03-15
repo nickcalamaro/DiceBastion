@@ -27,6 +27,8 @@ ALLOWED_ORIGIN = "http://localhost:1313,http://localhost:1314,http://localhost:8
 SUMUP_MERCHANT_CODE = "MUZHYEAH"
 ALLOW_TEST_BYPASS = "true"
 R2_PUBLIC_URL = "https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev"
+# Set the real key via: wrangler secret put BUNNY_STORAGE_API_KEY
+# BUNNY_STORAGE_API_KEY = ""
 
 # Production secrets (set via: wrangler secret put SECRET_NAME)
 # - SUMUP_ACCESS_TOKEN

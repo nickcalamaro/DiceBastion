@@ -3721,73 +3721,96 @@ app.get('/oauth/callback', async (c) => {
 // ============================================================================
 
 /**
- * Generate an SEO-friendly HTML page for a shared event link.
- * Contains Open Graph, Twitter Card, and Schema.org metadata for rich previews,
- * then immediately redirects the browser to /events?open=:slug to open the modal.
+ * Generate a small SEO HTML page for a shared event link.
+ * Contains OG / Twitter / Schema.org metadata for rich previews,
+ * then immediately redirects the browser to /events?open=:slug.
  */
-function generateEventSeoPage(event, siteUrl = 'https://dicebastion.com') {
-  const title = (event.title || event.event_name || 'Event').replace(/[<>"]/g, '');
+function generateEventSeoPage(event) {
+  const e = s => (s || '').replace(/[<>"]/g, '');
+  const site = 'https://dicebastion.com';
+  const title = e(event.title || event.event_name || 'Event');
   const slug = event.slug || '';
-  const eventDatetime = event.event_datetime || '';
-  const location = (event.location || 'Dice Bastion').replace(/[<>"]/g, '');
-  const imageUrl = event.image_url || `${siteUrl}/img/default-event.jpg`;
-  const rawDesc = event.seo_description || event.description || '';
-  const description = rawDesc.length > 160 ? rawDesc.substring(0, 157) + '...' : rawDesc;
-  const safeDesc = description.replace(/[<>"]/g, '');
-  const nonMembershipPrice = Number(event.non_membership_price) || 0;
-  const requiresPurchase = event.requires_purchase === 1;
-  const membershipPrice = Number(event.membership_price) || 0;
-  const memberPrice = requiresPurchase ? `\u00a3${(membershipPrice / 100).toFixed(2)}` : 'Free';
-  const nonMemberPrice = requiresPurchase ? `\u00a3${(nonMembershipPrice / 100).toFixed(2)}` : 'Free';
+  const dt = event.event_datetime || '';
+  const loc = e(event.location || 'Dice Bastion');
+  const img = event.image_url || `${site}/img/default-event.jpg`;
+  const raw = event.seo_description || event.description || '';
+  const desc = e(raw.length > 160 ? raw.substring(0, 157) + '...' : raw);
+  const url = `${site}/events/${slug}`;
+  const redir = `${site}/events?open=${encodeURIComponent(slug)}`;
+  const price = ((Number(event.non_membership_price) || 0) / 100).toFixed(2);
 
-  let formattedDate = '';
+  return `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${title} | Dice Bastion</title>
+<meta name="description" content="${desc}">
+<meta property="og:type" content="event"><meta property="og:url" content="${url}">
+<meta property="og:title" content="${title}"><meta property="og:description" content="${desc}">
+<meta property="og:image" content="${img}"><meta property="og:site_name" content="Dice Bastion">
+<meta property="event:start_time" content="${dt}"><meta property="event:location" content="${loc}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}">
+<meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Event","name":${JSON.stringify(title)},"description":${JSON.stringify(desc)},"startDate":"${dt}","location":{"@type":"Place","name":${JSON.stringify(loc)}},"image":"${img}","url":"${url}","offers":{"@type":"Offer","price":"${price}","priceCurrency":"GBP","availability":"https://schema.org/InStock"}}</script>
+<link rel="canonical" href="${url}">
+<script>window.location.replace("${redir}");</script>
+<meta http-equiv="refresh" content="0;url=${redir}">
+</head><body>
+<p>Redirecting&hellip; <a href="${redir}">Click here</a> if not redirected.</p>
+</body></html>`;
+}
+
+/**
+ * Upload (or delete) the static SEO page on Bunny Storage so that
+ * https://dicebastion.com/events/:slug serves the meta-tag page directly.
+ * Called from admin create / update / deactivate event endpoints.
+ */
+async function uploadEventSeoPage(env, event) {
+  const key = env.BUNNY_STORAGE_API_KEY;
+  if (!key || !event.slug) return;          // silently skip if not configured
+
+  const zone = 'dicebastion';               // Bunny Storage zone name
+  const path = `events/${event.slug}/index.html`;
+  const storageUrl = `https://storage.bunnycdn.com/${zone}/${path}`;
+
   try {
-    const d = new Date(eventDatetime);
-    formattedDate = d.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  } catch { formattedDate = eventDatetime; }
+    // If the event is inactive, delete the SEO page
+    if (event.is_active === 0 || event.is_active === false) {
+      await fetch(storageUrl, { method: 'DELETE', headers: { 'AccessKey': key } });
+      console.log(`[SEO] Deleted /events/${event.slug}`);
+      return;
+    }
 
-  const canonicalUrl = `${siteUrl}/events/${slug}`;
-  const redirectUrl = `${siteUrl}/events?open=${encodeURIComponent(slug)}`;
+    const html = generateEventSeoPage(event);
+    const res = await fetch(storageUrl, {
+      method: 'PUT',
+      headers: { 'AccessKey': key, 'Content-Type': 'text/html' },
+      body: html,
+    });
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} | Dice Bastion</title>
-  <meta name="title" content="${title} | Dice Bastion">
-  <meta name="description" content="${safeDesc}">
-  <meta property="og:type" content="event">
-  <meta property="og:url" content="${canonicalUrl}">
-  <meta property="og:title" content="${title}">
-  <meta property="og:description" content="${safeDesc}">
-  <meta property="og:image" content="${imageUrl}">
-  <meta property="og:site_name" content="Dice Bastion">
-  <meta property="event:start_time" content="${eventDatetime}">
-  <meta property="event:location" content="${location}">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:url" content="${canonicalUrl}">
-  <meta name="twitter:title" content="${title}">
-  <meta name="twitter:description" content="${safeDesc}">
-  <meta name="twitter:image" content="${imageUrl}">
-  <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"Event","name":${JSON.stringify(title)},"description":${JSON.stringify(safeDesc)},"startDate":"${eventDatetime}","location":{"@type":"Place","name":${JSON.stringify(location)}},"image":"${imageUrl}","url":"${canonicalUrl}","offers":{"@type":"Offer","price":"${(nonMembershipPrice / 100).toFixed(2)}","priceCurrency":"GBP","availability":"https://schema.org/InStock"}}
-  </script>
-  <link rel="canonical" href="${canonicalUrl}">
-  <script>window.location.replace("${redirectUrl}");</script>
-  <meta http-equiv="refresh" content="0;url=${redirectUrl}">
-  <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:800px;margin:0 auto;padding:2rem;line-height:1.6}.event-image{width:100%;max-height:400px;object-fit:cover;border-radius:12px;margin-bottom:2rem}.redirect-notice{background:#f0f9ff;border:1px solid #0ea5e9;border-radius:8px;padding:1rem;margin-bottom:2rem}</style>
-</head>
-<body>
-  <div class="redirect-notice"><p><strong>Redirecting...</strong> If you're not redirected automatically, <a href="${redirectUrl}">click here</a>.</p></div>
-  <img src="${imageUrl}" alt="${title}" class="event-image" onerror="this.style.display='none'">
-  <h1>${title}</h1>
-  <p><strong>When:</strong> ${formattedDate}</p>
-  ${location !== 'Dice Bastion' ? `<p><strong>Where:</strong> ${location}</p>` : ''}
-  ${requiresPurchase ? `<p><strong>Pricing:</strong></p><ul><li>Members: ${memberPrice}</li><li>Non-Members: ${nonMemberPrice}</li></ul>` : '<p><strong>Free Event</strong></p>'}
-  <p><a href="${redirectUrl}" style="display:inline-block;background:#0ea5e9;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;margin-top:1rem;">View Event Details &amp; Book</a></p>
-</body>
-</html>`;
+    if (res.ok) {
+      console.log(`[SEO] Uploaded /events/${event.slug}`);
+    } else {
+      console.error(`[SEO] Upload failed (${res.status}):`, await res.text());
+    }
+  } catch (err) {
+    // Non-fatal — event still saved, SEO page just won't update
+    console.error('[SEO] Upload error:', err);
+  }
+}
+
+/**
+ * Delete the static SEO page from Bunny Storage when an event is deleted.
+ */
+async function deleteEventSeoPage(env, slug) {
+  const key = env.BUNNY_STORAGE_API_KEY;
+  if (!key || !slug) return;
+  const zone = 'dicebastion';
+  const storageUrl = `https://storage.bunnycdn.com/${zone}/events/${slug}/index.html`;
+  try {
+    await fetch(storageUrl, { method: 'DELETE', headers: { 'AccessKey': key } });
+    console.log(`[SEO] Deleted /events/${slug}`);
+  } catch (err) {
+    console.error('[SEO] Delete error:', err);
+  }
 }
 
 // Get all active events (public endpoint)
@@ -4155,7 +4178,6 @@ app.get('/events/confirm', async c => {
 })
 
 // Get single event by slug (public endpoint)
-// Returns SEO HTML page for browsers (shareable links), JSON for API calls
 app.get('/events/:slug', async c => {
   try {
     const slug = c.req.param('slug')
@@ -4195,19 +4217,6 @@ app.get('/events/:slug', async c => {
       }
       event.event_datetime = nextOccurrence.toISOString()
       event.next_occurrence = nextOccurrence.toISOString()
-    }
-
-    // If the request is from a browser (not an API/fetch call), serve the SEO page
-    const accept = c.req.header('Accept') || ''
-    if (accept.includes('text/html') && !accept.includes('application/json')) {
-      const html = generateEventSeoPage(event)
-      return new Response(html, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'public, max-age=300, s-maxage=600',
-        }
-      })
     }
     
     return c.json(event)
@@ -4635,6 +4644,9 @@ app.post('/admin/events', requireAdmin, async c => {
       recurrence_end_date || null
     ).run()
     
+    // Upload static SEO page to Bunny Storage (non-blocking)
+    uploadEventSeoPage(c.env, { title, slug, organiser, description, seo_description, event_datetime: datetime, location, membership_price, non_membership_price, image_url, requires_purchase: requires_purchase !== undefined ? requires_purchase : 1, is_active: is_active !== undefined ? is_active : 1 })
+
     return c.json({ success: true, id: result.meta.last_row_id })
   } catch (e) {
     console.error('Create event error:', e)
@@ -4683,6 +4695,9 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       id
     ).run()
     
+    // Upload (or delete if deactivated) static SEO page on Bunny Storage
+    uploadEventSeoPage(c.env, { title, slug, organiser, description, seo_description, event_datetime: datetime, location, membership_price, non_membership_price, image_url, requires_purchase: requires_purchase !== undefined ? requires_purchase : 1, is_active: is_active !== undefined ? is_active : 1 })
+
     return c.json({ success: true })
   } catch (e) {
     console.error('Update event error:', e)
@@ -4700,7 +4715,7 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     const force = c.req.query('force') === 'true'
     
     // Check if event exists
-    const event = await c.env.DB.prepare('SELECT event_id, event_name, tickets_sold FROM events WHERE event_id = ?').bind(id).first()
+    const event = await c.env.DB.prepare('SELECT event_id, event_name, slug, tickets_sold FROM events WHERE event_id = ?').bind(id).first()
     if (!event) {
       return c.json({ error: 'not_found' }, 404)
     }
@@ -4731,6 +4746,9 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     }
     
     await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
+    
+    // Remove the static SEO page from Bunny Storage
+    deleteEventSeoPage(c.env, event.slug)
     
     return c.json({ success: true })
   } catch (e) {

@@ -437,6 +437,11 @@ function openEventModal(eventId, allEvents) {
   document.getElementById('event-modal').classList.add('is-open');
   document.body.style.overflow = 'hidden';
   
+  // Update URL bar to show the shareable event URL
+  if (event.slug) {
+    window.history.replaceState({}, '', `/events/${event.slug}`);
+  }
+  
   // Use setTimeout to ensure DOM has fully updated before attaching event listeners
   setTimeout(() => {
     if (typeof initEventPurchase === 'function') {
@@ -448,6 +453,10 @@ function openEventModal(eventId, allEvents) {
 function closeEventModal() {
   document.getElementById('event-modal').classList.remove('is-open');
   document.body.style.overflow = '';
+  // Restore the events listing URL if we were showing a slug URL
+  if (window.location.pathname.match(/^\/events\/[^/]+/)) {
+    window.history.replaceState({}, '', '/events/');
+  }
 }
 
 function formatEventDate(datetime) {

@@ -467,12 +467,8 @@ function checkAndOpenEventFromURL() {
       setTimeout(() => {
         openEventModal(event.id, allEvents);
         
-        // Update URL to clean version (remove query param but keep in history)
-        if (slug) {
-          const newUrl = new URL(window.location.href);
-          newUrl.searchParams.delete('open');
-          window.history.replaceState({}, '', newUrl.toString());
-        }
+        // Update URL bar to the clean shareable URL
+        window.history.replaceState({}, '', `/events/${event.slug}`);
       }, 100);
     } else if (window.eventIdToOpen) {
       // Fallback to event ID if provided
