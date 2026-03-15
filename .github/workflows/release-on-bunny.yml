@@ -37,6 +37,9 @@ jobs:
       - name: Build Emails API
         run: "cd bgg-bunny && npx esbuild emails-edge-script.ts --bundle --format=esm --outfile=dist/emails.js --platform=browser --target=es2022 --external:@bunny.net/edgescript-sdk"
 
+      - name: Build Events API
+        run: "cd bgg-bunny && npx esbuild events-edge-script.ts --bundle --format=esm --outfile=dist/events.js --platform=browser --target=es2022 --external:@bunny.net/edgescript-sdk"
+
       - name: Publish Board Games Script to Bunny
         uses: "BunnyWay/actions/deploy-script@main"
         with:
@@ -54,4 +57,10 @@ jobs:
         with:
           script_id: 63650
           file: "bgg-bunny/dist/emails.js"
+
+      - name: Publish Events Script to Bunny
+        uses: "BunnyWay/actions/deploy-script@main"
+        with:
+          script_id: 68196
+          file: "bgg-bunny/dist/events.js"
 

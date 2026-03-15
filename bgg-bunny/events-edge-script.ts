@@ -261,11 +261,13 @@ BunnySDK.net.http.serve(async (request: Request) => {
     // ==================== DYNAMIC EVENT PAGES ====================
     
     // GET /events/:slug - Dynamic event page with SEO
+    // Skip if no slug (let the main /events/ page pass through to origin)
     if (path.startsWith("/events/") && request.method === "GET") {
       const slug = path.split("/")[2];
       
       if (!slug) {
-        return new Response("Not Found", { status: 404 });
+        // No slug - pass through to origin to serve the static events listing page
+        return fetch(request);
       }
 
       // Fetch event by slug
