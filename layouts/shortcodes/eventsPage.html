@@ -26,6 +26,12 @@
   margin: 2rem 0;
 }
 
+.event-card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
 .event-card {
   border: 1px solid rgba(var(--color-neutral-300), 1);
   border-radius: 16px;
@@ -395,6 +401,7 @@ async function loadEvents() {
       const timeStr = datetime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
       
       return `
+        <a href="/events/${event.slug}" class="event-card-link" data-event-id="${event.id}">
         <div class="event-card" data-event-id="${event.id}">
           ${event.organiser ? `
             <div class="event-organiser-banner">
@@ -426,6 +433,7 @@ async function loadEvents() {
             </div>
           </div>
         </div>
+        </a>
       `;
     }).join('');
   } catch (err) {
@@ -435,14 +443,16 @@ async function loadEvents() {
   }
 }
 
-// Event delegation for card clicks
+// Event delegation for card clicks — intercept <a> link clicks to open modal instead of navigating
 document.addEventListener('DOMContentLoaded', () => {
   const grid = document.getElementById('events-grid');
   if (grid) {
     grid.addEventListener('click', (e) => {
-      const card = e.target.closest('.event-card');
-      if (card && card.dataset.eventId) {
-        openEventModal(parseInt(card.dataset.eventId), allEvents);
+      const link = e.target.closest('.event-card-link');
+      if (link) {
+        e.preventDefault();
+        const eventId = parseInt(link.dataset.eventId);
+        if (eventId) openEventModal(eventId, allEvents);
       }
     });
   }

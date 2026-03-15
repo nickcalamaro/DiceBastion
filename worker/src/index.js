@@ -3758,61 +3758,6 @@ function generateEventSeoPage(event) {
 </body></html>`;
 }
 
-/**
- * Upload (or delete) the static SEO page on Bunny Storage so that
- * https://dicebastion.com/events/:slug serves the meta-tag page directly.
- * Called from admin create / update / deactivate event endpoints.
- */
-async function uploadEventSeoPage(env, event) {
-  const key = env.BUNNY_STORAGE_API_KEY;
-  if (!key || !event.slug) return;          // silently skip if not configured
-
-  const zone = 'dicebastion';               // Bunny Storage zone name
-  const path = `events/${event.slug}/index.html`;
-  const storageUrl = `https://storage.bunnycdn.com/${zone}/${path}`;
-
-  try {
-    // If the event is inactive, delete the SEO page
-    if (event.is_active === 0 || event.is_active === false) {
-      await fetch(storageUrl, { method: 'DELETE', headers: { 'AccessKey': key } });
-      console.log(`[SEO] Deleted /events/${event.slug}`);
-      return;
-    }
-
-    const html = generateEventSeoPage(event);
-    const res = await fetch(storageUrl, {
-      method: 'PUT',
-      headers: { 'AccessKey': key, 'Content-Type': 'text/html' },
-      body: html,
-    });
-
-    if (res.ok) {
-      console.log(`[SEO] Uploaded /events/${event.slug}`);
-    } else {
-      console.error(`[SEO] Upload failed (${res.status}):`, await res.text());
-    }
-  } catch (err) {
-    // Non-fatal — event still saved, SEO page just won't update
-    console.error('[SEO] Upload error:', err);
-  }
-}
-
-/**
- * Delete the static SEO page from Bunny Storage when an event is deleted.
- */
-async function deleteEventSeoPage(env, slug) {
-  const key = env.BUNNY_STORAGE_API_KEY;
-  if (!key || !slug) return;
-  const zone = 'dicebastion';
-  const storageUrl = `https://storage.bunnycdn.com/${zone}/events/${slug}/index.html`;
-  try {
-    await fetch(storageUrl, { method: 'DELETE', headers: { 'AccessKey': key } });
-    console.log(`[SEO] Deleted /events/${slug}`);
-  } catch (err) {
-    console.error('[SEO] Delete error:', err);
-  }
-}
-
 // Get all active events (public endpoint)
 app.get('/events', async c => {
   try {
@@ -4177,10 +4122,51 @@ app.get('/events/confirm', async c => {
   }
 })
 
+// Dynamic sitemap for event URLs (so Google can discover them)
+app.get('/events/sitemap.xml', async c => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT slug, event_datetime
+      FROM events
+      WHERE is_active = 1
+        AND (event_datetime >= datetime('now') OR is_recurring = 1)
+      ORDER BY event_datetime ASC
+    `).all()
+
+    const urls = (results || []).map(e => {
+      const loc = `https://dicebastion.com/events/${e.slug}`
+      const lastmod = e.event_datetime ? new Date(e.event_datetime).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+      return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+    }).join('\n')
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
+
+    return new Response(xml, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+      }
+    })
+  } catch (err) {
+    console.error('Sitemap error:', err)
+    return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
+      status: 200,
+      headers: { 'Content-Type': 'application/xml' }
+    })
+  }
+})
+
 // Get single event by slug (public endpoint)
+// Serves SEO HTML for browsers (crawlers, shared links), JSON for API calls
 app.get('/events/:slug', async c => {
   try {
     const slug = c.req.param('slug')
+    
+    // Static files (index.html, index.json, etc.) aren't event slugs
+    if (!slug || slug.includes('.')) {
+      return c.json({ error: 'not_found' }, 404)
+    }
     
     const event = await c.env.DB.prepare(`
       SELECT 
@@ -4205,7 +4191,13 @@ app.get('/events/:slug', async c => {
       FROM events 
       WHERE slug = ? AND is_active = 1
     `).bind(slug).first()
-      if (!event) {
+
+    if (!event) {
+      // Browser request for unknown slug → redirect to events listing
+      const accept = c.req.header('Accept') || ''
+      if (accept.includes('text/html') && !accept.includes('application/json')) {
+        return Response.redirect('https://dicebastion.com/events/', 302)
+      }
       return c.json({ error: 'event_not_found' }, 404)
     }
     
@@ -4217,6 +4209,19 @@ app.get('/events/:slug', async c => {
       }
       event.event_datetime = nextOccurrence.toISOString()
       event.next_occurrence = nextOccurrence.toISOString()
+    }
+
+    // Browser request → serve SEO page (200 status for crawlers)
+    const accept = c.req.header('Accept') || ''
+    if (accept.includes('text/html') && !accept.includes('application/json')) {
+      const html = generateEventSeoPage(event)
+      return new Response(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300, s-maxage=600',
+        }
+      })
     }
     
     return c.json(event)
@@ -4643,9 +4648,6 @@ app.post('/admin/events', requireAdmin, async c => {
       recurrence_pattern || null,
       recurrence_end_date || null
     ).run()
-    
-    // Upload static SEO page to Bunny Storage (non-blocking)
-    uploadEventSeoPage(c.env, { title, slug, organiser, description, seo_description, event_datetime: datetime, location, membership_price, non_membership_price, image_url, requires_purchase: requires_purchase !== undefined ? requires_purchase : 1, is_active: is_active !== undefined ? is_active : 1 })
 
     return c.json({ success: true, id: result.meta.last_row_id })
   } catch (e) {
@@ -4694,9 +4696,6 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       recurrence_end_date || null,
       id
     ).run()
-    
-    // Upload (or delete if deactivated) static SEO page on Bunny Storage
-    uploadEventSeoPage(c.env, { title, slug, organiser, description, seo_description, event_datetime: datetime, location, membership_price, non_membership_price, image_url, requires_purchase: requires_purchase !== undefined ? requires_purchase : 1, is_active: is_active !== undefined ? is_active : 1 })
 
     return c.json({ success: true })
   } catch (e) {
@@ -4746,10 +4745,7 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     }
     
     await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
-    
-    // Remove the static SEO page from Bunny Storage
-    deleteEventSeoPage(c.env, event.slug)
-    
+
     return c.json({ success: true })
   } catch (e) {
     console.error('Delete event error:', e)
@@ -6616,6 +6612,48 @@ async function handleScheduled(event, env, ctx) {
 }
 
 export default {
-  fetch: app.fetch,
+  /**
+   * Custom fetch handler to separate route-intercepted requests (dicebastion.com/events/*)
+   * from normal API requests (workers.dev domain).
+   *
+   * When Cloudflare routes dicebastion.com/events/* to this Worker:
+   *   - /events/:slug (browser) → Hono serves SEO HTML
+   *   - everything else (/events/, static files) → fetch(request) passes to origin (GitHub Pages)
+   *
+   * Calling fetch(request) OUTSIDE Hono guarantees Cloudflare sends to origin,
+   * avoiding the recursion issue that happens with fetch(c.req.raw) inside Hono handlers.
+   */
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url)
+    const host = request.headers.get('Host') || ''
+
+    // Only intercept requests arriving via the custom-domain route
+    if (host.includes('dicebastion.com') && url.pathname.startsWith('/events')) {
+      const accept = request.headers.get('Accept') || ''
+      const isHtmlRequest = accept.includes('text/html') && !accept.includes('application/json')
+
+      // Extract slug from /events/:slug (strip trailing slash first)
+      const trimmed = url.pathname.replace(/\/+$/, '')   // /events/foo/ → /events/foo
+      const parts = trimmed.split('/')                   // ['', 'events', 'foo']
+      const slug = parts.length === 3 ? parts[2] : null  // 'foo' or null
+
+      // sitemap.xml → let Hono serve the dynamic sitemap
+      if (url.pathname === '/events/sitemap.xml') {
+        return app.fetch(request, env, ctx)
+      }
+
+      // Valid event slug + browser request → let Hono serve the SEO page
+      if (slug && !slug.includes('.') && isHtmlRequest) {
+        return app.fetch(request, env, ctx)
+      }
+
+      // Everything else (/events/, /events/index.html, /events/page/2, etc.)
+      // → pass straight through to origin (GitHub Pages)
+      return fetch(request)
+    }
+
+    // Non-route requests (workers.dev API calls, etc.) → normal Hono handling
+    return app.fetch(request, env, ctx)
+  },
   scheduled: handleScheduled
 }

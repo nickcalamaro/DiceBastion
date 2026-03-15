@@ -5,3 +5,4 @@ Allow: /
 Disallow: /
 {{- end }}
 Sitemap: {{ "sitemap.xml" | absURL }}
+Sitemap: https://dicebastion.com/events/sitemap.xml
