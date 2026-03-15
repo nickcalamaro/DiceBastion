@@ -304,6 +304,12 @@ Logout
 </div>
 
 <div class="form-group">
+<label class="form-label">SEO Description</label>
+<textarea id="event-seo-description" rows="2" maxlength="160" class="form-textarea" placeholder="Custom description for social media previews and search engines..."></textarea>
+<small class="admin-text-small">Shown in link previews when sharing (Open Graph, Twitter Cards). Max 160 chars. Falls back to Summary if empty.</small>
+</div>
+
+<div class="form-group">
 <label class="form-label">Full Description</label>
 <div id="event-description-editor" class="admin-editor">
 <div class="admin-editor-toolbar">
@@ -1602,6 +1608,7 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     slug: document.getElementById('event-slug').value,
     organiser: document.getElementById('event-organiser').value,
     description: document.getElementById('event-description').value,
+    seo_description: document.getElementById('event-seo-description').value,
     full_description: document.getElementById('event-full-description').innerHTML,
     event_date: isRecurring ? '2025-01-01' : document.getElementById('event-date').value,
     time: isRecurring ? document.getElementById('recurring-time').value : document.getElementById('event-time').value,
@@ -1655,6 +1662,7 @@ document.getElementById('event-form').reset();
 document.getElementById('event-id').value = '';
 document.getElementById('event-slug').value = '';
 document.getElementById('event-full-description').innerHTML = '';
+document.getElementById('event-seo-description').value = '';
 document.getElementById('event-requires-purchase').checked = true;
 document.getElementById('event-pricing-fields').style.display = 'block';
 document.getElementById('event-form-title').textContent = 'Add New Event';
@@ -1677,6 +1685,7 @@ async function editEvent(id) {
     document.getElementById('event-slug').value = event.slug || '';
     document.getElementById('event-organiser').value = event.organiser || '';
     document.getElementById('event-description').value = event.description || '';
+    document.getElementById('event-seo-description').value = event.seo_description || '';
     document.getElementById('event-full-description').innerHTML = event.full_description || '';
 
     // Parse datetime (treat as local time, not UTC)

@@ -3720,6 +3720,76 @@ app.get('/oauth/callback', async (c) => {
 // PUBLIC EVENT ENDPOINTS
 // ============================================================================
 
+/**
+ * Generate an SEO-friendly HTML page for a shared event link.
+ * Contains Open Graph, Twitter Card, and Schema.org metadata for rich previews,
+ * then immediately redirects the browser to /events?open=:slug to open the modal.
+ */
+function generateEventSeoPage(event, siteUrl = 'https://dicebastion.com') {
+  const title = (event.title || event.event_name || 'Event').replace(/[<>"]/g, '');
+  const slug = event.slug || '';
+  const eventDatetime = event.event_datetime || '';
+  const location = (event.location || 'Dice Bastion').replace(/[<>"]/g, '');
+  const imageUrl = event.image_url || `${siteUrl}/img/default-event.jpg`;
+  const rawDesc = event.seo_description || event.description || '';
+  const description = rawDesc.length > 160 ? rawDesc.substring(0, 157) + '...' : rawDesc;
+  const safeDesc = description.replace(/[<>"]/g, '');
+  const nonMembershipPrice = Number(event.non_membership_price) || 0;
+  const requiresPurchase = event.requires_purchase === 1;
+  const membershipPrice = Number(event.membership_price) || 0;
+  const memberPrice = requiresPurchase ? `\u00a3${(membershipPrice / 100).toFixed(2)}` : 'Free';
+  const nonMemberPrice = requiresPurchase ? `\u00a3${(nonMembershipPrice / 100).toFixed(2)}` : 'Free';
+
+  let formattedDate = '';
+  try {
+    const d = new Date(eventDatetime);
+    formattedDate = d.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { formattedDate = eventDatetime; }
+
+  const canonicalUrl = `${siteUrl}/events/${slug}`;
+  const redirectUrl = `${siteUrl}/events?open=${encodeURIComponent(slug)}`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} | Dice Bastion</title>
+  <meta name="title" content="${title} | Dice Bastion">
+  <meta name="description" content="${safeDesc}">
+  <meta property="og:type" content="event">
+  <meta property="og:url" content="${canonicalUrl}">
+  <meta property="og:title" content="${title}">
+  <meta property="og:description" content="${safeDesc}">
+  <meta property="og:image" content="${imageUrl}">
+  <meta property="og:site_name" content="Dice Bastion">
+  <meta property="event:start_time" content="${eventDatetime}">
+  <meta property="event:location" content="${location}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="${canonicalUrl}">
+  <meta name="twitter:title" content="${title}">
+  <meta name="twitter:description" content="${safeDesc}">
+  <meta name="twitter:image" content="${imageUrl}">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Event","name":${JSON.stringify(title)},"description":${JSON.stringify(safeDesc)},"startDate":"${eventDatetime}","location":{"@type":"Place","name":${JSON.stringify(location)}},"image":"${imageUrl}","url":"${canonicalUrl}","offers":{"@type":"Offer","price":"${(nonMembershipPrice / 100).toFixed(2)}","priceCurrency":"GBP","availability":"https://schema.org/InStock"}}
+  </script>
+  <link rel="canonical" href="${canonicalUrl}">
+  <script>window.location.replace("${redirectUrl}");</script>
+  <meta http-equiv="refresh" content="0;url=${redirectUrl}">
+  <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:800px;margin:0 auto;padding:2rem;line-height:1.6}.event-image{width:100%;max-height:400px;object-fit:cover;border-radius:12px;margin-bottom:2rem}.redirect-notice{background:#f0f9ff;border:1px solid #0ea5e9;border-radius:8px;padding:1rem;margin-bottom:2rem}</style>
+</head>
+<body>
+  <div class="redirect-notice"><p><strong>Redirecting...</strong> If you're not redirected automatically, <a href="${redirectUrl}">click here</a>.</p></div>
+  <img src="${imageUrl}" alt="${title}" class="event-image" onerror="this.style.display='none'">
+  <h1>${title}</h1>
+  <p><strong>When:</strong> ${formattedDate}</p>
+  ${location !== 'Dice Bastion' ? `<p><strong>Where:</strong> ${location}</p>` : ''}
+  ${requiresPurchase ? `<p><strong>Pricing:</strong></p><ul><li>Members: ${memberPrice}</li><li>Non-Members: ${nonMemberPrice}</li></ul>` : '<p><strong>Free Event</strong></p>'}
+  <p><a href="${redirectUrl}" style="display:inline-block;background:#0ea5e9;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;margin-top:1rem;">View Event Details &amp; Book</a></p>
+</body>
+</html>`;
+}
+
 // Get all active events (public endpoint)
 app.get('/events', async c => {
   try {
@@ -3731,6 +3801,7 @@ app.get('/events', async c => {
         organiser,
         description,
         full_description,
+        seo_description,
         event_datetime,
         location,
         membership_price,
@@ -4084,6 +4155,7 @@ app.get('/events/confirm', async c => {
 })
 
 // Get single event by slug (public endpoint)
+// Returns SEO HTML page for browsers (shareable links), JSON for API calls
 app.get('/events/:slug', async c => {
   try {
     const slug = c.req.param('slug')
@@ -4096,6 +4168,7 @@ app.get('/events/:slug', async c => {
         organiser,
         description,
         full_description,
+        seo_description,
         event_datetime,
         location,
         membership_price,
@@ -4122,6 +4195,19 @@ app.get('/events/:slug', async c => {
       }
       event.event_datetime = nextOccurrence.toISOString()
       event.next_occurrence = nextOccurrence.toISOString()
+    }
+
+    // If the request is from a browser (not an API/fetch call), serve the SEO page
+    const accept = c.req.header('Accept') || ''
+    if (accept.includes('text/html') && !accept.includes('application/json')) {
+      const html = generateEventSeoPage(event)
+      return new Response(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300, s-maxage=600',
+        }
+      })
     }
     
     return c.json(event)
@@ -4486,6 +4572,7 @@ app.get('/admin/events/:id', requireAdmin, async c => {
         organiser,
         description,
         full_description,
+        seo_description,
         event_datetime,
         location,
         membership_price,
@@ -4516,7 +4603,7 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
-    const { title, slug, organiser, description, full_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    const { title, slug, organiser, description, full_description, seo_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -4526,14 +4613,15 @@ app.post('/admin/events', requireAdmin, async c => {
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
     
     const result = await c.env.DB.prepare(`
-      INSERT INTO events (event_name, slug, organiser, description, full_description, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
     `).bind(
       title,
       slug,
       organiser || null,
       description || null,
       full_description || null,
+      seo_description || null,
       datetime,
       location || null,
       membership_price || 0,
@@ -4561,7 +4649,7 @@ app.post('/admin/events', requireAdmin, async c => {
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
-    const { title, slug, organiser, description, full_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    const { title, slug, organiser, description, full_description, seo_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -4572,7 +4660,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     await c.env.DB.prepare(`
       UPDATE events 
-      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?
+      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?
       WHERE event_id = ?
     `).bind(
       title,
@@ -4580,6 +4668,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       organiser || null,
       description || null,
       full_description || null,
+      seo_description || null,
       datetime,
       location || null,
       membership_price || 0,
