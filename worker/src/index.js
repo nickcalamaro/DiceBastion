@@ -3721,9 +3721,10 @@ app.get('/oauth/callback', async (c) => {
 // ============================================================================
 
 /**
- * Generate a small SEO HTML page for a shared event link.
+ * Generate an indexable SEO landing page for a shared event link.
  * Contains OG / Twitter / Schema.org metadata for rich previews,
- * then immediately redirects the browser to /events?open=:slug.
+ * plus a lightweight visible page so Google can index it (no redirect).
+ * Real users click through or get taken to the full events page via JS.
  */
 function generateEventSeoPage(event) {
   const e = s => (s || '').replace(/[<>"]/g, '');
@@ -3731,13 +3732,89 @@ function generateEventSeoPage(event) {
   const title = e(event.title || event.event_name || 'Event');
   const slug = event.slug || '';
   const dt = event.event_datetime || '';
-  const loc = e(event.location || 'Dice Bastion');
-  const img = event.image_url || `${site}/img/default-event.jpg`;
+  const loc = e(event.location || 'Gibraltar Warhammer Club');
+  const img = event.seo_image || event.image_url || `${site}/img/default-event.jpg`;
   const raw = event.seo_description || event.description || '';
   const desc = e(raw.length > 160 ? raw.substring(0, 157) + '...' : raw);
+  const fullDesc = e(raw);
   const url = `${site}/events/${slug}`;
-  const redir = `${site}/events?open=${encodeURIComponent(slug)}`;
-  const price = ((Number(event.non_membership_price) || 0) / 100).toFixed(2);
+  const eventsPage = `${site}/events?open=${encodeURIComponent(slug)}`;
+  const priceNum = (Number(event.non_membership_price) || 0) / 100;
+  const priceDisplay = priceNum.toFixed(2);
+  const isFree = priceNum === 0;
+  const organiserName = e(event.seo_organizer || event.organiser || 'Dice Bastion');
+
+  // Gibraltar timezone: CET (UTC+1) in winter, CEST (UTC+2) in summer
+  // DST runs from last Sunday of March to last Sunday of October
+  let startDateISO = dt;
+  if (dt) {
+    try {
+      const d = new Date(dt);
+      const year = d.getUTCFullYear();
+      const month = d.getUTCMonth(); // 0-indexed
+      // Last Sunday of March
+      const marchLast = new Date(Date.UTC(year, 2, 31));
+      marchLast.setUTCDate(31 - marchLast.getUTCDay());
+      // Last Sunday of October
+      const octLast = new Date(Date.UTC(year, 9, 31));
+      octLast.setUTCDate(31 - octLast.getUTCDay());
+      // CEST if between last Sun of March 01:00 UTC and last Sun of October 01:00 UTC
+      const isCEST = d >= marchLast && d < octLast;
+      const offset = isCEST ? '+02:00' : '+01:00';
+      // Append offset if the stored datetime doesn't already have one
+      if (dt && !dt.includes('+') && !dt.includes('Z')) {
+        startDateISO = dt + offset;
+      }
+    } catch {}
+  }
+
+  // Format the date nicely for display
+  let dateStr = '';
+  let timeStr = '';
+  if (dt) {
+    try {
+      const d = new Date(dt);
+      dateStr = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+      timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+    } catch {}
+  }
+
+  // Build Google-compliant Event structured data (JSON-LD)
+  // https://developers.google.com/search/docs/appearance/structured-data/event
+  const schema = {
+    '@context': 'https://schema.org',
+    '@type': 'Event',
+    'name': title,
+    'description': fullDesc || desc,
+    'startDate': startDateISO,
+    'eventStatus': 'https://schema.org/EventScheduled',
+    'eventAttendanceMode': 'https://schema.org/OfflineEventAttendanceMode',
+    'location': {
+      '@type': 'Place',
+      'name': loc,
+      'address': {
+        '@type': 'PostalAddress',
+        'streetAddress': '14 Cannon Lane',
+        'addressLocality': 'Gibraltar',
+        'postalCode': 'GX11 1AA',
+        'addressCountry': 'GI'
+      }
+    },
+    'image': [img],
+    'url': url,
+    'offers': {
+      '@type': 'Offer',
+      'url': eventsPage,
+      'price': priceNum,
+      'priceCurrency': 'GBP',
+      'availability': 'https://schema.org/InStock'
+    },
+    'organizer': {
+      '@type': 'Organization',
+      'name': organiserName,
+      'url': site
+    }
+  };
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -3749,12 +3826,47 @@ function generateEventSeoPage(event) {
 <meta property="event:start_time" content="${dt}"><meta property="event:location" content="${loc}">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}">
 <meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"Event","name":${JSON.stringify(title)},"description":${JSON.stringify(desc)},"startDate":"${dt}","location":{"@type":"Place","name":${JSON.stringify(loc)}},"image":"${img}","url":"${url}","offers":{"@type":"Offer","price":"${price}","priceCurrency":"GBP","availability":"https://schema.org/InStock"}}</script>
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
 <link rel="canonical" href="${url}">
-<script>window.location.replace("${redir}");</script>
-<meta http-equiv="refresh" content="0;url=${redir}">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.header{width:100%;padding:1rem 1.5rem;background:#16162a;text-align:center;border-bottom:1px solid #2a2a4a}
+.header a{color:#e0e0e0;text-decoration:none;font-size:1.1rem;font-weight:600}
+.card{max-width:640px;width:100%;margin:2rem auto;background:#16162a;border-radius:16px;overflow:hidden;border:1px solid #2a2a4a}
+.card img{width:100%;height:auto;display:block;max-height:360px;object-fit:cover}
+.card-body{padding:1.5rem}
+h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
+.desc{color:#b0b0c0;line-height:1.6;margin-bottom:1.25rem}
+.meta{display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem}
+.meta-item{display:flex;flex-direction:column;gap:.15rem}
+.meta-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:#808090}
+.meta-value{font-size:.95rem;color:#e0e0e0}
+.badge{display:inline-block;padding:.2rem .6rem;border-radius:6px;font-size:.8rem;font-weight:600}
+.badge-free{background:#064e3b;color:#6ee7b7}
+.badge-paid{background:#4a2c0a;color:#fbbf24}
+.cta{display:inline-block;padding:.75rem 2rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:1rem;transition:background .2s}
+.cta:hover{background:#6d28d9}
+.footer{margin-top:auto;padding:1.5rem;text-align:center;font-size:.85rem;color:#606070}
+.footer a{color:#a78bfa;text-decoration:none}
+</style>
 </head><body>
-<p>Redirecting&hellip; <a href="${redir}">Click here</a> if not redirected.</p>
+<div class="header"><a href="${site}">Dice Bastion</a></div>
+<div class="card">
+${img ? `<img src="${img}" alt="${title}">` : ''}
+<div class="card-body">
+<h1>${title}</h1>
+${fullDesc ? `<p class="desc">${fullDesc}</p>` : ''}
+<div class="meta">
+${dateStr ? `<div class="meta-item"><span class="meta-label">Date</span><span class="meta-value">${dateStr}</span></div>` : ''}
+${timeStr ? `<div class="meta-item"><span class="meta-label">Time</span><span class="meta-value">${timeStr}</span></div>` : ''}
+${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span class="meta-value">${loc}</span></div>` : ''}
+<div class="meta-item"><span class="meta-label">Price</span><span class="meta-value">${isFree ? '<span class="badge badge-free">Free</span>' : `<span class="badge badge-paid">£${priceDisplay}</span>`}</span></div>
+</div>
+<a class="cta" href="${eventsPage}">View Event &amp; Register</a>
+</div>
+</div>
+<div class="footer"><a href="${site}/events/">← All Events</a></div>
 </body></html>`;
 }
 
@@ -3770,6 +3882,8 @@ app.get('/events', async c => {
         description,
         full_description,
         seo_description,
+        seo_organizer,
+        seo_image,
         event_datetime,
         location,
         membership_price,
@@ -4177,6 +4291,8 @@ app.get('/events/:slug', async c => {
         description,
         full_description,
         seo_description,
+        seo_organizer,
+        seo_image,
         event_datetime,
         location,
         membership_price,
@@ -4193,12 +4309,8 @@ app.get('/events/:slug', async c => {
     `).bind(slug).first()
 
     if (!event) {
-      // Browser request for unknown slug → redirect to events listing
-      const accept = c.req.header('Accept') || ''
-      if (accept.includes('text/html') && !accept.includes('application/json')) {
-        return Response.redirect('https://dicebastion.com/events/', 302)
-      }
-      return c.json({ error: 'event_not_found' }, 404)
+      // Unknown slug → redirect to events listing
+      return Response.redirect('https://dicebastion.com/events/', 302)
     }
     
     // Calculate next occurrence for recurring events
@@ -4211,7 +4323,20 @@ app.get('/events/:slug', async c => {
       event.next_occurrence = nextOccurrence.toISOString()
     }
 
-    // Browser request → serve SEO page (200 status for crawlers)
+    // Public domain (dicebastion.com) → always serve SEO page for crawlers & shared links
+    const host = c.req.header('Host') || ''
+    if (host.includes('dicebastion.com')) {
+      const html = generateEventSeoPage(event)
+      return new Response(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300, s-maxage=600',
+        }
+      })
+    }
+
+    // Workers.dev domain → serve HTML or JSON based on Accept header
     const accept = c.req.header('Accept') || ''
     if (accept.includes('text/html') && !accept.includes('application/json')) {
       const html = generateEventSeoPage(event)
@@ -4587,6 +4712,8 @@ app.get('/admin/events/:id', requireAdmin, async c => {
         description,
         full_description,
         seo_description,
+        seo_organizer,
+        seo_image,
         event_datetime,
         location,
         membership_price,
@@ -4617,7 +4744,7 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
-    const { title, slug, organiser, description, full_description, seo_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -4627,8 +4754,8 @@ app.post('/admin/events', requireAdmin, async c => {
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
     
     const result = await c.env.DB.prepare(`
-      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
     `).bind(
       title,
       slug,
@@ -4636,6 +4763,8 @@ app.post('/admin/events', requireAdmin, async c => {
       description || null,
       full_description || null,
       seo_description || null,
+      seo_organizer || null,
+      seo_image || null,
       datetime,
       location || null,
       membership_price || 0,
@@ -4663,7 +4792,7 @@ app.post('/admin/events', requireAdmin, async c => {
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
-    const { title, slug, organiser, description, full_description, seo_description, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -4674,7 +4803,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     await c.env.DB.prepare(`
       UPDATE events 
-      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?
+      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?
       WHERE event_id = ?
     `).bind(
       title,
@@ -4683,6 +4812,8 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       description || null,
       full_description || null,
       seo_description || null,
+      seo_organizer || null,
+      seo_image || null,
       datetime,
       location || null,
       membership_price || 0,
@@ -6629,8 +6760,6 @@ export default {
 
     // Only intercept requests arriving via the custom-domain route
     if (host.includes('dicebastion.com') && url.pathname.startsWith('/events')) {
-      const accept = request.headers.get('Accept') || ''
-      const isHtmlRequest = accept.includes('text/html') && !accept.includes('application/json')
 
       // Extract slug from /events/:slug (strip trailing slash first)
       const trimmed = url.pathname.replace(/\/+$/, '')   // /events/foo/ → /events/foo
@@ -6642,8 +6771,8 @@ export default {
         return app.fetch(request, env, ctx)
       }
 
-      // Valid event slug + browser request → let Hono serve the SEO page
-      if (slug && !slug.includes('.') && isHtmlRequest) {
+      // Valid event slug → let Hono serve SEO page (or JSON for API callers)
+      if (slug && !slug.includes('.')) {
         return app.fetch(request, env, ctx)
       }
 

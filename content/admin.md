@@ -73,6 +73,24 @@ showDate: false
 .recurring-container { padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200)); }
 .dark .recurring-container { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
 
+/* Collapsible SEO section */
+.seo-toggle-btn { display: flex; align-items: center; gap: 0.5rem; background: none; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; padding: 0.625rem 1rem; cursor: pointer; font-weight: 600; font-size: 0.875rem; color: rgb(var(--color-neutral-600)); width: 100%; transition: all 0.2s; }
+.dark .seo-toggle-btn { border-color: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-400)); }
+.seo-toggle-btn:hover { background: rgb(var(--color-neutral-50)); color: rgb(var(--color-neutral-800)); }
+.dark .seo-toggle-btn:hover { background: rgb(var(--color-neutral-900)); color: rgb(var(--color-neutral-200)); }
+.seo-toggle-btn .seo-chevron { transition: transform 0.2s; font-size: 0.75rem; }
+.seo-toggle-btn.is-open .seo-chevron { transform: rotate(90deg); }
+.seo-section-body { display: none; padding: 1rem; margin-top: 0.5rem; background: rgb(var(--color-neutral-50)); border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200)); }
+.dark .seo-section-body { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.seo-section-body.is-open { display: block; }
+.seo-info-banner { display: flex; gap: 0.5rem; padding: 0.625rem 0.75rem; background: rgb(var(--color-primary-50)); border: 1px solid rgb(var(--color-primary-200)); border-radius: 6px; margin-bottom: 1rem; font-size: 0.813rem; color: rgb(var(--color-primary-700)); line-height: 1.4; }
+.dark .seo-info-banner { background: rgba(var(--color-primary-900), 0.2); border-color: rgba(var(--color-primary-700), 0.4); color: rgb(var(--color-primary-300)); }
+.seo-tooltip-trigger { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-600)); font-size: 0.7rem; font-weight: 700; cursor: help; position: relative; flex-shrink: 0; }
+.dark .seo-tooltip-trigger { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-300)); }
+.seo-tooltip-trigger .seo-tooltip { display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: 280px; padding: 0.75rem; background: rgb(var(--color-neutral-900)); color: rgb(var(--color-neutral-100)); border-radius: 8px; font-size: 0.78rem; font-weight: 400; line-height: 1.5; box-shadow: 0 4px 16px rgba(0,0,0,0.25); z-index: 100; text-align: left; }
+.seo-tooltip-trigger:hover .seo-tooltip, .seo-tooltip-trigger:focus .seo-tooltip { display: block; }
+.seo-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: rgb(var(--color-neutral-900)); }
+
 /* Stat cards */
 .stat-card { border-radius: 12px; padding: 1.5rem; color: white; }
 .stat-card-label { font-size: 0.875rem; opacity: 0.9; margin-bottom: 0.5rem; }
@@ -303,10 +321,52 @@ Logout
 <small class="admin-text-small">Brief summary shown on events listing</small>
 </div>
 
+<div class="form-group admin-mb-1">
+<button type="button" class="seo-toggle-btn" onclick="toggleSeoSection()">
+<span class="seo-chevron">▶</span> 🔍 Google Event SEO Settings
+</button>
+<div id="seo-section-body" class="seo-section-body">
+<div class="seo-info-banner">
+<span>ℹ️</span>
+<span>These fields control how your event appears in Google Search results and social media previews. All fields are optional — sensible defaults are used when empty.</span>
+</div>
+
 <div class="form-group">
 <label class="form-label">SEO Description</label>
-<textarea id="event-seo-description" rows="2" maxlength="160" class="form-textarea" placeholder="Custom description for social media previews and search engines..."></textarea>
-<small class="admin-text-small">Shown in link previews when sharing (Open Graph, Twitter Cards). Max 160 chars. Falls back to Summary if empty.</small>
+<textarea id="event-seo-description" rows="2" maxlength="160" class="form-textarea" placeholder="Custom description for search engines and social previews..."></textarea>
+<small class="admin-text-small">Max 160 chars. Falls back to Summary if empty. Used for meta description, Open Graph & Twitter Cards.</small>
+</div>
+
+<div class="form-group">
+<div style="display: flex; align-items: center; gap: 0.375rem;">
+<label class="form-label" style="margin-bottom: 0;">Organizer Name Override</label>
+<span class="seo-tooltip-trigger" tabindex="0">?
+<span class="seo-tooltip">By default the Google schema uses the <strong>Organised By</strong> field above. If that's empty it defaults to <strong>Dice Bastion</strong>. Use this field only if you need a different name specifically for Google's event schema (e.g. a more formal organisation name).</span>
+</span>
+</div>
+<input type="text" id="event-seo-organizer" class="form-input" placeholder="Leave empty to use Organised By field or 'Dice Bastion'">
+<small class="admin-text-small">Overrides schema.org organizer.name for Google Event markup only.</small>
+</div>
+
+<div class="form-group">
+<div style="display: flex; align-items: center; gap: 0.375rem;">
+<label class="form-label" style="margin-bottom: 0;">SEO Image Override</label>
+<span class="seo-tooltip-trigger" tabindex="0">?
+<span class="seo-tooltip"><strong>Google Image Guidelines:</strong><br>• Minimum width: 720px (1920px recommended)<br>• Minimum 50K total pixels (w×h)<br>• Provide 16:9, 4:3 and/or 1:1 ratios<br>• Must be crawlable (not blocked by robots.txt)<br>• Use .jpg, .png or .webp format<br><br>The event's uploaded image is used by default. Only set this if you want a different image for Google.</span>
+</span>
+</div>
+<input type="url" id="event-seo-image" class="form-input" placeholder="Leave empty to use event image">
+<small class="admin-text-small">Optional override. Uses the event's main image by default.</small>
+</div>
+
+<div class="form-group" style="margin-bottom: 0;">
+<label class="form-label">Location Preview</label>
+<div style="padding: 0.5rem 0.75rem; background: rgb(var(--color-neutral-100)); border-radius: 6px; font-size: 0.875rem; color: rgb(var(--color-neutral-600));">
+<span id="seo-location-preview">Gibraltar Warhammer Club</span> · 14 Cannon Lane, Gibraltar, GX11 1AA
+</div>
+<small class="admin-text-small">Location name comes from the Location field below (defaults to "Gibraltar Warhammer Club"). Address is fixed to 14 Cannon Lane.</small>
+</div>
+</div>
 </div>
 
 <div class="form-group">
@@ -970,6 +1030,19 @@ document.getElementById('event-max-attendees').value = '';
 }
 }
 
+function toggleSeoSection() {
+  const body = document.getElementById('seo-section-body');
+  const btn = body?.previousElementSibling;
+  body?.classList.toggle('is-open');
+  btn?.classList.toggle('is-open');
+}
+
+// Keep the SEO location preview in sync with the Location field
+document.getElementById('event-location')?.addEventListener('input', (e) => {
+  const preview = document.getElementById('seo-location-preview');
+  if (preview) preview.textContent = e.target.value || 'Gibraltar Warhammer Club';
+});
+
 // Image Cropping
 let cropper = null;
 let currentCropCallback = null;
@@ -1609,6 +1682,8 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     organiser: document.getElementById('event-organiser').value,
     description: document.getElementById('event-description').value,
     seo_description: document.getElementById('event-seo-description').value,
+    seo_organizer: document.getElementById('event-seo-organizer').value,
+    seo_image: document.getElementById('event-seo-image').value,
     full_description: document.getElementById('event-full-description').innerHTML,
     event_date: isRecurring ? '2025-01-01' : document.getElementById('event-date').value,
     time: isRecurring ? document.getElementById('recurring-time').value : document.getElementById('event-time').value,
@@ -1645,6 +1720,8 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
       document.getElementById('cancel-event-edit').style.display = 'none';
       document.getElementById('event-image-preview').innerHTML = '';
       document.getElementById('event-full-description').innerHTML = '';
+      document.getElementById('event-seo-organizer').value = '';
+      document.getElementById('event-seo-image').value = '';
 uploadedEventImage = null;
 loadEvents();
 alert('Event saved successfully!');
@@ -1663,12 +1740,18 @@ document.getElementById('event-id').value = '';
 document.getElementById('event-slug').value = '';
 document.getElementById('event-full-description').innerHTML = '';
 document.getElementById('event-seo-description').value = '';
+document.getElementById('event-seo-organizer').value = '';
+document.getElementById('event-seo-image').value = '';
 document.getElementById('event-requires-purchase').checked = true;
 document.getElementById('event-pricing-fields').style.display = 'block';
 document.getElementById('event-form-title').textContent = 'Add New Event';
 document.getElementById('event-submit-text').textContent = 'Add Event';
 document.getElementById('cancel-event-edit').style.display = 'none';
 document.getElementById('event-image-preview').innerHTML = '';
+const seoBody = document.getElementById('seo-section-body');
+const seoBtn = seoBody?.previousElementSibling;
+if (seoBody) seoBody.classList.remove('is-open');
+if (seoBtn) seoBtn.classList.remove('is-open');
 uploadedEventImage = null;
 });
 
@@ -1686,6 +1769,14 @@ async function editEvent(id) {
     document.getElementById('event-organiser').value = event.organiser || '';
     document.getElementById('event-description').value = event.description || '';
     document.getElementById('event-seo-description').value = event.seo_description || '';
+    document.getElementById('event-seo-organizer').value = event.seo_organizer || '';
+    document.getElementById('event-seo-image').value = event.seo_image || '';
+    if (event.seo_description || event.seo_organizer || event.seo_image) {
+      const seoBody = document.getElementById('seo-section-body');
+      const seoBtn = seoBody?.previousElementSibling;
+      if (seoBody) seoBody.classList.add('is-open');
+      if (seoBtn) seoBtn.classList.add('is-open');
+    }
     document.getElementById('event-full-description').innerHTML = event.full_description || '';
 
     // Parse datetime (treat as local time, not UTC)
