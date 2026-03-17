@@ -5,17 +5,21 @@
 <article class="max-w-full">
   <div class="page-container" style="max-width: 900px;">
 
+
     <!-- Hero Banner -->
     <div class="donate-hero-banner">
       <img src="/img/childline/ChildlineDonationBanner.png" alt="Pokémon Day Fundraiser - Supporting Childline Gibraltar & our gaming community" class="donate-hero-img">
     </div>
+
+        <h1 class="card-header" style="text-align: center; font-size: 2.5rem; margin: 1.5rem 0 2rem; padding: 0.25rem 0 0.6rem; line-height: 1.3; background: linear-gradient(135deg, rgb(var(--color-primary-600)), rgb(var(--color-primary-400))); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Thank you for your support!!</h1>
+
 
     <!-- Progress Tracker -->
     <div class="card" id="donation-progress-card">
       <div class="donate-progress-header">
         <div>
           <div class="donate-progress-amount" id="total-raised">£0.00</div>
-          <div class="donate-progress-label">raised so far</div>
+          <div class="donate-progress-label">raised!</div>
         </div>
         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem;">
           <div class="donate-progress-count">
@@ -49,109 +53,7 @@
       </p>
     </div>
 
-    <!-- Donation Form -->
-    <div class="card" id="donation-form-card">
-      <h2 class="card-header" style="font-size: 1.25rem;">Make a Donation</h2>
 
-      <!-- Amount Selection -->
-      <div class="form-group">
-        <label class="form-label">Choose an amount</label>
-        <div class="donate-amount-grid">
-          <button class="donate-amount-btn" data-amount="5">£5</button>
-          <button class="donate-amount-btn" data-amount="10">£10</button>
-          <button class="donate-amount-btn donate-amount-btn-popular" data-amount="20">
-            £20
-            <span class="donate-popular-tag">Popular</span>
-          </button>
-          <button class="donate-amount-btn" data-amount="50">£50</button>
-          <button class="donate-amount-btn" id="custom-amount-toggle">Other</button>
-        </div>
-        <div class="donate-custom-amount" id="custom-amount-wrapper" style="display:none;">
-          <div class="donate-input-prefix">
-            <span class="donate-currency-symbol">£</span>
-            <input type="number" id="custom-amount" class="form-input" min="1" max="10000" step="0.01" placeholder="Enter your amount">
-          </div>
-        </div>
-        <div id="amount-error" class="alert alert-error" style="display:none;"></div>
-      </div>
-
-      <!-- Donor Details (Optional) -->
-      <div class="form-group">
-        <label class="form-label" for="donor-name">Your Name <span style="font-weight:400; color: rgb(var(--color-neutral-500));">(optional)</span></label>
-        <input type="text" id="donor-name" class="form-input" placeholder="e.g. Ash Ketchum" maxlength="200">
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="donor-email">Email <span style="font-weight:400; color: rgb(var(--color-neutral-500));">(optional, for receipt)</span></label>
-        <input type="email" id="donor-email" class="form-input" placeholder="ash@pokemon.com">
-      </div>
-
-      <!-- Message -->
-      <div class="form-group">
-        <label class="form-label" for="donor-message">Leave a message <span style="font-weight:400; color: rgb(var(--color-neutral-500));">(optional, max 500 chars)</span></label>
-        <textarea id="donor-message" class="form-textarea" rows="3" maxlength="500" placeholder="Great cause! Good luck everyone 🎲"></textarea>
-        <div style="text-align: right; font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-top: 0.25rem;">
-          <span id="message-char-count">0</span>/500
-        </div>
-      </div>
-
-      <!-- Opt-in checkboxes -->
-      <div class="form-group">
-        <div class="checkbox-group">
-          <input type="checkbox" id="show-name" class="checkbox-input" checked>
-          <label for="show-name" class="checkbox-label">Show my name on the donation wall</label>
-        </div>
-        <div class="checkbox-group">
-          <input type="checkbox" id="show-message" class="checkbox-input" checked>
-          <label for="show-message" class="checkbox-label">Show my message on the donation wall</label>
-        </div>
-      </div>
-
-      <!-- Privacy Consent -->
-      <div class="form-group">
-        <div class="checkbox-group">
-          <input type="checkbox" id="privacy-consent" class="checkbox-input">
-          <label for="privacy-consent" class="checkbox-label">
-            I agree to the <a href="/privacy-policy/" class="link" target="_blank">privacy policy</a> and consent to my data being processed for this donation.
-          </label>
-        </div>
-      </div>
-
-      <!-- Error / Status -->
-      <div id="donation-error" class="alert alert-error" style="display:none;"></div>
-      <div id="donation-status" class="alert alert-info" style="display:none;"></div>
-
-      <!-- Submit Button -->
-      <button id="donate-btn" class="btn btn-primary btn-full btn-lg" disabled>
-        🎁 Donate Now
-      </button>
-
-      <p style="text-align:center; font-size:0.8rem; color:rgb(var(--color-neutral-500)); margin-top:0.75rem;">
-        Payments processed securely via SumUp. All transactions are in GBP (£).
-      </p>
-    </div>
-
-    <!-- SumUp Card Widget Container -->
-    <div id="sumup-payment-section" class="card" style="display:none;">
-      <h2 class="card-header" style="font-size:1.25rem;">💳 Enter Payment Details</h2>
-      <div id="donation-sumup-card"></div>
-      <div id="payment-processing" class="alert alert-info" style="display:none;">
-        Processing your payment... please wait.
-      </div>
-    </div>
-
-    <!-- Thank You (hidden until success) -->
-    <div id="donation-thank-you" class="card" style="display:none;">
-      <div style="text-align:center; padding:1rem 0;">
-        <div style="font-size:3rem; margin-bottom:0.5rem;">🎉</div>
-        <h2 class="card-header" style="font-size:1.5rem;">Thank You!</h2>
-        <p style="color:rgb(var(--color-neutral-600)); margin-bottom:1rem;">
-          Your donation of <strong id="ty-amount"></strong> has been received.<br>
-          You're helping support Childline Gibraltar and our gaming community!
-        </p>
-        <button class="btn btn-primary" onclick="window.location.reload()">Make Another Donation</button>
-      </div>
-    </div>
 
     <!-- Donation Wall -->
     <div class="card" id="donation-wall-card">
@@ -181,4 +83,64 @@
 </article>
 
 <script src="/js/donate.js"></script>
+<script>
+(function () {
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999';
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const COLOURS = ['#4f46e5','#818cf8','#facc15','#34d399','#f472b6','#60a5fa'];
+  const COUNT = 120;
+  const pieces = Array.from({ length: COUNT }, () => ({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height * 0.5 - canvas.height * 0.1,
+    r: Math.random() * 7 + 4,
+    d: Math.random() * COUNT,
+    colour: COLOURS[Math.floor(Math.random() * COLOURS.length)],
+    tilt: Math.random() * 10 - 10,
+    tiltAngle: 0,
+    tiltSpeed: Math.random() * 0.1 + 0.05
+  }));
+
+  let angle = 0;
+  let frame;
+  let startTime = null;
+  const DURATION = 6000;
+
+  function draw(ts) {
+    if (!startTime) startTime = ts;
+    const elapsed = ts - startTime;
+    const progress = Math.min(elapsed / DURATION, 1);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    angle += 0.008;
+
+    pieces.forEach((p, i) => {
+      p.tiltAngle += p.tiltSpeed * 0.75;
+      p.y += (Math.cos(angle + p.d) + 1.5 + p.r / 5) * 1.1;
+      p.x += Math.sin(angle) * 1.2;
+      p.tilt = Math.sin(p.tiltAngle) * 15;
+
+      ctx.globalAlpha = 1 - progress;
+      ctx.beginPath();
+      ctx.lineWidth = p.r;
+      ctx.strokeStyle = p.colour;
+      ctx.moveTo(p.x + p.tilt + p.r / 4, p.y);
+      ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r / 4);
+      ctx.stroke();
+    });
+
+    if (progress < 1) {
+      frame = requestAnimationFrame(draw);
+    } else {
+      canvas.remove();
+    }
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
 {{ end }}
