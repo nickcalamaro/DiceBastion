@@ -62,7 +62,7 @@
       if (!data.ok) return;
 
       // Update progress
-      const total = 1294.40;
+      const total = parseFloat(data.total_raised) || 0;
       const goal = getCurrentGoal(total);
       animateValue($totalRaised, 0, total, 1200, v => `£${v.toFixed(2)}`);
       $donationCount.textContent = data.donation_count || 0;
