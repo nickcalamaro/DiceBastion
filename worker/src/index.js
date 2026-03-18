@@ -3867,6 +3867,14 @@ ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span cl
 </div>
 </div>
 <div class="footer"><a href="${site}/events/">← All Events</a></div>
+<script>
+// Redirect real browsers to the events page with modal open.
+// Bots (Googlebot, etc.) run headless Chrome with navigator.webdriver=true,
+// so they stay on this page and index the Event schema markup.
+if (!navigator.webdriver) {
+  window.location.replace('${eventsPage}');
+}
+</script>
 </body></html>`;
 }
 
