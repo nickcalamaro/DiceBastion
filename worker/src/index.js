@@ -3420,6 +3420,288 @@ app.get('/membership/confirm', async (c) => {
   })
 })
 
+// ============================================================================
+// SPONSORED MEMBERSHIPS
+// ============================================================================
+
+/**
+ * Ensure the sponsored_memberships table exists (lazy migration).
+ */
+async function migrateSponsoredMemberships(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS sponsored_memberships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchased_by_email TEXT NOT NULL,
+      purchased_by_name  TEXT,
+      purchased_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      order_ref TEXT UNIQUE NOT NULL,
+      amount_paid REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','available','claimed','refunded')),
+      claimed_by_user_id INTEGER,
+      claimed_at TEXT,
+      FOREIGN KEY (claimed_by_user_id) REFERENCES users(user_id)
+    )
+  `).run()
+}
+
+/**
+ * GET /membership/sponsor/pool
+ * Returns the number of available sponsored memberships.
+ */
+app.get('/membership/sponsor/pool', async (c) => {
+  try {
+    await migrateSponsoredMemberships(c.env.DB)
+    const row = await c.env.DB.prepare(
+      `SELECT COUNT(*) as available FROM sponsored_memberships WHERE status = 'available'`
+    ).first()
+    return c.json({ available: Number(row?.available || 0) })
+  } catch (e) {
+    console.error('[sponsor/pool] Error:', e)
+    return c.json({ available: 0 })
+  }
+})
+
+/**
+ * POST /membership/sponsor/checkout
+ * Purchase a sponsorship — creates a SumUp checkout at the annual plan price.
+ * Does NOT create a membership for the buyer; instead creates a sponsored_membership record.
+ */
+const sponsorCheckoutRateLimits = new Map()
+
+app.post('/membership/sponsor/checkout', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    if (!checkRateLimit(ip, sponsorCheckoutRateLimits, 3, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many requests. Please try again in a minute.' }, 429)
+    }
+
+    const idem = c.req.header('Idempotency-Key')?.trim()
+    const { email, name, privacyConsent, turnstileToken } = await c.req.json()
+    if (!email) return c.json({ error: 'missing_fields' }, 400)
+    if (!EMAIL_RE.test(email) || email.length > 320) return c.json({ error: 'invalid_email' }, 400)
+    if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
+    if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
+
+    await migrateSponsoredMemberships(c.env.DB)
+
+    // Use the quarterly plan price
+    const svc = await getServiceForPlan(c.env.DB, 'quarterly')
+    if (!svc) return c.json({ error: 'plan_not_configured' }, 400)
+    const amount = Number(svc.amount)
+    const currency = svc.currency || 'GBP'
+
+    const order_ref = crypto.randomUUID()
+
+    // Idempotency check
+    if (idem) {
+      const existing = await c.env.DB.prepare(
+        `SELECT t.order_ref, t.checkout_id FROM transactions t
+         JOIN sponsored_memberships sm ON sm.id = t.reference_id
+         WHERE t.transaction_type = 'sponsorship' AND t.email = ? AND t.idempotency_key = ?
+         ORDER BY t.id DESC LIMIT 1`
+      ).bind(email, idem).first()
+      if (existing?.checkout_id) {
+        return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
+      }
+    }
+
+    let checkout
+    try {
+      checkout = await createCheckout(c.env, {
+        amount,
+        currency,
+        orderRef: order_ref,
+        title: 'Dice Bastion – Sponsor a Membership',
+        description: 'Quarterly sponsored membership for a community member',
+        savePaymentInstrument: false
+      })
+    } catch (err) {
+      console.error('[sponsor/checkout] SumUp error:', err)
+      return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
+    }
+    if (!checkout.id) return c.json({ error: 'sumup_missing_id' }, 502)
+
+    // Create pending sponsored_membership record
+    const smResult = await c.env.DB.prepare(
+      `INSERT INTO sponsored_memberships (purchased_by_email, purchased_by_name, order_ref, amount_paid, status)
+       VALUES (?, ?, ?, ?, 'pending') RETURNING id`
+    ).bind(email, name || null, order_ref, amount).first()
+    const smId = smResult?.id
+
+    // Create transaction record
+    await c.env.DB.prepare(
+      `INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                                 checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
+       VALUES ('sponsorship', ?, NULL, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+    ).bind(smId, email, name || null, order_ref, checkout.id,
+           String(amount), currency, idem || null, toIso(new Date())).run()
+
+    return c.json({ orderRef: order_ref, checkoutId: checkout.id })
+  } catch (e) {
+    console.error('[sponsor/checkout] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * GET /membership/sponsor/confirm?orderRef=...
+ * Polled by the frontend after SumUp reports success.
+ * Verifies payment and marks the sponsored_membership as 'available'.
+ */
+app.get('/membership/sponsor/confirm', async (c) => {
+  const orderRef = c.req.query('orderRef')
+  if (!orderRef || !UUID_RE.test(orderRef)) return c.json({ ok: false, error: 'invalid_orderRef' }, 400)
+
+  try {
+    await migrateSponsoredMemberships(c.env.DB)
+
+    const transaction = await c.env.DB.prepare(
+      `SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship'`
+    ).bind(orderRef).first()
+    if (!transaction) return c.json({ ok: false, error: 'order_not_found' }, 404)
+
+    const sm = await c.env.DB.prepare(
+      `SELECT * FROM sponsored_memberships WHERE id = ?`
+    ).bind(transaction.reference_id).first()
+    if (!sm) return c.json({ ok: false, error: 'sponsorship_not_found' }, 404)
+
+    // Already confirmed
+    if (sm.status === 'available') {
+      return c.json({ ok: true, status: 'active', message: 'Sponsorship already active' })
+    }
+
+    // Verify payment
+    let payment
+    try { payment = await fetchPayment(c.env, transaction.checkout_id) }
+    catch { return c.json({ ok: false, error: 'verify_failed' }, 400) }
+
+    if (!isCheckoutPaid(payment)) {
+      const currentStatus = payment?.status || 'PENDING'
+      const txStatuses = payment?.transactions?.map(t => t.status) || []
+      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+      return c.json({
+        ok: false,
+        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+        message: hasFailed ? 'Payment failed. Please try again.' :
+                 hasDeclined ? 'Your card was declined.' : 'Payment is still processing.'
+      })
+    }
+
+    // Mark sponsorship as available (in the pool)
+    await c.env.DB.prepare(
+      `UPDATE sponsored_memberships SET status = 'available' WHERE id = ?`
+    ).bind(sm.id).run()
+
+    // Update transaction status
+    await c.env.DB.prepare(
+      `UPDATE transactions SET payment_status = 'PAID', payment_id = ?, updated_at = ? WHERE id = ?`
+    ).bind(payment.id, toIso(new Date()), transaction.id).run()
+
+    return c.json({ ok: true, status: 'active', message: 'Thank you! Your sponsorship has been added to the pool.' })
+  } catch (e) {
+    console.error('[sponsor/confirm] Error:', e)
+    return c.json({ ok: false, error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * POST /membership/sponsor/claim
+ * Allows a user without a membership to claim one from the sponsored pool.
+ */
+app.post('/membership/sponsor/claim', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    const { email, name, privacyConsent, turnstileToken } = await c.req.json()
+
+    if (!email) return c.json({ error: 'email_required' }, 400)
+    if (!EMAIL_RE.test(email) || email.length > 320) return c.json({ error: 'invalid_email' }, 400)
+    if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
+    if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
+
+    await migrateSponsoredMemberships(c.env.DB)
+
+    // Check user doesn't already have an active membership
+    const ident = await getOrCreateIdentity(c.env.DB, email, name || null)
+    const activeMembership = await getActiveMembership(c.env.DB, ident.id)
+    if (activeMembership) {
+      return c.json({ error: 'already_member', message: 'You already have an active membership.' }, 409)
+    }
+
+    // Check pool availability
+    const poolRow = await c.env.DB.prepare(
+      `SELECT id FROM sponsored_memberships WHERE status = 'available' ORDER BY id ASC LIMIT 1`
+    ).first()
+    if (!poolRow) {
+      return c.json({ error: 'none_available', message: 'No sponsored memberships are currently available. Please check back later.' }, 409)
+    }
+
+    // Get quarterly plan details for membership duration
+    const svc = await getServiceForPlan(c.env.DB, 'quarterly')
+    if (!svc) return c.json({ error: 'plan_not_configured' }, 400)
+    const months = Number(svc.months || 3)
+
+    // Calculate membership dates
+    const now = new Date()
+    const end = addMonths(now, months)
+    const order_ref = crypto.randomUUID()
+
+    // Create membership record for the claimant
+    const mResult = await c.env.DB.prepare(
+      `INSERT INTO memberships (user_id, plan, status, start_date, end_date, auto_renew, order_ref)
+       VALUES (?, 'quarterly', 'active', ?, ?, 0, ?) RETURNING id`
+    ).bind(ident.id, toIso(now), toIso(end), order_ref).first()
+    const membershipId = mResult?.id
+
+    // Claim the sponsorship record
+    await c.env.DB.prepare(
+      `UPDATE sponsored_memberships
+       SET status = 'claimed', claimed_by_user_id = ?, claimed_at = ?
+       WHERE id = ?`
+    ).bind(ident.id, toIso(now), poolRow.id).run()
+
+    // Send welcome email (best-effort)
+    try {
+      const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(ident.id).first()
+      if (user) {
+        const updatedMembership = { plan: 'quarterly', end_date: toIso(end), auto_renew: 0 }
+        const emailContent = getWelcomeEmail(updatedMembership, user, false)
+        await sendEmail(c.env, {
+          to: user.email,
+          ...emailContent,
+          emailType: 'membership_welcome',
+          relatedId: membershipId,
+          relatedType: 'membership',
+          metadata: { plan: 'quarterly', sponsored: true }
+        })
+      }
+    } catch (emailError) {
+      console.error('[sponsor/claim] Failed to send welcome email:', emailError)
+    }
+
+    return c.json({
+      ok: true,
+      message: 'Your sponsored membership has been activated.',
+      endDate: toIso(end),
+      orderRef: order_ref
+    })
+  } catch (e) {
+    console.error('[sponsor/claim] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// ============================================================================
+// END SPONSORED MEMBERSHIPS
+// ============================================================================
+
 app.post('/webhooks/sumup', async (c) => {
   const payload = await c.req.json()
   const { id: paymentId, checkout_reference: orderRef, currency } = payload

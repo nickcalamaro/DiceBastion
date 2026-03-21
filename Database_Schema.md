@@ -11,6 +11,21 @@ CREATE TABLE services (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT
 );
+CREATE TABLE sponsored_memberships (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchased_by_email TEXT NOT NULL,        -- email of the person who paid for the sponsorship
+  purchased_by_name  TEXT,
+  purchased_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  order_ref TEXT UNIQUE NOT NULL,          -- UUID order reference, linked to transactions table
+  amount_paid REAL NOT NULL DEFAULT 0,     -- amount paid (annual plan price at purchase time)
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','available','claimed','refunded')),
+                                           -- pending: awaiting payment, available: in the pool,
+                                           -- claimed: used by a member, refunded: reversed
+  claimed_by_user_id INTEGER,              -- FK to users.user_id once claimed
+  claimed_at TEXT,
+  FOREIGN KEY (claimed_by_user_id) REFERENCES users(user_id)
+);
 CREATE TABLE users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,

@@ -1310,6 +1310,9 @@ document.getElementById(tab + '-tab').style.display = 'block';
 if (tab === 'bookings') {
   loadBookingsAndCalendar();
 }
+if (tab === 'memberships') {
+  loadMemberships();
+}
 });
 });
 

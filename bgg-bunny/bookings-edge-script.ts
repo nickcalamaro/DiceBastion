@@ -540,6 +540,21 @@ async function createBooking(request: Request) {
       }, 409);
     }
 
+    // Check if user already has a booking on this date (one booking per person per day)
+    const sameDayResult = await client.execute({
+      sql: `SELECT id, start_time, end_time FROM bookings
+            WHERE user_email = ? AND booking_date = ? AND status != 'cancelled'`,
+      args: [user_email, booking_date],
+    });
+
+    if (sameDayResult.rows.length > 0) {
+      const existing = sameDayResult.rows[0];
+      return jsonResponse({
+        error: "You already have a booking on this date",
+        message: `You already have a booking from ${existing.start_time} to ${existing.end_time} on ${booking_date}. Only one booking per day is allowed per person.`
+      }, 409);
+    }
+
     // Check max_bookings limit across ALL table types for this time slot
     const configResult = await client.execute(
       "SELECT max_bookings FROM booking_config WHERE id = 1"

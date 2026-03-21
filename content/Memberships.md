@@ -3,6 +3,7 @@
 title: Memberships
 herostyle: "background"
 showDate: false
+showPagination: false
 
 ---
 
@@ -11,7 +12,7 @@ showDate: false
 <script src="/js/modal.js"></script>
 
 <!-- Component Styles -->
-<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/forms.css">
 
 <meta name="description" content="Become a member of Dice Bastion Gibraltar and enjoy local discounts, free venue access, and exclusive support for our board game, card game, RPG, and wargame events.">
 
@@ -72,7 +73,90 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
       Join Annual
     </button>
   </div>
+
+
+
+
 </div>
+
+
+<!-- ===== OTHER MEMBERSHIP OPTIONS (collapsible) ===== -->
+<div style="margin: 2.5rem 0 0;">
+  <button id="other-options-toggle" type="button"
+    class="btn btn-secondary btn-full"
+    style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
+    aria-expanded="false"
+    aria-controls="other-options-panel">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+         stroke-linejoin="round" style="flex-shrink:0;">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+    Other Membership Options
+    <svg id="other-options-chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+         stroke-linecap="round" stroke-linejoin="round"
+         style="transition: transform 0.2s; flex-shrink: 0;">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </button>
+
+  <div id="other-options-panel" style="display: none; margin-top: 1rem;">
+    <div id="sponsor-alert" style="display: none; margin-bottom: 1rem;"></div>
+
+<div class="plans-grid" style="margin-top: 0; grid-template-columns: repeat(2, 1fr);">
+
+<!-- Sponsor a Membership -->
+<div class="plan-card" id="sponsor-card">
+  <div class="plan-label">Give back</div>
+  <h3 class="plan-name">Sponsor a Membership</h3>
+  <div class="plan-price">
+    <span class="currency">£</span><span id="sponsor-price-amount">25.00</span>
+    <span class="plan-price-period">/quarter</span>
+  </div>
+  <ul class="plan-features">
+    <li>Funds a quarterly membership for someone who can't afford one</li>
+    <li>Helps keep our club inclusive for everyone</li>
+    <li>Your generosity is greatly appreciated</li>
+  </ul>
+  <button class="plan-cta" id="sponsor-cta-btn" type="button">
+    Sponsor a Membership
+  </button>
+</div>
+
+<!-- Sponsored Membership (claim) -->
+<div class="plan-card" id="sponsored-claim-card">
+  <div class="plan-label">Community supported</div>
+  <h3 class="plan-name">Sponsored Membership</h3>
+  <div class="plan-price" style="color: rgb(var(--color-success-600));">
+    FREE
+    <span class="plan-price-period">&nbsp;</span>
+  </div>
+  <ul class="plan-features">
+    <li>Quarterly membership for those with limited financial means</li>
+    <li>All standard membership benefits</li>
+    <li>Funded by generous community members</li>
+  </ul>
+  <div id="sponsored-pool-status" style="margin-bottom: 0.75rem; font-size: 0.875rem;
+        color: rgb(var(--color-neutral-600));">Checking availability…</div>
+  <button class="plan-cta" id="sponsored-claim-btn" type="button">
+    Claim Sponsored Membership
+  </button>
+</div>
+
+</div><!-- /.plans-grid -->
+  </div><!-- /#other-options-panel -->
+</div><!-- /collapsible wrapper -->
+
+<!-- Sponsor Purchase Modal -->
+<div id="sponsor-modal-container"></div>
+
+<!-- Sponsored Claim Modal -->
+<div id="sponsored-claim-modal-container"></div>
+
 
 <div class="footer-info">
   <span>Secure checkout powered by SumUp</span>
@@ -86,7 +170,488 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 </div>
 </section>
 
-<!-- Modals are now created programmatically using Modal component -->
+
+<script>
+(function() {
+  const API_BASE = utils.getApiBase();
+  const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
+  const IS_LOCALHOST = window.location.hostname === 'localhost' ||
+                       window.location.hostname === '127.0.0.1' ||
+                       window.location.hostname === '0.0.0.0';
+
+  // ── Collapsible toggle ──────────────────────────────────────────────────
+  const toggleBtn = document.getElementById('other-options-toggle');
+  const panel     = document.getElementById('other-options-panel');
+  const chevron   = document.getElementById('other-options-chevron');
+
+  toggleBtn.addEventListener('click', () => {
+    const open = panel.style.display !== 'none';
+    panel.style.display = open ? 'none' : 'block';
+    chevron.style.transform = open ? '' : 'rotate(180deg)';
+    toggleBtn.setAttribute('aria-expanded', String(!open));
+    if (!open) loadSponsorPool();
+  });
+
+  // ── Pool availability ───────────────────────────────────────────────────
+  let sponsorPoolCount = null; // null = not yet loaded
+
+  async function loadSponsorPool() {
+    const poolStatus = document.getElementById('sponsored-pool-status');
+    try {
+      const resp = await fetch(`${API_BASE}/membership/sponsor/pool`);
+      const data = await resp.json();
+      const n = data.available || 0;
+      sponsorPoolCount = n;
+      if (n > 0) {
+        poolStatus.textContent = `${n} sponsored membership${n === 1 ? '' : 's'} available`;
+        poolStatus.style.color = 'rgb(var(--color-success-600))';
+      } else {
+        poolStatus.textContent = 'None currently available – check back soon!';
+        poolStatus.style.color = 'rgb(var(--color-neutral-500))';
+      }
+    } catch {
+      sponsorPoolCount = 0;
+      poolStatus.textContent = 'Unable to check availability right now.';
+    }
+  }
+
+  // Also load the annual plan price for the sponsor card
+  async function loadSponsorPrice() {
+    try {
+      const resp = await fetch(`${API_BASE}/membership/plans`);
+      const data = await resp.json();
+      const quarterly = (data.plans || []).find(p => p.code === 'quarterly');
+      if (quarterly) {
+        document.getElementById('sponsor-price-amount').textContent = quarterly.amount || '25.00';
+      }
+    } catch { /* silently ignore */ }
+  }
+  loadSponsorPrice();
+
+  // ── Shared helper ───────────────────────────────────────────────────────
+  function showSponsorAlert(msg, type) {
+    const el = document.getElementById('sponsor-alert');
+    el.className = `alert alert-${type}`;
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function hideSponsorAlert() {
+    document.getElementById('sponsor-alert').style.display = 'none';
+  }
+  function newIdempotencyKey() {
+    try { return crypto.randomUUID(); } catch { return String(Date.now()) + '-' + Math.random().toString(36).slice(2); }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SPONSOR PURCHASE FLOW
+  // ══════════════════════════════════════════════════════════════════════════
+
+  let sponsorModal = null;
+
+  document.getElementById('sponsor-cta-btn').addEventListener('click', openSponsorInfoModal);
+
+  function openSponsorInfoModal() {
+    sponsorModal = new Modal({
+      title: 'Sponsor a Membership',
+      size: 'md',
+      closeOnBackdrop: true,
+      content: `
+        <div style="margin-bottom: 1.25rem; line-height: 1.7; color: rgb(var(--color-neutral-700));">
+          <p>Dice Bastion and the Gibraltar Warhammer Club are funded primarily by our members, and so we kindly request that all those using the club on a regular basis become paying members. Despite that, we appreciate that not everyone has the same financial means.</p><br>
+          <p>Because of that, we're letting those who can afford to give a bit more the option to purchase this 'sponsored membership' which will allow others to use the club at no extra cost.</p><br>
+          <p>If you have any other ideas how we can continue to improve our club and make our community as inclusive as possible, please let us know at <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a></p><br>
+          <p><strong>Thank you for all your support!</strong></p>
+        </div>
+        <button id="sponsor-info-proceed" type="button" class="modal-btn modal-btn-primary">
+          Continue to Checkout
+        </button>
+      `,
+      onClose: () => { sponsorModal = null; }
+    });
+    sponsorModal.open();
+    sponsorModal.querySelector('#sponsor-info-proceed').addEventListener('click', () => {
+      sponsorModal.close();
+      sponsorModal = null;
+      openSponsorCheckoutModal();
+    });
+  }
+
+  function openSponsorCheckoutModal() {
+    const user = utils.session.getUser();
+    const isLoggedIn = user && user.email;
+
+    const guestForm = `
+      <div id="sp-guest-step" style="display: ${isLoggedIn ? 'none' : 'block'};">
+        <div class="modal-form-group">
+          <label for="sp-name" class="modal-form-label">Full name</label>
+          <input id="sp-name" type="text" placeholder="Your full name" class="modal-form-input">
+        </div>
+        <div class="modal-form-group">
+          <label for="sp-email" class="modal-form-label">Email</label>
+          <input id="sp-email" type="email" placeholder="you@example.com" class="modal-form-input">
+        </div>
+        <div class="modal-checkbox-group">
+          <input id="sp-privacy" type="checkbox" class="modal-checkbox">
+          <label for="sp-privacy" class="modal-checkbox-label">
+            I agree to the <a href="/privacy-policy/" target="_blank" rel="noopener" class="modal-link">Privacy Policy</a>.
+          </label>
+        </div>
+        <div class="modal-section">
+          <div class="modal-help-text">Security check</div>
+          <div id="sp-ts"></div>
+        </div>
+        <button id="sp-continue" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
+      </div>
+    `;
+
+    const loggedForm = `
+      <div id="sp-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
+        <div class="modal-info-box">
+          <p style="margin: 0 0 4px 0; color: #666;">Purchasing as:</p>
+          <p style="margin: 0; font-weight: 600;">${isLoggedIn ? user.email : ''}</p>
+        </div>
+        <div class="modal-section">
+          <div class="modal-help-text">Security check</div>
+          <div id="sp-ts-logged"></div>
+        </div>
+        <button id="sp-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
+        <div class="modal-section" style="text-align: center;">
+          <button id="sp-use-different" type="button" class="modal-btn-secondary"
+            style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+            Use a different email address
+          </button>
+        </div>
+      </div>
+    `;
+
+    sponsorModal = new Modal({
+      title: 'Sponsor a Membership – Checkout',
+      size: 'md',
+      closeOnBackdrop: false,
+      content: `
+        ${guestForm}
+        ${loggedForm}
+        <div id="sp-sumup-card" class="modal-widget-container"></div>
+        <div id="sp-error" class="modal-error"></div>
+      `,
+      onClose: () => { sponsorModal = null; }
+    });
+    sponsorModal.open();
+
+    // Render Turnstile
+    if (isLoggedIn) {
+      setTimeout(() => window.utils.renderTurnstile('sp-ts-logged', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
+    } else {
+      setTimeout(() => window.utils.renderTurnstile('sp-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
+    }
+
+    // Wire up buttons
+    const guestContinue  = sponsorModal.querySelector('#sp-continue');
+    const loggedContinue = sponsorModal.querySelector('#sp-continue-logged');
+    const useDiff        = sponsorModal.querySelector('#sp-use-different');
+
+    if (guestContinue)  guestContinue.addEventListener('click',  handleSponsorGuestContinue);
+    if (loggedContinue) loggedContinue.addEventListener('click', handleSponsorLoggedContinue);
+    if (useDiff) {
+      useDiff.addEventListener('click', () => {
+        sponsorModal.querySelector('#sp-guest-step').style.display  = 'block';
+        sponsorModal.querySelector('#sp-logged-step').style.display = 'none';
+        setTimeout(() => window.utils.renderTurnstile('sp-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
+      });
+    }
+  }
+
+  function showSponsorError(msg) {
+    const el = sponsorModal && sponsorModal.querySelector('#sp-error');
+    if (el) { el.textContent = msg; el.style.display = 'block'; }
+  }
+  function clearSponsorError() {
+    const el = sponsorModal && sponsorModal.querySelector('#sp-error');
+    if (el) { el.textContent = ''; el.style.display = 'none'; }
+  }
+
+  async function handleSponsorGuestContinue() {
+    const email   = (sponsorModal.querySelector('#sp-email')?.value || '').trim();
+    const name    = (sponsorModal.querySelector('#sp-name')?.value  || '').trim();
+    const consent = sponsorModal.querySelector('#sp-privacy')?.checked;
+    if (!name)    { showSponsorError('Please enter your full name.'); return; }
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) { showSponsorError('Please enter a valid email.'); return; }
+    if (!consent) { showSponsorError('Please agree to the Privacy Policy.'); return; }
+    const token = await window.utils.getTurnstileToken('sp-ts', null, IS_LOCALHOST);
+    await doSponsorCheckout(email, name, consent, token);
+  }
+
+  async function handleSponsorLoggedContinue() {
+    const user = utils.session.getUser();
+    if (!user?.email) { showSponsorError('Session expired. Please refresh.'); return; }
+    const token = await window.utils.getTurnstileToken('sp-ts-logged', null, IS_LOCALHOST);
+    await doSponsorCheckout(user.email, user.name || '', true, token);
+  }
+
+  async function doSponsorCheckout(email, name, privacyConsent, turnstileToken) {
+    try {
+      clearSponsorError();
+      const resp = await fetch(`${API_BASE}/membership/sponsor/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': newIdempotencyKey() },
+        body: JSON.stringify({ email, name, privacyConsent, turnstileToken })
+      });
+      const data = await resp.json();
+      if (!resp.ok) { showSponsorError(data.message || data.error || 'Checkout failed.'); return; }
+
+      // Hide form steps, show SumUp widget
+      const guestStep  = sponsorModal.querySelector('#sp-guest-step');
+      const loggedStep = sponsorModal.querySelector('#sp-logged-step');
+      const cardEl     = sponsorModal.querySelector('#sp-sumup-card');
+      if (guestStep)  guestStep.style.display  = 'none';
+      if (loggedStep) loggedStep.style.display = 'none';
+      if (cardEl)     { cardEl.style.display = 'block'; cardEl.innerHTML = ''; }
+
+      await window.utils.loadSumUpSdk();
+      await SumUpCard.mount({
+        id: 'sp-sumup-card',
+        checkoutId: data.checkoutId,
+        locale: 'en-GB',
+        country: 'GB',
+        onResponse: async (type) => {
+          clearSponsorError();
+          const t = String(type || '').toLowerCase();
+          if (t === 'success') {
+            await confirmSponsorOrder(data.orderRef);
+          } else if (t === 'error' || t === 'fail') {
+            showSponsorError('Payment failed. Please try again.');
+          } else if (t === 'cancel') {
+            showSponsorError('Payment cancelled.');
+          }
+        }
+      });
+    } catch (e) {
+      console.error('[sponsor checkout]', e);
+      showSponsorError('Could not start checkout. Please try again.');
+    }
+  }
+
+  async function confirmSponsorOrder(orderRef) {
+    await window.utils.pollPaymentConfirmation('/membership/sponsor/confirm', orderRef, {
+      pollInterval: 3000,
+      maxAttempts: 20,
+      onSuccess: () => {
+        if (sponsorModal) { sponsorModal.close(); sponsorModal = null; }
+        showSponsorAlert('🎉 Thank you! Your sponsored membership has been added to the pool.', 'success');
+        loadSponsorPool();
+        window.scrollTo({ top: document.getElementById('sponsor-alert').offsetTop - 80, behavior: 'smooth' });
+      },
+      onError: (msg) => showSponsorError(msg),
+      onTimeout: () => {
+        if (sponsorModal) { sponsorModal.close(); sponsorModal = null; }
+        showSponsorAlert('Your payment is being processed — we\'ll add the sponsorship to the pool shortly. Thank you!', 'info');
+      }
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SPONSORED MEMBERSHIP CLAIM FLOW
+  // ══════════════════════════════════════════════════════════════════════════
+
+  let claimModal = null;
+
+  document.getElementById('sponsored-claim-btn').addEventListener('click', () => {
+    // If pool is empty (or finished loading and is 0), show unavailability modal
+    if (sponsorPoolCount !== null && sponsorPoolCount <= 0) {
+      const noPoolModal = new Modal({
+        title: 'No Sponsored Memberships Available',
+        size: 'sm',
+        closeOnBackdrop: true,
+        content: `
+          <div style="line-height: 1.7; color: rgb(var(--color-neutral-700));">
+            <p>Unfortunately we don't have any sponsored memberships available at the moment.</p>
+            <p>If you'd like access to club facilities please contact us at
+               <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a></p>
+          </div>
+        `
+      });
+      noPoolModal.open();
+      return;
+    }
+    openClaimDisclaimerModal();
+  });
+
+  function openClaimDisclaimerModal() {
+    claimModal = new Modal({
+      title: 'Sponsored Membership',
+      size: 'md',
+      closeOnBackdrop: true,
+      content: `
+        <div style="margin-bottom: 1.25rem; line-height: 1.7; color: rgb(var(--color-neutral-700));">
+          <p>Dice Bastion and the Gibraltar Warhammer Club are funded primarily by our members, and so we kindly request that all those using the club on a regular basis become paying members. Despite that, we appreciate that not everyone has the same financial means and these sponsored memberships have been provided by other members to ensure that everyone has a welcoming and inclusive space to play their favourite games.</p><br>
+          <p>Your information will solely be shared with the GWC Committee for administrative purposes and this sponsored membership entitles you to all the standard benefits.</p><br>
+          <p>If you ever need any support, please feel free to reach out to us confidentially at <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a>.</p><br>
+          <p><strong>Happy gaming!</strong></p>
+        </div>
+        <button id="claim-info-proceed" type="button" class="modal-btn modal-btn-primary">
+          I understand – Claim my Membership
+        </button>
+      `,
+      onClose: () => { claimModal = null; }
+    });
+    claimModal.open();
+    claimModal.querySelector('#claim-info-proceed').addEventListener('click', () => {
+      claimModal.close();
+      claimModal = null;
+      openClaimFormModal();
+    });
+  }
+
+  function openClaimFormModal() {
+    const user = utils.session.getUser();
+    const isLoggedIn = user && user.email;
+
+    const guestForm = `
+      <div id="cl-guest-step" style="display: ${isLoggedIn ? 'none' : 'block'};">
+        <div class="modal-form-group">
+          <label for="cl-name" class="modal-form-label">Full name</label>
+          <input id="cl-name" type="text" placeholder="Your full name" class="modal-form-input">
+        </div>
+        <div class="modal-form-group">
+          <label for="cl-email" class="modal-form-label">Email</label>
+          <input id="cl-email" type="email" placeholder="you@example.com" class="modal-form-input">
+        </div>
+        <div class="modal-checkbox-group">
+          <input id="cl-privacy" type="checkbox" class="modal-checkbox">
+          <label for="cl-privacy" class="modal-checkbox-label">
+            I agree to the <a href="/privacy-policy/" target="_blank" rel="noopener" class="modal-link">Privacy Policy</a>.
+          </label>
+        </div>
+        <div class="modal-section">
+          <div class="modal-help-text">Security check</div>
+          <div id="cl-ts"></div>
+        </div>
+        <button id="cl-continue" type="button" class="modal-btn modal-btn-primary modal-section">Claim Membership</button>
+      </div>
+    `;
+
+    const loggedForm = `
+      <div id="cl-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
+        <div class="modal-info-box">
+          <p style="margin: 0 0 4px 0; color: #666;">Claiming as:</p>
+          <p style="margin: 0; font-weight: 600;">${isLoggedIn ? user.email : ''}</p>
+        </div>
+        <div class="modal-section">
+          <div class="modal-help-text">Security check</div>
+          <div id="cl-ts-logged"></div>
+        </div>
+        <button id="cl-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Claim Membership</button>
+        <div class="modal-section" style="text-align: center;">
+          <button id="cl-use-different" type="button" class="modal-btn-secondary"
+            style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+            Use a different email address
+          </button>
+        </div>
+      </div>
+    `;
+
+    claimModal = new Modal({
+      title: 'Claim your Sponsored Membership',
+      size: 'md',
+      closeOnBackdrop: false,
+      content: `
+        ${guestForm}
+        ${loggedForm}
+        <div id="cl-error" class="modal-error"></div>
+      `,
+      onClose: () => { claimModal = null; }
+    });
+    claimModal.open();
+
+    // Render Turnstile
+    if (isLoggedIn) {
+      setTimeout(() => window.utils.renderTurnstile('cl-ts-logged', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
+    } else {
+      setTimeout(() => window.utils.renderTurnstile('cl-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
+    }
+
+    const guestContinue  = claimModal.querySelector('#cl-continue');
+    const loggedContinue = claimModal.querySelector('#cl-continue-logged');
+    const useDiff        = claimModal.querySelector('#cl-use-different');
+
+    if (guestContinue)  guestContinue.addEventListener('click',  handleClaimGuest);
+    if (loggedContinue) loggedContinue.addEventListener('click', handleClaimLogged);
+    if (useDiff) {
+      useDiff.addEventListener('click', () => {
+        claimModal.querySelector('#cl-guest-step').style.display  = 'block';
+        claimModal.querySelector('#cl-logged-step').style.display = 'none';
+        setTimeout(() => window.utils.renderTurnstile('cl-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
+      });
+    }
+  }
+
+  function showClaimError(msg) {
+    const el = claimModal && claimModal.querySelector('#cl-error');
+    if (el) { el.textContent = msg; el.style.display = 'block'; }
+  }
+  function clearClaimError() {
+    const el = claimModal && claimModal.querySelector('#cl-error');
+    if (el) { el.textContent = ''; el.style.display = 'none'; }
+  }
+
+  async function handleClaimGuest() {
+    const email   = (claimModal.querySelector('#cl-email')?.value || '').trim();
+    const name    = (claimModal.querySelector('#cl-name')?.value  || '').trim();
+    const consent = claimModal.querySelector('#cl-privacy')?.checked;
+    if (!name)    { showClaimError('Please enter your full name.'); return; }
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) { showClaimError('Please enter a valid email.'); return; }
+    if (!consent) { showClaimError('Please agree to the Privacy Policy.'); return; }
+    const token = await window.utils.getTurnstileToken('cl-ts', null, IS_LOCALHOST);
+    await doClaimMembership(email, name, consent, token);
+  }
+
+  async function handleClaimLogged() {
+    const user = utils.session.getUser();
+    if (!user?.email) { showClaimError('Session expired. Please refresh.'); return; }
+    const token = await window.utils.getTurnstileToken('cl-ts-logged', null, IS_LOCALHOST);
+    await doClaimMembership(user.email, user.name || '', true, token);
+  }
+
+  async function doClaimMembership(email, name, privacyConsent, turnstileToken) {
+    try {
+      clearClaimError();
+      const btn = claimModal.querySelector('#cl-continue, #cl-continue-logged');
+      if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
+
+      const resp = await fetch(`${API_BASE}/membership/sponsor/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name, privacyConsent, turnstileToken })
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Claim Membership'; }
+        const knownErrors = {
+          already_member: 'You already have an active membership.',
+          none_available: 'No sponsored memberships are currently available. Please check back later.',
+          turnstile_failed: 'Security check failed. Please refresh and try again.'
+        };
+        showClaimError(knownErrors[data.error] || data.message || 'Something went wrong. Please try again.');
+        return;
+      }
+
+      // Success!
+      if (claimModal) { claimModal.close(); claimModal = null; }
+      showSponsorAlert('🎉 Your sponsored quarterly membership has been activated! Check your email for confirmation.', 'success');
+      loadSponsorPool();
+      window.scrollTo({ top: document.getElementById('sponsor-alert').offsetTop - 80, behavior: 'smooth' });
+    } catch (e) {
+      console.error('[claim membership]', e);
+      const btn = claimModal && claimModal.querySelector('#cl-continue, #cl-continue-logged');
+      if (btn) { btn.disabled = false; btn.textContent = 'Claim Membership'; }
+      showClaimError('Something went wrong. Please try again.');
+    }
+  }
+
+})();
+</script>
+
 
 <script>
 (function(){

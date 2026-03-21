@@ -1550,6 +1550,12 @@
   flex-direction: column;
   gap: 3rem;
   margin: 2rem 0;
+  max-width: 640px;
+}
+
+/* Lift the prose max-width constraint on the team page */
+.article-content:has(#team-container) {
+  max-width: none;
 }
 
 /* One wrapper per person — card on top, Q&A panel below */
@@ -1721,6 +1727,163 @@
 .dark .team-tag-neutral {
   background: rgb(var(--color-neutral-700));
   color: rgb(var(--color-neutral-300));
+}
+
+/* ---- games list ---- */
+.team-games-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ---- shared details/summary base ---- */
+.team-game-details,
+.team-qa-details {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* game-level summary: pill + label + chevron in one row */
+.team-game-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem 0.55rem 0.4rem;
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.team-game-summary::-webkit-details-marker { display: none; }
+
+.team-game-summary:hover {
+  background: rgb(var(--color-primary-50));
+}
+
+.dark .team-game-summary:hover {
+  background: rgba(79, 70, 229, 0.12);
+}
+
+.team-game-details[open] .team-game-summary {
+  background: rgb(var(--color-primary-50));
+  border-radius: 8px 8px 0 0;
+}
+
+.dark .team-game-details[open] .team-game-summary {
+  background: rgba(79, 70, 229, 0.12);
+}
+
+/* QA-level summary: label flush left, chevron right */
+.team-qa-item--collapsible {
+  gap: 0;
+}
+
+.team-qa-details {
+  width: 100%;
+}
+
+.team-qa-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.5rem 0.5rem 0;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s ease;
+}
+
+.team-qa-summary::-webkit-details-marker { display: none; }
+
+.team-qa-summary:hover .card-label {
+  color: rgb(var(--color-primary-600));
+}
+
+.dark .team-qa-summary:hover .card-label {
+  color: rgb(var(--color-primary-400));
+}
+
+.team-qa-details[open] .team-qa-summary {
+  border-bottom-color: rgb(var(--color-neutral-200));
+}
+
+.dark .team-qa-details[open] .team-qa-summary {
+  border-bottom-color: rgb(var(--color-neutral-700));
+}
+
+/* shared cue text */
+.team-details-cue {
+  font-size: 0.75rem;
+  color: rgb(var(--color-neutral-400));
+  margin-left: auto;
+  padding-right: 0.25rem;
+  transition: opacity 0.15s;
+}
+
+.team-game-details[open] .team-details-cue {
+  opacity: 0;
+}
+
+/* chevron arrow — pure CSS, no icon dependency */
+.team-details-chevron {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%239ca3af'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  transition: transform 0.2s ease;
+}
+
+details[open] > summary .team-details-chevron,
+details[open] > .team-qa-summary .team-details-chevron {
+  transform: rotate(180deg);
+}
+
+/* expanded content panel */
+.team-details-body {
+  padding: 0.875rem 0.75rem 0.75rem;
+  color: rgb(var(--color-neutral-700));
+  font-size: 0.9rem;
+  line-height: 1.7;
+  background: rgb(var(--color-neutral-50));
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  animation: team-expand 0.18s ease;
+}
+
+.dark .team-details-body {
+  color: rgb(var(--color-neutral-300));
+  background: rgba(0, 0, 0, 0.15);
+  border-color: rgb(var(--color-neutral-700));
+}
+
+.team-details-body p {
+  margin: 0 0 0.75rem;
+}
+
+.team-details-body p:last-child {
+  margin-bottom: 0;
+}
+
+@keyframes team-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* legacy inline value paragraphs (non-collapsible fields) */
+.team-qa-value p {
+  margin: 0 0 0.75rem;
+}
+
+.team-qa-value p:last-child {
+  margin-bottom: 0;
 }
 
 @media (max-width: 768px) {

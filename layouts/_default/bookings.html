@@ -346,6 +346,7 @@ let membershipStatus = null;
 let paymentModal = null;
 let authModal = null;
 let bookingTurnstileWidgetId = null; // Track Turnstile widget for cleanup
+let userBookings = []; // Cache of user's bookings for same-day validation
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Use the global auth modal from footer and add custom success handler
@@ -602,7 +603,29 @@ async function handleDateChange(date) {
   formSection.style.pointerEvents = 'none';
   document.getElementById('booking-form-instruction').style.display = 'block';
   document.getElementById('booking-form-wrapper').style.display = 'none';
-  
+
+  // Check if logged-in user already has a booking on this date
+  if (userSession?.email && userBookings.length > 0) {
+    const existingOnDate = userBookings.find(b => b.booking_date === date);
+    if (existingOnDate) {
+      const slotsSection = document.getElementById('slots-section');
+      slotsSection.style.opacity = '1';
+      slotsSection.style.pointerEvents = 'auto';
+      document.getElementById('slots-instruction').style.display = 'none';
+      const slotsContainer = document.getElementById('slots-container');
+      slotsContainer.style.display = 'block';
+      slotsContainer.innerHTML = `
+        <div class="alert alert-error">
+          ⚠️ You already have a booking on this date (${existingOnDate.start_time}–${existingOnDate.end_time} · ${existingOnDate.table_type}). Only one booking per day is allowed.
+        </div>
+      `;
+      setTimeout(() => {
+        slotsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+      return;
+    }
+  }
+
   await loadAvailableSlots(date);
   
   // Scroll to slots section
@@ -884,6 +907,7 @@ async function loadBookingsForDate(date) {
   try {
     const response = await fetch(`${BOOKINGS_API}/api/bookings/user/${encodeURIComponent(userSession.email)}`);
     const data = await response.json();
+    userBookings = data.bookings || [];
     
     if (!data.bookings || data.bookings.length === 0) {
       container.innerHTML = '<div class="alert alert-info">📭 You have no upcoming bookings</div>';
