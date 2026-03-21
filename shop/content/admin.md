@@ -23,227 +23,227 @@ title: "Admin - Product Management"
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
       <h1>Product Management</h1>
       <button id="logout-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">Logout</button>
+</div>
+
+<!-- Add/Edit Product Form -->
+<div id="product-form-container" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
+<h2 id="form-title">Add New Product</h2>
+<form id="product-form">
+<input type="hidden" id="product-id">
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+  <div>
+    <label for="product-name" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Product Name *</label>
+    <input type="text" id="product-name" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+  <div>
+    <label for="product-slug" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
+    <input type="text" id="product-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">e.g., warhammer-starter-set</small>
+  </div>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label for="product-description" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Description</label>
+  <textarea id="product-description" rows="3" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="Short description shown on product cards..."></textarea>
+  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Brief text shown on product listing cards.</small>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label for="product-summary" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Summary</label>
+  <textarea id="product-summary" rows="2" maxlength="160" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="One-line summary for search results and social previews..."></textarea>
+  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Used for Google meta description &amp; social previews. Max 160 chars recommended.</small>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Full Description</label>
+  <div class="shop-editor">
+    <div class="shop-editor-toolbar">
+      <button type="button" onclick="formatProductText('bold')" class="shop-editor-btn" style="font-weight: bold;">B</button>
+      <button type="button" onclick="formatProductText('italic')" class="shop-editor-btn" style="font-style: italic;">I</button>
+      <button type="button" onclick="formatProductText('underline')" class="shop-editor-btn" style="text-decoration: underline;">U</button>
+      <button type="button" onclick="formatProductText('insertUnorderedList')" class="shop-editor-btn">• List</button>
+      <button type="button" onclick="insertProductLink()" class="shop-editor-btn">🔗 Link</button>
+    </div>
+    <div id="product-full-description" contenteditable="true" class="shop-editor-content" placeholder="Detailed product information, features, specifications..."></div>
+  </div>
+  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Rich text shown on the product detail page. Also used by Google for SEO if Summary is empty.</small>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+  <div>
+    <label for="product-price" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Price (pence) *</label>
+    <input type="number" id="product-price" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">£10.00 = 1000 pence</small>
+  </div>
+  <div>
+    <label for="product-stock" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Stock Quantity *</label>
+    <input type="number" id="product-stock" required value="0" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+  <div>
+    <label for="product-category" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Category</label>
+    <input type="text" id="product-category" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+  <div>
+    <label for="product-image" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Image URL</label>
+    <input type="text" id="product-image" placeholder="https://..." style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+  <div>
+    <label for="product-release-date" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Release Date</label>
+    <input type="date" id="product-release-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">For pre-order products. Google will show "Pre-Order" status.</small>
+  </div>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label style="display: flex; align-items: center; cursor: pointer;">
+    <input type="checkbox" id="product-active" checked style="margin-right: 0.5rem;">
+    <span style="font-weight: 600;">Active (visible in shop)</span>
+  </label>
+</div>
+
+<!-- Collapsible SEO Section -->
+<div style="margin-bottom: 1.5rem;">
+  <button type="button" class="seo-toggle-btn" onclick="toggleShopSeoSection()">
+    <span class="seo-chevron">▶</span> 🔍 Google Product SEO Settings
+  </button>
+  <div id="shop-seo-section-body" class="seo-section-body">
+    <div class="seo-info-banner">
+      <span>ℹ️</span>
+      <span>These settings show how your product appears in Google Shopping results, search snippets, and social media link previews (WhatsApp, Discord, Facebook, etc.). All data is derived from the fields above.</span>
     </div>
 
-    <!-- Add/Edit Product Form -->
-    <div id="product-form-container" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
-      <h2 id="form-title">Add New Product</h2>
-      <form id="product-form">
-        <input type="hidden" id="product-id">
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-          <div>
-            <label for="product-name" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Product Name *</label>
-            <input type="text" id="product-name" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-          </div>
-          <div>
-            <label for="product-slug" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
-            <input type="text" id="product-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-            <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">e.g., warhammer-starter-set</small>
-          </div>
+    <div style="margin-bottom: 1rem;">
+      <h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">📋 How Your Fields Map to Google</h4>
+      <div class="seo-field-map">
+        <div class="seo-field-map-grid">
+          <strong>Title:</strong> <span>Product Name</span>
+          <strong>Description:</strong> <span>Full Description → Summary → Description (first non-empty, HTML stripped)</span>
+          <strong>Image:</strong> <span>Image URL (720px+ wide recommended)</span>
+          <strong>Price:</strong> <span>Price field (auto-converted from pence to £)</span>
+          <strong>Availability:</strong> <span id="seo-availability-preview">In Stock</span>
+          <strong>Category:</strong> <span>Category field (becomes breadcrumbs in Google)</span>
+          <strong>URL:</strong> <span id="seo-url-preview">shop.dicebastion.com/products/...</span>
         </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label for="product-description" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Description</label>
-          <textarea id="product-description" rows="3" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="Short description shown on product cards..."></textarea>
-          <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Brief text shown on product listing cards.</small>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label for="product-summary" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Summary</label>
-          <textarea id="product-summary" rows="2" maxlength="160" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="One-line summary for search results and social previews..."></textarea>
-          <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Used for Google meta description &amp; social previews. Max 160 chars recommended.</small>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Full Description</label>
-          <div class="shop-editor">
-            <div class="shop-editor-toolbar">
-              <button type="button" onclick="formatProductText('bold')" class="shop-editor-btn" style="font-weight: bold;">B</button>
-              <button type="button" onclick="formatProductText('italic')" class="shop-editor-btn" style="font-style: italic;">I</button>
-              <button type="button" onclick="formatProductText('underline')" class="shop-editor-btn" style="text-decoration: underline;">U</button>
-              <button type="button" onclick="formatProductText('insertUnorderedList')" class="shop-editor-btn">• List</button>
-              <button type="button" onclick="insertProductLink()" class="shop-editor-btn">🔗 Link</button>
-            </div>
-            <div id="product-full-description" contenteditable="true" class="shop-editor-content" placeholder="Detailed product information, features, specifications..."></div>
-          </div>
-          <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Rich text shown on the product detail page. Also used by Google for SEO if Summary is empty.</small>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-          <div>
-            <label for="product-price" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Price (pence) *</label>
-            <input type="number" id="product-price" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-            <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">£10.00 = 1000 pence</small>
-          </div>
-          <div>
-            <label for="product-stock" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Stock Quantity *</label>
-            <input type="number" id="product-stock" required value="0" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-          </div>
-          <div>
-            <label for="product-category" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Category</label>
-            <input type="text" id="product-category" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-          </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-          <div>
-            <label for="product-image" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Image URL</label>
-            <input type="text" id="product-image" placeholder="https://..." style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-          </div>
-          <div>
-            <label for="product-release-date" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Release Date</label>
-            <input type="date" id="product-release-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-            <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">For pre-order products. Google will show "Pre-Order" status.</small>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 1rem;">
-          <label style="display: flex; align-items: center; cursor: pointer;">
-            <input type="checkbox" id="product-active" checked style="margin-right: 0.5rem;">
-            <span style="font-weight: 600;">Active (visible in shop)</span>
-          </label>
-        </div>
-
-        <!-- Collapsible SEO Section -->
-        <div style="margin-bottom: 1.5rem;">
-          <button type="button" class="seo-toggle-btn" onclick="toggleShopSeoSection()">
-            <span class="seo-chevron">▶</span> 🔍 Google Product SEO Settings
-          </button>
-          <div id="shop-seo-section-body" class="seo-section-body">
-            <div class="seo-info-banner">
-              <span>ℹ️</span>
-              <span>These settings show how your product appears in Google Shopping results, search snippets, and social media link previews (WhatsApp, Discord, Facebook, etc.). All data is derived from the fields above.</span>
-            </div>
-
-            <div style="margin-bottom: 1rem;">
-              <h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">📋 How Your Fields Map to Google</h4>
-              <div class="seo-field-map">
-                <div class="seo-field-map-grid">
-                  <strong>Title:</strong> <span>Product Name</span>
-                  <strong>Description:</strong> <span>Full Description → Summary → Description (first non-empty, HTML stripped)</span>
-                  <strong>Image:</strong> <span>Image URL (720px+ wide recommended)</span>
-                  <strong>Price:</strong> <span>Price field (auto-converted from pence to £)</span>
-                  <strong>Availability:</strong> <span id="seo-availability-preview">In Stock</span>
-                  <strong>Category:</strong> <span>Category field (becomes breadcrumbs in Google)</span>
-                  <strong>URL:</strong> <span id="seo-url-preview">shop.dicebastion.com/products/...</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="seo-preview-box">
-              <h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">🔎 Google Search Preview</h4>
-              <div style="font-family: Arial, sans-serif;">
-                <div id="seo-preview-title" style="color: #1a0dab; font-size: 1.1rem; line-height: 1.3; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Product Name | Dice Bastion Shop</div>
-                <div id="seo-preview-url" style="color: #006621; font-size: 0.8rem; margin-bottom: 4px;">shop.dicebastion.com › products › slug</div>
-                <div id="seo-preview-price" style="color: #70757a; font-size: 0.8rem; margin-bottom: 2px;">£0.00 · <span id="seo-preview-stock" style="color: #188038;">In stock</span></div>
-                <div id="seo-preview-desc" style="color: #545454; font-size: 0.85rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">Product description will appear here...</div>
-              </div>
-            </div>
-
-            <div class="seo-info-banner seo-tip-banner">
-              <span>💡</span>
-              <span><strong>Image Tips:</strong> Google recommends product images be at least 720px wide (1920px preferred). Use .jpg, .png or .webp format. Provide 1:1 or 4:3 aspect ratios for best results in Shopping.</span>
-            </div>
-          </div>
-        </div>
-
-        <div style="display: flex; gap: 1rem;">
-          <button type="submit" id="save-btn" style="flex: 1; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
-            Save Product
-          </button>
-          <button type="button" id="cancel-btn" style="display: none; padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">
-            Cancel
-          </button>
-        </div>
-      </form>
-    </div>
-
-    <!-- Products List -->
-    <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
-      <h2>Products</h2>
-      <div id="products-list"></div>
-    </div>
-
-    <!-- SEO Documentation -->
-    <div style="margin-top: 2rem;">
-      <button type="button" class="docs-toggle-btn" onclick="toggleDocsSection()">
-        <span class="docs-chevron">▶</span> 📖 How Product SEO Works — Admin Guide
-      </button>
-      <div id="docs-body" class="docs-body">
-        <h3>🌐 What Are SEO Product Pages?</h3>
-        <p>Each active product automatically gets its own dedicated URL at:</p>
-        <p><code>shop.dicebastion.com/products/your-product-slug</code></p>
-        <p>These pages are <strong>invisible to regular visitors</strong> — humans are instantly redirected to the shop with the product modal open. But search engine crawlers (Google, Bing, etc.) and social media bots (WhatsApp, Discord, Facebook) see a fully optimised, content-rich page with structured data.</p>
-
-        <h3>🔄 How Dynamic Rendering Works</h3>
-        <p>The system uses <strong>server-side dynamic rendering</strong>, a Google-endorsed approach:</p>
-        <div class="docs-flow-diagram">
-          <span class="docs-flow-step">Visitor clicks product link</span>
-          <span class="docs-flow-arrow">→</span>
-          <span class="docs-flow-step">Server checks User-Agent</span>
-          <span class="docs-flow-arrow">→</span>
-          <span class="docs-flow-step">Bot? → Full SEO page</span>
-          <span class="docs-flow-arrow">/</span>
-          <span class="docs-flow-step">Human? → 302 redirect to shop modal</span>
-        </div>
-        <ul>
-          <li><strong>Google/Bing bots</strong> see a complete HTML page with Product JSON-LD schema, Open Graph tags, meta descriptions, and breadcrumbs</li>
-          <li><strong>Social bots</strong> (WhatsApp, Discord, Facebook, Twitter) see Open Graph data for rich link previews with product image, name, price</li>
-          <li><strong>Real visitors</strong> get an instant 302 redirect to <code>shop.dicebastion.com/?product=slug</code> which opens the product modal — no delay, no flash</li>
-        </ul>
-
-        <h3>📋 Field-to-Schema Mapping</h3>
-        <p>Here's exactly how your admin fields translate to Google's Product schema:</p>
-        <ul>
-          <li><strong>Product Name</strong> → <code>schema:name</code>, <code>og:title</code>, <code>&lt;title&gt;</code></li>
-          <li><strong>Description</strong> → Fallback for meta description if Summary and Full Description are empty</li>
-          <li><strong>Summary</strong> → Preferred source for <code>meta description</code>, <code>og:description</code>, <code>twitter:description</code> (max 160 chars)</li>
-          <li><strong>Full Description</strong> → <code>schema:description</code> (HTML stripped), also displayed visually on the SEO page. Takes priority over Summary for schema</li>
-          <li><strong>Price</strong> → <code>schema:offers.price</code> (auto-converted from pence to pounds, e.g. 1000 → £10.00)</li>
-          <li><strong>Stock</strong> → <code>schema:offers.availability</code>: InStock / OutOfStock / PreOrder</li>
-          <li><strong>Category</strong> → BreadcrumbList schema (Shop → Category → Product). Creates dedicated category landing pages at <code>shop.dicebastion.com/products/category/CategoryName</code></li>
-          <li><strong>Image URL</strong> → <code>schema:image</code>, <code>og:image</code>, <code>twitter:image</code></li>
-          <li><strong>URL Slug</strong> → Canonical URL, <code>og:url</code>, and the shareable link</li>
-          <li><strong>Release Date</strong> → If set to a future date, availability becomes PreOrder with <code>schema:offers.availabilityStarts</code></li>
-        </ul>
-
-        <h3>🔗 Shareable Links</h3>
-        <p>Every product gets a shareable URL you can use anywhere:</p>
-        <ul>
-          <li><strong>Product:</strong> <code>shop.dicebastion.com/products/your-slug</code></li>
-          <li><strong>Category:</strong> <code>shop.dicebastion.com/products/category/CategoryName</code></li>
-        </ul>
-        <p>When shared on WhatsApp, Discord, Facebook, or Twitter, these links will show a rich preview card with the product image, name, price, and description — pulled from the Open Graph and Twitter Card meta tags on the SEO page.</p>
-
-        <h3>🗺️ Sitemap</h3>
-        <p>All active products are automatically included in a dynamic XML sitemap at:</p>
-        <p><code>shop.dicebastion.com/products/sitemap.xml</code></p>
-        <p>This sitemap is auto-generated from the database and includes all product URLs plus category pages. Submit this URL to Google Search Console to accelerate indexing.</p>
-
-        <h3>🕸️ Crawlable Internal Links</h3>
-        <p>The shop homepage is automatically injected with hidden <code>&lt;a&gt;</code> links to every active product's SEO page. This gives Google a crawl path from your shop to each product — critical for discovery and indexing. These links are invisible to visitors but fully visible to search crawlers.</p>
-
-        <h3>💡 Best Practices</h3>
-        <ul>
-          <li><strong>Always fill in Summary</strong> — it's the primary text Google shows in search snippets. Keep it under 160 characters and make it compelling</li>
-          <li><strong>Use Full Description</strong> for detailed product info — it's the richest content Google can index. Use the formatting toolbar for lists and links</li>
-          <li><strong>Product images should be 720px+ wide</strong> (1920px recommended). Use .jpg, .png or .webp. Square (1:1) or landscape (4:3) aspect ratios work best for Google Shopping</li>
-          <li><strong>Slugs are permanent</strong> — once Google indexes a URL, changing the slug breaks the old link. Choose descriptive, lowercase slugs with hyphens</li>
-          <li><strong>Categories create pages</strong> — each unique category gets its own SEO landing page. Use consistent category names across products</li>
-          <li><strong>Set Release Date for pre-orders</strong> — Google will display "Pre-Order" availability status instead of "In Stock"</li>
-        </ul>
-
-        <h3>🔍 Testing Your SEO Pages</h3>
-        <ul>
-          <li><strong>Direct test:</strong> Visit <code>shop.dicebastion.com/products/your-slug</code> — you'll be redirected to the shop (that's correct!)</li>
-          <li><strong>Bot test:</strong> Use <a href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Google Rich Results Test</a> to see the Product schema</li>
-          <li><strong>Social test:</strong> Use <a href="https://developers.facebook.com/tools/debug/" target="_blank" rel="noopener">Facebook Debugger</a> or share the link in a Discord DM to yourself</li>
-          <li><strong>Sitemap:</strong> Check <code>shop.dicebastion.com/products/sitemap.xml</code> to verify all products appear</li>
-        </ul>
       </div>
     </div>
+
+    <div class="seo-preview-box">
+      <h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">🔎 Google Search Preview</h4>
+      <div style="font-family: Arial, sans-serif;">
+        <div id="seo-preview-title" style="color: #1a0dab; font-size: 1.1rem; line-height: 1.3; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Product Name | Dice Bastion Shop</div>
+        <div id="seo-preview-url" style="color: #006621; font-size: 0.8rem; margin-bottom: 4px;">shop.dicebastion.com › products › slug</div>
+        <div id="seo-preview-price" style="color: #70757a; font-size: 0.8rem; margin-bottom: 2px;">£0.00 · <span id="seo-preview-stock" style="color: #188038;">In stock</span></div>
+        <div id="seo-preview-desc" style="color: #545454; font-size: 0.85rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">Product description will appear here...</div>
+      </div>
+    </div>
+
+    <div class="seo-info-banner seo-tip-banner">
+      <span>💡</span>
+      <span><strong>Image Tips:</strong> Google recommends product images be at least 720px wide (1920px preferred). Use .jpg, .png or .webp format. Provide 1:1 or 4:3 aspect ratios for best results in Shopping.</span>
+    </div>
   </div>
+</div>
+
+<div style="display: flex; gap: 1rem;">
+  <button type="submit" id="save-btn" style="flex: 1; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+    Save Product
+  </button>
+  <button type="button" id="cancel-btn" style="display: none; padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">
+    Cancel
+  </button>
+</div>
+</form>
+</div>
+
+<!-- Products List -->
+<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
+<h2>Products</h2>
+<div id="products-list"></div>
+</div>
+
+<!-- SEO Documentation -->
+<div style="margin-top: 2rem;">
+<button type="button" class="docs-toggle-btn" onclick="toggleDocsSection()">
+<span class="docs-chevron">▶</span> 📖 How Product SEO Works — Admin Guide
+</button>
+<div id="docs-body" class="docs-body">
+<h3>🌐 What Are SEO Product Pages?</h3>
+<p>Each active product automatically gets its own dedicated URL at:</p>
+<p><code>shop.dicebastion.com/products/your-product-slug</code></p>
+<p>These pages are <strong>invisible to regular visitors</strong> — humans are instantly redirected to the shop with the product modal open. But search engine crawlers (Google, Bing, etc.) and social media bots (WhatsApp, Discord, Facebook) see a fully optimised, content-rich page with structured data.</p>
+
+<h3>🔄 How Dynamic Rendering Works</h3>
+<p>The system uses <strong>server-side dynamic rendering</strong>, a Google-endorsed approach:</p>
+<div class="docs-flow-diagram">
+  <span class="docs-flow-step">Visitor clicks product link</span>
+  <span class="docs-flow-arrow">→</span>
+  <span class="docs-flow-step">Server checks User-Agent</span>
+  <span class="docs-flow-arrow">→</span>
+  <span class="docs-flow-step">Bot? → Full SEO page</span>
+  <span class="docs-flow-arrow">/</span>
+  <span class="docs-flow-step">Human? → 302 redirect to shop modal</span>
+</div>
+<ul>
+  <li><strong>Google/Bing bots</strong> see a complete HTML page with Product JSON-LD schema, Open Graph tags, meta descriptions, and breadcrumbs</li>
+  <li><strong>Social bots</strong> (WhatsApp, Discord, Facebook, Twitter) see Open Graph data for rich link previews with product image, name, price</li>
+  <li><strong>Real visitors</strong> get an instant 302 redirect to <code>shop.dicebastion.com/?product=slug</code> which opens the product modal — no delay, no flash</li>
+</ul>
+
+<h3>📋 Field-to-Schema Mapping</h3>
+<p>Here's exactly how your admin fields translate to Google's Product schema:</p>
+<ul>
+  <li><strong>Product Name</strong> → <code>schema:name</code>, <code>og:title</code>, <code>&lt;title&gt;</code></li>
+  <li><strong>Description</strong> → Fallback for meta description if Summary and Full Description are empty</li>
+  <li><strong>Summary</strong> → Preferred source for <code>meta description</code>, <code>og:description</code>, <code>twitter:description</code> (max 160 chars)</li>
+  <li><strong>Full Description</strong> → <code>schema:description</code> (HTML stripped), also displayed visually on the SEO page. Takes priority over Summary for schema</li>
+  <li><strong>Price</strong> → <code>schema:offers.price</code> (auto-converted from pence to pounds, e.g. 1000 → £10.00)</li>
+  <li><strong>Stock</strong> → <code>schema:offers.availability</code>: InStock / OutOfStock / PreOrder</li>
+  <li><strong>Category</strong> → BreadcrumbList schema (Shop → Category → Product). Creates dedicated category landing pages at <code>shop.dicebastion.com/products/category/CategoryName</code></li>
+  <li><strong>Image URL</strong> → <code>schema:image</code>, <code>og:image</code>, <code>twitter:image</code></li>
+  <li><strong>URL Slug</strong> → Canonical URL, <code>og:url</code>, and the shareable link</li>
+  <li><strong>Release Date</strong> → If set to a future date, availability becomes PreOrder with <code>schema:offers.availabilityStarts</code></li>
+</ul>
+
+<h3>🔗 Shareable Links</h3>
+<p>Every product gets a shareable URL you can use anywhere:</p>
+<ul>
+  <li><strong>Product:</strong> <code>shop.dicebastion.com/products/your-slug</code></li>
+  <li><strong>Category:</strong> <code>shop.dicebastion.com/products/category/CategoryName</code></li>
+</ul>
+<p>When shared on WhatsApp, Discord, Facebook, or Twitter, these links will show a rich preview card with the product image, name, price, and description — pulled from the Open Graph and Twitter Card meta tags on the SEO page.</p>
+
+<h3>🗺️ Sitemap</h3>
+<p>All active products are automatically included in a dynamic XML sitemap at:</p>
+<p><code>shop.dicebastion.com/products/sitemap.xml</code></p>
+<p>This sitemap is auto-generated from the database and includes all product URLs plus category pages. Submit this URL to Google Search Console to accelerate indexing.</p>
+
+<h3>🕸️ Crawlable Internal Links</h3>
+<p>The shop homepage is automatically injected with hidden <code>&lt;a&gt;</code> links to every active product's SEO page. This gives Google a crawl path from your shop to each product — critical for discovery and indexing. These links are invisible to visitors but fully visible to search crawlers.</p>
+
+<h3>💡 Best Practices</h3>
+<ul>
+  <li><strong>Always fill in Summary</strong> — it's the primary text Google shows in search snippets. Keep it under 160 characters and make it compelling</li>
+  <li><strong>Use Full Description</strong> for detailed product info — it's the richest content Google can index. Use the formatting toolbar for lists and links</li>
+  <li><strong>Product images should be 720px+ wide</strong> (1920px recommended). Use .jpg, .png or .webp. Square (1:1) or landscape (4:3) aspect ratios work best for Google Shopping</li>
+  <li><strong>Slugs are permanent</strong> — once Google indexes a URL, changing the slug breaks the old link. Choose descriptive, lowercase slugs with hyphens</li>
+  <li><strong>Categories create pages</strong> — each unique category gets its own SEO landing page. Use consistent category names across products</li>
+  <li><strong>Set Release Date for pre-orders</strong> — Google will display "Pre-Order" availability status instead of "In Stock"</li>
+</ul>
+
+<h3>🔍 Testing Your SEO Pages</h3>
+<ul>
+  <li><strong>Direct test:</strong> Visit <code>shop.dicebastion.com/products/your-slug</code> — you'll be redirected to the shop (that's correct!)</li>
+  <li><strong>Bot test:</strong> Use <a href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Google Rich Results Test</a> to see the Product schema</li>
+  <li><strong>Social test:</strong> Use <a href="https://developers.facebook.com/tools/debug/" target="_blank" rel="noopener">Facebook Debugger</a> or share the link in a Discord DM to yourself</li>
+  <li><strong>Sitemap:</strong> Check <code>shop.dicebastion.com/products/sitemap.xml</code> to verify all products appear</li>
+</ul>
+</div>
+</div>
+</div>
 </div>
 
 <style>
