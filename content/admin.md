@@ -114,7 +114,16 @@ showDate: false
 .crop-container { background: white; border-radius: 12px; padding: 1rem 2rem 2rem 2rem; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; overflow-y: auto; }
 .dark .crop-container { background: rgb(var(--color-neutral-800)); color: rgb(var(--color-neutral-100)); }
 .crop-container h2 { margin-top: 0; margin-bottom: 1rem; }
-.crop-image-container { max-height: 50vh; margin: 1rem 0; overflow: hidden; }
+.crop-image-container { max-height: 50vh; margin: 1rem 0; overflow: hidden; position: relative; }
+.crop-image-container.eyedropper-active { cursor: crosshair !important; }
+.crop-image-container.eyedropper-active .cropper-face, .crop-image-container.eyedropper-active .cropper-point, .crop-image-container.eyedropper-active .cropper-line { cursor: crosshair !important; }
+.crop-bg-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.crop-bg-btn { padding: 0.375rem 0.75rem; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer; font-size: 0.813rem; transition: all 0.15s; }
+.dark .crop-bg-btn { background: rgb(var(--color-neutral-700)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-200)); }
+.crop-bg-btn:hover { background: rgb(var(--color-neutral-200)); }
+.dark .crop-bg-btn:hover { background: rgb(var(--color-neutral-600)); }
+.crop-bg-btn.active { background: rgb(var(--color-primary-600)); color: white; border-color: rgb(var(--color-primary-600)); }
+.crop-bg-swatch { display: inline-block; width: 20px; height: 20px; border-radius: 4px; border: 2px solid rgb(var(--color-neutral-300)); vertical-align: middle; }
 </style>
 
 <div id="admin-page">
@@ -741,7 +750,15 @@ Loading cron job logs...
 <button id="crop-center-h" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer;">↔️ Center H</button>
 <button id="crop-center-v" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer;">↕️ Center V</button>
 <button id="crop-reset" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer;">🔄 Reset</button>
-<span style="padding: 0.5rem; color: rgb(var(--color-neutral-600)); font-size: 0.875rem; align-self: center;">💡 Drag crop box beyond image for white space</span>
+<span style="padding: 0.5rem; color: rgb(var(--color-neutral-600)); font-size: 0.875rem; align-self: center;">💡 Drag crop box beyond image to extend background</span>
+</div>
+<div class="crop-bg-row">
+<label style="font-weight: 600; font-size: 0.875rem; min-width: 60px;">🎨 Fill:</label>
+<button type="button" class="crop-bg-btn active" data-bg="auto">Auto</button>
+<button type="button" class="crop-bg-btn" data-bg="white">White</button>
+<button type="button" class="crop-bg-btn" data-bg="pick" id="crop-bg-pick">🔍 Pick from image</button>
+<span id="crop-bg-swatch" class="crop-bg-swatch" style="background: #ffffff; display: none;" title="Sampled colour"></span>
+<span id="crop-bg-pick-hint" style="font-size: 0.78rem; color: rgb(var(--color-neutral-500)); display: none;">Click anywhere on the image to sample</span>
 </div>
 </div>
 <div class="crop-actions">
@@ -1047,6 +1064,57 @@ document.getElementById('event-location')?.addEventListener('input', (e) => {
 let cropper = null;
 let currentCropCallback = null;
 let currentAspectRatio = 336 / 220;
+let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
+let cropBgPickedCol = null; // hex string when mode is 'pick'
+
+// Background fill mode buttons
+document.querySelectorAll('.crop-bg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.crop-bg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    cropBgMode = btn.dataset.bg;
+    const swatch = document.getElementById('crop-bg-swatch');
+    const hint = document.getElementById('crop-bg-pick-hint');
+    const container = document.querySelector('.crop-image-container');
+    if (cropBgMode === 'pick') {
+      hint.style.display = 'inline';
+      container.classList.add('eyedropper-active');
+      if (cropBgPickedCol) { swatch.style.background = cropBgPickedCol; swatch.style.display = 'inline-block'; }
+    } else {
+      hint.style.display = 'none';
+      container.classList.remove('eyedropper-active');
+      if (cropBgMode === 'white') { swatch.style.background = '#ffffff'; swatch.style.display = 'inline-block'; }
+      else { swatch.style.display = 'none'; }
+    }
+  });
+});
+
+// Eyedropper: click on crop preview to sample a pixel colour
+document.querySelector('.crop-image-container').addEventListener('click', (e) => {
+  if (cropBgMode !== 'pick' || !cropper) return;
+  // Get the displayed image canvas from Cropper
+  const imgData = cropper.getImageData();
+  const canvasData = cropper.getCanvasData();
+  // Convert click coords to image pixel coords
+  const rect = e.currentTarget.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+  const imgX = Math.round((clickX - canvasData.left) / canvasData.width * imgData.naturalWidth);
+  const imgY = Math.round((clickY - canvasData.top) / canvasData.height * imgData.naturalHeight);
+  if (imgX < 0 || imgY < 0 || imgX >= imgData.naturalWidth || imgY >= imgData.naturalHeight) return;
+  // Sample the pixel from a temporary canvas
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = imgData.naturalWidth;
+  tmpCanvas.height = imgData.naturalHeight;
+  const tmpCtx = tmpCanvas.getContext('2d');
+  tmpCtx.drawImage(document.getElementById('crop-image'), 0, 0);
+  const px = tmpCtx.getImageData(imgX, imgY, 1, 1).data;
+  cropBgPickedCol = `#${((1<<24)+(px[0]<<16)+(px[1]<<8)+px[2]).toString(16).slice(1)}`;
+  const swatch = document.getElementById('crop-bg-swatch');
+  swatch.style.background = cropBgPickedCol;
+  swatch.style.display = 'inline-block';
+  document.getElementById('crop-bg-pick-hint').textContent = `Sampled: ${cropBgPickedCol}`;
+});
 
 function showCropModal(file, callback, aspectRatio = 336 / 220) {
   currentAspectRatio = aspectRatio;
@@ -1171,6 +1239,14 @@ cropper.destroy();
 cropper = null;
 }
 currentCropCallback = null;
+// Reset fill mode
+cropBgMode = 'auto';
+cropBgPickedCol = null;
+document.querySelectorAll('.crop-bg-btn').forEach(b => b.classList.remove('active'));
+document.querySelector('.crop-bg-btn[data-bg="auto"]').classList.add('active');
+document.getElementById('crop-bg-swatch').style.display = 'none';
+document.getElementById('crop-bg-pick-hint').style.display = 'none';
+document.querySelector('.crop-image-container').classList.remove('eyedropper-active');
 });
 
 document.getElementById('crop-confirm').addEventListener('click', async () => {
@@ -1188,13 +1264,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
     targetHeight = 440;
   }
 
-  // Create a canvas with transparent background at target size
-  const finalCanvas = document.createElement('canvas');
-  finalCanvas.width = targetWidth;
-  finalCanvas.height = targetHeight;
-  const ctx = finalCanvas.getContext('2d', { alpha: true });
-
-  // Get the cropped portion
+  // Get the cropped portion (transparent where crop extends beyond image)
   const croppedCanvas = cropper.getCroppedCanvas({
     width: targetWidth,
     height: targetHeight,
@@ -1203,58 +1273,55 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
     fillColor: 'transparent',
   });
 
-  // Draw the cropped image onto the transparent canvas
+  // Build final canvas with background fill
+  const finalCanvas = document.createElement('canvas');
+  finalCanvas.width = targetWidth;
+  finalCanvas.height = targetHeight;
+  const ctx = finalCanvas.getContext('2d');
+
+  // Determine fill colour based on selected mode
+  let fillCol;
+  if (cropBgMode === 'white') {
+    fillCol = '#ffffff';
+  } else if (cropBgMode === 'pick' && cropBgPickedCol) {
+    fillCol = cropBgPickedCol;
+  } else {
+    // Auto: sample average colour from opaque edge pixels
+    const srcCtx = croppedCanvas.getContext('2d');
+    const px = srcCtx.getImageData(0, 0, targetWidth, targetHeight).data;
+    let rSum = 0, gSum = 0, bSum = 0, cnt = 0;
+    const samplePx = (x, y) => {
+      const i = (y * targetWidth + x) * 4;
+      if (px[i + 3] > 128) { rSum += px[i]; gSum += px[i+1]; bSum += px[i+2]; cnt++; }
+    };
+    for (let x = 0; x < targetWidth; x += 3) {
+      for (let d = 0; d < 3; d++) { samplePx(x, d); samplePx(x, targetHeight - 1 - d); }
+    }
+    for (let y = 0; y < targetHeight; y += 3) {
+      for (let d = 0; d < 3; d++) { samplePx(d, y); samplePx(targetWidth - 1 - d, y); }
+    }
+    fillCol = cnt > 0
+      ? `rgb(${Math.round(rSum/cnt)},${Math.round(gSum/cnt)},${Math.round(bSum/cnt)})`
+      : '#ffffff';
+  }
+
+  // 1) Fill entire canvas with the chosen colour
+  ctx.fillStyle = fillCol;
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
+
+  // 2) For auto mode, draw a blurred copy so edges bleed softly
+  if (cropBgMode === 'auto') {
+    ctx.save();
+    ctx.filter = 'blur(28px)';
+    ctx.drawImage(croppedCanvas, -30, -30, targetWidth + 60, targetHeight + 60);
+    ctx.restore();
+  }
+
+  // 3) Draw the sharp crop on top
   ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
 
-  // Analyze for horizontal transparency and zoom if needed
-  const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
-  const data = imageData.data;
-  
-  let minX = targetWidth;
-  let maxX = 0;
-  
-  // Scan for non-transparent pixels
-  for (let y = 0; y < targetHeight; y++) {
-    for (let x = 0; x < targetWidth; x++) {
-      const alpha = data[(y * targetWidth + x) * 4 + 3];
-      if (alpha > 10) {
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-      }
-    }
-  }
-  
-  // If there's significant horizontal transparency, zoom to fill
-  if (minX < maxX) {
-    const contentWidth = maxX - minX + 1;
-    const zoomFactor = targetWidth / contentWidth;
-    
-    if (zoomFactor > 1.01) {
-      console.log(`Detected transparency - applying zoom factor: ${zoomFactor.toFixed(2)}`);
-      
-      // Create temp canvas with zoomed content
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = targetWidth;
-      tempCanvas.height = targetHeight;
-      const tempCtx = tempCanvas.getContext('2d', { alpha: true });
-      
-      // Calculate centered zoom
-      const zoomedWidth = targetWidth * zoomFactor;
-      const zoomedHeight = targetHeight * zoomFactor;
-      const offsetX = -(zoomedWidth - targetWidth) / 2;
-      const offsetY = -(zoomedHeight - targetHeight) / 2;
-      
-      // Draw zoomed image
-      tempCtx.drawImage(finalCanvas, offsetX, offsetY, zoomedWidth, zoomedHeight);
-      
-      // Copy back to final canvas
-      ctx.clearRect(0, 0, targetWidth, targetHeight);
-      ctx.drawImage(tempCanvas, 0, 0);
-    }
-  }
-
-  // Convert to PNG base64 (PNG supports transparency)
-  const croppedImage = finalCanvas.toDataURL('image/png');
+  // Convert to JPEG (no transparency needed)
+  const croppedImage = finalCanvas.toDataURL('image/jpeg', 0.92);
 
   // Upload to R2
   try {
@@ -1280,6 +1347,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
         cropper = null;
       }
       currentCropCallback = null;
+      cropBgMode = 'auto';
+      cropBgPickedCol = null;
     } else {
       Modal.alert({ title: 'Upload Failed', message: 'Failed to upload image. Please try again.' });
       console.error('Upload error:', uploadData);
