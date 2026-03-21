@@ -7,9 +7,11 @@ compatibility_date = "2024-10-23"
 workers_dev = true
 
 # Route event slug URLs through this Worker for SEO pages
+# Route product slug URLs through this Worker for shop SEO pages
 routes = [
   { pattern = "dicebastion.com/events/*", zone_name = "dicebastion.com" },
-  { pattern = "www.dicebastion.com/events/*", zone_name = "dicebastion.com" }
+  { pattern = "www.dicebastion.com/events/*", zone_name = "dicebastion.com" },
+  { pattern = "shop.dicebastion.com/products/*", zone_name = "dicebastion.com" }
 ]
 
 # D1 Database

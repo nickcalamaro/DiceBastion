@@ -5809,6 +5809,400 @@ app.get('/test/delayed-emails', async (c) => {
 // PRODUCT & SHOP API ENDPOINTS
 // ============================================================================
 
+// ---------- Product SEO Page Generator ----------
+// Produces a rich HTML landing page with Product JSON-LD for Google Shopping,
+// Open Graph tags for social sharing, and BreadcrumbList for SERP breadcrumbs.
+// https://developers.google.com/search/docs/appearance/structured-data/product
+function generateProductSeoPage(product, allCategories) {
+  const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
+  const stripHtml = s => (s || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  const shop = 'https://shop.dicebastion.com';
+  const name = e(product.name || 'Product');
+  const slug = product.slug || '';
+  const img = product.image_url || `${shop}/img/og-image.png`;
+  const rawDesc = product.full_description || product.summary || product.description || '';
+  const plainDesc = stripHtml(rawDesc);
+  const desc = e(plainDesc.length > 160 ? plainDesc.substring(0, 157) + '...' : plainDesc);
+  const fullDescHtml = rawDesc;  // Keep HTML for visual display
+  const url = `${shop}/products/${slug}`;
+  const priceNum = (Number(product.price) || 0) / 100;
+  const priceDisplay = priceNum.toFixed(2);
+  const inStock = (product.stock_quantity || 0) > 0;
+  const isPreorder = product.release_date && new Date(product.release_date) > new Date();
+  const categories = (product.category || '').split(',').map(c => c.trim()).filter(Boolean);
+  const primaryCategory = categories[0] || 'Tabletop Gaming';
+
+  // Google Product structured data (JSON-LD)
+  const schema = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    'name': product.name || 'Product',
+    'description': plainDesc || desc,
+    'image': img,
+    'url': url,
+    'sku': slug,
+    'brand': { '@type': 'Brand', 'name': 'Dice Bastion' },
+    'category': primaryCategory,
+    'offers': {
+      '@type': 'Offer',
+      'url': url,
+      'priceCurrency': product.currency || 'GBP',
+      'price': priceNum,
+      'availability': isPreorder
+        ? 'https://schema.org/PreOrder'
+        : inStock
+          ? 'https://schema.org/InStock'
+          : 'https://schema.org/OutOfStock',
+      'seller': {
+        '@type': 'Organization',
+        'name': 'Dice Bastion',
+        'url': shop
+      },
+      'shippingDetails': {
+        '@type': 'OfferShippingDetails',
+        'shippingDestination': {
+          '@type': 'DefinedRegion',
+          'addressCountry': 'GI'
+        },
+        'deliveryTime': {
+          '@type': 'ShippingDeliveryTime',
+          'handlingTime': { '@type': 'QuantitativeValue', 'minValue': 0, 'maxValue': 1, 'unitCode': 'DAY' },
+          'transitTime': { '@type': 'QuantitativeValue', 'minValue': 0, 'maxValue': 1, 'unitCode': 'DAY' }
+        },
+        'shippingRate': { '@type': 'MonetaryAmount', 'value': '0', 'currency': 'GBP' }
+      },
+      'hasMerchantReturnPolicy': {
+        '@type': 'MerchantReturnPolicy',
+        'applicableCountry': 'GI',
+        'returnPolicyCategory': 'https://schema.org/MerchantReturnFiniteReturnWindow',
+        'merchantReturnDays': 14,
+        'returnMethod': 'https://schema.org/ReturnInStore'
+      }
+    }
+  };
+
+  if (isPreorder && product.release_date) {
+    schema.offers.availabilityStarts = product.release_date;
+  }
+
+  // BreadcrumbList for SERP breadcrumbs
+  const breadcrumbs = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    'itemListElement': [
+      { '@type': 'ListItem', 'position': 1, 'name': 'Shop', 'item': shop },
+      ...(categories[0] ? [{ '@type': 'ListItem', 'position': 2, 'name': categories[0], 'item': `${shop}/products/category/${encodeURIComponent(categories[0])}` }] : []),
+      { '@type': 'ListItem', 'position': categories[0] ? 3 : 2, 'name': product.name || 'Product' }
+    ]
+  };
+
+  // Format release date for pre-orders
+  let releaseDateStr = '';
+  if (isPreorder && product.release_date) {
+    try {
+      releaseDateStr = new Date(product.release_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch {}
+  }
+
+  return `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${name} | Dice Bastion Shop</title>
+<meta name="description" content="${desc}">
+<meta property="og:type" content="product"><meta property="og:url" content="${url}">
+<meta property="og:title" content="${name}"><meta property="og:description" content="${desc}">
+<meta property="og:image" content="${img}"><meta property="og:site_name" content="Dice Bastion Shop">
+<meta property="product:price:amount" content="${priceDisplay}"><meta property="product:price:currency" content="${product.currency || 'GBP'}">
+<meta property="product:availability" content="${inStock ? 'in stock' : 'out of stock'}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${name}">
+<meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
+<link rel="canonical" href="${url}">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.header{width:100%;padding:1rem 1.5rem;background:#16162a;text-align:center;border-bottom:1px solid #2a2a4a}
+.header a{color:#e0e0e0;text-decoration:none;font-size:1.1rem;font-weight:600}
+.breadcrumb{max-width:640px;width:100%;margin:1rem auto 0;padding:0 1rem;font-size:.8rem;color:#808090}
+.breadcrumb a{color:#a78bfa;text-decoration:none}
+.breadcrumb a:hover{text-decoration:underline}
+.card{max-width:640px;width:100%;margin:1rem auto 2rem;background:#16162a;border-radius:16px;overflow:hidden;border:1px solid #2a2a4a}
+.card img{width:100%;height:auto;display:block;max-height:400px;object-fit:cover}
+.card-body{padding:1.5rem}
+h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
+.desc{color:#b0b0c0;line-height:1.6;margin-bottom:1.25rem}
+.meta{display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem}
+.meta-item{display:flex;flex-direction:column;gap:.15rem}
+.meta-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:#808090}
+.meta-value{font-size:.95rem;color:#e0e0e0}
+.price{font-size:1.75rem;font-weight:700;color:#a78bfa;margin-bottom:1rem}
+.badge{display:inline-block;padding:.2rem .6rem;border-radius:6px;font-size:.8rem;font-weight:600}
+.badge-stock{background:#064e3b;color:#6ee7b7}
+.badge-out{background:#4a1c1c;color:#f87171}
+.badge-preorder{background:#4a2c0a;color:#fbbf24}
+.categories{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1.25rem}
+.cat-tag{padding:.25rem .75rem;background:#2a2a4a;border-radius:6px;font-size:.8rem;color:#c0c0d0;text-decoration:none}
+.cat-tag:hover{background:#3a3a5a}
+.cta{display:inline-block;padding:.75rem 2rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:1rem;transition:background .2s}
+.cta:hover{background:#6d28d9}
+.cta-disabled{background:#4a4a5a;cursor:not-allowed}
+.footer{margin-top:auto;padding:1.5rem;text-align:center;font-size:.85rem;color:#606070}
+.footer a{color:#a78bfa;text-decoration:none}
+</style>
+</head><body>
+<div class="header"><a href="${shop}">Dice Bastion Shop</a></div>
+<div class="breadcrumb">
+<a href="${shop}">Shop</a>${categories[0] ? ` › <a href="${shop}/products/category/${encodeURIComponent(categories[0])}">${e(categories[0])}</a>` : ''} › ${name}
+</div>
+<div class="card">
+${img ? `<img src="${img}" alt="${name}">` : ''}
+<div class="card-body">
+<h1>${name}</h1>
+${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${shop}/products/category/${encodeURIComponent(c)}">${e(c)}</a>`).join('')}</div>` : ''}
+<div class="price">£${priceDisplay}</div>
+${fullDescHtml ? `<div class="desc">${fullDescHtml}</div>` : ''}
+<div class="meta">
+<div class="meta-item"><span class="meta-label">Availability</span><span class="meta-value">${isPreorder ? `<span class="badge badge-preorder">Pre-order · ${releaseDateStr}</span>` : inStock ? `<span class="badge badge-stock">${product.stock_quantity} in stock</span>` : '<span class="badge badge-out">Out of stock</span>'}</span></div>
+<div class="meta-item"><span class="meta-label">Pickup</span><span class="meta-value">Gibraltar Warhammer Club</span></div>
+</div>
+<a class="${inStock || isPreorder ? 'cta' : 'cta cta-disabled'}" href="${shop}/?product=${slug}">${isPreorder ? 'Pre-order Now' : inStock ? 'View in Shop' : 'Out of Stock'}</a>
+</div>
+</div>
+<div class="footer"><a href="${shop}">← Back to Shop</a></div>
+</body></html>`;
+}
+
+// ---------- Product Category SEO Page ----------
+function generateCategorySeoPage(categoryName, products) {
+  const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
+  const shop = 'https://shop.dicebastion.com';
+  const catDisplay = e(categoryName);
+  const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
+  const desc = `Shop ${catDisplay} at Dice Bastion Gibraltar. Board games, miniatures, and gaming accessories.`;
+
+  // CollectionPage + ItemList schema
+  const schema = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    'name': `${categoryName} | Dice Bastion Shop`,
+    'description': desc,
+    'url': url,
+    'mainEntity': {
+      '@type': 'ItemList',
+      'numberOfItems': products.length,
+      'itemListElement': products.map((p, i) => ({
+        '@type': 'ListItem',
+        'position': i + 1,
+        'url': `${shop}/products/${p.slug}`,
+        'name': p.name
+      }))
+    }
+  };
+
+  const breadcrumbs = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    'itemListElement': [
+      { '@type': 'ListItem', 'position': 1, 'name': 'Shop', 'item': shop },
+      { '@type': 'ListItem', 'position': 2, 'name': categoryName }
+    ]
+  };
+
+  const productCards = products.map(p => {
+    const price = ((Number(p.price) || 0) / 100).toFixed(2);
+    return `<a href="${shop}/products/${p.slug}" class="cat-product-card">
+${p.image_url ? `<img src="${p.image_url}" alt="${e(p.name)}">` : '<div class="cat-product-img-placeholder"></div>'}
+<div class="cat-product-info"><span class="cat-product-name">${e(p.name)}</span><span class="cat-product-price">£${price}</span></div></a>`;
+  }).join('\n');
+
+  return `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${catDisplay} | Dice Bastion Shop</title>
+<meta name="description" content="${desc}">
+<meta property="og:type" content="website"><meta property="og:url" content="${url}">
+<meta property="og:title" content="${catDisplay} | Dice Bastion Shop"><meta property="og:description" content="${desc}">
+<meta property="og:site_name" content="Dice Bastion Shop">
+<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop">
+<meta name="twitter:description" content="${desc}">
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
+<link rel="canonical" href="${url}">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.header{width:100%;padding:1rem 1.5rem;background:#16162a;text-align:center;border-bottom:1px solid #2a2a4a}
+.header a{color:#e0e0e0;text-decoration:none;font-size:1.1rem;font-weight:600}
+.breadcrumb{max-width:900px;width:100%;margin:1rem auto 0;padding:0 1rem;font-size:.8rem;color:#808090}
+.breadcrumb a{color:#a78bfa;text-decoration:none}
+.cat-heading{max-width:900px;width:100%;margin:1rem auto;padding:0 1rem}
+.cat-heading h1{font-size:2rem;color:#fff}
+.cat-heading p{color:#808090;margin-top:.25rem}
+.cat-grid{max-width:900px;width:100%;margin:1rem auto 2rem;padding:0 1rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1.25rem}
+.cat-product-card{background:#16162a;border:1px solid #2a2a4a;border-radius:12px;overflow:hidden;text-decoration:none;color:#e0e0e0;transition:transform .2s,border-color .2s}
+.cat-product-card:hover{transform:translateY(-4px);border-color:#7c3aed}
+.cat-product-card img{width:100%;height:180px;object-fit:cover;display:block}
+.cat-product-img-placeholder{width:100%;height:180px;background:#2a2a4a}
+.cat-product-info{padding:1rem;display:flex;flex-direction:column;gap:.25rem}
+.cat-product-name{font-weight:600;font-size:.95rem}
+.cat-product-price{color:#a78bfa;font-weight:700}
+.footer{margin-top:auto;padding:1.5rem;text-align:center;font-size:.85rem;color:#606070}
+.footer a{color:#a78bfa;text-decoration:none}
+</style>
+</head><body>
+<div class="header"><a href="${shop}">Dice Bastion Shop</a></div>
+<div class="breadcrumb"><a href="${shop}">Shop</a> › ${catDisplay}</div>
+<div class="cat-heading"><h1>${catDisplay}</h1><p>${products.length} product${products.length !== 1 ? 's' : ''}</p></div>
+<div class="cat-grid">${productCards}</div>
+<div class="footer"><a href="${shop}">← Back to Shop</a></div>
+</body></html>`;
+}
+
+// ---------- Product Sitemap ----------
+app.get('/products/sitemap.xml', async c => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT slug, updated_at, category FROM products
+      WHERE is_active = 1 AND slug IS NOT NULL
+      ORDER BY updated_at DESC
+    `).all()
+
+    const shop = 'https://shop.dicebastion.com'
+
+    // Collect unique categories
+    const categories = new Set()
+    ;(results || []).forEach(p => {
+      if (p.category) p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => categories.add(c))
+    })
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>${shop}</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`
+
+    // Product pages
+    for (const p of (results || [])) {
+      const lastmod = p.updated_at ? `<lastmod>${p.updated_at.split('T')[0]}</lastmod>` : ''
+      xml += `\n<url><loc>${shop}/products/${encodeURIComponent(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.8</priority></url>`
+    }
+
+    // Category pages
+    for (const cat of categories) {
+      xml += `\n<url><loc>${shop}/products/category/${encodeURIComponent(cat)}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`
+    }
+
+    xml += '\n</urlset>'
+
+    return new Response(xml, {
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+      }
+    })
+  } catch (err) {
+    console.error('Product sitemap error:', err)
+    return new Response('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
+      headers: { 'Content-Type': 'application/xml' }
+    })
+  }
+})
+
+// ---------- Product SEO route (by slug) ----------
+app.get('/products/:slug', async c => {
+  try {
+    const slug = c.req.param('slug')
+    if (!slug || slug.includes('.')) return c.json({ error: 'not_found' }, 404)
+
+    const product = await c.env.DB.prepare(
+      'SELECT * FROM products WHERE slug = ? AND is_active = 1'
+    ).bind(slug).first()
+
+    if (!product) {
+      return Response.redirect('https://shop.dicebastion.com/', 302)
+    }
+
+    // Server-side dynamic rendering: bots get SEO page, humans get 302
+    const host = c.req.header('Host') || ''
+    if (host.includes('shop.dicebastion.com')) {
+      const ua = (c.req.header('User-Agent') || '').toLowerCase()
+      const isBot = /googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
+
+      if (isBot) {
+        const html = generateProductSeoPage(product)
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300, s-maxage=600' }
+        })
+      }
+
+      // Human → redirect to shop with product modal
+      return Response.redirect(`https://shop.dicebastion.com/?product=${encodeURIComponent(product.slug)}`, 302)
+    }
+
+    // Workers.dev → serve based on Accept header
+    const accept = c.req.header('Accept') || ''
+    if (accept.includes('text/html') && !accept.includes('application/json')) {
+      const html = generateProductSeoPage(product)
+      return new Response(html, {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      })
+    }
+
+    return c.json(product)
+  } catch (err) {
+    console.error('Product slug error:', err)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// ---------- Category SEO route ----------
+app.get('/products/category/:name', async c => {
+  try {
+    const categoryName = decodeURIComponent(c.req.param('name'))
+
+    const { results } = await c.env.DB.prepare(`
+      SELECT id, name, slug, summary, price, currency, stock_quantity, image_url, category, release_date
+      FROM products WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
+      ORDER BY name ASC
+    `).all()
+
+    // Filter products that contain this category
+    const catProducts = (results || []).filter(p =>
+      p.category && p.category.split(',').map(c => c.trim()).includes(categoryName)
+    )
+
+    if (catProducts.length === 0) {
+      return Response.redirect('https://shop.dicebastion.com/', 302)
+    }
+
+    // Bots get category page, humans get redirect to shop filtered by category
+    const host = c.req.header('Host') || ''
+    if (host.includes('shop.dicebastion.com')) {
+      const ua = (c.req.header('User-Agent') || '').toLowerCase()
+      const isBot = /googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
+
+      if (isBot) {
+        const html = generateCategorySeoPage(categoryName, catProducts)
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=1800' }
+        })
+      }
+
+      return Response.redirect(`https://shop.dicebastion.com/?category=${encodeURIComponent(categoryName)}`, 302)
+    }
+
+    // Workers.dev fallback
+    const html = generateCategorySeoPage(categoryName, catProducts)
+    return new Response(html, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    })
+  } catch (err) {
+    console.error('Category page error:', err)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // Get all active products (public), optionally filtered by category
 app.get('/products', async (c) => {
   try {
@@ -7039,12 +7433,11 @@ async function handleScheduled(event, env, ctx) {
 
 export default {
   /**
-   * Custom fetch handler to separate route-intercepted requests (dicebastion.com/events/*)
+   * Custom fetch handler to separate route-intercepted requests
    * from normal API requests (workers.dev domain).
    *
-   * When Cloudflare routes dicebastion.com/events/* to this Worker:
-   *   - /events/:slug (browser) → Hono serves SEO HTML
-   *   - everything else (/events/, static files) → fetch(request) passes to origin (GitHub Pages)
+   * dicebastion.com/events/*         → Event SEO pages / origin pass-through
+   * shop.dicebastion.com/products/*  → Product SEO pages / origin pass-through
    *
    * Calling fetch(request) OUTSIDE Hono guarantees Cloudflare sends to origin,
    * avoiding the recursion issue that happens with fetch(c.req.raw) inside Hono handlers.
@@ -7053,8 +7446,82 @@ export default {
     const url = new URL(request.url)
     const host = request.headers.get('Host') || ''
 
-    // Only intercept requests arriving via the custom-domain route
-    if (host.includes('dicebastion.com') && url.pathname.startsWith('/events')) {
+    // ====== SHOP: shop.dicebastion.com/products/* ======
+    if (host.includes('shop.dicebastion.com') && url.pathname.startsWith('/products')) {
+      const trimmed = url.pathname.replace(/\/+$/, '')
+      const parts = trimmed.split('/')  // ['', 'products', ...]
+
+      // /products/sitemap.xml → Hono serves dynamic sitemap
+      if (url.pathname === '/products/sitemap.xml') {
+        return app.fetch(request, env, ctx)
+      }
+
+      // /products/category/:name → Hono serves category SEO page
+      if (parts.length === 4 && parts[2] === 'category') {
+        return app.fetch(request, env, ctx)
+      }
+
+      // /products/:slug → Hono serves product SEO page (or 302 for humans)
+      const slug = parts.length === 3 ? parts[2] : null
+      if (slug && !slug.includes('.')) {
+        return app.fetch(request, env, ctx)
+      }
+
+      // Everything else → pass to Cloudflare Pages origin, inject crawlable links
+      try {
+        const [originRes, { results: activeProducts }] = await Promise.all([
+          fetch(request),
+          env.DB.prepare(`
+            SELECT slug, name, category FROM products
+            WHERE is_active = 1 AND slug IS NOT NULL AND COALESCE(show_in_shop, 1) = 1
+            ORDER BY name ASC
+          `).all()
+        ])
+
+        const ct = originRes.headers.get('content-type') || ''
+        if (!ct.includes('text/html') || !activeProducts || activeProducts.length === 0) {
+          return originRes
+        }
+
+        let html = await originRes.text()
+
+        // Collect categories
+        const categories = new Set()
+        activeProducts.forEach(p => {
+          if (p.category) p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => categories.add(c))
+        })
+
+        const productLinks = activeProducts.map(p =>
+          `<a href="/products/${encodeURIComponent(p.slug)}">${p.name}</a>`
+        ).join('\n          ')
+
+        const categoryLinks = [...categories].map(c =>
+          `<a href="/products/category/${encodeURIComponent(c)}">${c}</a>`
+        ).join('\n          ')
+
+        const navBlock = `
+      <nav aria-label="Products" style="padding:1.5rem 1rem;text-align:center;font-size:0.85rem;color:#888;border-top:1px solid rgba(128,128,128,0.2)">
+        ${categoryLinks ? `<p style="margin-bottom:0.5rem;font-weight:600;color:#aaa">Categories</p>
+        <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0.5rem 1.25rem;margin-bottom:1rem">${categoryLinks}</div>` : ''}
+        <p style="margin-bottom:0.5rem;font-weight:600;color:#aaa">All Products</p>
+        <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0.5rem 1.25rem">
+          ${productLinks}
+        </div>
+      </nav>`
+
+        html = html.replace('</body>', navBlock + '\n</body>')
+
+        return new Response(html, {
+          status: originRes.status,
+          headers: originRes.headers
+        })
+      } catch (e) {
+        return fetch(request)
+      }
+    }
+
+    // ====== EVENTS: dicebastion.com/events/* ======
+    if (host.includes('dicebastion.com') && !host.includes('shop.') && url.pathname.startsWith('/events')) {
 
       // Extract slug from /events/:slug (strip trailing slash first)
       const trimmed = url.pathname.replace(/\/+$/, '')   // /events/foo/ → /events/foo
