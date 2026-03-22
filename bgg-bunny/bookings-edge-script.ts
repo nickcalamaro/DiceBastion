@@ -540,19 +540,14 @@ async function createBooking(request: Request) {
       }, 409);
     }
 
-    // Check if user already has a booking on this date (one booking per person per day)
-    const sameDayResult = await client.execute({
-      sql: `SELECT id, start_time, end_time FROM bookings
-            WHERE user_email = ? AND booking_date = ? AND status != 'cancelled'`,
-      args: [user_email, booking_date],
-    });
-
-    if (sameDayResult.rows.length > 0) {
-      const existing = sameDayResult.rows[0];
+    // Reject same-day bookings — must be booked at least the day before
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD in UTC
+    if (booking_date <= todayStr) {
       return jsonResponse({
-        error: "You already have a booking on this date",
-        message: `You already have a booking from ${existing.start_time} to ${existing.end_time} on ${booking_date}. Only one booking per day is allowed per person.`
-      }, 409);
+        error: "Same-day bookings are not accepted",
+        message: "Tables must be booked at least the day before. Please contact us if you need a last-minute table."
+      }, 422);
     }
 
     // Check max_bookings limit across ALL table types for this time slot

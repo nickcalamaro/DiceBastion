@@ -252,7 +252,14 @@
   {{ end }}
 
   <div id="alert-container"></div>
-  
+
+  <div class="alert alert-info" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
+    <span style="font-size: 1.3rem; flex-shrink: 0;">📅</span>
+    <div>
+      <strong>Advance booking required</strong> — Tables must be booked at least the day before.
+    </div>
+  </div>
+
   <div id="membership-status-container"></div>
 
   <!-- Table Type Selection -->
@@ -346,7 +353,7 @@ let membershipStatus = null;
 let paymentModal = null;
 let authModal = null;
 let bookingTurnstileWidgetId = null; // Track Turnstile widget for cleanup
-let userBookings = []; // Cache of user's bookings for same-day validation
+let userBookings = []; // Cache of user's bookings
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Use the global auth modal from footer and add custom success handler
@@ -559,6 +566,8 @@ function selectTableType(type, cardElement) {
   // Initialize Flatpickr if not already done
   if (!picker) {
     const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
     
     // Parse available days (day names like "Monday", "Tuesday", etc.)
     const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
@@ -566,7 +575,7 @@ function selectTableType(type, cardElement) {
     const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
     
     picker = flatpickr('#booking-date', {
-      minDate: 'today',
+      minDate: tomorrow,
       dateFormat: 'Y-m-d',
       enable: [
         function(date) {
@@ -603,28 +612,6 @@ async function handleDateChange(date) {
   formSection.style.pointerEvents = 'none';
   document.getElementById('booking-form-instruction').style.display = 'block';
   document.getElementById('booking-form-wrapper').style.display = 'none';
-
-  // Check if logged-in user already has a booking on this date
-  if (userSession?.email && userBookings.length > 0) {
-    const existingOnDate = userBookings.find(b => b.booking_date === date);
-    if (existingOnDate) {
-      const slotsSection = document.getElementById('slots-section');
-      slotsSection.style.opacity = '1';
-      slotsSection.style.pointerEvents = 'auto';
-      document.getElementById('slots-instruction').style.display = 'none';
-      const slotsContainer = document.getElementById('slots-container');
-      slotsContainer.style.display = 'block';
-      slotsContainer.innerHTML = `
-        <div class="alert alert-error">
-          ⚠️ You already have a booking on this date (${existingOnDate.start_time}–${existingOnDate.end_time} · ${existingOnDate.table_type}). Only one booking per day is allowed.
-        </div>
-      `;
-      setTimeout(() => {
-        slotsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 100);
-      return;
-    }
-  }
 
   await loadAvailableSlots(date);
   
