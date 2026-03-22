@@ -301,6 +301,20 @@ title: "Admin - Product Management"
   color: white;
 }
 
+.btn-index {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: #059669;
+  color: white;
+  transition: all 0.2s;
+}
+.btn-index:hover { background: #047857; }
+.btn-index:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .badge {
   display: inline-block;
   padding: 0.25rem 0.5rem;
@@ -473,6 +487,7 @@ async function loadProducts() {
         <div class="product-actions">
           <button class="btn-edit" onclick="editProduct(${product.id})">Edit</button>
           <button class="btn-delete" onclick="deleteProduct(${product.id}, '${product.name}')">Delete</button>
+          ${product.slug ? `<button class="btn-index" onclick="requestIndexing('${product.slug}', this)">📡 Index</button>` : ''}
         </div>
       </div>
     `).join('');
@@ -757,9 +772,41 @@ function toggleDocsSection() {
   body.classList.toggle('is-open');
 }
 
+// ==================== Google Indexing API ====================
+async function requestIndexing(slug, btn) {
+  const url = `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`;
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Sending…';
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/indexing/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+      body: JSON.stringify({ url, type: 'URL_UPDATED' })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = '✅ Indexed';
+      btn.style.background = '#059669';
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 3000);
+    } else {
+      btn.textContent = '❌ Failed';
+      btn.style.background = '#dc2626';
+      console.error('Indexing failed:', data);
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+    }
+  } catch (err) {
+    btn.textContent = '❌ Error';
+    console.error('Indexing error:', err);
+    setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+  }
+}
+
 // Make functions global for onclick handlers
 window.editProduct = editProduct;
 window.deleteProduct = deleteProduct;
+window.requestIndexing = requestIndexing;
 window.toggleShopSeoSection = toggleShopSeoSection;
 window.toggleDocsSection = toggleDocsSection;
 window.formatProductText = formatProductText;

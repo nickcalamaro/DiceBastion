@@ -731,6 +731,11 @@ Loading cron job logs...
 .dark .btn-delete { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
 .btn-delete:hover { background: #fee; color: #c00; }
 .dark .btn-delete:hover { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
+.btn-index { padding: 0.5rem 1rem; background: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
+.dark .btn-index { background: #10b981; }
+.btn-index:hover { background: #047857; }
+.dark .btn-index:hover { background: #059669; }
+.btn-index:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 
 <!-- Image Crop Modal -->
@@ -1546,6 +1551,7 @@ ${p.image_url ? `<img src="${p.image_url}" style="width: 80px; height: 80px; obj
 <div class="item-actions">
 <button class="btn-edit" onclick="editProduct(${p.id})">Edit</button>
 <button class="btn-delete" onclick="deleteProduct(${p.id}, '${p.name}')">Delete</button>
+${p.slug ? `<button class="btn-index" onclick="requestIndexing('product', '${p.slug}', this)">📡 Index</button>` : ''}
 </div>
 </div>
 `;
@@ -1732,6 +1738,7 @@ ${requiresPurchase ? `<p style="margin: 0.5rem 0;">Member: £${(e.membership_pri
 <div class="item-actions">
 <button class="btn-edit" onclick="editEvent(${eventId})">Edit</button>
 <button class="btn-delete" onclick="deleteEvent(${eventId}, '${e.title.replace(/'/g, "\\'")}')">Delete</button>
+${e.slug ? `<button class="btn-index" onclick="requestIndexing('event', '${e.slug}', this)">📡 Index</button>` : ''}
 </div>
 </div>
 `;
@@ -2982,6 +2989,43 @@ function changeWeek(direction) {
 function loadBookingsAndCalendar() {
   loadTimeBlocks();
   loadCalendarWeek();
+}
+
+// ==================== Google Indexing API ====================
+async function requestIndexing(type, slug, btn) {
+  const urlMap = {
+    event: `https://dicebastion.com/events/${encodeURIComponent(slug)}`,
+    product: `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`
+  };
+  const url = urlMap[type];
+  if (!url) return;
+
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Sending…';
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/indexing/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+      body: JSON.stringify({ url, type: 'URL_UPDATED' })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = '✅ Indexed';
+      btn.style.background = '#059669';
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 3000);
+    } else {
+      btn.textContent = '❌ Failed';
+      btn.style.background = '#dc2626';
+      console.error('Indexing failed:', data);
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+    }
+  } catch (err) {
+    btn.textContent = '❌ Error';
+    console.error('Indexing error:', err);
+    setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+  }
 }
 
 // Initialize

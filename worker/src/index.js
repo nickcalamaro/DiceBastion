@@ -61,6 +61,136 @@ const addMonths = (date, months) => {
 
 const toIso = (d) => new Date(d).toISOString()
 
+// ============================================================================
+// GOOGLE INDEXING API - JWT Auth + URL Notification
+// ============================================================================
+
+/**
+ * In-memory cache for the Google OAuth2 access token.
+ * Tokens are valid for ~3600 s; we refresh 5 min early.
+ */
+let _googleTokenCache = { token: null, expiresAt: 0 }
+
+/**
+ * Base64url-encode a string or ArrayBuffer (no padding).
+ */
+function b64url(input) {
+  const bytes = typeof input === 'string'
+    ? new TextEncoder().encode(input)
+    : new Uint8Array(input)
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/**
+ * Import a PEM-encoded RSA private key for RS256 signing (Web Crypto).
+ */
+async function importPrivateKey(pem) {
+  const stripped = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\s/g, '')
+  const binaryDer = Uint8Array.from(atob(stripped), c => c.charCodeAt(0))
+  return crypto.subtle.importKey(
+    'pkcs8',
+    binaryDer.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+}
+
+/**
+ * Build and sign a Google-style JWT (RS256).
+ * @returns {string} Compact JWS  (header.payload.signature)
+ */
+async function buildJWT(clientEmail, privateKeyPem) {
+  const now = Math.floor(Date.now() / 1000)
+  const header = { alg: 'RS256', typ: 'JWT' }
+  const payload = {
+    iss: clientEmail,
+    scope: 'https://www.googleapis.com/auth/indexing',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600
+  }
+  const unsigned = b64url(JSON.stringify(header)) + '.' + b64url(JSON.stringify(payload))
+  const key = await importPrivateKey(privateKeyPem)
+  const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned))
+  return unsigned + '.' + b64url(sig)
+}
+
+/**
+ * Exchange a signed JWT for a short-lived OAuth2 access token.
+ * Caches the token in memory until 5 min before expiry.
+ */
+async function getGoogleAccessToken(env) {
+  if (_googleTokenCache.token && Date.now() < _googleTokenCache.expiresAt) {
+    return _googleTokenCache.token
+  }
+
+  const sa = JSON.parse(env.GOOGLE_SA_KEY)
+  const jwt = await buildJWT(sa.client_email, sa.private_key)
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=${encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer')}&assertion=${jwt}`
+  })
+
+  if (!res.ok) {
+    const txt = await res.text()
+    throw new Error(`Google token exchange failed (${res.status}): ${txt}`)
+  }
+
+  const data = await res.json()
+  _googleTokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + (data.expires_in - 300) * 1000  // refresh 5 min early
+  }
+  return data.access_token
+}
+
+/**
+ * Notify Google Indexing API about a URL change.
+ * @param {Object} env  - Worker env (needs GOOGLE_SA_KEY secret)
+ * @param {string} url  - The fully-qualified page URL
+ * @param {string} type - 'URL_UPDATED' | 'URL_DELETED'
+ * @returns {{ ok: boolean, status: number, body: any }}
+ */
+async function notifyGoogleIndexing(env, url, type = 'URL_UPDATED') {
+  try {
+    const token = await getGoogleAccessToken(env)
+    const res = await fetch('https://indexing.googleapis.com/v3/urlNotifications:publish', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ url, type })
+    })
+    const body = await res.json()
+    console.log(`Google Indexing [${type}] ${url} → ${res.status}`, JSON.stringify(body))
+    return { ok: res.ok, status: res.status, body }
+  } catch (err) {
+    console.error('Google Indexing error:', err)
+    return { ok: false, status: 0, body: { error: err.message } }
+  }
+}
+
+/**
+ * Fire-and-forget: notify Google about a URL without blocking the caller.
+ * Safe to call from any endpoint – swallows all errors.
+ */
+function notifyGoogleIndexingAsync(ctx, env, url, type = 'URL_UPDATED') {
+  ctx.waitUntil(
+    notifyGoogleIndexing(env, url, type).catch(err =>
+      console.error('Async Google Indexing failed:', err)
+    )
+  )
+}
+
 // Rate limiting storage (in-memory for this worker instance)
 const checkoutRateLimits = new Map()
 const membershipCheckoutRateLimits = new Map()
@@ -5073,6 +5203,11 @@ app.post('/admin/events', requireAdmin, async c => {
       recurrence_end_date || null
     ).run()
 
+    // Notify Google Indexing API (fire-and-forget)
+    if (c.env.GOOGLE_SA_KEY && slug) {
+      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://dicebastion.com/events/${encodeURIComponent(slug)}`)
+    }
+
     return c.json({ success: true, id: result.meta.last_row_id })
   } catch (e) {
     console.error('Create event error:', e)
@@ -5122,6 +5257,11 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       recurrence_end_date || null,
       id
     ).run()
+
+    // Notify Google Indexing API (fire-and-forget)
+    if (c.env.GOOGLE_SA_KEY && slug) {
+      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://dicebastion.com/events/${encodeURIComponent(slug)}`)
+    }
 
     return c.json({ success: true })
   } catch (e) {
@@ -6106,10 +6246,11 @@ app.get('/products/sitemap.xml', async c => {
 })
 
 // ---------- Product SEO route (by slug) ----------
-app.get('/products/:slug', async c => {
+app.get('/products/:slug', async (c, next) => {
   try {
     const slug = c.req.param('slug')
-    if (!slug || slug.includes('.')) return c.json({ error: 'not_found' }, 404)
+    // Pure numeric IDs are handled by the JSON API route below
+    if (!slug || slug.includes('.') || /^\d+$/.test(slug)) return next()
 
     const product = await c.env.DB.prepare(
       'SELECT * FROM products WHERE slug = ? AND is_active = 1'
@@ -6275,6 +6416,11 @@ app.post('/admin/products', requireAdmin, async (c) => {
       now,
       now
     ).run()
+
+    // Notify Google Indexing API (fire-and-forget)
+    if (c.env.GOOGLE_SA_KEY && slug) {
+      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`)
+    }
     
     return c.json({ success: true, product_id: result.meta.last_row_id })
   } catch (e) {
@@ -6338,6 +6484,13 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     await c.env.DB.prepare(`
       UPDATE products SET ${updates.join(', ')} WHERE id = ?
     `).bind(...binds).run()
+
+    // Notify Google Indexing API (fire-and-forget)
+    // Resolve the slug: use the updated slug if provided, otherwise fetch from DB
+    const productSlug = slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
+    if (c.env.GOOGLE_SA_KEY && productSlug) {
+      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}`)
+    }
     
     return c.json({ success: true })
   } catch (e) {
@@ -6456,6 +6609,74 @@ app.get('/admin/orders', async (c) => {
   } catch (e) {
     console.error('Get orders error:', e)
     return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// ============================================================================
+// GOOGLE INDEXING API - Admin Endpoints
+// ============================================================================
+
+// Manually request Google indexing for a single URL
+app.post('/admin/indexing/notify', requireAdmin, async (c) => {
+  try {
+    const { url, type } = await c.req.json()
+    if (!url) return c.json({ error: 'url_required' }, 400)
+    if (!c.env.GOOGLE_SA_KEY) return c.json({ error: 'google_sa_key_not_configured' }, 500)
+
+    const result = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
+    return c.json(result, result.ok ? 200 : 502)
+  } catch (e) {
+    console.error('Admin indexing notify error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// Batch notify – accepts an array of URLs
+app.post('/admin/indexing/batch', requireAdmin, async (c) => {
+  try {
+    const { urls, type } = await c.req.json()
+    if (!Array.isArray(urls) || urls.length === 0) return c.json({ error: 'urls_array_required' }, 400)
+    if (urls.length > 100) return c.json({ error: 'max_100_urls_per_batch' }, 400)
+    if (!c.env.GOOGLE_SA_KEY) return c.json({ error: 'google_sa_key_not_configured' }, 500)
+
+    const results = await Promise.allSettled(
+      urls.map(u => notifyGoogleIndexing(c.env, u, type || 'URL_UPDATED'))
+    )
+
+    const summary = results.map((r, i) => ({
+      url: urls[i],
+      ...(r.status === 'fulfilled' ? r.value : { ok: false, status: 0, body: { error: r.reason?.message } })
+    }))
+
+    return c.json({
+      total: urls.length,
+      succeeded: summary.filter(s => s.ok).length,
+      failed: summary.filter(s => !s.ok).length,
+      results: summary
+    })
+  } catch (e) {
+    console.error('Admin batch indexing error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// Check indexing status for a URL
+app.get('/admin/indexing/status', requireAdmin, async (c) => {
+  try {
+    const url = c.req.query('url')
+    if (!url) return c.json({ error: 'url_query_param_required' }, 400)
+    if (!c.env.GOOGLE_SA_KEY) return c.json({ error: 'google_sa_key_not_configured' }, 500)
+
+    const token = await getGoogleAccessToken(c.env)
+    const res = await fetch(
+      `https://indexing.googleapis.com/v3/urlNotifications/metadata?url=${encodeURIComponent(url)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const body = await res.json()
+    return c.json({ ok: res.ok, status: res.status, body }, res.ok ? 200 : 502)
+  } catch (e) {
+    console.error('Indexing status error:', e)
+    return c.json({ error: e.message }, 500)
   }
 })
 

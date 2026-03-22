@@ -536,7 +536,7 @@ function renderProducts(products) {
     }) : null;
     
     return `
-    <a href="/products/${product.slug}" class="product-card-link" onclick="event.preventDefault(); showProductDetail(${product.id})">
+    <a href="/products/${product.slug}" class="product-card-link" onclick="event.preventDefault(); showProductDetail(${product.id}, '${product.slug}')">
     <div class="product-card">
       ${product.image_url ? 
         `<img src="${product.image_url}" alt="${product.name}" class="product-image">` :
@@ -621,10 +621,19 @@ window.addToCart = function(productId, name, price, stock, imageUrl, isPreorder,
 };
 
 // Show product detail modal
-window.showProductDetail = async function(productId) {
+window.showProductDetail = async function(productId, slug, skipPushState) {
 try {
 const response = await fetch(`${API_BASE}/products/${productId}`);
 const product = await response.json();
+
+// Update URL with product slug (use slug param or fall back to product.slug)
+if (!skipPushState) {
+  const productSlug = slug || product.slug;
+  if (productSlug) {
+    const newUrl = `${window.location.pathname}?product=${encodeURIComponent(productSlug)}`;
+    history.pushState({ product: productSlug }, '', newUrl);
+  }
+}
 
 const isPreorder = product.release_date && new Date(product.release_date) > new Date();
 const releaseDate = isPreorder ? new Date(product.release_date).toLocaleDateString('en-GB', { 
@@ -678,12 +687,32 @@ console.error('Failed to load product details:', error);
 
 window.closeProductModal = function() {
 document.getElementById('product-modal').classList.remove('active');
+// Restore clean URL
+const params = new URLSearchParams(window.location.search);
+if (params.has('product')) {
+  const cleanUrl = params.has('category')
+    ? `${window.location.pathname}?category=${encodeURIComponent(params.get('category'))}`
+    : window.location.pathname;
+  history.pushState({}, '', cleanUrl);
+}
 };
 
 // Close modal on background click
 document.addEventListener('click', function(e) {
 if (e.target.id === 'product-modal') {
 closeProductModal();
+}
+});
+
+// Handle browser back/forward button
+window.addEventListener('popstate', function(e) {
+const params = new URLSearchParams(window.location.search);
+const productSlug = params.get('product');
+if (productSlug && allProducts.length > 0) {
+  const match = allProducts.find(p => p.slug === productSlug);
+  if (match) showProductDetail(match.id, match.slug, true);
+} else {
+  document.getElementById('product-modal').classList.remove('active');
 }
 });
 
@@ -712,7 +741,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   if (productSlug && allProducts.length > 0) {
     const match = allProducts.find(p => p.slug === productSlug);
     if (match) {
-      showProductDetail(match.id);
+      showProductDetail(match.id, match.slug, true);
     }
   }
 });
