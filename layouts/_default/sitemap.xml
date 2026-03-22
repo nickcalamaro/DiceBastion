@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
 {{ range .Data.Pages }}{{ if not (in .Site.Params.sitemap.excludedKinds .Kind) }}{{ if and (.Param "xml" | default true) (or (not .Params.externalUrl) (and (.Params.externalUrl) (and (not (hasPrefix .Params.externalUrl "http://")) (not (hasPrefix .Params.externalUrl "https://"))))) }}
-{{- if .Permalink -}}{{ $link := .Permalink }}{{ if .Params.externalUrl }}{{ $link = printf "%s%s" .Site.BaseURL (substr .Params.externalUrl 1) }}{{ end }}
+{{- if .Permalink -}}{{ $link := .Permalink | replaceRE "^http://" "https://" }}{{ if .Params.externalUrl }}{{ $link = printf "%s%s" .Site.BaseURL (substr .Params.externalUrl 1) | replaceRE "^http://" "https://" }}{{ end }}
   <url>
     <loc>{{ $link }}</loc>{{ if not .Lastmod.IsZero }}
     <lastmod>{{ safeHTML ( .Lastmod.Format "2006-01-02T15:04:05-07:00" ) }}</lastmod>{{ end }}{{ with .Sitemap.ChangeFreq }}
@@ -11,7 +11,7 @@
     <xhtml:link
       rel="alternate"
       hreflang="{{ .Language.LanguageCode }}"
-      href="{{ .Permalink }}"
+      href="{{ .Permalink | replaceRE "^http://" "https://" }}"
     />{{ end }}
     <xhtml:link
       rel="alternate"
