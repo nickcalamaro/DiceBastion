@@ -29,20 +29,34 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-// Request logging middleware
+/**
+ * Constant-time string comparison to prevent timing attacks on the internal secret.
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+	const encoder = new TextEncoder()
+	const aBytes = encoder.encode(a)
+	const bBytes = encoder.encode(b)
+	// XOR all bytes; non-zero length difference is folded in via the initial seed
+	const len = Math.max(aBytes.length, bBytes.length)
+	let result = aBytes.length ^ bBytes.length
+	for (let i = 0; i < len; i++) {
+		result |= (aBytes[i] ?? 0) ^ (bBytes[i] ?? 0)
+	}
+	return result === 0
+}
+
+// Request logging middleware — intentionally omits headers to avoid leaking secrets in logs
 app.use('/*', async (c, next) => {
 	console.log('Request received:', {
 		method: c.req.method,
-		url: c.req.url,
-		path: c.req.path,
-		headers: Object.fromEntries(c.req.raw.headers.entries())
+		path: c.req.path
 	})
 	await next()
 })
 
-// CORS middleware
+// CORS middleware — restricted to the main worker origin; this is an internal service
 app.use('/*', cors({
-	origin: '*',
+	origin: ['https://dicebastion-memberships.ncalamaro.workers.dev', 'https://dicebastion.com', 'https://www.dicebastion.com'],
 	allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 	allowHeaders: ['Content-Type', 'Authorization', 'X-Internal-Secret'],
 }))
@@ -50,18 +64,10 @@ app.use('/*', cors({
 // Internal authentication middleware
 app.use('/internal/*', async (c, next) => {
 	const secret = c.req.header('X-Internal-Secret')
-	console.log('Auth check:', {
-		path: c.req.path,
-		hasSecret: !!secret,
-		secretLength: secret?.length,
-		envSecretLength: c.env.INTERNAL_SECRET?.length,
-		match: secret === c.env.INTERNAL_SECRET
-	})
-	if (!secret || secret !== c.env.INTERNAL_SECRET) {
-		console.log('Auth failed - returning 401')
+	if (!secret || !c.env.INTERNAL_SECRET || !timingSafeEqual(secret, c.env.INTERNAL_SECRET)) {
+		console.warn('Auth failed for path:', c.req.path)
 		return c.json({ error: 'Unauthorized' }, 401)
 	}
-	console.log('Auth success - proceeding to handler')
 	await next()
 })
 
@@ -196,7 +202,7 @@ async function getOrCreateSumUpCustomer(env: Bindings, user: { user_id: number; 
 			throw new Error(`Failed to create SumUp customer (${createRes.status}): ${txt}`)
 		}
 
-		const customer = await createRes.json()
+		const customer = await createRes.json() as { customer_id: string }
 		console.log('Created SumUp customer:', customerId)
 		return customer.customer_id
 	} catch (error: any) {

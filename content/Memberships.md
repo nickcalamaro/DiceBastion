@@ -732,7 +732,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
         </div>
 
         <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;">🔄 <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+          <p style="margin: 0;"> <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -752,7 +752,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
         </div>
         
         <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;">🔄 <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+          <p style="margin: 0;"> <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">

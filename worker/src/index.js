@@ -937,8 +937,10 @@ async function processMembershipRenewal(db, membership, env) {
     return await handleRenewalFailure(db, env, membership, instrument, amount, currency, e)
   }
 
-  // Charge returned but status is not paid
-  if (!payment || (payment.status !== 'PAID' && payment.status !== 'SUCCESSFUL')) {
+  // Charge returned but status is not paid — use isCheckoutPaid() to also
+  // inspect the transactions[] array for SumUp recurring-charge responses
+  // that carry top-level PENDING but a successful transaction inside.
+  if (!payment || !isCheckoutPaid(payment)) {
     const statusErr = new Error(`Payment not successful: ${payment?.status || 'UNKNOWN'}`)
     return await handleRenewalFailure(db, env, membership, instrument, amount, currency, statusErr)
   }
@@ -988,7 +990,10 @@ async function processMembershipRenewal(db, membership, env) {
   try {
     const user = await db.prepare('SELECT email, name FROM users WHERE user_id = ?').bind(userId).first()
     if (user) {
-      const emailContent = getRenewalSuccessEmail(membership, user, toIso(newEnd))
+      // Merge the actual charged amount into the membership object so the email
+      // always shows the correct price even if the stored column was null.
+      const membershipForEmail = { ...membership, amount: String(amount) }
+      const emailContent = getRenewalSuccessEmail(membershipForEmail, user, toIso(newEnd))
       await sendEmail(env, { 
         to: user.email, 
         ...emailContent,
@@ -1345,8 +1350,9 @@ const PLAN_NAMES = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual
  * @returns {string} Formatted price
  */
 function formatPrice(amount, currency = 'GBP') {
-  const num = typeof amount === 'string' ? parseFloat(amount) : amount
+  const num = typeof amount === 'string' ? parseFloat(amount) : Number(amount)
   const symbols = { GBP: '£', EUR: '€', USD: '$' }
+  if (amount == null || isNaN(num)) return `${symbols[currency] || currency}?.??`
   return `${symbols[currency] || currency}${num.toFixed(2)}`
 }
 
@@ -1714,7 +1720,7 @@ function getUpcomingRenewalEmail(membership, user, daysUntil) {
     <p><strong>Need to make changes?</strong></p>
     <ul>
       <li>Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'renewal_reminder')}">dicebastion.com/memberships</a></li>
-      <li>Cancel auto-renewal if you don't wish to continue</li>
+      <li><a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'renewal_reminder')}">Manage your membership</a> from your account page</li>
     </ul>
     <p>Thank you for being part of the Dice Bastion community!</p>
     <p>— The Dice Bastion Team</p>
@@ -1723,7 +1729,33 @@ function getUpcomingRenewalEmail(membership, user, daysUntil) {
   return {
     subject: `Dice Bastion: Your ${planName} Membership Renews in ${daysUntil} Days`,
     html: createEmailTemplate({ headerTitle: 'Upcoming Renewal', content }),
-    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership will automatically renew on ${formatDate(membership.end_date)}.\n\nYour card will be charged automatically. If you need to update your payment method or cancel auto-renewal, visit dicebastion.com/memberships.\n\nThank you!\n— The Dice Bastion Team`
+    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership will automatically renew on ${formatDate(membership.end_date)}.\n\nYour card will be charged automatically. To manage your membership, visit dicebastion.com/account.\n\nThank you!\n— The Dice Bastion Team`
+  }
+}
+
+function getMembershipExpiryWarningEmail(membership, user, daysUntil) {
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const urgency = daysUntil <= 1 ? 'today' : `in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>This is a friendly heads-up that your <strong>${planName} Membership</strong> expires <strong>${urgency}</strong> on <strong>${formatDate(membership.end_date)}</strong>.</p>
+    <div class="warning">
+      <strong>⚠️ Your membership is not set to auto-renew.</strong>
+      <p style="margin: 8px 0 0 0;">Once it expires you'll lose member benefits unless you renew.</p>
+    </div>
+    <p><strong>To keep your membership going:</strong></p>
+    <ul>
+      <li>Renew now at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}">dicebastion.com/memberships</a></li>
+      <li>You can also opt into auto-renewal during checkout so this never happens again</li>
+      <li><a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'expiry_warning')}">Manage your membership</a> from your account page</li>
+    </ul>
+    <p>Questions? Reach us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></p>
+    <p>— The Dice Bastion Team</p>
+  `
+  return {
+    subject: `Reminder: Your Dice Bastion ${planName} Membership Expires ${urgency}`,
+    html: createEmailTemplate({ headerTitle: '⏰ Membership Expiring Soon', content, headerColor: '#f59e0b', headerGradient: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' }),
+    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership expires ${urgency} on ${formatDate(membership.end_date)}.\n\nRenew at dicebastion.com/memberships to keep your access.\n\n— The Dice Bastion Team`
   }
 }
 
@@ -1741,7 +1773,7 @@ function getRenewalFailedEmail(membership, user, attemptNumber = 1) {
     ` : ''}
     <p><strong>What to do next:</strong></p>
     <ul>
-      <li><strong>Recommended:</strong> Update your payment method at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
+      <li><strong>Recommended:</strong> <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'payment_failed')}">Visit your account page</a> to retry the payment or update your card details</li>
       <li>Or purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_failed')}">dicebastion.com/memberships</a></li>
       <li>Contact us if you need help: <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
     </ul>
@@ -1774,8 +1806,8 @@ function getRenewalFailedFinalEmail(membership, user) {
     </div>
     <p><strong>What to do now:</strong></p>
     <ul>
-      <li><strong>Option 1:</strong> Purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'auto_renewal_disabled')}">dicebastion.com/memberships</a> (you can do this now or when your current membership expires)</li>
-      <li><strong>Option 2:</strong> Update your payment method and contact us to re-enable auto-renewal</li>
+      <li><strong>Option 1:</strong> <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'auto_renewal_disabled')}">Update your card and re-enable auto-renewal</a> from your account page</li>
+      <li><strong>Option 2:</strong> Purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'auto_renewal_disabled')}">dicebastion.com/memberships</a></li>
       <li><strong>Need help?</strong> Email us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></li>
     </ul>
     <p>We'd love to keep you as a member! If you're experiencing payment issues, please reach out and we'll help resolve them.</p>
@@ -1806,9 +1838,8 @@ function getExpiredPaymentMethodEmail(membership, user) {
     </div>
     <p><strong>To continue your membership:</strong></p>
     <ol>
-      <li>Visit <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_method_expired')}">dicebastion.com/memberships</a></li>
-      <li>Purchase a new membership with your updated payment details</li>
-      <li>Enable auto-renewal during checkout to save your new payment method</li>
+      <li><a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'payment_method_expired')}">Go to your account page</a> to update your card and re-enable auto-renewal</li>
+      <li>Or purchase a new membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'payment_method_expired')}">dicebastion.com/memberships</a></li>
     </ol>
     <p><strong>Need help?</strong> Contact us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></p>
     <p>We'd love to keep you as a member!</p>
@@ -2604,6 +2635,12 @@ app.get('/account/info', async c => {
         consent_given: 0
       }
     }
+
+    // Get active payment instrument so the account page can show saved card info
+    const paymentInstrument = membership ? await c.env.DB.prepare(`
+      SELECT instrument_id, last_4, card_type, created_at FROM payment_instruments
+      WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1
+    `).bind(userId).first() : null
     
     return c.json({
       success: true,
@@ -2615,6 +2652,7 @@ app.get('/account/info', async c => {
         member_since: session.user_created_at
       },
       membership: membership || null,
+      payment_instrument: paymentInstrument || null,
       memberships_history: membershipsHistory.results || [],
       tickets: tickets.results || [],
       orders: orders.results || [],
@@ -2980,10 +3018,12 @@ app.get('/account/confirm-payment-setup', async c => {
         ORDER BY end_date DESC LIMIT 1
       `).bind(session.user_id).first()
       
-      if (membership && membership.auto_renew === 0) {
+      if (membership) {
+        // Always reset failure state and link new instrument — covers both
+        // fresh enable-auto-renewal and replace-card-after-failure flows.
         await c.env.DB.prepare(`
           UPDATE memberships 
-          SET auto_renew = 1, renewal_attempts = 0, payment_instrument_id = ?
+          SET auto_renew = 1, renewal_attempts = 0, renewal_failed_at = NULL, payment_instrument_id = ?
           WHERE id = ?
         `).bind(instrument.instrument_id, membership.id).run()
       }
@@ -3065,6 +3105,103 @@ app.post('/account/cancel-auto-renewal', async c => {
   } catch (error) {
     console.error('[Cancel Auto-Renewal] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// User-initiated retry of a failed renewal charge
+app.post('/account/retry-renewal', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    if (!sessionToken) return c.json({ error: 'no_session_token' }, 401)
+
+    const session = await c.env.DB.prepare(`
+      SELECT us.user_id FROM user_sessions us
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    if (!session) return c.json({ error: 'invalid_session' }, 401)
+
+    const membership = await c.env.DB.prepare(`
+      SELECT * FROM memberships WHERE user_id = ? AND status = 'active'
+      ORDER BY end_date DESC LIMIT 1
+    `).bind(session.user_id).first()
+    if (!membership) return c.json({ error: 'no_active_membership', message: 'No active membership found.' }, 404)
+
+    if (!membership.renewal_failed_at) {
+      return c.json({ error: 'no_failed_renewal', message: 'No failed renewal to retry.' }, 400)
+    }
+    if (membership.renewal_attempts >= 3) {
+      return c.json({ error: 'max_attempts_reached', message: 'Maximum retry attempts reached. Please update your card details.' }, 400)
+    }
+
+    const instrument = await getActivePaymentInstrument(c.env.DB, session.user_id)
+    if (!instrument) {
+      return c.json({ error: 'no_payment_method', message: 'No saved payment method found. Please add a card first.' }, 400)
+    }
+
+    console.log(`[Account Retry] User ${session.user_id} retrying renewal for membership ${membership.id}`)
+    const result = await processMembershipRenewal(c.env.DB, membership, c.env)
+
+    if (result.success) {
+      return c.json({ success: true, message: 'Payment successful! Your membership has been renewed.', new_end_date: result.newEndDate })
+    } else {
+      return c.json({ success: false, message: 'Payment failed. Please update your card details and try again.', error: result.error }, 402)
+    }
+  } catch (error) {
+    console.error('[Account Retry Renewal] ERROR:', error)
+    return c.json({ error: 'internal_error', message: 'An error occurred. Please try again.' }, 500)
+  }
+})
+
+// User-initiated card replacement — creates a £0 tokenization checkout
+app.post('/account/update-payment-method', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    if (!sessionToken) return c.json({ error: 'no_session_token' }, 401)
+
+    const session = await c.env.DB.prepare(`
+      SELECT us.user_id, u.email, u.name FROM user_sessions us
+      JOIN users u ON us.user_id = u.user_id
+      WHERE us.session_token = ? AND us.expires_at > datetime('now')
+    `).bind(sessionToken).first()
+    if (!session) return c.json({ error: 'invalid_session' }, 401)
+
+    const membership = await c.env.DB.prepare(`
+      SELECT * FROM memberships WHERE user_id = ? AND status = 'active'
+      ORDER BY end_date DESC LIMIT 1
+    `).bind(session.user_id).first()
+    if (!membership) return c.json({ error: 'no_active_membership' }, 404)
+
+    const orderRef = `CARD-UPDATE-${session.user_id}-${Date.now()}`
+    const customerId = `USER-${session.user_id}`
+
+    // Ensure SumUp customer exists
+    const customerResponse = await c.env.PAYMENTS.fetch('https://payments/internal/customer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': c.env.INTERNAL_SECRET },
+      body: JSON.stringify({ user_id: session.user_id, email: session.email, name: session.name })
+    })
+    if (!customerResponse.ok) throw new Error('Failed to create customer')
+
+    // £0 tokenization checkout — saves card without charging
+    const checkoutResponse = await c.env.PAYMENTS.fetch('https://payments/internal/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': c.env.INTERNAL_SECRET },
+      body: JSON.stringify({
+        amount: 0,
+        currency: 'GBP',
+        orderRef,
+        description: 'Update saved payment method',
+        savePaymentInstrument: true,
+        customerId
+      })
+    })
+    if (!checkoutResponse.ok) throw new Error('Failed to create checkout')
+
+    const checkout = await checkoutResponse.json()
+    return c.json({ success: true, checkout_id: checkout.id, order_ref: orderRef })
+  } catch (error) {
+    console.error('[Update Payment Method] ERROR:', error)
+    return c.json({ error: 'internal_error', message: error.message }, 500)
   }
 })
 
@@ -5825,7 +5962,7 @@ app.post('/membership/payment-method/remove', async (c) => {
 })
 
 // Manually retry a failed renewal (useful after user updates payment method)
-app.post('/membership/retry-renewal', async (c) => {
+app.post('/membership/retry-renewal', requireAdmin, async (c) => {
   try {
     const { email } = await c.req.json()
     if (!email || !EMAIL_RE.test(email)) return c.json({ error: 'invalid_email' }, 400)
@@ -5860,7 +5997,7 @@ app.post('/membership/retry-renewal', async (c) => {
 })
 
 // Test endpoint to manually trigger renewal for a specific user
-app.get('/test/renew-user', async (c) => {
+app.get('/test/renew-user', requireAdmin, async (c) => {
   const email = c.req.query('email')
   if (!email) return c.json({ error: 'email required' }, 400)
   
@@ -5897,7 +6034,7 @@ app.get('/test/renew-user', async (c) => {
 })
 
 // Test endpoint to manually trigger event reminders
-app.get('/test/event-reminders', async (c) => {
+app.get('/test/event-reminders', requireAdmin, async (c) => {
   try {
     console.log('Manually triggering event reminders cron job...')
     await processEventReminders(c.env)
@@ -5913,7 +6050,7 @@ app.get('/test/event-reminders', async (c) => {
 })
 
 // Test endpoint to manually trigger auto-renewals
-app.get('/test/auto-renewals', async (c) => {
+app.get('/test/auto-renewals', requireAdmin, async (c) => {
   try {
     console.log('Manually triggering auto-renewals cron job...')
     await processAutoRenewals(c.env)
@@ -5929,7 +6066,7 @@ app.get('/test/auto-renewals', async (c) => {
 })
 
 // Test endpoint to manually trigger delayed account setup emails
-app.get('/test/delayed-emails', async (c) => {
+app.get('/test/delayed-emails', requireAdmin, async (c) => {
   try {
     console.log('Manually triggering delayed account setup emails cron job...')
     await processDelayedAccountSetupEmails(c.env)
@@ -6720,7 +6857,7 @@ async function logCronJob(db, jobName, status, details = {}) {
 /**
  * Process auto-renewals and membership warnings
  * This function handles:
- * 1. Sending renewal warnings (2 days before)
+ * 1. Sending renewal warnings (3 days before)
  * 2. Processing renewals for expiring memberships
  * 3. Marking expired memberships
  */
@@ -6741,16 +6878,18 @@ async function processAutoRenewals(env) {
     const now = new Date()
     const today = toIso(now)
     
-    // Calculate dates for warnings (2 days from now)
-    const warningDate = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000))
+    // Calculate dates for warnings (3 days from now)
+    const warningDate = new Date(now.getTime() + (3 * 24 * 60 * 60 * 1000))
     const warningDateStr = toIso(warningDate)
     
-    // Grace period: allow renewals for memberships that expired in the last 1 day
-    const gracePeriodStart = new Date(now.getTime() - (1 * 24 * 60 * 60 * 1000))
+    // Grace period: allow renewals for memberships that expired in the last 3 days.
+    // The cron runs once per day and will attempt up to 3 times, so the grace window
+    // must be at least 3 days to match the renewal_attempts < 3 cap.
+    const gracePeriodStart = new Date(now.getTime() - (3 * 24 * 60 * 60 * 1000))
     const gracePeriodStartStr = toIso(gracePeriodStart)
     
     // ========================================================================
-    // STEP 1: Send renewal warnings (2 days before expiry)
+    // STEP 1: Send renewal warnings (3 days before expiry)
     // ========================================================================
     console.log(`[CRON] Step 1: Checking for memberships needing renewal warnings...`)
     
@@ -6764,11 +6903,12 @@ async function processAutoRenewals(env) {
         u.name
       FROM memberships m
       JOIN users u ON m.user_id = u.user_id
-      WHERE DATE(m.end_date) = DATE(?)
+      WHERE DATE(m.end_date) <= DATE(?)
+        AND DATE(m.end_date) >= DATE(?)
         AND m.auto_renew = 1
         AND m.status = 'active'
         AND (m.renewal_warning_sent = 0 OR m.renewal_warning_sent IS NULL)
-    `).bind(warningDateStr).all()
+    `).bind(warningDateStr, today).all()
     
     console.log(`[CRON] Found ${warningMemberships.results?.length || 0} memberships needing warnings`)
     
@@ -6781,14 +6921,15 @@ async function processAutoRenewals(env) {
           payment_instrument_last_4: instrument?.last_4 || null
         }
         
-        const emailContent = getUpcomingRenewalEmail(membershipWithInstrument, membership, 2)
+        const daysUntil = Math.max(1, Math.round((new Date(membership.end_date) - now) / (24 * 60 * 60 * 1000)))
+        const emailContent = getUpcomingRenewalEmail(membershipWithInstrument, membership, daysUntil)
         await sendEmail(env, {
           to: membership.email,
           ...emailContent,
           emailType: 'membership_renewal_reminder',
           relatedId: membership.id,
           relatedType: 'membership',
-          metadata: { plan: membership.plan, days_until_renewal: 2 }
+          metadata: { plan: membership.plan, days_until_renewal: daysUntil }
         })
         
         // Mark warning as sent
@@ -6808,6 +6949,62 @@ async function processAutoRenewals(env) {
       }
     }
     
+    // ========================================================================
+    // STEP 1b: Send expiry warnings to non-auto-renewing members (3 days notice)
+    // ========================================================================
+    console.log(`[CRON] Step 1b: Checking for non-auto-renew memberships needing expiry warnings...`)
+
+    const expiryWarningDate = new Date(now.getTime() + (3 * 24 * 60 * 60 * 1000))
+    const expiryWarningDateStr = toIso(expiryWarningDate)
+
+    const expiryWarningMemberships = await env.DB.prepare(`
+      SELECT 
+        m.id,
+        m.user_id,
+        m.plan,
+        m.end_date,
+        u.email,
+        u.name
+      FROM memberships m
+      JOIN users u ON m.user_id = u.user_id
+      WHERE DATE(m.end_date) <= DATE(?)
+        AND DATE(m.end_date) >= DATE(?)
+        AND m.auto_renew = 0
+        AND m.status = 'active'
+        AND (m.renewal_warning_sent = 0 OR m.renewal_warning_sent IS NULL)
+    `).bind(expiryWarningDateStr, today).all()
+
+    console.log(`[CRON] Found ${expiryWarningMemberships.results?.length || 0} non-auto-renew memberships needing expiry warnings`)
+
+    for (const membership of (expiryWarningMemberships.results || [])) {
+      try {
+        const daysLeft = Math.max(0, Math.round((new Date(membership.end_date) - now) / (24 * 60 * 60 * 1000)))
+        const emailContent = getMembershipExpiryWarningEmail(membership, membership, daysLeft)
+        await sendEmail(env, {
+          to: membership.email,
+          ...emailContent,
+          emailType: 'membership_expiry_warning',
+          relatedId: membership.id,
+          relatedType: 'membership',
+          metadata: { plan: membership.plan, days_until_expiry: daysLeft }
+        })
+
+        await env.DB.prepare('UPDATE memberships SET renewal_warning_sent = 1 WHERE id = ?')
+          .bind(membership.id).run()
+
+        warningsSent++
+        console.log(`[CRON] Expiry warning sent for non-auto-renew membership ${membership.id} (${membership.email})`)
+      } catch (err) {
+        console.error(`[CRON] Failed to send expiry warning for membership ${membership.id}:`, err)
+        errors.push({
+          membership_id: membership.id,
+          email: membership.email,
+          action: 'expiry_warning_email',
+          error: err.message
+        })
+      }
+    }
+
     // ========================================================================
     // STEP 2: Process renewals for memberships expiring today or past-due
     // ========================================================================
@@ -6882,14 +7079,15 @@ async function processAutoRenewals(env) {
     const expiredNoAutoRenew = expiredNoAutoRenewResult.meta?.changes || 0
     console.log(`[CRON] Marked ${expiredNoAutoRenew} non-auto-renewing memberships as expired`)
     
-    // Then, expire memberships with auto-renewal that have exhausted grace period (1 day)
+    // Then, expire memberships with auto-renewal that have exhausted all attempts
+    // OR have been stuck past their grace period with any failed attempt.
     const expiredGracePeriodResult = await env.DB.prepare(`
       UPDATE memberships
       SET status = 'expired'
       WHERE end_date < ?
         AND status = 'active'
         AND auto_renew = 1
-        AND renewal_attempts >= 3
+        AND (renewal_attempts >= 3 OR (renewal_failed_at IS NOT NULL AND renewal_attempts > 0))
     `).bind(gracePeriodStartStr).run()
     
     const expiredGracePeriod = expiredGracePeriodResult.meta?.changes || 0

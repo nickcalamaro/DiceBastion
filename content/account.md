@@ -103,8 +103,30 @@ Go to Login
 <!-- Status Message -->
 <div id="auto-renewal-message" style="display: none; margin-top: 1rem; padding: 0.75rem; border-radius: 6px; font-size: 0.875rem;"></div>
 </div>
+<!-- Payment Failed Notice -->
+<div id="payment-failed-section" style="display: none; margin-top: 1.5rem; padding: 1rem; border-radius: 8px; background: #fee2e2; border: 1px solid #fca5a5;">
+  <div style="display: flex; align-items: start; gap: 1rem;">
+    <div style="font-size: 1.5rem; flex-shrink: 0;">⚠️</div>
+    <div style="flex: 1;">
+      <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 600; color: #991b1b;">Renewal Payment Failed</h3>
+      <p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: #7f1d1d;" id="payment-failed-message"></p>
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button id="retry-payment-btn" style="padding: 0.5rem 1rem; background: #dc2626; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
+          Retry Payment
+        </button>
+        <button id="update-card-btn" style="padding: 0.5rem 1rem; background: white; color: #991b1b; border: 1px solid #fca5a5; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
+          Update Card Details
+        </button>
+      </div>
+      <div id="sumup-card-update-container" style="display: none; margin-top: 1.5rem;">
+        <h4 style="margin: 0 0 1rem 0; font-size: 0.875rem; font-weight: 600;">Enter New Card Details</h4>
+        <div id="sumup-card-update-widget"></div>
+      </div>
+    </div>
+  </div>
+  <div id="payment-action-message" style="display: none; margin-top: 1rem; padding: 0.75rem; border-radius: 6px; font-size: 0.875rem;"></div>
 </div>
-</div>
+</div></div>
 <div id="membership-inactive" style="display: none; text-align: center; padding: 2rem;">
 <div style="font-size: 3rem; margin-bottom: 1rem;">🎫</div>
 <h3 style="margin-top: 0; margin-bottom: 0.5rem;">No Active Membership</h3>
@@ -358,6 +380,24 @@ if (enableSection) {
     }
 }
 }
+
+// Payment failed notice
+const paymentFailedSection = document.getElementById('payment-failed-section');
+const paymentFailedMessage = document.getElementById('payment-failed-message');
+if (paymentFailedSection) {
+if (data.membership.renewal_attempts > 0 && data.membership.renewal_failed_at) {
+    paymentFailedSection.style.display = 'block';
+    const failedAttempts = data.membership.renewal_attempts;
+    const attemptsLeft = 3 - failedAttempts;
+    if (attemptsLeft > 0) {
+    paymentFailedMessage.textContent = `Our last automatic payment attempt failed (attempt ${failedAttempts} of 3). We'll retry automatically, but you can also retry now or update your card details below.`;
+    } else {
+    paymentFailedMessage.textContent = 'All 3 automatic renewal attempts have failed. Please update your card details to keep your membership active.';
+    }
+} else {
+    paymentFailedSection.style.display = 'none';
+}
+}
 } else if (membershipActiveEl && membershipInactiveEl) {
 membershipActiveEl.style.display = 'none';
 membershipInactiveEl.style.display = 'block';
@@ -379,6 +419,9 @@ setupEmailPreferenceListener();
 
 // Set up auto-renewal listeners
 setupAutoRenewalListeners();
+
+// Set up renewal failure listeners
+setupRenewalFailureListeners();
 
 // Tickets
 renderTickets(data.tickets);
@@ -786,6 +829,167 @@ try {
     cancelBtn.textContent = originalText;
 }
 });
+}
+}
+
+// Handle retry payment and update card for failed renewals
+function setupRenewalFailureListeners() {
+const retryBtn = document.getElementById('retry-payment-btn');
+const updateCardBtn = document.getElementById('update-card-btn');
+const actionMessageEl = document.getElementById('payment-action-message');
+
+if (retryBtn) {
+    retryBtn.addEventListener('click', async () => {
+    const sessionToken = utils.session.get();
+    const originalText = retryBtn.textContent.trim();
+    try {
+        retryBtn.disabled = true;
+        retryBtn.textContent = 'Processing...';
+        const response = await fetch(`${API_BASE}/account/retry-renewal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken }
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+        actionMessageEl.textContent = 'Payment successful! Your membership has been renewed.';
+        actionMessageEl.style.background = '#d1fae5';
+        actionMessageEl.style.color = '#065f46';
+        actionMessageEl.style.display = 'block';
+        setTimeout(() => loadAccountData(), 1500);
+        } else {
+        throw new Error(data.message || data.error || 'Payment failed. Please try updating your card details.');
+        }
+    } catch (error) {
+        actionMessageEl.textContent = error.message;
+        actionMessageEl.style.background = '#fee2e2';
+        actionMessageEl.style.color = '#991b1b';
+        actionMessageEl.style.display = 'block';
+        retryBtn.disabled = false;
+        retryBtn.textContent = originalText;
+    }
+    });
+}
+
+if (updateCardBtn) {
+    updateCardBtn.addEventListener('click', async () => {
+    const sessionToken = utils.session.get();
+    const originalText = updateCardBtn.textContent.trim();
+    try {
+        updateCardBtn.disabled = true;
+        updateCardBtn.textContent = 'Loading...';
+        const response = await fetch(`${API_BASE}/account/update-payment-method`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken }
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+        const updateContainer = document.getElementById('sumup-card-update-container');
+        if (updateContainer) updateContainer.style.display = 'block';
+        updateCardBtn.style.display = 'none';
+        actionMessageEl.textContent = 'Please enter your new card details below.';
+        actionMessageEl.style.background = '#dbeafe';
+        actionMessageEl.style.color = '#1e40af';
+        actionMessageEl.style.display = 'block';
+        try {
+            await window.utils.loadSumUpSdk();
+            window.sumUpCardUpdateInstance = await SumUpCard.mount({
+            id: 'sumup-card-update-widget',
+            checkoutId: data.checkout_id,
+            locale: 'en-GB',
+            country: 'GB',
+            onResponse: async (type, body) => {
+                if (type === 'success') {
+                actionMessageEl.textContent = 'Verifying new card...';
+                actionMessageEl.style.background = '#dbeafe';
+                actionMessageEl.style.color = '#1e40af';
+                if (updateContainer) updateContainer.style.display = 'none';
+                let attempts = 0;
+                const maxAttempts = 30;
+                const pollInterval = setInterval(async () => {
+                    attempts++;
+                    try {
+                    const confirmResponse = await fetch(
+                        `${API_BASE}/account/confirm-payment-setup?orderRef=${data.order_ref}`,
+                        { headers: { 'X-Session-Token': sessionToken } }
+                    );
+                    const confirmData = await confirmResponse.json();
+                    if (confirmData.success && confirmData.status === 'completed') {
+                        clearInterval(pollInterval);
+                        actionMessageEl.textContent = 'Card updated! Your renewal payment will be retried automatically.';
+                        actionMessageEl.style.background = '#d1fae5';
+                        actionMessageEl.style.color = '#065f46';
+                        setTimeout(() => loadAccountData(), 1500);
+                    } else if (confirmData.success === false || confirmData.status === 'failed') {
+                        clearInterval(pollInterval);
+                        actionMessageEl.textContent = confirmData.message || 'Card verification failed. Please try again.';
+                        actionMessageEl.style.background = '#fee2e2';
+                        actionMessageEl.style.color = '#991b1b';
+                        updateCardBtn.disabled = false;
+                        updateCardBtn.textContent = originalText;
+                        updateCardBtn.style.display = 'block';
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(pollInterval);
+                        actionMessageEl.textContent = 'Setup timed out. Please refresh and try again.';
+                        actionMessageEl.style.background = '#fee2e2';
+                        actionMessageEl.style.color = '#991b1b';
+                        updateCardBtn.disabled = false;
+                        updateCardBtn.textContent = originalText;
+                        updateCardBtn.style.display = 'block';
+                    }
+                    } catch (e) {
+                    if (attempts >= maxAttempts) {
+                        clearInterval(pollInterval);
+                        actionMessageEl.textContent = 'Error verifying card. Please refresh and try again.';
+                        actionMessageEl.style.background = '#fee2e2';
+                        actionMessageEl.style.color = '#991b1b';
+                        updateCardBtn.disabled = false;
+                        updateCardBtn.textContent = originalText;
+                        updateCardBtn.style.display = 'block';
+                    }
+                    }
+                }, 1000);
+                } else if (type === 'error' || type === 'fail') {
+                actionMessageEl.textContent = `Card error: ${body?.message || 'Please try again.'}`;
+                actionMessageEl.style.background = '#fee2e2';
+                actionMessageEl.style.color = '#991b1b';
+                updateCardBtn.disabled = false;
+                updateCardBtn.textContent = originalText;
+                updateCardBtn.style.display = 'block';
+                if (updateContainer) updateContainer.style.display = 'none';
+                } else if (type === 'cancel') {
+                actionMessageEl.textContent = 'Card update cancelled.';
+                actionMessageEl.style.background = '#fef3c7';
+                actionMessageEl.style.color = '#92400e';
+                updateCardBtn.disabled = false;
+                updateCardBtn.textContent = originalText;
+                updateCardBtn.style.display = 'block';
+                if (updateContainer) updateContainer.style.display = 'none';
+                } else {
+                actionMessageEl.textContent = 'Please complete the card verification above...';
+                actionMessageEl.style.background = '#dbeafe';
+                actionMessageEl.style.color = '#1e40af';
+                }
+            }
+            });
+        } catch (sdkError) {
+            actionMessageEl.textContent = 'Failed to load payment form. Please refresh and try again.';
+            actionMessageEl.style.background = '#fee2e2';
+            actionMessageEl.style.color = '#991b1b';
+            updateCardBtn.disabled = false;
+            updateCardBtn.textContent = originalText;
+        }
+        } else {
+        throw new Error(data.error || 'Failed to start card update. Please try again.');
+        }
+    } catch (error) {
+        actionMessageEl.textContent = error.message;
+        actionMessageEl.style.background = '#fee2e2';
+        actionMessageEl.style.color = '#991b1b';
+        actionMessageEl.style.display = 'block';
+        updateCardBtn.disabled = false;
+        updateCardBtn.textContent = originalText;
+    }
+    });
 }
 }
 
