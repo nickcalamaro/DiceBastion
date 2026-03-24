@@ -851,11 +851,12 @@ if (retryBtn) {
         });
         const data = await response.json();
         if (response.ok && data.success) {
-        actionMessageEl.textContent = 'Payment successful! Your membership has been renewed.';
-        actionMessageEl.style.background = '#d1fae5';
-        actionMessageEl.style.color = '#065f46';
-        actionMessageEl.style.display = 'block';
-        setTimeout(() => loadAccountData(), 1500);
+        Modal.alert({
+            title: '🎉 Payment Successful!',
+            message: 'Your membership has been renewed. Everything is good to go!',
+            buttonText: 'Great, thanks!',
+            onClose: () => loadAccountData()
+        });
         } else {
         throw new Error(data.message || data.error || 'Payment failed. Please try updating your card details.');
         }
@@ -915,10 +916,12 @@ if (updateCardBtn) {
                     const confirmData = await confirmResponse.json();
                     if (confirmData.success && confirmData.status === 'completed') {
                         clearInterval(pollInterval);
-                        actionMessageEl.textContent = 'Card updated! Your renewal payment will be retried automatically.';
-                        actionMessageEl.style.background = '#d1fae5';
-                        actionMessageEl.style.color = '#065f46';
-                        setTimeout(() => loadAccountData(), 1500);
+                        Modal.alert({
+                        title: '✅ Card Updated!',
+                        message: `Your new card ending in ${confirmData.card_last_4 || '••••'} has been saved. We'll retry your renewal payment automatically.`,
+                        buttonText: 'Done',
+                        onClose: () => loadAccountData()
+                        });
                     } else if (confirmData.success === false || confirmData.status === 'failed') {
                         clearInterval(pollInterval);
                         actionMessageEl.textContent = confirmData.message || 'Card verification failed. Please try again.';

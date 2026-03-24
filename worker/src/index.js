@@ -2202,30 +2202,41 @@ app.post('/register', async c => {
     // Check if user already exists
     console.log('[User Register] Checking if user exists...')
     const existingUser = await c.env.DB.prepare(`
-      SELECT user_id, email, name, is_active
+      SELECT user_id, email, name, password_hash, is_active
       FROM users
-      WHERE email = ?
+      WHERE LOWER(email) = LOWER(?)
     `).bind(email).first()
     
-    if (existingUser) {
-      console.log('[User Register] User already exists')
-      return c.json({ 
-        error: 'user_already_exists', 
-        message: 'An account with this email already exists. Please login instead.' 
-      }, 409)
-    }
-    
-    // Create brand new user
-    console.log('[User Register] Creating new user')
-    const passwordHash = await bcrypt.hash(password, 10)
     const now = new Date().toISOString()
-    
-    const result = await c.env.DB.prepare(`
-      INSERT INTO users (email, name, password_hash, is_admin, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, 0, 1, ?, ?)
-    `).bind(email, name, passwordHash, now, now).run()
-    
-    const userId = result.meta.last_row_id
+    let userId
+
+    if (existingUser) {
+      if (existingUser.password_hash) {
+        // Full account already exists — user must log in or reset password
+        console.log('[User Register] User already exists with password')
+        return c.json({ 
+          error: 'user_already_exists', 
+          message: 'An account with this email already exists. Please login instead.' 
+        }, 409)
+      }
+
+      // Stub account created by a checkout (no password) — complete the registration
+      console.log('[User Register] Completing stub account for user', existingUser.user_id)
+      const passwordHash = await bcrypt.hash(password, 10)
+      await c.env.DB.prepare(`
+        UPDATE users SET password_hash = ?, name = ?, is_active = 1, updated_at = ? WHERE user_id = ?
+      `).bind(passwordHash, name, now, existingUser.user_id).run()
+      userId = existingUser.user_id
+    } else {
+      // Brand new user
+      console.log('[User Register] Creating new user')
+      const passwordHash = await bcrypt.hash(password, 10)
+      const result = await c.env.DB.prepare(`
+        INSERT INTO users (email, name, password_hash, is_admin, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, 0, 1, ?, ?)
+      `).bind(email, name, passwordHash, now, now).run()
+      userId = result.meta.last_row_id
+    }
     
     // Create session for auto-login
     const sessionToken = crypto.randomUUID()
