@@ -4292,6 +4292,7 @@ function generateEventSeoPage(event) {
   const title = e(event.title || event.event_name || 'Event');
   const slug = event.slug || '';
   const dt = event.event_datetime || '';
+  const endTime = event.end_time || '';  // HH:MM format
   const loc = e(event.location || 'Gibraltar Warhammer Club');
   const img = event.seo_image || event.image_url || `${site}/img/default-event.jpg`;
   const raw = event.seo_description || event.description || '';
@@ -4306,24 +4307,29 @@ function generateEventSeoPage(event) {
 
   // Gibraltar timezone: CET (UTC+1) in winter, CEST (UTC+2) in summer
   // DST runs from last Sunday of March to last Sunday of October
+  let tzOffset = '+01:00';
   let startDateISO = dt;
+  let endDateISO = '';
   if (dt) {
     try {
       const d = new Date(dt);
       const year = d.getUTCFullYear();
-      const month = d.getUTCMonth(); // 0-indexed
       // Last Sunday of March
       const marchLast = new Date(Date.UTC(year, 2, 31));
       marchLast.setUTCDate(31 - marchLast.getUTCDay());
       // Last Sunday of October
       const octLast = new Date(Date.UTC(year, 9, 31));
       octLast.setUTCDate(31 - octLast.getUTCDay());
-      // CEST if between last Sun of March 01:00 UTC and last Sun of October 01:00 UTC
       const isCEST = d >= marchLast && d < octLast;
-      const offset = isCEST ? '+02:00' : '+01:00';
+      tzOffset = isCEST ? '+02:00' : '+01:00';
       // Append offset if the stored datetime doesn't already have one
-      if (dt && !dt.includes('+') && !dt.includes('Z')) {
-        startDateISO = dt + offset;
+      if (!dt.includes('+') && !dt.includes('Z')) {
+        startDateISO = dt + tzOffset;
+      }
+      // Compute endDate from event date + end_time
+      if (endTime) {
+        const datePart = dt.split('T')[0];  // e.g. 2026-04-12
+        endDateISO = `${datePart}T${endTime}:00${tzOffset}`;
       }
     } catch {}
   }
@@ -4367,7 +4373,8 @@ function generateEventSeoPage(event) {
       'url': eventsPage,
       'price': priceNum,
       'priceCurrency': 'GBP',
-      'availability': 'https://schema.org/InStock'
+      'availability': 'https://schema.org/InStock',
+      'validFrom': event.created_at || new Date().toISOString()
     },
     'organizer': {
       '@type': 'Organization',
@@ -4375,6 +4382,20 @@ function generateEventSeoPage(event) {
       'url': site
     }
   };
+
+  // Add endDate if end_time is provided (Google strongly recommends this)
+  if (endDateISO) {
+    schema.endDate = endDateISO;
+  }
+
+  // Format end time for display
+  let endTimeStr = '';
+  if (endTime) {
+    try {
+      const [h, m] = endTime.split(':');
+      endTimeStr = `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+    } catch {}
+  }
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -4419,7 +4440,7 @@ ${img ? `<img src="${img}" alt="${title}">` : ''}
 ${fullDesc ? `<p class="desc">${fullDesc}</p>` : ''}
 <div class="meta">
 ${dateStr ? `<div class="meta-item"><span class="meta-label">Date</span><span class="meta-value">${dateStr}</span></div>` : ''}
-${timeStr ? `<div class="meta-item"><span class="meta-label">Time</span><span class="meta-value">${timeStr}</span></div>` : ''}
+${timeStr ? `<div class="meta-item"><span class="meta-label">Time</span><span class="meta-value">${timeStr}${endTimeStr ? ` – ${endTimeStr}` : ''}</span></div>` : ''}
 ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span class="meta-value">${loc}</span></div>` : ''}
 <div class="meta-item"><span class="meta-label">Price</span><span class="meta-value">${isFree ? '<span class="badge badge-free">Free</span>' : `<span class="badge badge-paid">£${priceDisplay}</span>`}</span></div>
 </div>
@@ -4454,7 +4475,8 @@ app.get('/events', async c => {
         requires_purchase,
         is_recurring,
         recurrence_pattern,
-        recurrence_end_date
+        recurrence_end_date,
+        end_time
       FROM events 
       WHERE is_active = 1 
         AND (event_datetime >= datetime('now') OR is_recurring = 1)
@@ -4863,7 +4885,9 @@ app.get('/events/:slug', async c => {
         requires_purchase,
         is_recurring,
         recurrence_pattern,
-        recurrence_end_date
+        recurrence_end_date,
+        end_time,
+        created_at
       FROM events 
       WHERE slug = ? AND is_active = 1
     `).bind(slug).first()
@@ -5298,7 +5322,8 @@ app.get('/admin/events/:id', requireAdmin, async c => {
         is_active,
         is_recurring,
         recurrence_pattern,
-        recurrence_end_date
+        recurrence_end_date,
+        end_time
       FROM events 
       WHERE event_id = ?
     `).bind(id).first()
@@ -5317,7 +5342,7 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
-    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -5327,8 +5352,8 @@ app.post('/admin/events', requireAdmin, async c => {
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
     
     const result = await c.env.DB.prepare(`
-      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date, end_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       title,
       slug,
@@ -5348,7 +5373,8 @@ app.post('/admin/events', requireAdmin, async c => {
       is_active !== undefined ? is_active : 1,
       is_recurring || 0,
       recurrence_pattern || null,
-      recurrence_end_date || null
+      recurrence_end_date || null,
+      end_time || null
     ).run()
 
     // Notify Google Indexing API (fire-and-forget)
@@ -5370,7 +5396,7 @@ app.post('/admin/events', requireAdmin, async c => {
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
-    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -5381,7 +5407,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     await c.env.DB.prepare(`
       UPDATE events 
-      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?
+      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?, end_time = ?
       WHERE event_id = ?
     `).bind(
       title,
@@ -5403,6 +5429,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       is_recurring || 0,
       recurrence_pattern || null,
       recurrence_end_date || null,
+      end_time || null,
       id
     ).run()
 

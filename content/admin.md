@@ -398,9 +398,15 @@ Logout
     <label class="form-label">Date *</label>
     <input type="date" id="event-date" required class="form-input">
   </div>
-  <div class="form-group">
-    <label class="form-label">Time</label>
-    <input type="time" id="event-time" class="form-input">
+  <div style="display: flex; gap: 0.75rem;">
+    <div class="form-group" style="flex: 1;">
+      <label class="form-label">Start Time</label>
+      <input type="time" id="event-time" class="form-input">
+    </div>
+    <div class="form-group" style="flex: 1;">
+      <label class="form-label">End Time</label>
+      <input type="time" id="event-end-time" class="form-input">
+    </div>
   </div>
 </div>
 
@@ -423,6 +429,10 @@ Logout
       <div class="form-group">
         <label class="form-label">Time *</label>
         <input type="time" id="recurring-time" class="form-input">
+      </div>
+      <div class="form-group">
+        <label class="form-label">End Time</label>
+        <input type="time" id="recurring-end-time" class="form-input">
       </div>
     </div>
 
@@ -1766,6 +1776,7 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     full_description: document.getElementById('event-full-description').innerHTML,
     event_date: isRecurring ? '2025-01-01' : document.getElementById('event-date').value,
     time: isRecurring ? document.getElementById('recurring-time').value : document.getElementById('event-time').value,
+    end_time: isRecurring ? document.getElementById('recurring-end-time').value : document.getElementById('event-end-time').value,
     requires_purchase: requiresPurchase ? 1 : 0,
     membership_price: requiresPurchase ? parseFloat(document.getElementById('event-member-price').value) : 0,
     non_membership_price: requiresPurchase ? parseFloat(document.getElementById('event-nonmember-price').value) : 0,
@@ -1821,6 +1832,8 @@ document.getElementById('event-full-description').innerHTML = '';
 document.getElementById('event-seo-description').value = '';
 document.getElementById('event-seo-organizer').value = '';
 document.getElementById('event-seo-image').value = '';
+document.getElementById('event-end-time').value = '';
+document.getElementById('recurring-end-time').value = '';
 document.getElementById('event-requires-purchase').checked = true;
 document.getElementById('event-pricing-fields').style.display = 'block';
 document.getElementById('event-form-title').textContent = 'Add New Event';
@@ -1868,6 +1881,15 @@ async function editEvent(id) {
       if (event.is_recurring === 1) {
         document.getElementById('recurring-time').value = eventTime ? eventTime.slice(0, 5) : '';
       }
+    }
+
+    // Set end time
+    if (event.end_time) {
+      document.getElementById('event-end-time').value = event.end_time.slice(0, 5);
+      document.getElementById('recurring-end-time').value = event.end_time.slice(0, 5);
+    } else {
+      document.getElementById('event-end-time').value = '';
+      document.getElementById('recurring-end-time').value = '';
     }
 
     document.getElementById('event-location').value = event.location || '';

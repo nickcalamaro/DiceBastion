@@ -187,7 +187,7 @@ CREATE TABLE IF NOT EXISTS "events" (
     full_description TEXT,
     requires_purchase INTEGER DEFAULT 1,
     is_active INTEGER DEFAULT 1
-, is_recurring INTEGER DEFAULT 0, recurrence_pattern TEXT, recurrence_end_date TEXT, organiser TEXT, seo_description TEXT, seo_organizer TEXT, seo_image TEXT);
+, is_recurring INTEGER DEFAULT 0, recurrence_pattern TEXT, recurrence_end_date TEXT, organiser TEXT, seo_description TEXT, seo_organizer TEXT, seo_image TEXT, end_time TEXT);
 CREATE TABLE email_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email_type TEXT NOT NULL,
