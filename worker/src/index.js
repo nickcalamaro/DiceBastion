@@ -4827,24 +4827,34 @@ app.get('/events/confirm', async c => {
 app.get('/events/sitemap.xml', async c => {
   try {
     const { results } = await c.env.DB.prepare(`
-      SELECT slug, event_datetime, updated_at
+      SELECT slug, event_datetime, updated_at, created_at, is_recurring
       FROM events
       WHERE is_active = 1
         AND (event_datetime >= datetime('now') OR is_recurring = 1)
       ORDER BY event_datetime ASC
     `).all()
 
+    const today = new Date().toISOString().split('T')[0]
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+
     const urls = (results || []).map(e => {
       const loc = `https://dicebastion.com/events/${e.slug}`
-      // Use updated_at for lastmod (most accurate signal to Google)
-      // Fall back to event_datetime, then today
+      // Pick the best lastmod: updated_at > created_at > event_datetime > today
       let lastmod
       if (e.updated_at) {
         lastmod = new Date(e.updated_at).toISOString().split('T')[0]
+      } else if (e.created_at) {
+        lastmod = new Date(e.created_at).toISOString().split('T')[0]
       } else if (e.event_datetime) {
         lastmod = new Date(e.event_datetime).toISOString().split('T')[0]
       } else {
-        lastmod = new Date().toISOString().split('T')[0]
+        lastmod = today
+      }
+      // For recurring events or any event with a stale lastmod (>30 days old),
+      // use today so Google doesn't deprioritize crawling
+      const lastmodDate = new Date(lastmod)
+      if (e.is_recurring || lastmodDate < thirtyDaysAgo) {
+        lastmod = today
       }
       return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
     }).join('\n')
