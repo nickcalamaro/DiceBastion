@@ -1,5 +1,5 @@
 {{ $visibility := 3 }}
-{{ if .Params.visibility }}{{ $visibility = .Params.visibility }}{{ end }}
+{{ if isset .Params "visibility" }}{{ $visibility = .Params.visibility }}{{ end }}
 
 <li class="menu-item mt-1" data-visibility="{{ $visibility }}">
     <a href="{{ .URL }}" class="flex items-center text-gray-500 hover:text-primary-600 dark:hover:text-primary-400">
@@ -18,7 +18,7 @@
 </li>
 {{ range .Children }}
 {{ $childVisibility := 3 }}
-{{ if .Params.visibility }}{{ $childVisibility = .Params.visibility }}{{ end }}
+{{ if isset .Params "visibility" }}{{ $childVisibility = .Params.visibility }}{{ end }}
 <li class="menu-item mt-1" data-visibility="{{ $childVisibility }}">
     <a href="{{ .URL }}" {{ if or (strings.HasPrefix .URL "http:" ) (strings.HasPrefix .URL "https:"
         ) }} target="_blank" {{ end }} class="flex items-center text-gray-500 hover:text-primary-600 dark:hover:text-primary-400">

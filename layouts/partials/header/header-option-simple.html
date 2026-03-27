@@ -1,5 +1,5 @@
 {{ $visibility := 3 }}
-{{ if .Params.visibility }}{{ $visibility = .Params.visibility }}{{ end }}
+{{ if isset .Params "visibility" }}{{ $visibility = .Params.visibility }}{{ end }}
 
 <a href="{{ .URL }}"{{ if eq .Identifier "login" }} data-action="login"{{ end }} {{ if or (strings.HasPrefix .URL "http:" ) (strings.HasPrefix .URL "https:" ) }} target="_blank" {{ end }} data-visibility="{{ $visibility }}" class="menu-item flex items-center text-gray-500 hover:text-primary-600 dark:hover:text-primary-400" title="{{ .Title }}">
     {{ if .Pre }}
