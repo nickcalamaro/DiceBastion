@@ -50,36 +50,40 @@ description: Gibraltar's premier location for board games, wargames, card games 
   <h2 class="homepage-section-title">Opening Hours</h2>
 </div>
 
-<div class="opening-hours-grid">
-  <div class="opening-hours-card">
-    <h3 class="opening-hours-card-title">Public Nights</h3>
-    <div class="opening-hours-row">
-      <span class="opening-hours-day">Friday</span>
-      <span class="opening-hours-time">6pm – Late</span>
-    </div>
+<div class="opening-hours-week">
+  <div class="opening-hours-day-col">
+    <span class="opening-hours-wday">Mon</span>
+    <span class="opening-hours-access opening-hours-access--members">Members</span>
+    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
   </div>
-  <div class="opening-hours-card">
-    <h3 class="opening-hours-card-title">Members Access</h3>
-    <div class="opening-hours-row">
-      <span class="opening-hours-day">Monday</span>
-      <span class="opening-hours-time">All Day</span>
-    </div>
-    <div class="opening-hours-row">
-      <span class="opening-hours-day">Wednesday</span>
-      <span class="opening-hours-time">All Day</span>
-    </div>
-    <div class="opening-hours-row">
-      <span class="opening-hours-day">Friday</span>
-      <span class="opening-hours-time">All Day</span>
-    </div>
-    <div class="opening-hours-row">
-      <span class="opening-hours-day">Saturday</span>
-      <span class="opening-hours-time">All Day</span>
-    </div>
-    <div class="opening-hours-row">
-      <span class="opening-hours-day">Sunday</span>
-      <span class="opening-hours-time">All Day</span>
-    </div>
+  <div class="opening-hours-day-col opening-hours-day-col--closed">
+    <span class="opening-hours-wday">Tue</span>
+    <span class="opening-hours-access opening-hours-access--closed">Closed</span>
+  </div>
+  <div class="opening-hours-day-col">
+    <span class="opening-hours-wday">Wed</span>
+    <span class="opening-hours-access opening-hours-access--members">Members</span>
+    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
+  </div>
+  <div class="opening-hours-day-col opening-hours-day-col--closed">
+    <span class="opening-hours-wday">Thu</span>
+    <span class="opening-hours-access opening-hours-access--closed">Closed</span>
+  </div>
+  <div class="opening-hours-day-col opening-hours-day-col--featured">
+    <span class="opening-hours-wday">Fri</span>
+    <span class="opening-hours-access opening-hours-access--members">Members</span>
+    <span class="opening-hours-access opening-hours-access--public">Public</span>
+    <span class="opening-hours-fri-time">6pm – Late</span>
+  </div>
+  <div class="opening-hours-day-col">
+    <span class="opening-hours-wday">Sat</span>
+    <span class="opening-hours-access opening-hours-access--members">Members</span>
+    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
+  </div>
+  <div class="opening-hours-day-col">
+    <span class="opening-hours-wday">Sun</span>
+    <span class="opening-hours-access opening-hours-access--members">Members</span>
+    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
   </div>
 </div>
 

@@ -2113,84 +2113,152 @@ details[open] > .team-qa-summary .team-details-chevron {
 }
 
 /* ===== OPENING HOURS (Homepage) ===== */
-.opening-hours-grid {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 1rem;
+/* Seven-column week-at-a-glance grid */
+.opening-hours-week {
+  display: flex;
+  gap: 0.5rem;
   margin: 0 0 2rem;
   width: 100%;
-  align-items: start;
 }
 
-.opening-hours-card {
-  background: linear-gradient(180deg, #ffffff, #f9f9f9);
+.opening-hours-day-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1rem 0.4rem 1rem;
+  border-radius: 10px;
+  background: rgb(var(--color-neutral-50));
   border: 1px solid rgb(var(--color-neutral-200));
-  border-radius: 12px;
-  padding: 1.25rem 1.4rem;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s;
 }
 
-.dark .opening-hours-card {
-  background: linear-gradient(180deg, rgb(var(--color-neutral-800)), rgb(var(--color-neutral-900)));
+.dark .opening-hours-day-col {
+  background: rgb(var(--color-neutral-800));
   border-color: rgb(var(--color-neutral-700));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 
-.opening-hours-card-title {
-  font-size: 0.75rem;
+/* Muted columns for closed days */
+.opening-hours-day-col--closed {
+  opacity: 0.4;
+}
+
+/* Featured column for Friday — public night */
+.opening-hours-day-col--featured {
+  border-color: rgb(var(--color-primary-300));
+  background: rgb(var(--color-primary-50));
+  box-shadow: 0 4px 14px rgba(var(--color-primary-500), 0.12);
+}
+
+.dark .opening-hours-day-col--featured {
+  background: rgba(var(--color-primary-900), 0.35);
+  border-color: rgb(var(--color-primary-700));
+}
+
+/* Day name label — Mon, Tue, etc. */
+.opening-hours-wday {
+  font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: rgb(var(--color-primary-600));
-  margin: 0 0 0.85rem 0;
-  padding-bottom: 0.65rem;
-  border-bottom: 1px solid rgb(var(--color-neutral-200));
-}
-
-.dark .opening-hours-card-title {
-  color: rgb(var(--color-primary-400));
-  border-bottom-color: rgb(var(--color-neutral-700));
-}
-
-.opening-hours-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.45rem 0;
-  border-bottom: 1px solid rgb(var(--color-neutral-100));
-  font-size: 0.9rem;
-}
-
-.opening-hours-row:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.dark .opening-hours-row {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
-}
-
-.opening-hours-day {
-  color: rgb(var(--color-neutral-800));
-  font-weight: 600;
-}
-
-.dark .opening-hours-day {
-  color: rgb(var(--color-neutral-200));
-}
-
-.opening-hours-time {
   color: rgb(var(--color-neutral-500));
-  font-size: 0.875rem;
+  margin-bottom: 0.2rem;
 }
 
-.dark .opening-hours-time {
+.dark .opening-hours-wday {
   color: rgb(var(--color-neutral-400));
 }
 
-@media (max-width: 640px) {
-  .opening-hours-grid {
-    grid-template-columns: 1fr;
+/* Access badges */
+.opening-hours-access {
+  width: 100%;
+  text-align: center;
+  padding: 0.3rem 0.2rem;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.03em;
+}
+
+.opening-hours-access--members {
+  background: rgb(var(--color-primary-100));
+  color: rgb(var(--color-primary-700));
+}
+
+.dark .opening-hours-access--members {
+  background: rgba(var(--color-primary-900), 0.5);
+  color: rgb(var(--color-primary-300));
+}
+
+.opening-hours-access--public {
+  background: rgb(var(--color-primary-500));
+  color: #fff;
+}
+
+.dark .opening-hours-access--public {
+  background: rgb(var(--color-primary-600));
+}
+
+.opening-hours-access--closed {
+  background: transparent;
+  color: rgb(var(--color-neutral-400));
+  font-size: 1rem;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* Small time label under Friday's badges */
+.opening-hours-fri-time {
+  font-size: 0.6rem;
+  color: rgb(var(--color-primary-600));
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.3;
+  margin-top: auto;
+}
+
+.dark .opening-hours-fri-time {
+  color: rgb(var(--color-primary-400));
+}
+
+.opening-hours-book-link {
+  font-size: 0.6rem;
+  color: rgb(var(--color-primary-600));
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.3;
+  margin-top: auto;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.opening-hours-book-link:hover {
+  color: rgb(var(--color-primary-800));
+}
+
+.dark .opening-hours-book-link {
+  color: rgb(var(--color-primary-400));
+}
+
+.dark .opening-hours-book-link:hover {
+  color: rgb(var(--color-primary-200));
+}
+
+@media (max-width: 480px) {
+  .opening-hours-week {
+    gap: 0.3rem;
+  }
+
+  .opening-hours-day-col {
+    padding: 0.75rem 0.2rem;
+  }
+
+  .opening-hours-access {
+    font-size: 0.6rem;
+    padding: 0.25rem 0.15rem;
   }
 }
 
