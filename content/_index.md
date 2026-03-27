@@ -11,8 +11,7 @@ description: Gibraltar's premier location for board games, wargames, card games 
 <!-- Description Section -->
 <div style="margin: 0 auto; width: 90%; font-size: 1rem;">
   Gibraltar's premier location for board games, wargames, card games and RPGs!</br>-</br> Check out our 
-  <a href="/events/">Upcoming Events</a> and find out how you can 
-  <a href="/memberships/">Become a Member</a> to book this amazing space for RPG campaigns, board game meetups, Magic the Gathering and more!
+  <a href="/events/">Upcoming Events</a> or <a href="/bookings/">Book a Table</a> for you and your play group! <br><br> Find out how you can <a href="/memberships/">Become a Member</a> to get free bookings for RPG campaigns, board game meetups, Magic the Gathering and more!
 </div>
 
 <!-- CSS styles for responsive table container -->

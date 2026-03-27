@@ -4326,10 +4326,15 @@ function generateEventSeoPage(event) {
       if (!dt.includes('+') && !dt.includes('Z')) {
         startDateISO = dt + tzOffset;
       }
-      // Compute endDate from event date + end_time
+      // Compute endDate from event date + end_time, or default to +4 hours
       if (endTime) {
-        const datePart = dt.split('T')[0];  // e.g. 2026-04-12
+        const datePart = dt.split('T')[0];
         endDateISO = `${datePart}T${endTime}:00${tzOffset}`;
+      } else {
+        // Default: 4 hours after start
+        const endD = new Date(d.getTime() + 4 * 60 * 60 * 1000);
+        const pad = n => String(n).padStart(2, '0');
+        endDateISO = `${endD.getUTCFullYear()}-${pad(endD.getUTCMonth()+1)}-${pad(endD.getUTCDate())}T${pad(endD.getUTCHours())}:${pad(endD.getUTCMinutes())}:00${tzOffset}`;
       }
     } catch {}
   }
@@ -4822,7 +4827,7 @@ app.get('/events/confirm', async c => {
 app.get('/events/sitemap.xml', async c => {
   try {
     const { results } = await c.env.DB.prepare(`
-      SELECT slug, event_datetime
+      SELECT slug, event_datetime, updated_at
       FROM events
       WHERE is_active = 1
         AND (event_datetime >= datetime('now') OR is_recurring = 1)
@@ -4831,7 +4836,16 @@ app.get('/events/sitemap.xml', async c => {
 
     const urls = (results || []).map(e => {
       const loc = `https://dicebastion.com/events/${e.slug}`
-      const lastmod = e.event_datetime ? new Date(e.event_datetime).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+      // Use updated_at for lastmod (most accurate signal to Google)
+      // Fall back to event_datetime, then today
+      let lastmod
+      if (e.updated_at) {
+        lastmod = new Date(e.updated_at).toISOString().split('T')[0]
+      } else if (e.event_datetime) {
+        lastmod = new Date(e.event_datetime).toISOString().split('T')[0]
+      } else {
+        lastmod = new Date().toISOString().split('T')[0]
+      }
       return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
     }).join('\n')
 

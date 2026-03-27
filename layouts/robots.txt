@@ -4,5 +4,5 @@ Allow: /
 {{- else }}
 Disallow: /
 {{- end }}
-Sitemap: {{ "sitemap.xml" | absURL }}
+Sitemap: https://dicebastion.com/sitemap.xml
 Sitemap: https://dicebastion.com/events/sitemap.xml
