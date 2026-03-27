@@ -4938,7 +4938,7 @@ app.get('/events/:slug', async c => {
     const host = c.req.header('Host') || ''
     if (host.includes('dicebastion.com')) {
       const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = /googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
+      const isBot = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
 
       if (isBot) {
         // Serve full SEO page with Event schema for indexing
@@ -6463,7 +6463,7 @@ app.get('/products/:slug', async (c, next) => {
     const host = c.req.header('Host') || ''
     if (host.includes('shop.dicebastion.com')) {
       const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = /googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
+      const isBot = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
 
       if (isBot) {
         const html = generateProductSeoPage(product)
@@ -6518,7 +6518,7 @@ app.get('/products/category/:name', async c => {
     const host = c.req.header('Host') || ''
     if (host.includes('shop.dicebastion.com')) {
       const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = /googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
+      const isBot = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
 
       if (isBot) {
         const html = generateCategorySeoPage(categoryName, catProducts)
