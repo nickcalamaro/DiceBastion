@@ -51,40 +51,29 @@ description: Gibraltar's premier location for board games, wargames, card games 
 </div>
 
 <div class="opening-hours-week">
-  <div class="opening-hours-day-col">
-    <span class="opening-hours-wday">Mon</span>
-    <span class="opening-hours-access opening-hours-access--members">Members</span>
-    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
+<div class="hours-panels">
+
+<div class="hours-panel">
+  <span class="hours-panel-label">Open for members</span>
+  <div class="hours-day-chips">
+    <span class="hours-day-chip">Mon</span>
+    <span class="hours-day-chip">Wed</span>
+    <span class="hours-day-chip">Fri</span>
+    <span class="hours-day-chip">Sat</span>
+    <span class="hours-day-chip">Sun</span>
   </div>
-  <div class="opening-hours-day-col opening-hours-day-col--closed">
-    <span class="opening-hours-wday">Tue</span>
-    <span class="opening-hours-access opening-hours-access--closed">Closed</span>
-  </div>
-  <div class="opening-hours-day-col">
-    <span class="opening-hours-wday">Wed</span>
-    <span class="opening-hours-access opening-hours-access--members">Members</span>
-    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
-  </div>
-  <div class="opening-hours-day-col opening-hours-day-col--closed">
-    <span class="opening-hours-wday">Thu</span>
-    <span class="opening-hours-access opening-hours-access--closed">Closed</span>
-  </div>
-  <div class="opening-hours-day-col opening-hours-day-col--featured">
-    <span class="opening-hours-wday">Fri</span>
-    <span class="opening-hours-access opening-hours-access--members">Members</span>
-    <span class="opening-hours-access opening-hours-access--public">Public</span>
-    <span class="opening-hours-fri-time">6pm – Late</span>
-  </div>
-  <div class="opening-hours-day-col">
-    <span class="opening-hours-wday">Sat</span>
-    <span class="opening-hours-access opening-hours-access--members">Members</span>
-    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
-  </div>
-  <div class="opening-hours-day-col">
-    <span class="opening-hours-wday">Sun</span>
-    <span class="opening-hours-access opening-hours-access--members">Members</span>
-    <a href="/bookings/" class="opening-hours-book-link">Book Now</a>
-  </div>
+  <p class="hours-panel-sub">All day access for members.</p>
+  <a href="/bookings/" class="hours-panel-link">Book a table</a>
+</div>
+
+<div class="hours-panel hours-panel--featured">
+  <span class="hours-panel-label">Open for all</span>
+  <span class="hours-panel-day">Friday</span>
+  <span class="hours-panel-time">6pm – Late</span>
+  <p class="hours-panel-sub">No booking required! Just turn up and join the community!</p>
+</div>
+
+</div>
 </div>
 
 <!-- How to Find Us -->
@@ -94,12 +83,14 @@ description: Gibraltar's premier location for board games, wargames, card games 
 
 <div class="find-us-grid">
   <div class="find-us-map-wrap">
-    <iframe
-      src="https://maps.google.com/maps?q=Casemates+Square,+Gibraltar&t=&z=17&ie=UTF8&iwloc=B&output=embed"
-      title="Dice Bastion — Casemates Vaults, Gibraltar"
-      loading="lazy"
-      referrerpolicy="no-referrer-when-downgrade">
-    </iframe>
+    <div class="find-us-map-ratio">
+      <iframe
+        src="https://maps.google.com/maps?q=Gibraltar+Warhammer+Club&output=embed"
+        title="Dice Bastion — Casemates Vaults, Gibraltar"
+        loading="lazy"
+        allowfullscreen>
+      </iframe>
+    </div>
   </div>
   <div class="find-us-info">
     <div class="find-us-detail">
