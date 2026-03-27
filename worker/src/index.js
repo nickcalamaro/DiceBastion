@@ -6880,6 +6880,118 @@ app.get('/admin/indexing/status', requireAdmin, async (c) => {
 })
 
 // ============================================================================
+// CRON JOB: Daily SEO freshness – sitemap ping + re-index active events
+// ============================================================================
+
+/**
+ * Ping Google & Bing with sitemap URLs so they know content has changed,
+ * then batch-notify the Indexing API for any events updated in the last 48 h
+ * (or all active events on Sundays for a weekly full sweep).
+ */
+async function processSeoFreshness(env) {
+  const jobName = 'seo_freshness'
+  const startedAt = new Date().toISOString()
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+
+  let processed = 0
+  let succeeded = 0
+  let failed = 0
+
+  try {
+    // 1. Ping search-engine sitemap endpoints (lightweight GET)
+    const sitemaps = [
+      'https://dicebastion.com/sitemap.xml',
+      'https://dicebastion.com/events/sitemap.xml'
+    ]
+    for (const sm of sitemaps) {
+      try {
+        const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sm)}`
+        const res = await fetch(pingUrl)
+        console.log(`[SEO] Pinged Google sitemap: ${sm} → ${res.status}`)
+      } catch (e) {
+        console.error(`[SEO] Sitemap ping failed for ${sm}:`, e)
+      }
+    }
+
+    // 2. Batch re-index events via Google Indexing API
+    if (!env.GOOGLE_SA_KEY) {
+      console.log('[SEO] GOOGLE_SA_KEY not configured – skipping Indexing API')
+      await logCronJob(env.DB, jobName, 'completed', {
+        started_at: startedAt,
+        records_processed: 0,
+        records_succeeded: 0,
+        records_failed: 0,
+        extra: { note: 'sitemap pinged only, no SA key' }
+      })
+      return
+    }
+
+    // On Sundays (day 0) re-index ALL active events for a weekly sweep.
+    // Other days only re-index events updated in the last 48 hours.
+    const dayOfWeek = new Date().getUTCDay()
+    let events
+    if (dayOfWeek === 0) {
+      const { results } = await env.DB.prepare(`
+        SELECT slug FROM events
+        WHERE is_active = 1
+          AND (event_datetime >= datetime('now') OR is_recurring = 1)
+      `).all()
+      events = results || []
+      console.log(`[SEO] Sunday full sweep: ${events.length} active events`)
+    } else {
+      const { results } = await env.DB.prepare(`
+        SELECT slug FROM events
+        WHERE is_active = 1
+          AND (event_datetime >= datetime('now') OR is_recurring = 1)
+          AND updated_at >= datetime('now', '-48 hours')
+      `).all()
+      events = results || []
+      console.log(`[SEO] Daily delta: ${events.length} recently updated events`)
+    }
+
+    // Google Indexing API allows 200 requests/day – cap at 100 to leave room
+    const batch = events.slice(0, 100)
+    processed = batch.length
+
+    for (const e of batch) {
+      try {
+        const url = `https://dicebastion.com/events/${e.slug}`
+        const result = await notifyGoogleIndexing(env, url, 'URL_UPDATED')
+        if (result.ok) {
+          succeeded++
+        } else {
+          failed++
+          console.error(`[SEO] Index notify failed for ${e.slug}:`, result.body)
+        }
+      } catch (err) {
+        failed++
+        console.error(`[SEO] Index notify error for ${e.slug}:`, err)
+      }
+    }
+
+    console.log(`[SEO] Batch indexing done: ${succeeded}/${processed} succeeded`)
+
+    await logCronJob(env.DB, jobName, failed === 0 ? 'completed' : 'partial', {
+      started_at: startedAt,
+      records_processed: processed,
+      records_succeeded: succeeded,
+      records_failed: failed,
+      extra: { day: dayOfWeek === 0 ? 'sunday_sweep' : 'daily_delta' }
+    })
+  } catch (err) {
+    console.error(`[CRON] ${jobName} FAILED:`, err)
+    await logCronJob(env.DB, jobName, 'failed', {
+      started_at: startedAt,
+      records_processed: processed,
+      records_succeeded: succeeded,
+      records_failed: failed,
+      error_message: err.message
+    })
+    throw err
+  }
+}
+
+// ============================================================================
 // HELPER FUNCTIONS FOR CRON JOBS
 // ============================================================================
 
@@ -7860,7 +7972,8 @@ async function handleScheduled(event, env, ctx) {
   const jobResults = {
     auto_renewals: null,
     event_reminders: null,
-    delayed_account_setup_emails: null
+    delayed_account_setup_emails: null,
+    seo_freshness: null
   }
   
   // Run all cron jobs sequentially, catching errors individually
@@ -7889,6 +8002,14 @@ async function handleScheduled(event, env, ctx) {
     console.error('[CRON MASTER] Delayed account setup emails failed:', e)
     jobResults.delayed_account_setup_emails = 'failed'
     // Individual job already logged its own error
+  }
+
+  try {
+    await processSeoFreshness(env)
+    jobResults.seo_freshness = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] SEO freshness failed:', e)
+    jobResults.seo_freshness = 'failed'
   }
   
   console.log('============================================')
