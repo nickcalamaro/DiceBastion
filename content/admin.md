@@ -196,6 +196,7 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
 <button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings & Calendar</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
+<button class="admin-tab-btn tab-btn" data-tab="newsletter">Newsletter</button>
 </div>
 
 <!-- Products Tab -->
@@ -728,6 +729,69 @@ Loading cron job logs...
 <!-- Will be populated by JavaScript -->
 </div>
 </div>
+
+<!-- Newsletter Tab -->
+<div id="newsletter-tab" class="tab-content" style="display: none;">
+<div class="admin-flex-between admin-mb-2">
+<h2 class="admin-m-0">Newsletter Builder</h2>
+<div id="nl-recipient-badge" class="nl-badge">Loading recipients...</div>
+</div>
+
+<div class="card card-compact admin-mb-2">
+<div class="form-group">
+<label class="form-label">Subject Line</label>
+<input type="text" id="nl-subject" class="form-input" placeholder="e.g. This Month at Dice Bastion">
+</div>
+
+<div class="form-group">
+<label class="form-label">Email Body</label>
+<div id="nl-quill-wrap">
+<div id="nl-toolbar">
+<span class="ql-formats"><select class="ql-header"><option selected></option><option value="1">Heading 1</option><option value="2">Heading 2</option><option value="3">Heading 3</option></select></span>
+<span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
+<span class="ql-formats"><button class="ql-list" value="bullet"></button><button class="ql-list" value="ordered"></button></span>
+<span class="ql-formats"><button class="ql-link"></button></span>
+<span class="ql-formats nl-extra-fmts"><button type="button" onclick="nlInsertDivider()" class="nl-tb-btn">Divider</button><button type="button" onclick="openNlEventPicker()" class="nl-tb-btn nl-tb-event-btn">Insert Event</button></span>
+</div>
+<div id="nl-editor"></div>
+</div>
+<small class="admin-text-small">Tip: Type # / ## / ### then Space for headings, - or * then Space for bullets. Ctrl+B bold, Ctrl+I italic.</small>
+</div>
+</div>
+
+<div class="admin-flex" style="justify-content: flex-end; gap: 1rem; flex-wrap: wrap; align-items: center;">
+<span id="nl-draft-status" class="nl-draft-status"></span>
+<button onclick="clearNewsletter()" class="btn btn-secondary">Clear</button>
+<button onclick="previewNewsletter()" class="btn btn-secondary">Preview</button>
+<button onclick="sendNewsletter()" class="btn btn-primary" id="nl-send-btn">Send Newsletter</button>
+</div>
+<div id="nl-send-result" style="display: none;"></div>
+</div>
+
+<!-- Event Picker Modal -->
+<div id="nl-event-picker" class="nl-modal" style="display: none;">
+<div class="nl-modal-box">
+<div class="admin-flex-between admin-mb-2">
+<h3 class="admin-m-0">Insert Upcoming Event</h3>
+<button onclick="closeNlEventPicker()" class="btn btn-secondary btn-sm">Cancel</button>
+</div>
+<div id="nl-event-picker-list">
+<div style="text-align: center; padding: 1.5rem; color: rgb(var(--color-neutral-500));">Loading events...</div>
+</div>
+</div>
+</div>
+
+<!-- Preview Modal -->
+<div id="nl-preview-modal" class="nl-modal" style="display: none;">
+<div class="nl-modal-box" style="max-width: min(900px, 96vw); width: 100%;">
+<div class="admin-flex-between" style="margin-bottom: 1rem;">
+<h3 class="admin-m-0">Email Preview</h3>
+<button onclick="closeNlPreview()" class="btn btn-secondary btn-sm">Close</button>
+</div>
+<iframe id="nl-preview-frame" style="width: 100%; height: min(82vh, 700px); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 8px; background: white;"></iframe>
+</div>
+</div>
+
 </div>
 </div>
 
@@ -746,6 +810,46 @@ Loading cron job logs...
 .btn-index:hover { background: #047857; }
 .dark .btn-index:hover { background: #059669; }
 .btn-index:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Newsletter Builder */
+.nl-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgb(var(--color-primary-50)); border: 1px solid rgb(var(--color-primary-200)); border-radius: 8px; font-size: 0.875rem; font-weight: 600; color: rgb(var(--color-primary-700)); }
+.dark .nl-badge { background: rgba(var(--color-primary-900), 0.2); border-color: rgba(var(--color-primary-700), 0.4); color: rgb(var(--color-primary-300)); }
+.nl-tb-btn { padding: 4px 10px; font-size: 0.8rem; border: 1px solid rgb(var(--color-neutral-300)); background: white; border-radius: 4px; cursor: pointer; font-weight: 500; color: rgb(var(--color-neutral-700)); line-height: 1.4; }
+.dark .nl-tb-btn { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-300)); }
+.nl-tb-btn:hover { background: rgb(var(--color-neutral-100)); }
+.dark .nl-tb-btn:hover { background: rgb(var(--color-neutral-700)); }
+.nl-tb-event-btn { background: rgb(var(--color-secondary-600)) !important; color: white !important; border-color: rgb(var(--color-secondary-600)) !important; }
+.nl-tb-event-btn:hover { background: rgb(var(--color-secondary-700)) !important; }
+.nl-extra-fmts { border-left: 1px solid rgb(var(--color-neutral-200)); padding-left: 8px; margin-left: 4px; display: inline-flex; gap: 4px; align-items: center; vertical-align: middle; }
+.dark .nl-extra-fmts { border-left-color: rgb(var(--color-neutral-700)); }
+.nl-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.nl-modal-box { background: rgb(var(--color-neutral)); border-radius: 12px; padding: 1.5rem; max-width: 560px; width: 100%; max-height: 80vh; overflow-y: auto; }
+.dark .nl-modal-box { background: rgb(var(--color-neutral-800)); }
+.nl-event-pick-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.75rem; display: flex; gap: 0.75rem; align-items: center; cursor: pointer; transition: all 0.15s; margin-bottom: 0.5rem; }
+.dark .nl-event-pick-card { border-color: rgb(var(--color-neutral-700)); }
+.nl-event-pick-card:hover { border-color: rgb(var(--color-primary-400)); background: rgb(var(--color-primary-50)); }
+.dark .nl-event-pick-card:hover { background: rgba(var(--color-primary-900), 0.2); }
+.nl-event-pick-img { width: 64px; height: 48px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: rgb(var(--color-neutral-100)); }
+.nl-event-pick-title { font-weight: 600; font-size: 0.9rem; color: rgb(var(--color-neutral-900)); }
+.dark .nl-event-pick-title { color: rgb(var(--color-neutral-100)); }
+.nl-event-pick-date { font-size: 0.8rem; color: rgb(var(--color-neutral-500)); margin-top: 2px; }
+.nl-draft-status { font-size: 0.8rem; color: rgb(var(--color-neutral-400)); font-style: italic; transition: opacity 0.4s; }
+.nl-draft-status.saved { color: rgb(var(--color-success-600)); font-style: normal; }
+.nl-send-result { padding: 1rem 1.25rem; border-radius: 8px; margin-top: 1rem; font-size: 0.9rem; }
+.nl-send-result.nl-success { background: rgb(var(--color-success-50)); border: 1px solid rgb(var(--color-success-200)); color: rgb(var(--color-success-700)); }
+.nl-send-result.nl-error { background: rgb(var(--color-danger-50)); border: 1px solid rgb(var(--color-danger-200)); color: rgb(var(--color-danger-700)); }
+#nl-quill-wrap { border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; overflow: hidden; }
+.dark #nl-quill-wrap { border-color: rgb(var(--color-neutral-600)); }
+#nl-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-50)); border: none; border-bottom: 1px solid rgb(var(--color-neutral-200)); flex-wrap: wrap; padding: 6px 8px; }
+.dark #nl-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-900)); border-bottom-color: rgb(var(--color-neutral-700)); }
+#nl-quill-wrap .ql-container.ql-snow { border: none; font-family: inherit; }
+#nl-quill-wrap .ql-editor { min-height: 300px; font-size: 1rem; line-height: 1.7; padding: 1rem; color: rgb(var(--color-neutral-900)); }
+.dark #nl-quill-wrap .ql-editor { color: rgb(var(--color-neutral-100)); background: rgb(var(--color-neutral-800)); }
+.dark #nl-quill-wrap .ql-stroke { stroke: rgb(var(--color-neutral-400)) !important; }
+.dark #nl-quill-wrap .ql-fill { fill: rgb(var(--color-neutral-400)) !important; }
+.dark #nl-quill-wrap .ql-picker { color: rgb(var(--color-neutral-300)); }
+.dark #nl-quill-wrap .ql-picker-options { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-200)); }
+.nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 </style>
 
 <!-- Image Crop Modal -->
@@ -1396,6 +1500,11 @@ if (tab === 'bookings') {
 }
 if (tab === 'memberships') {
   loadMemberships();
+}
+if (tab === 'newsletter') {
+  loadNewsletterRecipients();
+  loadNewsletterEvents();
+  nlInitEditor();
 }
 });
 });
@@ -3047,6 +3156,379 @@ async function requestIndexing(type, slug, btn) {
     btn.textContent = '❌ Error';
     console.error('Indexing error:', err);
     setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+  }
+}
+
+// ==================== Newsletter Builder ====================
+
+let nlEvents = [];
+const NL_DRAFT_KEY = 'nl_draft_v1';
+let nlDraftTimer = null;
+
+function nlSaveDraft() {
+  const subject = document.getElementById('nl-subject')?.value || '';
+  const body = nlQuill ? nlQuill.root.innerHTML : '';
+  // Don't persist an empty editor
+  if (!subject.trim() && (!body || body === '<p><br></p>')) {
+    nlClearDraft(false);
+    return;
+  }
+  localStorage.setItem(NL_DRAFT_KEY, JSON.stringify({ subject, body, saved: Date.now() }));
+  nlShowDraftStatus('Draft saved');
+}
+
+function nlClearDraft(showMsg) {
+  localStorage.removeItem(NL_DRAFT_KEY);
+  if (showMsg !== false) nlShowDraftStatus('');
+}
+
+function nlShowDraftStatus(msg) {
+  const el = document.getElementById('nl-draft-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('saved', !!msg);
+}
+
+function nlRestoreDraft() {
+  try {
+    const raw = localStorage.getItem(NL_DRAFT_KEY);
+    if (!raw) return;
+    const { subject, body, saved } = JSON.parse(raw);
+    if (!subject && (!body || body === '<p><br></p>')) return;
+    const ago = Math.round((Date.now() - saved) / 60000);
+    const agoStr = ago < 1 ? 'less than a minute ago' : ago === 1 ? '1 minute ago' : ago + ' minutes ago';
+    const subjectEl = document.getElementById('nl-subject');
+    if (subjectEl) subjectEl.value = subject || '';
+    if (nlQuill && body) nlQuill.root.innerHTML = body;
+    nlShowDraftStatus('Draft restored (saved ' + agoStr + ')');
+  } catch (e) {
+    // Corrupt draft — discard silently
+    nlClearDraft(false);
+  }
+}
+
+let nlQuill = null;
+let nlEditorReady = false;
+
+function nlInitEditor() {
+  if (nlEditorReady) return;
+  nlEditorReady = true;
+  if (!document.getElementById('quill-css')) {
+    const link = document.createElement('link');
+    link.id = 'quill-css';
+    link.rel = 'stylesheet';
+    link.href = 'https://cdn.quilljs.com/1.3.7/quill.snow.css';
+    document.head.appendChild(link);
+  }
+  if (!window.Quill) {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.quilljs.com/1.3.7/quill.min.js';
+    script.onload = nlCreateEditor;
+    document.head.appendChild(script);
+  } else {
+    nlCreateEditor();
+  }
+}
+
+function nlCreateEditor() {
+  if (nlQuill) return;
+
+  // Custom blot: renders an hr divider
+  const BlockEmbed = Quill.import('blots/block/embed');
+  class DividerBlot extends BlockEmbed {}
+  DividerBlot.blotName = 'divider';
+  DividerBlot.tagName = 'hr';
+  Quill.register(DividerBlot);
+
+  // Custom blot: renders a non-editable event card, preserving full HTML
+  class EventCardBlot extends BlockEmbed {
+    static create(html) {
+      const node = super.create();
+      node.setAttribute('data-card', html);
+      node.innerHTML = html;
+      node.contentEditable = 'false';
+      return node;
+    }
+    static value(node) {
+      return node.getAttribute('data-card');
+    }
+  }
+  EventCardBlot.blotName = 'event-card';
+  EventCardBlot.tagName = 'div';
+  EventCardBlot.className = 'nl-event-card-embed';
+  Quill.register(EventCardBlot);
+
+  nlQuill = new Quill('#nl-editor', {
+    theme: 'snow',
+    placeholder: 'Start writing your newsletter...',
+    modules: {
+      toolbar: { container: '#nl-toolbar' },
+      keyboard: {
+        bindings: {
+          h1: { key: ' ', collapsed: true, prefix: /^#$/,   handler: function(r)     { this.quill.deleteText(r.index-1,1,'user'); this.quill.formatLine(r.index-1,1,'header',1,'user'); return false; } },
+          h2: { key: ' ', collapsed: true, prefix: /^##$/,  handler: function(r)     { this.quill.deleteText(r.index-2,2,'user'); this.quill.formatLine(r.index-2,1,'header',2,'user'); return false; } },
+          h3: { key: ' ', collapsed: true, prefix: /^###$/, handler: function(r)     { this.quill.deleteText(r.index-3,3,'user'); this.quill.formatLine(r.index-3,1,'header',3,'user'); return false; } },
+          ul: { key: ' ', collapsed: true, prefix: /^[-*]$/, handler: function(r)    { this.quill.deleteText(r.index-1,1,'user'); this.quill.formatLine(r.index-1,1,'list','bullet','user'); return false; } },
+          ol: { key: ' ', collapsed: true, prefix: /^\d+\.$/,handler: function(r,ctx){ const l=ctx.prefix.length; this.quill.deleteText(r.index-l,l,'user'); this.quill.formatLine(r.index-l,1,'list','ordered','user'); return false; } }
+        }
+      }
+    }
+  });
+
+  // Auto-save draft on any change (debounced 1.5 s)
+  nlQuill.on('text-change', function() {
+    clearTimeout(nlDraftTimer);
+    nlShowDraftStatus('Saving...');
+    nlDraftTimer = setTimeout(nlSaveDraft, 1500);
+  });
+
+  // Also auto-save when the subject line changes
+  const subjectEl = document.getElementById('nl-subject');
+  if (subjectEl) {
+    subjectEl.addEventListener('input', function() {
+      clearTimeout(nlDraftTimer);
+      nlShowDraftStatus('Saving...');
+      nlDraftTimer = setTimeout(nlSaveDraft, 1500);
+    });
+  }
+
+  // Restore any previous draft
+  nlRestoreDraft();
+}
+
+async function loadNewsletterRecipients() {
+  const badge = document.getElementById('nl-recipient-badge');
+  if (!badge) return;
+  badge.textContent = 'Loading...';
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletter/recipients`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const data = await res.json();
+    const count = data.count ?? 0;
+    badge.textContent = `${count} ${count === 1 ? 'recipient' : 'recipients'}`;
+  } catch (err) {
+    badge.textContent = 'Could not load';
+    console.error('Newsletter recipients error:', err);
+  }
+}
+
+async function loadNewsletterEvents() {
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletter/events`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    nlEvents = await res.json();
+    renderNlEventPickerList();
+  } catch (err) {
+    console.error('Newsletter events error:', err);
+    nlEvents = [];
+  }
+}
+
+function renderNlEventPickerList() {
+  const list = document.getElementById('nl-event-picker-list');
+  if (!list) return;
+  if (!nlEvents || nlEvents.length === 0) {
+    list.innerHTML = '<div style="text-align: center; padding: 1.5rem; color: rgb(var(--color-neutral-500));">No upcoming events found.</div>';
+    return;
+  }
+  list.innerHTML = nlEvents.map((ev, idx) => {
+    const dt = new Date(ev.event_datetime);
+    const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
+    const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const imgHtml = ev.image_url
+      ? `<img class="nl-event-pick-img" src="${ev.image_url}" alt="">`
+      : `<div class="nl-event-pick-img"></div>`;
+    const locationSuffix = ev.location ? ` &middot; ${ev.location}` : '';
+    return `
+      <div class="nl-event-pick-card" onclick="insertNlEventBlock(${idx})">
+        ${imgHtml}
+        <div>
+          <div class="nl-event-pick-title">${ev.event_name || ''}</div>
+          <div class="nl-event-pick-date">${dateStr} at ${timeStr}${locationSuffix}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openNlEventPicker() {
+  renderNlEventPickerList();
+  document.getElementById('nl-event-picker').style.display = 'flex';
+}
+
+function closeNlEventPicker() {
+  document.getElementById('nl-event-picker').style.display = 'none';
+}
+
+function insertNlEventBlock(idx) {
+  closeNlEventPicker();
+  if (!nlQuill) return;
+  const ev = nlEvents[idx];
+  if (!ev) return;
+
+  const dt = new Date(ev.event_datetime);
+  const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+  // Images are always 400x190 - use natural aspect ratio, no cropping
+  const imgPart = ev.image_url
+    ? '<img src="' + ev.image_url + '" alt="" width="400" height="190" style="width:100%;height:auto;display:block;">'
+    : '';
+  const locationPart = ev.location
+    ? '<p style="margin:4px 0;font-size:14px;color:#64748b;">' + ev.location + '</p>'
+    : '';
+  const descPart = ev.description
+    ? '<p style="margin:8px 0 0 0;font-size:14px;color:#475569;">' + ev.description + '</p>'
+    : '';
+  const linkHref = ev.slug
+    ? 'https://dicebastion.com/events/' + ev.slug
+    : 'https://dicebastion.com/events';
+
+  const cardHtml = imgPart
+    + '<div style="padding:18px 20px 20px 20px;">'
+    + '<p style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#4f46e5;margin:0 0 8px 0;">Upcoming Event</p>'
+    + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + (ev.event_name || '') + '</h3>'
+    + '<p style="margin:0 0 4px 0;font-size:14px;color:#64748b;">' + dateStr + ' at ' + timeStr + '</p>'
+    + locationPart + descPart
+    + '<a href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Event</a>'
+    + '</div>';
+
+  const range = nlQuill.getSelection(true);
+  const index = range ? range.index : nlQuill.getLength() - 1;
+  nlQuill.insertEmbed(index, 'event-card', cardHtml, 'user');
+  nlQuill.setSelection(index + 1, 0, 'user');
+}
+
+function nlInsertDivider() {
+  if (!nlQuill) return;
+  const range = nlQuill.getSelection(true);
+  const index = range ? range.index : nlQuill.getLength() - 1;
+  nlQuill.insertEmbed(index, 'divider', true, 'user');
+  nlQuill.setSelection(index + 1, 0, 'user');
+}
+
+function clearNewsletter() {
+  if (!confirm('Clear all newsletter content?')) return;
+  document.getElementById('nl-subject').value = '';
+  if (nlQuill) nlQuill.setText('');
+  nlClearDraft();
+  const result = document.getElementById('nl-send-result');
+  if (result) result.style.display = 'none';
+}
+
+function buildNlEmailHtml(bodyHtml, subject) {
+  const body = bodyHtml
+    .replace(/ data-card="[^"]*"/g, '')
+    .replace(/ contenteditable="[^"]*"/g, '')
+    .replace(/class="nl-event-card-embed"/g,
+      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    .replace(/ class="ql-[^"]*"/g, '')
+    .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
+  // Goldmark terminates a script block on a literal closing style tag,
+  // so split that string across two literals.
+  const stO = '<sty' + 'le>';
+  const stC = '</sty' + 'le>';
+  const pReset = stO
+    + 'p{margin:0 0 14px 0;padding:0;}'
+    + 'h1{font-size:26px;font-weight:800;color:#111827;margin:0 0 16px 0;line-height:1.25;}'
+    + 'h2{font-size:20px;font-weight:700;color:#111827;margin:0 0 12px 0;line-height:1.3;padding-left:12px;border-left:3px solid #4f46e5;}'
+    + 'h3{font-size:17px;font-weight:700;color:#111827;margin:0 0 10px 0;line-height:1.35;}'
+    + 'ul,ol{margin:0 0 14px 0;padding-left:1.5em;}li{margin:0 0 5px 0;}'
+    + 'a{color:#4f46e5;}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0;}'
+    + stC;
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + '</head>'
+    + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#1a1a1a;">'
+    + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
+    + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'
+    + '<div style="background-color:#2d1f8a;background-image:url(https://dicebastion.com/img/clubfull.png);background-size:cover;background-position:center 40%;">'
+    + '<div style="background:linear-gradient(155deg,rgba(6,8,40,0.55) 0%,rgba(79,70,229,0.88) 100%);padding:36px 32px 32px 32px;">'
+    + '<div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:rgba(255,255,255,0.6);margin-bottom:12px;">Dice Bastion</div>'
+    + '<div style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
+    + '</div></div>'
+    + '<div style="padding:32px;line-height:1.75;font-size:16px;color:#1a1a1a;">' + body + '</div>'
+    + '<div style="padding:20px 32px;background:#f8f8fc;border-top:1px solid #ebebf5;font-size:12px;color:#9ca3af;line-height:1.6;">'
+    + '<p style="margin:0 0 6px 0;">You\'re receiving this as a Dice Bastion member who signed up for updates.</p>'
+    + '<p style="margin:0;"><a href="https://dicebastion.com/account" style="color:#9ca3af;text-decoration:underline;">Manage email preferences</a></p>'
+    + '</div>'
+    + '</div>'
+    + '</div></body></html>';
+}
+
+function previewNewsletter() {
+  const subject = document.getElementById('nl-subject').value.trim() || 'Newsletter Preview';
+  const bodyHtml = nlQuill ? nlQuill.root.innerHTML.trim() : '';
+  if (!bodyHtml || bodyHtml === '<p><br></p>') {
+    Modal.alert({ title: 'Empty', message: 'Add some content before previewing.' });
+    return;
+  }
+  const fullHtml = buildNlEmailHtml(bodyHtml, subject);
+  const frame = document.getElementById('nl-preview-frame');
+  frame.srcdoc = fullHtml;
+  document.getElementById('nl-preview-modal').style.display = 'flex';
+}
+
+function closeNlPreview() {
+  document.getElementById('nl-preview-modal').style.display = 'none';
+}
+
+async function sendNewsletter() {
+  const subject = document.getElementById('nl-subject').value.trim();
+  const bodyHtml = nlQuill ? nlQuill.root.innerHTML.trim() : '';
+  const resultEl = document.getElementById('nl-send-result');
+
+  if (!subject) {
+    Modal.alert({ title: 'Missing Subject', message: 'Please enter a subject line before sending.' });
+    return;
+  }
+  if (!bodyHtml || bodyHtml === '<p><br></p>') {
+    Modal.alert({ title: 'Empty Newsletter', message: 'Please write some content before sending.' });
+    return;
+  }
+
+  const badge = document.getElementById('nl-recipient-badge');
+  const recipientText = badge ? badge.textContent : 'subscribers';
+
+  const confirmed = await Modal.confirm({
+    title: 'Send Newsletter',
+    message: `This will send the newsletter to ${recipientText}. This cannot be undone. Continue?`
+  });
+  if (!confirmed) return;
+
+  const btn = document.getElementById('nl-send-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  resultEl.style.display = 'none';
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletter/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': sessionToken
+      },
+      body: JSON.stringify({ subject, html: bodyHtml })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      resultEl.className = 'nl-send-result nl-success';
+      resultEl.textContent = `Newsletter sent. ${data.sent} delivered, ${data.failed} failed (${data.total} total recipients).`;
+      resultEl.style.display = 'block';
+      // Draft is no longer needed after a successful send
+      nlClearDraft(false);
+    } else {
+      resultEl.className = 'nl-send-result nl-error';
+      resultEl.textContent = `Send failed: ${data.error || 'Unknown error'}`;
+      resultEl.style.display = 'block';
+    }
+  } catch (err) {
+    resultEl.className = 'nl-send-result nl-error';
+    resultEl.textContent = `Network error: ${err.message}`;
+    resultEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send Newsletter';
   }
 }
 

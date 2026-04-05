@@ -1205,7 +1205,7 @@ async function logEmailHistory(db, emailData) {
  * @param {Object} params - Email parameters
  * @returns {Object} {success, error, skipped}
  */
-async function sendEmail(env, { to, subject, html, text, attachments = null, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null }) {
+async function sendEmail(env, { to, subject, html, text, attachments = null, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null, replyTo = null }) {
   if (!env.MAILERSEND_API_KEY) {
     console.warn('MAILERSEND_API_KEY not configured, skipping email')
     return { skipped: true }
@@ -1218,6 +1218,11 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
       subject,
       html,
       text: text || html.replace(/<[^>]*>/g, '')
+    }
+
+    // Reply-To makes the email look like it comes from a real person
+    if (replyTo) {
+      body.reply_to = typeof replyTo === 'string' ? { email: replyTo } : replyTo
     }
     
     // Add attachments if provided
@@ -1288,6 +1293,91 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
     
     return { success: false, error: String(e) }
   }
+}
+
+/**
+ * Strip Quill editor artefacts that must not reach email clients.
+ * Called by wrapNewsletterHtml before the body is embedded in the template.
+ */
+function cleanNewsletterBody(html) {
+  return html
+    // data-card blobs are large redundant attribute copies Quill adds to BlockEmbeds
+    .replace(/ data-card="[^"]*"/g, '')
+    // contenteditable is a browser-only attribute
+    .replace(/ contenteditable="[^"]*"/g, '')
+    // Replace the Quill event-card class with full inline styles for email clients
+    .replace(/class="nl-event-card-embed"/g,
+      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    // Strip Quill formatting classes (ql-align, ql-indent, etc.) — no stylesheet in email
+    .replace(/ class="ql-[^"]*"/g, '')
+    // Quill inserts <p><br></p> for every blank line the user types.
+    .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
+}
+
+/**
+ * Wrap newsletter body HTML in a full email template
+ */
+function wrapNewsletterHtml(bodyHtml, subject) {
+  const cleaned = cleanNewsletterBody(bodyHtml);
+  const pReset = 'p{margin:0 0 14px 0;padding:0;}'
+    + 'h1{font-size:26px;font-weight:800;color:#111827;margin:0 0 16px 0;line-height:1.25;}'
+    + 'h2{font-size:20px;font-weight:700;color:#111827;margin:0 0 12px 0;line-height:1.3;padding-left:12px;border-left:3px solid #4f46e5;}'
+    + 'h3{font-size:17px;font-weight:700;color:#111827;margin:0 0 10px 0;line-height:1.35;}'
+    + 'ul,ol{margin:0 0 14px 0;padding-left:1.5em;}li{margin:0 0 5px 0;}'
+    + 'a{color:#4f46e5;}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0;}';
+  return '<!DOCTYPE html><html lang="en"><head>'
+    + '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
+    + '<title>' + subject + '</title>'
+    + '<style>' + pReset + '</style>'
+    + '</head>'
+    + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif;color:#1a1a1a;">'
+    + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
+    + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'
+    + '<div style="background-color:#2d1f8a;background-image:url(https://dicebastion.com/img/clubfull.png);background-size:cover;background-position:center 40%;">'
+    + '<div style="background:linear-gradient(155deg,rgba(6,8,40,0.55) 0%,rgba(79,70,229,0.88) 100%);padding:36px 32px 32px 32px;">'
+    + '<div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:rgba(255,255,255,0.6);margin-bottom:12px;">Dice Bastion</div>'
+    + '<div style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
+    + '</div></div>'
+    + '<div style="padding:32px;line-height:1.75;font-size:16px;color:#1a1a1a;">' + cleaned + '</div>'
+    + '<div style="padding:20px 32px;background:#f8f8fc;border-top:1px solid #ebebf5;font-size:12px;color:#9ca3af;line-height:1.6;">'
+    + '<p style="margin:0 0 6px 0;">You\'re receiving this as a Dice Bastion member who signed up for updates.</p>'
+    + '<p style="margin:0;"><a href="https://dicebastion.com/account" style="color:#9ca3af;text-decoration:underline;">Manage email preferences</a></p>'
+    + '</div>'
+    + '</div>'
+    + '</div></body></html>';
+}
+
+/**
+ * Convert HTML email body to a clean plain-text alternative.
+ * Runs regex-only (no DOM) so it works inside a Cloudflare Worker.
+ */
+function htmlToPlainText(html) {
+  let t = html;
+  // Headings
+  t = t.replace(/<h1[^>]*>([\.\s\S]*?)<\/h1>/gi, (_, s) => '\n\n' + _stripTags(s).toUpperCase() + '\n');
+  t = t.replace(/<h2[^>]*>([\.\s\S]*?)<\/h2>/gi, (_, s) => '\n\n' + _stripTags(s).toUpperCase() + '\n');
+  t = t.replace(/<h3[^>]*>([\.\s\S]*?)<\/h3>/gi, (_, s) => '\n\n' + _stripTags(s).toUpperCase() + '\n');
+  // Links: preserve both label and URL
+  t = t.replace(/<a[^>]+href="([^"]*)"[^>]*>([\.\s\S]*?)<\/a>/gi, (_, url, label) => {
+    const l = _stripTags(label).trim();
+    return (url && url !== l && !url.startsWith('#')) ? l + ' (' + url + ')' : l;
+  });
+  // Block elements
+  t = t.replace(/<\/p>/gi, '\n\n');
+  t = t.replace(/<p[^>]*>/gi, '');
+  t = t.replace(/<br\s*\/?>/gi, '\n');
+  t = t.replace(/<li[^>]*>([\.\s\S]*?)<\/li>/gi, (_, s) => '\n- ' + _stripTags(s).trim());
+  t = t.replace(/<\/?[uod]l[^>]*>/gi, '\n');
+  t = t.replace(/<hr[^>]*>/gi, '\n\n---\n\n');
+  // Strip all remaining tags
+  t = _stripTags(t);
+  // Decode common HTML entities
+  t = t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+  return t.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function _stripTags(html) {
+  return (html || '').replace(/<[^>]+>/g, '');
 }
 
 /**
@@ -6875,6 +6965,107 @@ app.get('/admin/indexing/status', requireAdmin, async (c) => {
     return c.json({ ok: res.ok, status: res.status, body }, res.ok ? 200 : 502)
   } catch (e) {
     console.error('Indexing status error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// ============================================================================
+// ADMIN NEWSLETTER ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /admin/newsletter/recipients
+ * Returns the count of users opted in to marketing emails
+ */
+app.get('/admin/newsletter/recipients', requireAdmin, async c => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT COUNT(*) as count
+      FROM email_preferences ep
+      JOIN users u ON ep.user_id = u.user_id
+      WHERE ep.marketing_emails = 1 AND ep.consent_given = 1 AND u.is_active = 1
+    `).first()
+    return c.json({ count: result?.count ?? 0 })
+  } catch (e) {
+    console.error('[Newsletter] recipients error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * GET /admin/newsletter/events
+ * Returns active upcoming events for embedding in newsletters
+ */
+app.get('/admin/newsletter/events', requireAdmin, async c => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT event_id, event_name, description, event_datetime, location, image_url, slug
+      FROM events
+      WHERE is_active = 1 AND event_datetime >= datetime('now')
+      ORDER BY event_datetime ASC
+      LIMIT 10
+    `).all()
+    return c.json(results ?? [])
+  } catch (e) {
+    console.error('[Newsletter] events error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * POST /admin/newsletter/send
+ * Body: { subject: string, html: string }
+ * Sends newsletter to all opted-in marketing recipients
+ */
+app.post('/admin/newsletter/send', requireAdmin, async c => {
+  try {
+    const { subject, html } = await c.req.json()
+    if (!subject?.trim() || !html?.trim()) {
+      return c.json({ error: 'subject and html are required' }, 400)
+    }
+
+    const { results: recipients } = await c.env.DB.prepare(`
+      SELECT u.email, u.name
+      FROM email_preferences ep
+      JOIN users u ON ep.user_id = u.user_id
+      WHERE ep.marketing_emails = 1 AND ep.consent_given = 1 AND u.is_active = 1
+    `).all()
+
+    if (!recipients || recipients.length === 0) {
+      return c.json({ success: true, sent: 0, failed: 0, total: 0, message: 'No eligible recipients found.' })
+    }
+
+    const fullHtml = wrapNewsletterHtml(html, subject)
+    const plainText = htmlToPlainText(html)
+    // Reply-To makes the email look like it's from a real person, not a no-reply blast.
+    // Prefer a dedicated env var; fall back to the sender address.
+    const replyTo = c.env.MAILERSEND_REPLY_TO || c.env.MAILERSEND_FROM_EMAIL || 'hello@dicebastion.com'
+    let sent = 0
+    let failed = 0
+    const errors = []
+
+    for (const r of recipients) {
+      const result = await sendEmail(c.env, {
+        to: r.email,
+        subject,
+        html: fullHtml,
+        text: plainText,
+        replyTo,
+        emailType: 'newsletter',
+        metadata: JSON.stringify({ campaign: 'newsletter' })
+      })
+      if (result.success || result.skipped) {
+        sent++
+      } else {
+        failed++
+        errors.push({ email: r.email, error: result.error })
+      }
+    }
+
+    console.log(`[Newsletter] Sent: ${sent}, Failed: ${failed}`)
+    return c.json({ success: true, total: recipients.length, sent, failed, errors })
+  } catch (e) {
+    console.error('[Newsletter] send error:', e)
     return c.json({ error: e.message }, 500)
   }
 })
