@@ -738,6 +738,13 @@ Loading cron job logs...
 </div>
 
 <div class="card card-compact admin-mb-2">
+<div id="nl-draft-banner" class="nl-draft-banner" style="display:none;">
+  <span id="nl-draft-banner-msg"></span>
+  <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0;">
+    <button type="button" id="nl-draft-restore-btn" onclick="nlApplyDraft()" class="btn btn-secondary btn-sm" style="display:none;">Restore draft</button>
+    <button type="button" onclick="nlDiscardDraft()" class="nl-draft-discard-btn">Discard draft</button>
+  </div>
+</div>
 <div class="form-group">
 <label class="form-label">Subject Line</label>
 <input type="text" id="nl-subject" class="form-input" placeholder="e.g. This Month at Dice Bastion">
@@ -835,6 +842,13 @@ Loading cron job logs...
 .nl-event-pick-date { font-size: 0.8rem; color: rgb(var(--color-neutral-500)); margin-top: 2px; }
 .nl-draft-status { font-size: 0.8rem; color: rgb(var(--color-neutral-400)); font-style: italic; transition: opacity 0.4s; }
 .nl-draft-status.saved { color: rgb(var(--color-success-600)); font-style: normal; }
+.nl-draft-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 11px 15px; border-radius: 8px; margin-bottom: 1rem; font-size: 0.875rem; flex-wrap: wrap; }
+.nl-draft-banner.nl-banner-restored { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+.nl-draft-banner.nl-banner-available { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+.dark .nl-draft-banner.nl-banner-restored { background: rgba(22,101,52,0.15); border-color: rgba(134,239,172,0.25); color: rgb(var(--color-success-300)); }
+.dark .nl-draft-banner.nl-banner-available { background: rgba(30,64,175,0.12); border-color: rgba(147,197,253,0.3); color: rgb(var(--color-primary-300)); }
+.nl-draft-discard-btn { background: none; border: none; cursor: pointer; font-size: 0.8rem; text-decoration: underline; padding: 0; opacity: 0.75; color: inherit; }
+.nl-draft-discard-btn:hover { opacity: 1; }
 .nl-send-result { padding: 1rem 1.25rem; border-radius: 8px; margin-top: 1rem; font-size: 0.9rem; }
 .nl-send-result.nl-success { background: rgb(var(--color-success-50)); border: 1px solid rgb(var(--color-success-200)); color: rgb(var(--color-success-700)); }
 .nl-send-result.nl-error { background: rgb(var(--color-danger-50)); border: 1px solid rgb(var(--color-danger-200)); color: rgb(var(--color-danger-700)); }
@@ -3169,10 +3183,7 @@ function nlSaveDraft() {
   const subject = document.getElementById('nl-subject')?.value || '';
   const body = nlQuill ? nlQuill.root.innerHTML : '';
   // Don't persist an empty editor
-  if (!subject.trim() && (!body || body === '<p><br></p>')) {
-    nlClearDraft(false);
-    return;
-  }
+  if (!subject.trim() && (!body || body === '<p><br></p>')) return;
   localStorage.setItem(NL_DRAFT_KEY, JSON.stringify({ subject, body, saved: Date.now() }));
   nlShowDraftStatus('Draft saved');
 }
@@ -3180,6 +3191,7 @@ function nlSaveDraft() {
 function nlClearDraft(showMsg) {
   localStorage.removeItem(NL_DRAFT_KEY);
   if (showMsg !== false) nlShowDraftStatus('');
+  nlShowDraftBanner(false);
 }
 
 function nlShowDraftStatus(msg) {
@@ -3189,22 +3201,64 @@ function nlShowDraftStatus(msg) {
   el.classList.toggle('saved', !!msg);
 }
 
+function nlShowDraftBanner(mode) {
+  const banner = document.getElementById('nl-draft-banner');
+  const msgEl = document.getElementById('nl-draft-banner-msg');
+  const restoreBtn = document.getElementById('nl-draft-restore-btn');
+  if (!banner) return;
+  if (!mode) { banner.style.display = 'none'; return; }
+  try {
+    const raw = localStorage.getItem(NL_DRAFT_KEY);
+    if (!raw) { banner.style.display = 'none'; return; }
+    const { subject, saved } = JSON.parse(raw);
+    const mins = Math.round((Date.now() - saved) / 60000);
+    const hrs = Math.round(mins / 60);
+    const agoStr = mins < 1 ? 'less than a minute ago' : mins < 60 ? (mins === 1 ? '1 minute ago' : mins + ' minutes ago') : (hrs === 1 ? '1 hour ago' : hrs + ' hours ago');
+    const sub = subject ? (subject.length > 45 ? subject.slice(0, 45) + '...' : subject) : '(no subject)';
+    banner.className = 'nl-draft-banner ' + (mode === 'restored' ? 'nl-banner-restored' : 'nl-banner-available');
+    if (mode === 'restored') {
+      if (msgEl) msgEl.textContent = 'Draft restored — saved ' + agoStr + '. Subject: "' + sub + '"';
+      if (restoreBtn) restoreBtn.style.display = 'none';
+    } else {
+      if (msgEl) msgEl.textContent = 'Saved draft available from ' + agoStr + '. Subject: "' + sub + '"';
+      if (restoreBtn) restoreBtn.style.display = '';
+    }
+    banner.style.display = 'flex';
+  } catch (e) { banner.style.display = 'none'; }
+}
+
 function nlRestoreDraft() {
   try {
     const raw = localStorage.getItem(NL_DRAFT_KEY);
     if (!raw) return;
-    const { subject, body, saved } = JSON.parse(raw);
+    const { subject, body } = JSON.parse(raw);
     if (!subject && (!body || body === '<p><br></p>')) return;
-    const ago = Math.round((Date.now() - saved) / 60000);
-    const agoStr = ago < 1 ? 'less than a minute ago' : ago === 1 ? '1 minute ago' : ago + ' minutes ago';
     const subjectEl = document.getElementById('nl-subject');
     if (subjectEl) subjectEl.value = subject || '';
     if (nlQuill && body) nlQuill.root.innerHTML = body;
-    nlShowDraftStatus('Draft restored (saved ' + agoStr + ')');
+    nlShowDraftBanner('restored');
   } catch (e) {
     // Corrupt draft — discard silently
     nlClearDraft(false);
   }
+}
+
+function nlApplyDraft() {
+  try {
+    const raw = localStorage.getItem(NL_DRAFT_KEY);
+    if (!raw) return;
+    const { subject, body } = JSON.parse(raw);
+    const subjectEl = document.getElementById('nl-subject');
+    if (subjectEl) subjectEl.value = subject || '';
+    if (nlQuill && body) nlQuill.root.innerHTML = body;
+    nlShowDraftBanner('restored');
+  } catch (e) { nlClearDraft(false); }
+}
+
+function nlDiscardDraft() {
+  if (!confirm('Permanently delete this saved draft?')) return;
+  nlClearDraft(false);
+  nlShowDraftStatus('');
 }
 
 let nlQuill = null;
@@ -3410,12 +3464,18 @@ function nlInsertDivider() {
 }
 
 function clearNewsletter() {
-  if (!confirm('Clear all newsletter content?')) return;
+  const hasDraft = !!localStorage.getItem(NL_DRAFT_KEY);
+  const confirmMsg = 'Clear the editor?' + (hasDraft ? ' Your saved draft will still be available to restore.' : '');
+  if (!confirm(confirmMsg)) return;
   document.getElementById('nl-subject').value = '';
   if (nlQuill) nlQuill.setText('');
-  nlClearDraft();
   const result = document.getElementById('nl-send-result');
   if (result) result.style.display = 'none';
+  if (hasDraft) {
+    nlShowDraftBanner('available');
+  } else {
+    nlShowDraftStatus('');
+  }
 }
 
 function buildNlEmailHtml(bodyHtml, subject) {
