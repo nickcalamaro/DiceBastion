@@ -734,7 +734,23 @@ Loading cron job logs...
 <div id="newsletter-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
 <h2 class="admin-m-0">Newsletter Builder</h2>
-<div id="nl-recipient-badge" class="nl-badge">Loading recipients...</div>
+<div style="display:flex;gap:0.75rem;align-items:center;">
+  <button type="button" id="nl-drafts-btn" onclick="nlToggleDraftPanel()" class="btn btn-secondary btn-sm" style="display:none;position:relative;">Saved draft <span id="nl-draft-dot" style="display:inline-block;width:7px;height:7px;background:#10b981;border-radius:50%;margin-left:4px;vertical-align:middle;"></span></button>
+  <div id="nl-recipient-badge" class="nl-badge">Loading recipients...</div>
+</div>
+</div>
+<div id="nl-draft-panel" class="nl-draft-panel" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <div style="font-weight:600;font-size:0.875rem;margin-bottom:3px;">Saved draft</div>
+      <div id="nl-draft-panel-subject" style="font-size:0.875rem;margin-bottom:2px;"></div>
+      <div id="nl-draft-panel-meta" style="font-size:0.78rem;opacity:0.65;"></div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0;">
+      <button type="button" onclick="nlApplyDraft()" class="btn btn-secondary btn-sm">Load into editor</button>
+      <button type="button" onclick="nlDiscardDraft()" class="nl-draft-discard-btn" style="font-size:0.875rem;">Delete draft</button>
+    </div>
+  </div>
 </div>
 
 <div class="card card-compact admin-mb-2">
@@ -849,6 +865,8 @@ Loading cron job logs...
 .dark .nl-draft-banner.nl-banner-available { background: rgba(30,64,175,0.12); border-color: rgba(147,197,253,0.3); color: rgb(var(--color-primary-300)); }
 .nl-draft-discard-btn { background: none; border: none; cursor: pointer; font-size: 0.8rem; text-decoration: underline; padding: 0; opacity: 0.75; color: inherit; }
 .nl-draft-discard-btn:hover { opacity: 1; }
+.nl-draft-panel { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px 16px; margin-bottom: 1rem; color: #1e3a8a; }
+.dark .nl-draft-panel { background: rgba(30,64,175,0.12); border-color: rgba(147,197,253,0.25); color: rgb(var(--color-primary-200)); }
 .nl-send-result { padding: 1rem 1.25rem; border-radius: 8px; margin-top: 1rem; font-size: 0.9rem; }
 .nl-send-result.nl-success { background: rgb(var(--color-success-50)); border: 1px solid rgb(var(--color-success-200)); color: rgb(var(--color-success-700)); }
 .nl-send-result.nl-error { background: rgb(var(--color-danger-50)); border: 1px solid rgb(var(--color-danger-200)); color: rgb(var(--color-danger-700)); }
@@ -3178,6 +3196,7 @@ async function requestIndexing(type, slug, btn) {
 let nlEvents = [];
 const NL_DRAFT_KEY = 'nl_draft_v1';
 let nlDraftTimer = null;
+let nlRestoringDraft = false;
 
 function nlSaveDraft() {
   const subject = document.getElementById('nl-subject')?.value || '';
@@ -3186,12 +3205,15 @@ function nlSaveDraft() {
   if (!subject.trim() && (!body || body === '<p><br></p>')) return;
   localStorage.setItem(NL_DRAFT_KEY, JSON.stringify({ subject, body, saved: Date.now() }));
   nlShowDraftStatus('Draft saved');
+  nlUpdateDraftBtn();
 }
 
 function nlClearDraft(showMsg) {
+  clearTimeout(nlDraftTimer);
   localStorage.removeItem(NL_DRAFT_KEY);
   if (showMsg !== false) nlShowDraftStatus('');
   nlShowDraftBanner(false);
+  nlUpdateDraftBtn();
 }
 
 function nlShowDraftStatus(msg) {
@@ -3227,17 +3249,52 @@ function nlShowDraftBanner(mode) {
   } catch (e) { banner.style.display = 'none'; }
 }
 
+function nlToggleDraftPanel(force) {
+  const panel = document.getElementById('nl-draft-panel');
+  if (!panel) return;
+  const isVisible = panel.style.display !== 'none';
+  const show = force !== undefined ? !!force : !isVisible;
+  if (show) {
+    try {
+      const raw = localStorage.getItem(NL_DRAFT_KEY);
+      if (!raw) { panel.style.display = 'none'; return; }
+      const { subject, saved } = JSON.parse(raw);
+      const mins = Math.round((Date.now() - saved) / 60000);
+      const hrs = Math.round(mins / 60);
+      const timeStr = mins < 1 ? 'just now' : mins < 60 ? (mins === 1 ? '1 min ago' : mins + ' min ago') : (hrs === 1 ? '1 hour ago' : hrs + ' hours ago');
+      const subEl = document.getElementById('nl-draft-panel-subject');
+      const metaEl = document.getElementById('nl-draft-panel-meta');
+      if (subEl) subEl.textContent = subject ? '"' + subject + '"' : '(no subject)';
+      if (metaEl) metaEl.textContent = 'Last saved ' + timeStr;
+    } catch (e) {}
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+function nlUpdateDraftBtn() {
+  const btn = document.getElementById('nl-drafts-btn');
+  const hasDraft = !!localStorage.getItem(NL_DRAFT_KEY);
+  if (btn) btn.style.display = hasDraft ? '' : 'none';
+  if (!hasDraft) nlToggleDraftPanel(false);
+}
+
 function nlRestoreDraft() {
   try {
     const raw = localStorage.getItem(NL_DRAFT_KEY);
     if (!raw) return;
     const { subject, body } = JSON.parse(raw);
     if (!subject && (!body || body === '<p><br></p>')) return;
+    nlRestoringDraft = true;
     const subjectEl = document.getElementById('nl-subject');
     if (subjectEl) subjectEl.value = subject || '';
     if (nlQuill && body) nlQuill.root.innerHTML = body;
+    nlRestoringDraft = false;
     nlShowDraftBanner('restored');
+    nlUpdateDraftBtn();
   } catch (e) {
+    nlRestoringDraft = false;
     // Corrupt draft — discard silently
     nlClearDraft(false);
   }
@@ -3248,11 +3305,14 @@ function nlApplyDraft() {
     const raw = localStorage.getItem(NL_DRAFT_KEY);
     if (!raw) return;
     const { subject, body } = JSON.parse(raw);
+    nlRestoringDraft = true;
     const subjectEl = document.getElementById('nl-subject');
     if (subjectEl) subjectEl.value = subject || '';
     if (nlQuill && body) nlQuill.root.innerHTML = body;
+    nlRestoringDraft = false;
     nlShowDraftBanner('restored');
-  } catch (e) { nlClearDraft(false); }
+    nlToggleDraftPanel(false);
+  } catch (e) { nlRestoringDraft = false; nlClearDraft(false); }
 }
 
 function nlDiscardDraft() {
@@ -3331,6 +3391,7 @@ function nlCreateEditor() {
 
   // Auto-save draft on any change (debounced 1.5 s)
   nlQuill.on('text-change', function() {
+    if (nlRestoringDraft) return;
     clearTimeout(nlDraftTimer);
     nlShowDraftStatus('Saving...');
     nlDraftTimer = setTimeout(nlSaveDraft, 1500);
@@ -3340,6 +3401,7 @@ function nlCreateEditor() {
   const subjectEl = document.getElementById('nl-subject');
   if (subjectEl) {
     subjectEl.addEventListener('input', function() {
+      if (nlRestoringDraft) return;
       clearTimeout(nlDraftTimer);
       nlShowDraftStatus('Saving...');
       nlDraftTimer = setTimeout(nlSaveDraft, 1500);
@@ -3468,11 +3530,14 @@ function clearNewsletter() {
   const confirmMsg = 'Clear the editor?' + (hasDraft ? ' Your saved draft will still be available to restore.' : '');
   if (!confirm(confirmMsg)) return;
   document.getElementById('nl-subject').value = '';
+  nlRestoringDraft = true;
   if (nlQuill) nlQuill.setText('');
+  nlRestoringDraft = false;
   const result = document.getElementById('nl-send-result');
   if (result) result.style.display = 'none';
   if (hasDraft) {
     nlShowDraftBanner('available');
+    nlToggleDraftPanel(true);
   } else {
     nlShowDraftStatus('');
   }
@@ -3502,7 +3567,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#1a1a1a;">'
     + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
     + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'
-    + '<div style="background-color:#2d1f8a;background-image:url(https://dicebastion.com/img/clubfull.png);background-size:cover;background-position:center 40%;">'
+    + '<div style="background-color:#2d1f8a;background-image:url(https://dicebastion.com/img/clubfull.png?v=2);background-size:cover;background-position:center 40%;">'
     + '<div style="background:linear-gradient(155deg,rgba(6,8,40,0.55) 0%,rgba(79,70,229,0.88) 100%);padding:36px 32px 32px 32px;">'
     + '<div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:rgba(255,255,255,0.6);margin-bottom:12px;">Dice Bastion</div>'
     + '<div style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'

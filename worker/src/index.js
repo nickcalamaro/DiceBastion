@@ -1333,7 +1333,7 @@ function wrapNewsletterHtml(bodyHtml, subject) {
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif;color:#1a1a1a;">'
     + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
     + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'
-    + '<div style="background-color:#2d1f8a;background-image:url(https://dicebastion.com/img/clubfull.png);background-size:cover;background-position:center 40%;">'
+    + '<div style="background-color:#2d1f8a;background-image:url(https://dicebastion.com/img/clubfull.png?v=2);background-size:cover;background-position:center 40%;">'
     + '<div style="background:linear-gradient(155deg,rgba(6,8,40,0.55) 0%,rgba(79,70,229,0.88) 100%);padding:36px 32px 32px 32px;">'
     + '<div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:rgba(255,255,255,0.6);margin-bottom:12px;">Dice Bastion</div>'
     + '<div style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
