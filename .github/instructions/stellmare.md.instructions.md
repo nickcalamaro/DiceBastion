@@ -6,18 +6,17 @@ applyTo: '**'
 
 The Stellmare SaaS platform lives at `C:\Users\nickc\Desktop\Dev\Stellmare\`.
 
-Before doing ANY Stellmare work, read `README.md` at the Stellmare repo root.
-It is the single source of truth. It contains:
-- Infrastructure status table
-- Key decisions and their rationale
-- Known issues
-- Roadmap with task checkboxes (Infrastructure, Phase 1, Phase 2)
+Before doing ANY Stellmare work, read these files at the Stellmare repo root:
 
-After completing work on Stellmare, UPDATE `README.md` to reflect:
-- Any roadmap tasks completed (tick the checkbox)
-- Any infrastructure status changes (update the table)
-- Any new decisions (add to Key Decisions table)
-- Any new known issues (add to Known Issues list)
-- Any resolved known issues (remove from the list)
+1. **`README.md`** — Architecture, project structure, build/deploy, roadmap status.
+2. **`SCHEMA.md`** — Database schema reference. Every table, column, type, and constraint. **Always consult before writing any database queries or inserts.**
+3. **`API.md`** — Full API reference. Every endpoint's request body, response JSON shape, query params, auth requirements, and error format. **Always consult before writing any frontend fetch() calls or handler changes.**
+
+These three files are the sources of truth. Use the exact field names documented there — never guess.
+
+After completing work on Stellmare, UPDATE the relevant docs:
+- `README.md` — roadmap checkboxes, infrastructure status, key decisions, known issues
+- `SCHEMA.md` — if you added/changed any database tables or columns
+- `API.md` — if you added/changed any API endpoints, request bodies, or response shapes
 
 `STATUS.md` exists only as an AI instruction pointer — do NOT duplicate information there.
