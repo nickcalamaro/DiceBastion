@@ -3601,7 +3601,6 @@ function buildCalendarHtml(events) {
       + '<td class="ec-cell" width="50%" valign="top" style="padding:0 0 12px 6px;vertical-align:top;">' + right + '</td>'
       + '</tr>';
   }
-  }
   return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 12px 0;">'
     + rows
     + '</table>';
