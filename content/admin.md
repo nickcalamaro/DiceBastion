@@ -3582,9 +3582,9 @@ function buildCalendarHtml(events) {
   function buildCard(ev) {
     const p = fmtDate(ev.event_datetime);
     const imgRow = ev.image_url
-      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + ev.image_url + '" alt="" width="100%" style="display:block;width:100%;height:160px;object-fit:cover;border-radius:8px 8px 0 0;" /></td></tr>'
+      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + ev.image_url + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
       : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
-    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;height:100%;">'
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
       + imgRow
       + '<tr><td style="padding:12px 14px 14px;background:#ffffff;">'
       + '<p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.07em;line-height:1;">' + p.dayName + '</p>'
@@ -3597,9 +3597,10 @@ function buildCalendarHtml(events) {
     const left = buildCard(events[i]);
     const right = events[i + 1] ? buildCard(events[i + 1]) : '';
     rows += '<tr>'
-      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 6px 12px 0;vertical-align:top;height:100%;">' + left + '</td>'
-      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 0 12px 6px;vertical-align:top;height:100%;">' + right + '</td>'
+      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 6px 12px 0;vertical-align:top;">' + left + '</td>'
+      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 0 12px 6px;vertical-align:top;">' + right + '</td>'
       + '</tr>';
+  }
   }
   return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 12px 0;">'
     + rows
