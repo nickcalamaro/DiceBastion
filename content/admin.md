@@ -3584,13 +3584,18 @@ function buildCalendarHtml(events) {
     const imgRow = ev.image_url
       ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + ev.image_url + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
       : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
-    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
+    const href = ev.slug ? 'https://dicebastion.com/events/' + ev.slug : 'https://dicebastion.com/events';
+    return '<a href="' + href + '" style="display:block;text-decoration:none;color:inherit;">'
+      + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
       + imgRow
       + '<tr><td style="padding:12px 14px 14px;background:#ffffff;">'
       + '<p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.07em;line-height:1;">' + p.dayName + '</p>'
-      + '<p style="margin:4px 0 2px;font-size:16px;font-weight:700;color:#111827;line-height:1.2;">' + p.dayOrdinal + ' ' + p.month + '</p>'
-      + '<p style="margin:0;font-size:13px;color:#6b7280;line-height:1;">' + p.time + '</p>'
-      + '</td></tr></table>';
+      + '<p style="margin:4px 0 6px;font-size:16px;font-weight:700;color:#111827;line-height:1.2;">' + p.dayOrdinal + ' ' + p.month + '</p>'
+      + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+      + '<tr><td style="font-size:13px;color:#6b7280;line-height:1;">' + p.time + '</td>'
+      + '<td style="text-align:right;"><span style="display:inline-block;background:#4f46e5;color:#ffffff;font-size:11px;font-weight:600;padding:5px 10px;border-radius:4px;text-decoration:none;">Sign Up</span></td>'
+      + '</tr></table>'
+      + '</td></tr></table></a>';
   }
   let rows = '';
   for (let i = 0; i < events.length; i += 2) {
@@ -3700,7 +3705,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
   const pReset = stO
     + 'p{margin:0 0 14px 0;padding:0;}'
     + 'h1{font-size:26px;font-weight:800;color:#111827;margin:0 0 16px 0;line-height:1.25;}'
-    + 'h2{font-size:20px;font-weight:700;color:#111827;margin:0 0 12px 0;line-height:1.3;padding-left:12px;border-left:3px solid #4f46e5;}'
+    + 'h2{font-size:20px;font-weight:700;color:#111827;margin:0 0 12px 0;line-height:1.3;}'
     + 'h3{font-size:17px;font-weight:700;color:#111827;margin:0 0 10px 0;line-height:1.35;}'
     + 'ul,ol{margin:0 0 14px 0;padding-left:1.5em;}li{margin:0 0 5px 0;}'
     + 'a{color:#4f46e5;}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0;}'
