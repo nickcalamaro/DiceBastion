@@ -811,7 +811,7 @@ Loading cron job logs...
 <h3 class="admin-m-0">Insert Event Calendar</h3>
 <button onclick="closeNlCalendarPicker()" class="btn btn-secondary btn-sm">Cancel</button>
 </div>
-<p style="font-size:0.875rem;color:rgb(var(--color-neutral-500));margin:0 0 1rem 0;">Select events to include. They appear in date order, two per row. Images are not included so the calendar reads well on mobile.</p>
+<p style="font-size:0.875rem;color:rgb(var(--color-neutral-500));margin:0 0 1rem 0;">Select events to include. They appear in date order, two per row, showing the event image and date.</p>
 <div id="nl-calendar-picker-list">
 <div style="text-align: center; padding: 1.5rem; color: rgb(var(--color-neutral-500));">Loading events...</div>
 </div>
@@ -3581,15 +3581,15 @@ function buildCalendarHtml(events) {
   }
   function buildCard(ev) {
     const p = fmtDate(ev.event_datetime);
-    const meta = ev.location ? p.time + ' · ' + ev.location : p.time;
+    const imgRow = ev.image_url
+      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + ev.image_url + '" alt="" width="100%" style="display:block;width:100%;height:160px;object-fit:cover;border-radius:8px 8px 0 0;" /></td></tr>'
+      : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
     return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;height:100%;">'
-      + '<tr><td style="background-color:#4f46e5;padding:10px 16px 10px 16px;border-radius:8px 8px 0 0;">'
-      + '<p style="margin:0;font-size:12px;font-weight:500;color:#c7d2fe;">' + p.dayName + '</p>'
-      + '<p style="margin:3px 0 0;font-size:15px;font-weight:700;color:#ffffff;">' + p.dayOrdinal + ' ' + p.month + '</p>'
-      + '</td></tr>'
-      + '<tr><td style="padding:10px 16px 12px;background:#ffffff;border-radius:0 0 8px 8px;">'
-      + '<p style="margin:0;font-size:14px;font-weight:600;color:#111827;line-height:1.4;">' + (ev.event_name || '') + '</p>'
-      + '<p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">' + meta + '</p>'
+      + imgRow
+      + '<tr><td style="padding:12px 14px 14px;background:#ffffff;">'
+      + '<p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.07em;line-height:1;">' + p.dayName + '</p>'
+      + '<p style="margin:4px 0 2px;font-size:16px;font-weight:700;color:#111827;line-height:1.2;">' + p.dayOrdinal + ' ' + p.month + '</p>'
+      + '<p style="margin:0;font-size:13px;color:#6b7280;line-height:1;">' + p.time + '</p>'
       + '</td></tr></table>';
   }
   let rows = '';
