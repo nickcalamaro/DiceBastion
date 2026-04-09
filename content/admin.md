@@ -3582,12 +3582,12 @@ function buildCalendarHtml(events) {
   function buildCard(ev) {
     const p = fmtDate(ev.event_datetime);
     const meta = ev.location ? p.time + ' · ' + ev.location : p.time;
-    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;">'
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;height:100%;">'
       + '<tr><td style="background-color:#4f46e5;padding:10px 16px 10px 16px;border-radius:8px 8px 0 0;">'
       + '<p style="margin:0;font-size:12px;font-weight:500;color:#c7d2fe;">' + p.dayName + '</p>'
       + '<p style="margin:3px 0 0;font-size:15px;font-weight:700;color:#ffffff;">' + p.dayOrdinal + ' ' + p.month + '</p>'
       + '</td></tr>'
-      + '<tr><td style="padding:10px 16px 12px;background:#ffffff;border:1px solid #dde0fa;border-top:none;border-radius:0 0 8px 8px;">'
+      + '<tr><td style="padding:10px 16px 12px;background:#ffffff;border-radius:0 0 8px 8px;">'
       + '<p style="margin:0;font-size:14px;font-weight:600;color:#111827;line-height:1.4;">' + (ev.event_name || '') + '</p>'
       + '<p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">' + meta + '</p>'
       + '</td></tr></table>';
@@ -3597,20 +3597,13 @@ function buildCalendarHtml(events) {
     const left = buildCard(events[i]);
     const right = events[i + 1] ? buildCard(events[i + 1]) : '';
     rows += '<tr>'
-      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 6px 12px 0;vertical-align:top;">' + left + '</td>'
-      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 0 12px 6px;vertical-align:top;">' + right + '</td>'
+      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 6px 12px 0;vertical-align:top;height:100%;">' + left + '</td>'
+      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 0 12px 6px;vertical-align:top;height:100%;">' + right + '</td>'
       + '</tr>';
   }
-  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 8px 0;">'
-    + '<tr><td style="background:#f8f9ff;border:1px solid #dde0fa;border-radius:10px;padding:20px 16px 8px 16px;">'
-    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
-    + '<tr><td style="padding:0 0 16px 12px;border-left:3px solid #4f46e5;">'
-    + '<p style="margin:0;font-size:10px;font-weight:700;color:#4f46e5;text-transform:uppercase;letter-spacing:0.1em;">Calendar</p>'
-    + '<h2 style="margin:4px 0 0;font-size:18px;font-weight:700;color:#111827;padding:0;">Upcoming Events</h2>'
-    + '</td></tr></table>'
-    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 12px 0;">'
     + rows
-    + '</table></td></tr></table>';
+    + '</table>';
 }
 
 function openNlCalendarPicker() {
