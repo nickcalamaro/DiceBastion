@@ -774,7 +774,7 @@ Loading cron job logs...
 <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
 <span class="ql-formats"><button class="ql-list" value="bullet"></button><button class="ql-list" value="ordered"></button></span>
 <span class="ql-formats"><button class="ql-link"></button></span>
-<span class="ql-formats nl-extra-fmts"><button type="button" onclick="nlInsertDivider()" class="nl-tb-btn">Divider</button><button type="button" onclick="openNlEventPicker()" class="nl-tb-btn nl-tb-event-btn">Insert Event</button></span>
+<span class="ql-formats nl-extra-fmts"><button type="button" onclick="nlInsertDivider()" class="nl-tb-btn">Divider</button><button type="button" onclick="openNlEventPicker()" class="nl-tb-btn nl-tb-event-btn">Insert Event</button><button type="button" onclick="openNlCalendarPicker()" class="nl-tb-btn nl-tb-calendar-btn">Event Calendar</button></span>
 </div>
 <div id="nl-editor"></div>
 </div>
@@ -800,6 +800,24 @@ Loading cron job logs...
 </div>
 <div id="nl-event-picker-list">
 <div style="text-align: center; padding: 1.5rem; color: rgb(var(--color-neutral-500));">Loading events...</div>
+</div>
+</div>
+</div>
+
+<!-- Calendar Picker Modal -->
+<div id="nl-calendar-picker" class="nl-modal" style="display: none;">
+<div class="nl-modal-box">
+<div class="admin-flex-between admin-mb-2">
+<h3 class="admin-m-0">Insert Event Calendar</h3>
+<button onclick="closeNlCalendarPicker()" class="btn btn-secondary btn-sm">Cancel</button>
+</div>
+<p style="font-size:0.875rem;color:rgb(var(--color-neutral-500));margin:0 0 1rem 0;">Select events to include. They appear in date order, two per row. Images are not included so the calendar reads well on mobile.</p>
+<div id="nl-calendar-picker-list">
+<div style="text-align: center; padding: 1.5rem; color: rgb(var(--color-neutral-500));">Loading events...</div>
+</div>
+<div style="margin-top:1.25rem;display:flex;gap:0.75rem;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
+<button onclick="nlCalendarToggleAll()" class="btn btn-secondary btn-sm" id="nl-cal-toggle-all-btn">Deselect All</button>
+<button onclick="insertNlCalendarBlock()" class="btn btn-primary">Insert Calendar</button>
 </div>
 </div>
 </div>
@@ -843,6 +861,8 @@ Loading cron job logs...
 .dark .nl-tb-btn:hover { background: rgb(var(--color-neutral-700)); }
 .nl-tb-event-btn { background: rgb(var(--color-secondary-600)) !important; color: white !important; border-color: rgb(var(--color-secondary-600)) !important; }
 .nl-tb-event-btn:hover { background: rgb(var(--color-secondary-700)) !important; }
+.nl-tb-calendar-btn { background: #312e81 !important; color: white !important; border-color: #312e81 !important; }
+.nl-tb-calendar-btn:hover { background: #3730a3 !important; }
 .nl-extra-fmts { border-left: 1px solid rgb(var(--color-neutral-200)); padding-left: 8px; margin-left: 4px; display: inline-flex; gap: 4px; align-items: center; vertical-align: middle; }
 .dark .nl-extra-fmts { border-left-color: rgb(var(--color-neutral-700)); }
 .nl-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 1rem; }
@@ -882,6 +902,15 @@ Loading cron job logs...
 .dark #nl-quill-wrap .ql-picker { color: rgb(var(--color-neutral-300)); }
 .dark #nl-quill-wrap .ql-picker-options { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-200)); }
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
+.nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
+.dark .nl-cal-check-card { border-color: rgb(var(--color-neutral-700)); }
+.nl-cal-check-card:hover { background: rgb(var(--color-primary-50)); }
+.dark .nl-cal-check-card:hover { background: rgba(var(--color-primary-900), 0.2); }
+.nl-cal-check-card input[type="checkbox"] { flex-shrink: 0; accent-color: rgb(var(--color-primary-600)); width: 16px; height: 16px; margin-top: 3px; }
+.nl-cal-card-title { font-weight: 600; font-size: 0.9rem; color: rgb(var(--color-neutral-900)); }
+.dark .nl-cal-card-title { color: rgb(var(--color-neutral-100)); }
+.nl-cal-card-date { font-size: 0.8rem; color: rgb(var(--color-neutral-500)); margin-top: 2px; }
 </style>
 
 <!-- Image Crop Modal -->
@@ -3372,6 +3401,24 @@ function nlCreateEditor() {
   EventCardBlot.className = 'nl-event-card-embed';
   Quill.register(EventCardBlot);
 
+  // Custom blot: renders a non-editable 2-column events calendar grid
+  class CalendarBlot extends BlockEmbed {
+    static create(html) {
+      const node = super.create();
+      node.setAttribute('data-card', html);
+      node.innerHTML = html;
+      node.contentEditable = 'false';
+      return node;
+    }
+    static value(node) {
+      return node.getAttribute('data-card');
+    }
+  }
+  CalendarBlot.blotName = 'event-calendar';
+  CalendarBlot.tagName = 'div';
+  CalendarBlot.className = 'nl-calendar-embed';
+  Quill.register(CalendarBlot);
+
   nlQuill = new Quill('#nl-editor', {
     theme: 'snow',
     placeholder: 'Start writing your newsletter...',
@@ -3517,6 +3564,97 @@ function insertNlEventBlock(idx) {
   nlQuill.setSelection(index + 1, 0, 'user');
 }
 
+function buildCalendarHtml(events) {
+  if (!events || events.length === 0) return '';
+  const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    const h = d.getHours(), mn = d.getMinutes();
+    const ampm = h < 12 ? 'AM' : 'PM';
+    const dh = h % 12 || 12;
+    return { dayName: DAY_NAMES[d.getDay()], dayNum: d.getDate(), month: MONTH_NAMES[d.getMonth()], year: d.getFullYear(), time: dh + ':' + String(mn).padStart(2,'0') + ' ' + ampm };
+  }
+  function buildCard(ev) {
+    const p = fmtDate(ev.event_datetime);
+    const meta = ev.location ? p.time + ' · ' + ev.location : p.time;
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">'
+      + '<tr><td style="background-color:#4f46e5;padding:10px 14px 8px 14px;border-radius:6px 6px 0 0;">'
+      + '<p style="margin:0;font-size:10px;font-weight:700;color:#c7d2fe;text-transform:uppercase;letter-spacing:0.1em;">' + p.dayName + ' &middot; ' + p.month + ' ' + p.year + '</p>'
+      + '<p style="margin:2px 0 0;font-size:26px;font-weight:700;color:#ffffff;line-height:1;">' + p.dayNum + '</p>'
+      + '</td></tr>'
+      + '<tr><td style="padding:12px 14px 14px 14px;background:#ffffff;">'
+      + '<p style="margin:0;font-size:14px;font-weight:600;color:#111827;line-height:1.4;">' + (ev.event_name || '') + '</p>'
+      + '<p style="margin:5px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">' + meta + '</p>'
+      + '</td></tr></table>';
+  }
+  let rows = '';
+  for (let i = 0; i < events.length; i += 2) {
+    const left = buildCard(events[i]);
+    const right = events[i + 1] ? buildCard(events[i + 1]) : '';
+    rows += '<tr>'
+      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 6px 12px 0;vertical-align:top;">' + left + '</td>'
+      + '<td class="ec-cell" width="50%" valign="top" style="padding:0 0 12px 6px;vertical-align:top;">' + right + '</td>'
+      + '</tr>';
+  }
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 8px 0;">'
+    + '<tr><td colspan="2" style="padding:0 0 14px 0;"><h2 style="margin:0;font-size:16px;font-weight:600;color:#111827;">Upcoming Events</h2></td></tr>'
+    + rows
+    + '</table>';
+}
+
+function openNlCalendarPicker() {
+  renderNlCalendarPickerList();
+  document.getElementById('nl-calendar-picker').style.display = 'flex';
+}
+
+function closeNlCalendarPicker() {
+  document.getElementById('nl-calendar-picker').style.display = 'none';
+}
+
+function renderNlCalendarPickerList() {
+  const list = document.getElementById('nl-calendar-picker-list');
+  if (!list) return;
+  if (!nlEvents || nlEvents.length === 0) {
+    list.innerHTML = '<div style="text-align:center;padding:1.5rem;color:rgb(var(--color-neutral-500));">No upcoming events found.</div>';
+    return;
+  }
+  list.innerHTML = nlEvents.map((ev, idx) => {
+    const dt = new Date(ev.event_datetime);
+    const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
+    const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const locationSuffix = ev.location ? ' &middot; ' + ev.location : '';
+    return '<label class="nl-cal-check-card">'
+      + '<input type="checkbox" name="nl-cal-ev" value="' + idx + '" checked>'
+      + '<div>'
+      + '<div class="nl-cal-card-title">' + (ev.event_name || '') + '</div>'
+      + '<div class="nl-cal-card-date">' + dateStr + ' at ' + timeStr + locationSuffix + '</div>'
+      + '</div></label>';
+  }).join('');
+  const btn = document.getElementById('nl-cal-toggle-all-btn');
+  if (btn) btn.textContent = 'Deselect All';
+}
+
+function nlCalendarToggleAll() {
+  const boxes = document.querySelectorAll('#nl-calendar-picker-list input[type="checkbox"]');
+  const allChecked = Array.from(boxes).every(b => b.checked);
+  boxes.forEach(b => { b.checked = !allChecked; });
+  const btn = document.getElementById('nl-cal-toggle-all-btn');
+  if (btn) btn.textContent = allChecked ? 'Select All' : 'Deselect All';
+}
+
+function insertNlCalendarBlock() {
+  const boxes = document.querySelectorAll('#nl-calendar-picker-list input[type="checkbox"]:checked');
+  const selected = Array.from(boxes).map(b => nlEvents[parseInt(b.value)]).filter(Boolean);
+  closeNlCalendarPicker();
+  if (!nlQuill || selected.length === 0) return;
+  const calHtml = buildCalendarHtml(selected);
+  const range = nlQuill.getSelection(true);
+  const index = range ? range.index : nlQuill.getLength() - 1;
+  nlQuill.insertEmbed(index, 'event-calendar', calHtml, 'user');
+  nlQuill.setSelection(index + 1, 0, 'user');
+}
+
 function nlInsertDivider() {
   if (!nlQuill) return;
   const range = nlQuill.getSelection(true);
@@ -3549,6 +3687,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
     .replace(/ contenteditable="[^"]*"/g, '')
     .replace(/class="nl-event-card-embed"/g,
       'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
     .replace(/ class="ql-[^"]*"/g, '')
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
   // Goldmark terminates a script block on a literal closing style tag,
@@ -3563,7 +3702,8 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + 'ul,ol{margin:0 0 14px 0;padding-left:1.5em;}li{margin:0 0 5px 0;}'
     + 'a{color:#4f46e5;}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0;}'
     + stC;
-  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + '</head>'
+  const ecMedia = stO + '@media only screen and (max-width:480px){.ec-cell{display:block!important;width:100%!important;padding:0 0 12px 0!important;}}' + stC;
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + ecMedia + '</head>'
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#1a1a1a;">'
     + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
     + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'
