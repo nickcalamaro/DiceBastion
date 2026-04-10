@@ -7021,37 +7021,14 @@ app.get('/admin/newsletter/events', requireAdmin, async c => {
 /**
  * GET /unsubscribe?token=<token>
  * Public endpoint — no auth required.
- * Validates the single-use token, removes marketing consent, shows a confirmation page.
- * Works for any recipient including those without a site password.
+ * Validates the single-use token, removes marketing consent, returns JSON.
+ * The dicebastion.com/unsubscribe Hugo page calls this and renders the result.
  */
 app.get('/unsubscribe', async c => {
   const token = c.req.query('token')
 
-  const unsubPage = (title, body, isError = false) =>
-    c.html(`<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title} - Dice Bastion</title>
-<style>
-  *{box-sizing:border-box;}
-  body{margin:0;padding:40px 16px;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#1a1a1a;}
-  .card{max-width:520px;margin:0 auto;background:#fff;border-radius:16px;border:1px solid #dde0fa;padding:48px 40px;text-align:center;}
-  .logo{font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#9ca3af;margin-bottom:32px;}
-  h1{font-size:22px;font-weight:800;color:#111827;margin:0 0 12px 0;}
-  p{font-size:15px;color:#6b7280;line-height:1.65;margin:0 0 20px 0;}
-  .back{display:inline-block;margin-top:8px;font-size:14px;color:#9ca3af;text-decoration:underline;}
-  .accent{width:48px;height:4px;background:#4f46e5;border-radius:2px;margin:0 auto 28px;}
-</style>
-</head><body><div class="card">
-<div class="logo">Dice Bastion</div>
-<div class="accent"></div>
-<h1>${title}</h1>
-${body}
-<a href="https://dicebastion.com" class="back">Return to Dice Bastion</a>
-</div></body></html>`, isError ? 400 : 200)
-
   if (!token) {
-    return unsubPage('Invalid Link', '<p>This unsubscribe link is missing a token. Please use the link from your email.</p>', true)
+    return c.json({ success: false, error: 'missing_token' }, 400)
   }
 
   try {
@@ -7062,17 +7039,17 @@ ${body}
     `).bind(token).first()
 
     if (!row) {
-      return unsubPage('Link Not Found', '<p>This unsubscribe link is invalid. It may have already been used or the link may be incorrect.</p><p>You can also manage your preferences by logging into your account.</p>', true)
+      return c.json({ success: false, error: 'invalid_token' }, 404)
     }
 
     if (row.used) {
-      // Idempotent — already unsubscribed, show success rather than an error
-      return unsubPage('Already Unsubscribed', '<p>You have already unsubscribed from Dice Bastion marketing emails. You will not receive any further newsletters.</p><p>If you change your mind, you can re-enable emails from your account settings.</p>')
+      // Idempotent — already unsubscribed
+      return c.json({ success: true, already: true })
     }
 
     const now = new Date().toISOString()
     if (row.expires_at < now) {
-      return unsubPage('Link Expired', '<p>This unsubscribe link has expired. Please log into your account to manage your email preferences.</p>', true)
+      return c.json({ success: false, error: 'expired_token' }, 410)
     }
 
     // Remove marketing consent
@@ -7087,10 +7064,10 @@ ${body}
       UPDATE newsletter_unsub_tokens SET used = 1 WHERE id = ?
     `).bind(row.id).run()
 
-    return unsubPage('Unsubscribed', '<p>You have been successfully unsubscribed from Dice Bastion newsletters. You will not receive any further marketing emails.</p><p>If you change your mind, you can re-enable emails from your account settings.</p>')
+    return c.json({ success: true })
   } catch (e) {
     console.error('[Unsubscribe] error:', e)
-    return unsubPage('Something Went Wrong', '<p>We could not process your request. Please try again or contact us at hello@dicebastion.com.</p>', true)
+    return c.json({ success: false, error: 'server_error' }, 500)
   }
 })
 
