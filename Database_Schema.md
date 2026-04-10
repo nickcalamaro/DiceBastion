@@ -277,3 +277,23 @@ CREATE INDEX idx_donations_status ON donations(payment_status);
 CREATE INDEX idx_donations_order_ref ON donations(order_ref);
 CREATE INDEX idx_newsletter_unsub_tokens_token ON newsletter_unsub_tokens(token);
 CREATE INDEX idx_newsletter_unsub_tokens_user ON newsletter_unsub_tokens(user_id);
+CREATE INDEX idx_newsletter_drafts_status ON newsletter_drafts(status);
+CREATE INDEX idx_newsletter_drafts_scheduled ON newsletter_drafts(scheduled_for) WHERE status = 'scheduled';
+
+## newsletter_drafts
+
+Server-side persistent newsletter drafts with scheduling support.
+
+```sql
+CREATE TABLE newsletter_drafts (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  subject          TEXT    NOT NULL DEFAULT '',
+  html             TEXT    NOT NULL DEFAULT '',
+  status           TEXT    NOT NULL DEFAULT 'draft',  -- 'draft' | 'scheduled' | 'sent' | 'failed'
+  scheduled_for    TEXT,            -- ISO 8601 datetime; NULL unless status = 'scheduled'
+  sent_at          TEXT,            -- ISO 8601 datetime; set when status transitions to 'sent'
+  recipients_count INTEGER,         -- number of recipients actually sent to
+  created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```

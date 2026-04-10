@@ -735,32 +735,27 @@ Loading cron job logs...
 <div class="admin-flex-between admin-mb-2">
 <h2 class="admin-m-0">Newsletter Builder</h2>
 <div style="display:flex;gap:0.75rem;align-items:center;">
-  <button type="button" id="nl-drafts-btn" onclick="nlToggleDraftPanel()" class="btn btn-secondary btn-sm" style="display:none;position:relative;">Saved draft <span id="nl-draft-dot" style="display:inline-block;width:7px;height:7px;background:#10b981;border-radius:50%;margin-left:4px;vertical-align:middle;"></span></button>
+  <button type="button" id="nl-newsletters-btn" onclick="nlToggleNewslettersPanel()" class="btn btn-secondary btn-sm">Saved Newsletters</button>
   <div id="nl-recipient-badge" class="nl-badge">Loading recipients...</div>
 </div>
 </div>
-<div id="nl-draft-panel" class="nl-draft-panel" style="display:none;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
-    <div>
-      <div style="font-weight:600;font-size:0.875rem;margin-bottom:3px;">Saved draft</div>
-      <div id="nl-draft-panel-subject" style="font-size:0.875rem;margin-bottom:2px;"></div>
-      <div id="nl-draft-panel-meta" style="font-size:0.78rem;opacity:0.65;"></div>
-    </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0;">
-      <button type="button" onclick="nlApplyDraft()" class="btn btn-secondary btn-sm">Load into editor</button>
-      <button type="button" onclick="nlDiscardDraft()" class="nl-draft-discard-btn" style="font-size:0.875rem;">Delete draft</button>
-    </div>
+
+<!-- Saved Newsletters Panel -->
+<div id="nl-newsletters-panel" class="nl-newsletters-panel" style="display:none;">
+  <div id="nl-newsletters-list">
+    <div style="text-align:center;padding:1.5rem;color:rgb(var(--color-neutral-500));">Loading...</div>
+  </div>
+</div>
+
+<!-- Active draft / editing banner -->
+<div id="nl-active-banner" class="nl-draft-banner nl-banner-restored" style="display:none;">
+  <span id="nl-active-banner-msg"></span>
+  <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0;">
+    <button type="button" onclick="nlNewDraft()" class="nl-draft-discard-btn">New newsletter</button>
   </div>
 </div>
 
 <div class="card card-compact admin-mb-2">
-<div id="nl-draft-banner" class="nl-draft-banner" style="display:none;">
-  <span id="nl-draft-banner-msg"></span>
-  <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0;">
-    <button type="button" id="nl-draft-restore-btn" onclick="nlApplyDraft()" class="btn btn-secondary btn-sm" style="display:none;">Restore draft</button>
-    <button type="button" onclick="nlDiscardDraft()" class="nl-draft-discard-btn">Discard draft</button>
-  </div>
-</div>
 <div class="form-group">
 <label class="form-label">Subject Line</label>
 <input type="text" id="nl-subject" class="form-input" placeholder="e.g. This Month at Dice Bastion">
@@ -786,7 +781,9 @@ Loading cron job logs...
 <span id="nl-draft-status" class="nl-draft-status"></span>
 <button onclick="clearNewsletter()" class="btn btn-secondary">Clear</button>
 <button onclick="previewNewsletter()" class="btn btn-secondary">Preview</button>
-<button onclick="sendNewsletter()" class="btn btn-primary" id="nl-send-btn">Send Newsletter</button>
+<button onclick="nlServerSaveDraft()" class="btn btn-secondary" id="nl-save-draft-btn">Save Draft</button>
+<button onclick="nlOpenScheduleModal()" class="btn btn-secondary" id="nl-schedule-btn">Schedule</button>
+<button onclick="sendNewsletter()" class="btn btn-primary" id="nl-send-btn">Send Now</button>
 </div>
 <div id="nl-send-result" style="display: none;"></div>
 </div>
@@ -830,6 +827,25 @@ Loading cron job logs...
 <button onclick="closeNlPreview()" class="btn btn-secondary btn-sm">Close</button>
 </div>
 <iframe id="nl-preview-frame" style="width: 100%; height: min(82vh, 700px); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 8px; background: white;"></iframe>
+</div>
+</div>
+
+<!-- Schedule Modal -->
+<div id="nl-schedule-modal" class="nl-modal" style="display: none;">
+<div class="nl-modal-box" style="max-width:440px;">
+<div class="admin-flex-between admin-mb-2">
+<h3 class="admin-m-0">Schedule Newsletter</h3>
+<button onclick="nlCloseScheduleModal()" class="btn btn-secondary btn-sm">Cancel</button>
+</div>
+<p style="font-size:0.875rem;color:rgb(var(--color-neutral-500));margin:0 0 1.25rem 0;">Choose when to send this newsletter. The daily job at 2 AM UTC will dispatch it automatically.</p>
+<div class="form-group">
+<label class="form-label">Send At</label>
+<input type="datetime-local" id="nl-schedule-datetime" class="form-input">
+</div>
+<div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.25rem;">
+<button onclick="nlCloseScheduleModal()" class="btn btn-secondary">Cancel</button>
+<button onclick="nlConfirmSchedule()" class="btn btn-primary" id="nl-schedule-confirm-btn">Schedule</button>
+</div>
 </div>
 </div>
 
@@ -885,8 +901,27 @@ Loading cron job logs...
 .dark .nl-draft-banner.nl-banner-available { background: rgba(30,64,175,0.12); border-color: rgba(147,197,253,0.3); color: rgb(var(--color-primary-300)); }
 .nl-draft-discard-btn { background: none; border: none; cursor: pointer; font-size: 0.8rem; text-decoration: underline; padding: 0; opacity: 0.75; color: inherit; }
 .nl-draft-discard-btn:hover { opacity: 1; }
-.nl-draft-panel { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px 16px; margin-bottom: 1rem; color: #1e3a8a; }
-.dark .nl-draft-panel { background: rgba(30,64,175,0.12); border-color: rgba(147,197,253,0.25); color: rgb(var(--color-primary-200)); }
+/* Saved newsletters panel */
+.nl-newsletters-panel { background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; max-height: 360px; overflow-y: auto; }
+.dark .nl-newsletters-panel { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-700)); }
+.nl-saved-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 0.875rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; margin-bottom: 0.5rem; background: white; flex-wrap: wrap; }
+.nl-saved-item:last-child { margin-bottom: 0; }
+.dark .nl-saved-item { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.nl-saved-item-active { border-color: rgb(var(--color-primary-400)); background: rgb(var(--color-primary-50)) !important; }
+.dark .nl-saved-item-active { border-color: rgba(var(--color-primary-500),0.5); background: rgba(var(--color-primary-900),0.25) !important; }
+.nl-saved-item-subject { font-weight: 600; font-size: 0.9rem; color: rgb(var(--color-neutral-900)); margin-bottom: 3px; }
+.dark .nl-saved-item-subject { color: rgb(var(--color-neutral-100)); }
+.nl-saved-item-meta { font-size: 0.78rem; color: rgb(var(--color-neutral-500)); }
+.nl-saved-item-actions { display: flex; gap: 0.5rem; flex-shrink: 0; flex-wrap: wrap; }
+.nl-status-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.nl-status-draft { background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-600)); }
+.nl-status-scheduled { background: #dbeafe; color: #1d4ed8; }
+.nl-status-sent { background: #dcfce7; color: #15803d; }
+.nl-status-failed { background: #fee2e2; color: #dc2626; }
+.dark .nl-status-draft { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-300)); }
+.dark .nl-status-scheduled { background: rgba(29,78,216,0.2); color: #93c5fd; }
+.dark .nl-status-sent { background: rgba(21,128,61,0.2); color: #86efac; }
+.dark .nl-status-failed { background: rgba(220,38,38,0.2); color: #fca5a5; }
 .nl-send-result { padding: 1rem 1.25rem; border-radius: 8px; margin-top: 1rem; font-size: 0.9rem; }
 .nl-send-result.nl-success { background: rgb(var(--color-success-50)); border: 1px solid rgb(var(--color-success-200)); color: rgb(var(--color-success-700)); }
 .nl-send-result.nl-error { background: rgb(var(--color-danger-50)); border: 1px solid rgb(var(--color-danger-200)); color: rgb(var(--color-danger-700)); }
@@ -3223,26 +3258,25 @@ async function requestIndexing(type, slug, btn) {
 // ==================== Newsletter Builder ====================
 
 let nlEvents = [];
-const NL_DRAFT_KEY = 'nl_draft_v1';
+let nlActiveDraftId = null;         // ID of the server-side draft being edited (null = new)
+const NL_DRAFT_KEY = 'nl_draft_v1'; // localStorage key for crash-recovery autosave
 let nlDraftTimer = null;
 let nlRestoringDraft = false;
 
+// ---- localStorage crash-recovery autosave ----
+// These functions silently persist the editor contents to localStorage as a
+// safety net against browser crashes. They are NOT the primary save mechanism —
+// the server-side "Save Draft" button is.
 function nlSaveDraft() {
   const subject = document.getElementById('nl-subject')?.value || '';
   const body = nlQuill ? nlQuill.root.innerHTML : '';
-  // Don't persist an empty editor
   if (!subject.trim() && (!body || body === '<p><br></p>')) return;
   localStorage.setItem(NL_DRAFT_KEY, JSON.stringify({ subject, body, saved: Date.now() }));
-  nlShowDraftStatus('Draft saved');
-  nlUpdateDraftBtn();
 }
 
 function nlClearDraft(showMsg) {
   clearTimeout(nlDraftTimer);
   localStorage.removeItem(NL_DRAFT_KEY);
-  if (showMsg !== false) nlShowDraftStatus('');
-  nlShowDraftBanner(false);
-  nlUpdateDraftBtn();
 }
 
 function nlShowDraftStatus(msg) {
@@ -3252,102 +3286,284 @@ function nlShowDraftStatus(msg) {
   el.classList.toggle('saved', !!msg);
 }
 
-function nlShowDraftBanner(mode) {
-  const banner = document.getElementById('nl-draft-banner');
-  const msgEl = document.getElementById('nl-draft-banner-msg');
-  const restoreBtn = document.getElementById('nl-draft-restore-btn');
-  if (!banner) return;
-  if (!mode) { banner.style.display = 'none'; return; }
-  try {
-    const raw = localStorage.getItem(NL_DRAFT_KEY);
-    if (!raw) { banner.style.display = 'none'; return; }
-    const { subject, saved } = JSON.parse(raw);
-    const mins = Math.round((Date.now() - saved) / 60000);
-    const hrs = Math.round(mins / 60);
-    const agoStr = mins < 1 ? 'less than a minute ago' : mins < 60 ? (mins === 1 ? '1 minute ago' : mins + ' minutes ago') : (hrs === 1 ? '1 hour ago' : hrs + ' hours ago');
-    const sub = subject ? (subject.length > 45 ? subject.slice(0, 45) + '...' : subject) : '(no subject)';
-    banner.className = 'nl-draft-banner ' + (mode === 'restored' ? 'nl-banner-restored' : 'nl-banner-available');
-    if (mode === 'restored') {
-      if (msgEl) msgEl.textContent = 'Draft restored — saved ' + agoStr + '. Subject: "' + sub + '"';
-      if (restoreBtn) restoreBtn.style.display = 'none';
-    } else {
-      if (msgEl) msgEl.textContent = 'Saved draft available from ' + agoStr + '. Subject: "' + sub + '"';
-      if (restoreBtn) restoreBtn.style.display = '';
-    }
-    banner.style.display = 'flex';
-  } catch (e) { banner.style.display = 'none'; }
+// ---- Server-side newsletters panel ----
+
+function formatRelative(isoStr) {
+  if (!isoStr) return '';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + (mins === 1 ? ' min ago' : ' mins ago');
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+  const days = Math.round(hrs / 24);
+  return days + (days === 1 ? ' day ago' : ' days ago');
 }
 
-function nlToggleDraftPanel(force) {
-  const panel = document.getElementById('nl-draft-panel');
-  if (!panel) return;
-  const isVisible = panel.style.display !== 'none';
-  const show = force !== undefined ? !!force : !isVisible;
-  if (show) {
-    try {
-      const raw = localStorage.getItem(NL_DRAFT_KEY);
-      if (!raw) { panel.style.display = 'none'; return; }
-      const { subject, saved } = JSON.parse(raw);
-      const mins = Math.round((Date.now() - saved) / 60000);
-      const hrs = Math.round(mins / 60);
-      const timeStr = mins < 1 ? 'just now' : mins < 60 ? (mins === 1 ? '1 min ago' : mins + ' min ago') : (hrs === 1 ? '1 hour ago' : hrs + ' hours ago');
-      const subEl = document.getElementById('nl-draft-panel-subject');
-      const metaEl = document.getElementById('nl-draft-panel-meta');
-      if (subEl) subEl.textContent = subject ? '"' + subject + '"' : '(no subject)';
-      if (metaEl) metaEl.textContent = 'Last saved ' + timeStr;
-    } catch (e) {}
-    panel.style.display = 'block';
+function nlUpdateActiveBanner(draft) {
+  const banner = document.getElementById('nl-active-banner');
+  const msgEl = document.getElementById('nl-active-banner-msg');
+  if (!banner) return;
+  if (!nlActiveDraftId || !draft) { banner.style.display = 'none'; return; }
+  let msg = '';
+  if (draft.status === 'scheduled' && draft.scheduled_for) {
+    const timeStr = new Date(draft.scheduled_for).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
+    msg = 'Editing scheduled newsletter — sends ' + timeStr;
+    banner.className = 'nl-draft-banner nl-banner-available';
+  } else if (draft.status === 'sent') {
+    msg = 'Viewing sent newsletter (read only)';
+    banner.className = 'nl-draft-banner nl-banner-restored';
   } else {
+    msg = 'Editing saved draft';
+    banner.className = 'nl-draft-banner nl-banner-restored';
+  }
+  if (msgEl) msgEl.textContent = msg;
+  banner.style.display = 'flex';
+}
+
+function nlToggleNewslettersPanel() {
+  const panel = document.getElementById('nl-newsletters-panel');
+  if (!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  if (isOpen) {
     panel.style.display = 'none';
+  } else {
+    panel.style.display = 'block';
+    nlLoadDraftsList();
   }
 }
 
-function nlUpdateDraftBtn() {
-  const btn = document.getElementById('nl-drafts-btn');
-  const hasDraft = !!localStorage.getItem(NL_DRAFT_KEY);
-  if (btn) btn.style.display = hasDraft ? '' : 'none';
-  if (!hasDraft) nlToggleDraftPanel(false);
+async function nlLoadDraftsList() {
+  const listEl = document.getElementById('nl-newsletters-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="text-align:center;padding:1.5rem;color:rgb(var(--color-neutral-500));">Loading...</div>';
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletters`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const drafts = await res.json();
+    if (!Array.isArray(drafts) || drafts.length === 0) {
+      listEl.innerHTML = '<div style="text-align:center;padding:1.5rem;color:rgb(var(--color-neutral-500));">No saved newsletters yet. Use Save Draft to save your work.</div>';
+      return;
+    }
+    listEl.innerHTML = drafts.map(d => {
+      const statusLabel = { draft: 'Draft', scheduled: 'Scheduled', sent: 'Sent', failed: 'Failed' }[d.status] || d.status;
+      const sub = (d.subject || '(no subject)').replace(/</g, '&lt;');
+      let metaText = '';
+      if (d.status === 'scheduled' && d.scheduled_for) {
+        metaText = 'Scheduled for ' + new Date(d.scheduled_for).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
+      } else if (d.status === 'sent' && d.sent_at) {
+        metaText = 'Sent ' + formatRelative(d.sent_at) + (d.recipients_count != null ? ' &middot; ' + d.recipients_count + ' recipients' : '');
+      } else {
+        metaText = 'Updated ' + formatRelative(d.updated_at);
+      }
+      const isActive = d.id === nlActiveDraftId;
+      const editLabel = isActive ? 'Editing' : (d.status === 'sent' ? 'View' : 'Edit');
+      const editBtn = `<button onclick="nlLoadServerDraft(${d.id})" class="btn btn-secondary btn-sm"${isActive ? ' disabled' : ''}>${editLabel}</button>`;
+      const sendBtn = d.status === 'scheduled' ? `<button onclick="nlSendScheduledNow(${d.id})" class="btn btn-primary btn-sm">Send Now</button>` : '';
+      const deleteBtn = d.status !== 'sent' ? `<button onclick="nlDeleteServerDraft(${d.id})" class="btn btn-secondary btn-sm">Delete</button>` : '';
+      return `<div class="nl-saved-item${isActive ? ' nl-saved-item-active' : ''}">
+        <div class="nl-saved-item-info">
+          <div class="nl-saved-item-subject">${sub}</div>
+          <div class="nl-saved-item-meta"><span class="nl-status-badge nl-status-${d.status}">${statusLabel}</span> &nbsp;${metaText}</div>
+        </div>
+        <div class="nl-saved-item-actions">${editBtn}${sendBtn}${deleteBtn}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = '<div style="text-align:center;padding:1.5rem;color:rgb(var(--color-danger-600));">Failed to load. Please try again.</div>';
+  }
 }
 
-function nlRestoreDraft() {
+async function nlServerSaveDraft() {
+  const subject = document.getElementById('nl-subject')?.value || '';
+  const html = nlQuill ? nlQuill.root.innerHTML : '';
+  const btn = document.getElementById('nl-save-draft-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  nlShowDraftStatus('Saving...');
   try {
-    const raw = localStorage.getItem(NL_DRAFT_KEY);
-    if (!raw) return;
-    const { subject, body } = JSON.parse(raw);
-    if (!subject && (!body || body === '<p><br></p>')) return;
+    let draft;
+    if (nlActiveDraftId) {
+      const res = await fetch(`${API_BASE}/admin/newsletters/${nlActiveDraftId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+        body: JSON.stringify({ subject, html })
+      });
+      if (!res.ok) throw new Error('Update failed');
+      draft = { id: nlActiveDraftId, status: 'draft', subject };
+    } else {
+      const res = await fetch(`${API_BASE}/admin/newsletters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+        body: JSON.stringify({ subject, html })
+      });
+      if (!res.ok) throw new Error('Create failed');
+      const data = await res.json();
+      nlActiveDraftId = data.id;
+      draft = { id: nlActiveDraftId, status: 'draft', subject };
+    }
+    nlShowDraftStatus('Saved');
+    nlUpdateActiveBanner(draft);
+    setTimeout(() => nlShowDraftStatus(''), 3000);
+    // Refresh list if panel is open
+    const panel = document.getElementById('nl-newsletters-panel');
+    if (panel && panel.style.display !== 'none') nlLoadDraftsList();
+  } catch (e) {
+    nlShowDraftStatus('Save failed');
+    console.error('nlServerSaveDraft error:', e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Draft'; }
+  }
+}
+
+async function nlLoadServerDraft(id) {
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletters/${id}`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    if (!res.ok) throw new Error('Failed to load');
+    const draft = await res.json();
     nlRestoringDraft = true;
     const subjectEl = document.getElementById('nl-subject');
-    if (subjectEl) subjectEl.value = subject || '';
-    if (nlQuill && body) nlQuill.root.innerHTML = body;
+    if (subjectEl) subjectEl.value = draft.subject || '';
+    if (nlQuill) nlQuill.root.innerHTML = draft.html || '';
     nlRestoringDraft = false;
-    nlShowDraftBanner('restored');
-    nlUpdateDraftBtn();
+    nlActiveDraftId = id;
+    nlUpdateActiveBanner(draft);
+    // Close panel after loading
+    const panel = document.getElementById('nl-newsletters-panel');
+    if (panel) panel.style.display = 'none';
+    nlShowDraftStatus('');
+    // Scroll to top of editor
+    document.getElementById('nl-subject')?.focus();
   } catch (e) {
     nlRestoringDraft = false;
-    // Corrupt draft — discard silently
-    nlClearDraft(false);
+    Modal.alert({ title: 'Error', message: 'Could not load this newsletter.' });
   }
 }
 
-function nlApplyDraft() {
+async function nlDeleteServerDraft(id) {
+  if (!confirm('Permanently delete this newsletter?')) return;
   try {
-    const raw = localStorage.getItem(NL_DRAFT_KEY);
-    if (!raw) return;
-    const { subject, body } = JSON.parse(raw);
-    nlRestoringDraft = true;
-    const subjectEl = document.getElementById('nl-subject');
-    if (subjectEl) subjectEl.value = subject || '';
-    if (nlQuill && body) nlQuill.root.innerHTML = body;
-    nlRestoringDraft = false;
-    nlShowDraftBanner('restored');
-    nlToggleDraftPanel(false);
-  } catch (e) { nlRestoringDraft = false; nlClearDraft(false); }
+    const res = await fetch(`${API_BASE}/admin/newsletters/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    if (!res.ok) throw new Error('Delete failed');
+    if (nlActiveDraftId === id) {
+      nlActiveDraftId = null;
+      nlUpdateActiveBanner(null);
+    }
+    nlLoadDraftsList();
+  } catch (e) {
+    Modal.alert({ title: 'Error', message: 'Could not delete this newsletter.' });
+  }
 }
 
-function nlDiscardDraft() {
-  if (!confirm('Permanently delete this saved draft?')) return;
-  nlClearDraft(false);
+async function nlSendScheduledNow(id) {
+  const confirmed = await Modal.confirm({
+    title: 'Send Now',
+    message: 'Send this scheduled newsletter immediately to all opted-in recipients? This cannot be undone.'
+  });
+  if (!confirmed) return;
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletters/${id}/send`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      Modal.alert({ title: 'Sent', message: `Newsletter sent. ${data.sent} delivered, ${data.failed} failed.` });
+      if (nlActiveDraftId === id) { nlActiveDraftId = null; nlUpdateActiveBanner(null); }
+      nlLoadDraftsList();
+    } else {
+      Modal.alert({ title: 'Error', message: data.error || 'Send failed.' });
+    }
+  } catch (e) {
+    Modal.alert({ title: 'Error', message: 'Network error: ' + e.message });
+  }
+}
+
+function nlOpenScheduleModal() {
+  const subject = document.getElementById('nl-subject')?.value?.trim();
+  const body = nlQuill ? nlQuill.root.innerHTML.trim() : '';
+  if (!subject) { Modal.alert({ title: 'Missing Subject', message: 'Please add a subject line before scheduling.' }); return; }
+  if (!body || body === '<p><br></p>') { Modal.alert({ title: 'Empty Newsletter', message: 'Please write some content before scheduling.' }); return; }
+  // Default to tomorrow at 10:00 AM local time
+  const dt = new Date();
+  dt.setDate(dt.getDate() + 1);
+  dt.setHours(10, 0, 0, 0);
+  const pad = n => String(n).padStart(2, '0');
+  const local = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  const dtInput = document.getElementById('nl-schedule-datetime');
+  if (dtInput) dtInput.value = local;
+  document.getElementById('nl-schedule-modal').style.display = 'flex';
+}
+
+function nlCloseScheduleModal() {
+  document.getElementById('nl-schedule-modal').style.display = 'none';
+}
+
+async function nlConfirmSchedule() {
+  const dtInput = document.getElementById('nl-schedule-datetime');
+  if (!dtInput?.value) { Modal.alert({ title: 'Invalid', message: 'Please select a date and time.' }); return; }
+  const scheduledDate = new Date(dtInput.value);
+  if (scheduledDate <= new Date()) { Modal.alert({ title: 'Invalid', message: 'Please select a future date and time.' }); return; }
+  const btn = document.getElementById('nl-schedule-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Scheduling...'; }
+  try {
+    const subject = document.getElementById('nl-subject')?.value || '';
+    const html = nlQuill ? nlQuill.root.innerHTML : '';
+    const scheduledFor = scheduledDate.toISOString();
+    if (nlActiveDraftId) {
+      const res = await fetch(`${API_BASE}/admin/newsletters/${nlActiveDraftId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+        body: JSON.stringify({ subject, html, status: 'scheduled', scheduled_for: scheduledFor })
+      });
+      if (!res.ok) throw new Error('Schedule failed');
+    } else {
+      const createRes = await fetch(`${API_BASE}/admin/newsletters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+        body: JSON.stringify({ subject, html })
+      });
+      if (!createRes.ok) throw new Error('Save failed');
+      const createData = await createRes.json();
+      nlActiveDraftId = createData.id;
+      const schedRes = await fetch(`${API_BASE}/admin/newsletters/${nlActiveDraftId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+        body: JSON.stringify({ status: 'scheduled', scheduled_for: scheduledFor })
+      });
+      if (!schedRes.ok) throw new Error('Schedule failed');
+    }
+    nlCloseScheduleModal();
+    const timeStr = scheduledDate.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    nlShowDraftStatus('Scheduled for ' + timeStr);
+    nlUpdateActiveBanner({ id: nlActiveDraftId, status: 'scheduled', scheduled_for: scheduledFor });
+    setTimeout(() => nlShowDraftStatus(''), 5000);
+    const panel = document.getElementById('nl-newsletters-panel');
+    if (panel && panel.style.display !== 'none') nlLoadDraftsList();
+  } catch (e) {
+    Modal.alert({ title: 'Error', message: 'Could not schedule this newsletter. ' + e.message });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Schedule'; }
+  }
+}
+
+function nlNewDraft() {
+  if (!confirm('Start a new newsletter? Your current editor content will be cleared.')) return;
+  nlActiveDraftId = null;
+  nlUpdateActiveBanner(null);
+  document.getElementById('nl-subject').value = '';
+  nlRestoringDraft = true;
+  if (nlQuill) nlQuill.setText('');
+  nlRestoringDraft = false;
+  nlClearDraft();
   nlShowDraftStatus('');
+  const resultEl = document.getElementById('nl-send-result');
+  if (resultEl) resultEl.style.display = 'none';
 }
 
 let nlQuill = null;
@@ -3436,11 +3652,10 @@ function nlCreateEditor() {
     }
   });
 
-  // Auto-save draft on any change (debounced 1.5 s)
+  // Auto-save to localStorage on any change (debounced 1.5 s — crash-recovery only)
   nlQuill.on('text-change', function() {
     if (nlRestoringDraft) return;
     clearTimeout(nlDraftTimer);
-    nlShowDraftStatus('Saving...');
     nlDraftTimer = setTimeout(nlSaveDraft, 1500);
   });
 
@@ -3450,13 +3665,9 @@ function nlCreateEditor() {
     subjectEl.addEventListener('input', function() {
       if (nlRestoringDraft) return;
       clearTimeout(nlDraftTimer);
-      nlShowDraftStatus('Saving...');
       nlDraftTimer = setTimeout(nlSaveDraft, 1500);
     });
   }
-
-  // Restore any previous draft
-  nlRestoreDraft();
 }
 
 async function loadNewsletterRecipients() {
@@ -3668,21 +3879,17 @@ function nlInsertDivider() {
 }
 
 function clearNewsletter() {
-  const hasDraft = !!localStorage.getItem(NL_DRAFT_KEY);
-  const confirmMsg = 'Clear the editor?' + (hasDraft ? ' Your saved draft will still be available to restore.' : '');
-  if (!confirm(confirmMsg)) return;
+  if (!confirm('Clear the editor? Any unsaved changes will be lost.')) return;
+  nlActiveDraftId = null;
+  nlUpdateActiveBanner(null);
   document.getElementById('nl-subject').value = '';
   nlRestoringDraft = true;
   if (nlQuill) nlQuill.setText('');
   nlRestoringDraft = false;
+  nlClearDraft();
+  nlShowDraftStatus('');
   const result = document.getElementById('nl-send-result');
   if (result) result.style.display = 'none';
-  if (hasDraft) {
-    nlShowDraftBanner('available');
-    nlToggleDraftPanel(true);
-  } else {
-    nlShowDraftStatus('');
-  }
 }
 
 function buildNlEmailHtml(bodyHtml, subject) {
@@ -3758,7 +3965,6 @@ async function sendNewsletter() {
 
   const badge = document.getElementById('nl-recipient-badge');
   const recipientText = badge ? badge.textContent : 'subscribers';
-
   const confirmed = await Modal.confirm({
     title: 'Send Newsletter',
     message: `This will send the newsletter to ${recipientText}. This cannot be undone. Continue?`
@@ -3771,21 +3977,41 @@ async function sendNewsletter() {
   resultEl.style.display = 'none';
 
   try {
-    const res = await fetch(`${API_BASE}/admin/newsletter/send`, {
+    // Ensure we have a server-side draft record to track this send
+    if (!nlActiveDraftId) {
+      const createRes = await fetch(`${API_BASE}/admin/newsletters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+        body: JSON.stringify({ subject, html: bodyHtml })
+      });
+      if (!createRes.ok) throw new Error('Failed to create draft record');
+      const createData = await createRes.json();
+      nlActiveDraftId = createData.id;
+    } else {
+      // Update the existing draft with the current editor content
+      await fetch(`${API_BASE}/admin/newsletters/${nlActiveDraftId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+        body: JSON.stringify({ subject, html: bodyHtml })
+      });
+    }
+
+    const res = await fetch(`${API_BASE}/admin/newsletters/${nlActiveDraftId}/send`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-Token': sessionToken
-      },
-      body: JSON.stringify({ subject, html: bodyHtml })
+      headers: { 'X-Session-Token': sessionToken }
     });
     const data = await res.json();
+
     if (res.ok && data.success) {
       resultEl.className = 'nl-send-result nl-success';
       resultEl.textContent = `Newsletter sent. ${data.sent} delivered, ${data.failed} failed (${data.total} total recipients).`;
       resultEl.style.display = 'block';
-      // Draft is no longer needed after a successful send
-      nlClearDraft(false);
+      nlClearDraft();
+      nlActiveDraftId = null;
+      nlUpdateActiveBanner(null);
+      // Refresh the list if open
+      const panel = document.getElementById('nl-newsletters-panel');
+      if (panel && panel.style.display !== 'none') nlLoadDraftsList();
     } else {
       resultEl.className = 'nl-send-result nl-error';
       resultEl.textContent = `Send failed: ${data.error || 'Unknown error'}`;
@@ -3797,7 +4023,7 @@ async function sendNewsletter() {
     resultEl.style.display = 'block';
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Send Newsletter';
+    btn.textContent = 'Send Now';
   }
 }
 

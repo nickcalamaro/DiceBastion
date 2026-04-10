@@ -7015,6 +7015,219 @@ app.get('/admin/newsletter/events', requireAdmin, async c => {
 })
 
 // ============================================================================
+// SHARED: Newsletter campaign send logic (HTTP endpoint + cron scheduler)
+// ============================================================================
+
+/**
+ * Fetches all opted-in recipients, sends per-recipient with unsubscribe token,
+ * and optionally marks a newsletter_drafts record as 'sent'.
+ */
+async function sendNewsletterCampaign(env, subject, html, draftId = null) {
+  const { results: recipients } = await env.DB.prepare(`
+    SELECT u.email, u.name, ep.user_id
+    FROM email_preferences ep
+    JOIN users u ON ep.user_id = u.user_id
+    WHERE ep.marketing_emails = 1 AND ep.consent_given = 1 AND u.is_active = 1
+  `).all()
+
+  if (!recipients || recipients.length === 0) {
+    if (draftId) {
+      await env.DB.prepare(`
+        UPDATE newsletter_drafts
+        SET status = 'sent', sent_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+            recipients_count = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE id = ?
+      `).bind(draftId).run()
+    }
+    return { success: true, sent: 0, failed: 0, total: 0, message: 'No eligible recipients found.' }
+  }
+
+  const plainText = htmlToPlainText(html)
+  const replyTo = env.MAILERSEND_REPLY_TO || env.MAILERSEND_FROM_EMAIL || 'hello@dicebastion.com'
+  const tokenExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+  let sent = 0
+  let failed = 0
+  const errors = []
+
+  for (const r of recipients) {
+    const token = crypto.randomUUID().replace(/-/g, '')
+    try {
+      await env.DB.prepare(
+        'INSERT INTO newsletter_unsub_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'
+      ).bind(r.user_id, token, tokenExpiry).run()
+    } catch (tokenErr) {
+      console.error('[Newsletter] Failed to create unsub token for', r.email, tokenErr)
+    }
+    const unsubscribeUrl = `https://dicebastion.com/unsubscribe?token=${token}`
+    const fullHtml = wrapNewsletterHtml(html, subject, unsubscribeUrl)
+    const result = await sendEmail(env, {
+      to: r.email,
+      subject,
+      html: fullHtml,
+      text: plainText,
+      replyTo,
+      emailType: 'newsletter',
+      metadata: JSON.stringify({ campaign: 'newsletter', draftId })
+    })
+    if (result.success || result.skipped) {
+      sent++
+    } else {
+      failed++
+      errors.push({ email: r.email, error: result.error })
+    }
+  }
+
+  if (draftId) {
+    await env.DB.prepare(`
+      UPDATE newsletter_drafts
+      SET status = 'sent', sent_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+          recipients_count = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id = ?
+    `).bind(sent, draftId).run()
+  }
+
+  console.log(`[Newsletter] Sent: ${sent}, Failed: ${failed}`)
+  return { success: true, total: recipients.length, sent, failed, errors }
+}
+
+// ============================================================================
+// ADMIN NEWSLETTER DRAFTS CRUD
+// ============================================================================
+
+/**
+ * GET /admin/newsletters
+ * Lists all newsletter drafts, scheduled newsletters, and recently sent (cap 50)
+ */
+app.get('/admin/newsletters', requireAdmin, async c => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT id, subject, status, scheduled_for, sent_at, recipients_count, created_at, updated_at
+      FROM newsletter_drafts
+      ORDER BY
+        CASE status WHEN 'draft' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END,
+        updated_at DESC
+      LIMIT 50
+    `).all()
+    return c.json(results ?? [])
+  } catch (e) {
+    console.error('[Newsletter] list error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * POST /admin/newsletters
+ * Creates a new newsletter draft. Body: { subject, html }
+ */
+app.post('/admin/newsletters', requireAdmin, async c => {
+  try {
+    const { subject, html } = await c.req.json()
+    const result = await c.env.DB.prepare(`
+      INSERT INTO newsletter_drafts (subject, html) VALUES (?, ?)
+    `).bind(subject ?? '', html ?? '').run()
+    return c.json({ id: Number(result.lastInsertRowid), success: true }, 201)
+  } catch (e) {
+    console.error('[Newsletter] create error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * GET /admin/newsletters/:id
+ * Fetches a single newsletter draft including full HTML body
+ */
+app.get('/admin/newsletters/:id', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    const row = await c.env.DB.prepare(
+      'SELECT * FROM newsletter_drafts WHERE id = ?'
+    ).bind(id).first()
+    if (!row) return c.json({ error: 'Not found' }, 404)
+    return c.json(row)
+  } catch (e) {
+    console.error('[Newsletter] get error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * PUT /admin/newsletters/:id
+ * Updates a draft. Accepts any combination of: { subject, html, status, scheduled_for }
+ * Cannot edit a newsletter that has already been sent.
+ */
+app.put('/admin/newsletters/:id', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    const existing = await c.env.DB.prepare(
+      'SELECT id, status FROM newsletter_drafts WHERE id = ?'
+    ).bind(id).first()
+    if (!existing) return c.json({ error: 'Not found' }, 404)
+    if (existing.status === 'sent') return c.json({ error: 'Cannot edit a sent newsletter' }, 400)
+    const body = await c.req.json()
+    const setClauses = []
+    const args = []
+    if (body.subject !== undefined) { setClauses.push('subject = ?'); args.push(body.subject) }
+    if (body.html !== undefined) { setClauses.push('html = ?'); args.push(body.html) }
+    if (body.status !== undefined) { setClauses.push('status = ?'); args.push(body.status) }
+    if (body.scheduled_for !== undefined) { setClauses.push('scheduled_for = ?'); args.push(body.scheduled_for) }
+    if (setClauses.length === 0) return c.json({ error: 'No fields to update' }, 400)
+    setClauses.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+    args.push(id)
+    await c.env.DB.prepare(
+      `UPDATE newsletter_drafts SET ${setClauses.join(', ')} WHERE id = ?`
+    ).bind(...args).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[Newsletter] update error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * DELETE /admin/newsletters/:id
+ * Deletes a draft or scheduled newsletter. Cannot delete sent newsletters.
+ */
+app.delete('/admin/newsletters/:id', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    const existing = await c.env.DB.prepare(
+      'SELECT id, status FROM newsletter_drafts WHERE id = ?'
+    ).bind(id).first()
+    if (!existing) return c.json({ error: 'Not found' }, 404)
+    if (existing.status === 'sent') return c.json({ error: 'Cannot delete a sent newsletter' }, 400)
+    await c.env.DB.prepare('DELETE FROM newsletter_drafts WHERE id = ?').bind(id).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[Newsletter] delete error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * POST /admin/newsletters/:id/send
+ * Sends a saved newsletter immediately to all opted-in recipients.
+ * Marks the draft as 'sent' on success.
+ */
+app.post('/admin/newsletters/:id/send', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    const draft = await c.env.DB.prepare(
+      'SELECT * FROM newsletter_drafts WHERE id = ?'
+    ).bind(id).first()
+    if (!draft) return c.json({ error: 'Not found' }, 404)
+    if (draft.status === 'sent') return c.json({ error: 'This newsletter has already been sent' }, 400)
+    if (!draft.subject?.trim() || !draft.html?.trim()) {
+      return c.json({ error: 'Draft has no subject or body' }, 400)
+    }
+    const result = await sendNewsletterCampaign(c.env, draft.subject, draft.html, Number(id))
+    return c.json(result)
+  } catch (e) {
+    console.error('[Newsletter] send-draft error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// ============================================================================
 // PUBLIC: Newsletter unsubscribe via magic link (no login required)
 // ============================================================================
 
@@ -7024,7 +7237,7 @@ app.get('/admin/newsletter/events', requireAdmin, async c => {
  * Validates the single-use token, removes marketing consent, returns JSON.
  * The dicebastion.com/unsubscribe Hugo page calls this and renders the result.
  */
-app.get('/unsubscribe', async c => {
+async function handleUnsubscribe(c) {
   const token = c.req.query('token')
 
   if (!token) {
@@ -7069,7 +7282,9 @@ app.get('/unsubscribe', async c => {
     console.error('[Unsubscribe] error:', e)
     return c.json({ success: false, error: 'server_error' }, 500)
   }
-})
+}
+app.get('/unsubscribe', handleUnsubscribe)
+app.get('/unsubscribe/', handleUnsubscribe)
 
 /**
  * POST /admin/newsletter/send
@@ -7082,65 +7297,82 @@ app.post('/admin/newsletter/send', requireAdmin, async c => {
     if (!subject?.trim() || !html?.trim()) {
       return c.json({ error: 'subject and html are required' }, 400)
     }
-
-    const { results: recipients } = await c.env.DB.prepare(`
-      SELECT u.email, u.name, ep.user_id
-      FROM email_preferences ep
-      JOIN users u ON ep.user_id = u.user_id
-      WHERE ep.marketing_emails = 1 AND ep.consent_given = 1 AND u.is_active = 1
-    `).all()
-
-    if (!recipients || recipients.length === 0) {
-      return c.json({ success: true, sent: 0, failed: 0, total: 0, message: 'No eligible recipients found.' })
-    }
-
-    const plainText = htmlToPlainText(html)
-    // Reply-To makes the email look like it's from a real person, not a no-reply blast.
-    // Prefer a dedicated env var; fall back to the sender address.
-    const replyTo = c.env.MAILERSEND_REPLY_TO || c.env.MAILERSEND_FROM_EMAIL || 'hello@dicebastion.com'
-    // Unsubscribe tokens expire after 1 year — long enough to still be in someone's inbox
-    const tokenExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-    let sent = 0
-    let failed = 0
-    const errors = []
-
-    for (const r of recipients) {
-      // Generate a single-use magic-link token so any recipient (including those
-      // without a site password) can unsubscribe without logging in.
-      const token = crypto.randomUUID().replace(/-/g, '')
-      try {
-        await c.env.DB.prepare(
-          'INSERT INTO newsletter_unsub_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'
-        ).bind(r.user_id, token, tokenExpiry).run()
-      } catch (tokenErr) {
-        console.error('[Newsletter] Failed to create unsub token for', r.email, tokenErr)
-      }
-      const unsubscribeUrl = `https://dicebastion.com/unsubscribe?token=${token}`
-      const fullHtml = wrapNewsletterHtml(html, subject, unsubscribeUrl)
-      const result = await sendEmail(c.env, {
-        to: r.email,
-        subject,
-        html: fullHtml,
-        text: plainText,
-        replyTo,
-        emailType: 'newsletter',
-        metadata: JSON.stringify({ campaign: 'newsletter' })
-      })
-      if (result.success || result.skipped) {
-        sent++
-      } else {
-        failed++
-        errors.push({ email: r.email, error: result.error })
-      }
-    }
-
-    console.log(`[Newsletter] Sent: ${sent}, Failed: ${failed}`)
-    return c.json({ success: true, total: recipients.length, sent, failed, errors })
+    const result = await sendNewsletterCampaign(c.env, subject, html)
+    return c.json(result)
   } catch (e) {
     console.error('[Newsletter] send error:', e)
     return c.json({ error: e.message }, 500)
   }
 })
+
+// ============================================================================
+// CRON JOB: Scheduled newsletter dispatch
+// ============================================================================
+
+/**
+ * Queries newsletter_drafts for any rows with status='scheduled' whose
+ * scheduled_for timestamp is now or in the past, then sends each one.
+ */
+async function processScheduledNewsletters(env) {
+  const jobName = 'scheduled_newsletters'
+  const startedAt = new Date().toISOString()
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+
+  let processed = 0
+  let succeeded = 0
+  let failed = 0
+
+  try {
+    const { results: due } = await env.DB.prepare(`
+      SELECT * FROM newsletter_drafts
+      WHERE status = 'scheduled'
+        AND scheduled_for <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    `).all()
+
+    if (!due || due.length === 0) {
+      console.log('[CRON] No scheduled newsletters due')
+      await logCronJob(env.DB, jobName, 'completed', {
+        started_at: startedAt,
+        records_processed: 0,
+        records_succeeded: 0,
+        records_failed: 0
+      })
+      return
+    }
+
+    for (const draft of due) {
+      processed++
+      try {
+        await sendNewsletterCampaign(env, draft.subject, draft.html, draft.id)
+        succeeded++
+        console.log(`[CRON] Sent scheduled newsletter id=${draft.id}: "${draft.subject}"`)
+      } catch (e) {
+        failed++
+        console.error(`[CRON] Failed to send newsletter id=${draft.id}:`, e)
+        await env.DB.prepare(
+          `UPDATE newsletter_drafts SET status = 'failed', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`
+        ).bind(draft.id).run().catch(() => {})
+      }
+    }
+
+    await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
+      started_at: startedAt,
+      records_processed: processed,
+      records_succeeded: succeeded,
+      records_failed: failed
+    })
+  } catch (e) {
+    console.error(`[CRON] ${jobName} error:`, e)
+    await logCronJob(env.DB, jobName, 'failed', {
+      started_at: startedAt,
+      records_processed: processed,
+      records_succeeded: succeeded,
+      records_failed: failed,
+      extra: { error: e.message }
+    }).catch(() => {})
+    throw e
+  }
+}
 
 // ============================================================================
 // CRON JOB: Daily SEO freshness – sitemap ping + re-index active events
@@ -8233,6 +8465,7 @@ async function handleScheduled(event, env, ctx) {
   console.log('============================================')
   
   const jobResults = {
+    scheduled_newsletters: null,
     auto_renewals: null,
     event_reminders: null,
     delayed_account_setup_emails: null,
@@ -8240,6 +8473,14 @@ async function handleScheduled(event, env, ctx) {
   }
   
   // Run all cron jobs sequentially, catching errors individually
+  try {
+    await processScheduledNewsletters(env)
+    jobResults.scheduled_newsletters = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Scheduled newsletters failed:', e)
+    jobResults.scheduled_newsletters = 'failed'
+  }
+
   try {
     await processAutoRenewals(env)
     jobResults.auto_renewals = 'completed'
