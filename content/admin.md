@@ -3585,17 +3585,13 @@ function buildCalendarHtml(events) {
       ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + ev.image_url + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
       : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
     const href = ev.slug ? 'https://dicebastion.com/events/' + ev.slug : 'https://dicebastion.com/events';
-    return '<a href="' + href + '" style="display:block;text-decoration:none;color:inherit;">'
-      + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
       + imgRow
       + '<tr><td style="padding:12px 14px 14px;background:#ffffff;">'
       + '<p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.07em;line-height:1;">' + p.dayName + '</p>'
-      + '<p style="margin:4px 0 6px;font-size:16px;font-weight:700;color:#111827;line-height:1.2;">' + p.dayOrdinal + ' ' + p.month + '</p>'
-      + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
-      + '<tr><td style="font-size:13px;color:#6b7280;line-height:1;">' + p.time + '</td>'
-      + '<td style="text-align:right;"><span style="display:inline-block;background:#4f46e5;color:#ffffff;font-size:11px;font-weight:600;padding:5px 10px;border-radius:4px;text-decoration:none;">Sign Up</span></td>'
-      + '</tr></table>'
-      + '</td></tr></table></a>';
+      + '<p style="margin:4px 0 8px;font-size:16px;font-weight:700;color:#111827;line-height:1.2;">' + p.dayOrdinal + ' ' + p.month + '</p>'
+      + '<p style="margin:0;font-size:13px;color:#6b7280;line-height:1.4;">' + p.time + ' &nbsp;&middot;&nbsp; <a href="' + href + '" style="color:#4f46e5;text-decoration:underline;font-weight:600;">Sign Up</a></p>'
+      + '</td></tr></table>';
   }
   let rows = '';
   for (let i = 0; i < events.length; i += 2) {

@@ -221,6 +221,15 @@ CREATE TABLE password_reset_tokens (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+CREATE TABLE newsletter_unsub_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
 CREATE TABLE donations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   donor_name TEXT,
@@ -266,3 +275,5 @@ CREATE INDEX idx_cron_job_log_status
 CREATE INDEX idx_donations_campaign ON donations(campaign);
 CREATE INDEX idx_donations_status ON donations(payment_status);
 CREATE INDEX idx_donations_order_ref ON donations(order_ref);
+CREATE INDEX idx_newsletter_unsub_tokens_token ON newsletter_unsub_tokens(token);
+CREATE INDEX idx_newsletter_unsub_tokens_user ON newsletter_unsub_tokens(user_id);
