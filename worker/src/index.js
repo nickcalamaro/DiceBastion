@@ -7293,6 +7293,96 @@ async function handleUnsubscribe(c) {
 app.get('/unsubscribe', handleUnsubscribe)
 app.get('/unsubscribe/', handleUnsubscribe)
 
+// ============================================================================
+// PUBLIC: Newsletter subscribe
+// ============================================================================
+
+/**
+ * POST /newsletter/subscribe
+ * Public endpoint — handles four cases:
+ *  1. X-Session-Token present + already subscribed  → { status: 'already_subscribed' }
+ *  2. X-Session-Token present + not yet subscribed  → opt in, { status: 'subscribed' }
+ *  3. No token, email matches an existing account   → { status: 'registered_user' }
+ *  4. No token, brand-new email                     → create identity + opt in, { status: 'subscribed', new_account: true }
+ *
+ * Body (unauthenticated): { email: string, name?: string, consent: true }
+ */
+app.post('/newsletter/subscribe', async c => {
+  try {
+    const sessionToken = c.req.header('X-Session-Token')
+    const now = new Date().toISOString()
+
+    // ── Case 1 & 2: Logged-in user ────────────────────────────────────────
+    if (sessionToken) {
+      const session = await c.env.DB.prepare(`
+        SELECT us.user_id FROM user_sessions us
+        WHERE us.session_token = ? AND us.expires_at > datetime('now')
+      `).bind(sessionToken).first()
+
+      if (!session) return c.json({ error: 'invalid_session' }, 401)
+
+      const prefs = await c.env.DB.prepare(
+        'SELECT marketing_emails FROM email_preferences WHERE user_id = ?'
+      ).bind(session.user_id).first()
+
+      if (prefs && prefs.marketing_emails === 1) {
+        return c.json({ status: 'already_subscribed' })
+      }
+
+      await c.env.DB.prepare(`
+        INSERT INTO email_preferences (user_id, marketing_emails, consent_given, consent_date, last_updated)
+        VALUES (?, 1, 1, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          marketing_emails = 1,
+          consent_given = 1,
+          consent_date = COALESCE(consent_date, excluded.consent_date),
+          last_updated = excluded.last_updated
+      `).bind(session.user_id, now, now).run()
+
+      return c.json({ status: 'subscribed' })
+    }
+
+    // ── Case 3 & 4: Unauthenticated ───────────────────────────────────────
+    const body = await c.req.json()
+    const { email, name, consent } = body
+
+    if (!email) return c.json({ error: 'email_required' }, 400)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'invalid_email' }, 400)
+    if (!consent) return c.json({ error: 'consent_required' }, 400)
+
+    // Check if this email already has a registered account
+    const existingUser = await c.env.DB.prepare(
+      'SELECT user_id FROM users WHERE LOWER(email) = LOWER(?)'
+    ).bind(email).first()
+
+    if (existingUser) {
+      // Case 3: Don't reveal subscription status — just tell them to log in
+      return c.json({ status: 'registered_user' })
+    }
+
+    // Case 4: New subscriber — create minimal identity and opt in
+    const ident = await getOrCreateIdentity(c.env.DB, email, name ? name.trim().substring(0, 200) : null)
+    if (!ident || !ident.id) {
+      return c.json({ error: 'identity_error' }, 500)
+    }
+
+    await c.env.DB.prepare(`
+      INSERT INTO email_preferences (user_id, marketing_emails, consent_given, consent_date, last_updated)
+      VALUES (?, 1, 1, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        marketing_emails = 1,
+        consent_given = 1,
+        consent_date = COALESCE(consent_date, excluded.consent_date),
+        last_updated = excluded.last_updated
+    `).bind(ident.id, now, now).run()
+
+    return c.json({ status: 'subscribed', new_account: true })
+  } catch (e) {
+    console.error('[Newsletter Subscribe] error:', e)
+    return c.json({ error: 'server_error' }, 500)
+  }
+})
+
 /**
  * POST /admin/newsletter/send
  * Body: { subject: string, html: string }
