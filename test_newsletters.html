@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Newsletter API Test</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f0f0f0; }
+    h1 { color: #1e1b4b; }
+    h2 { color: #333; margin-top: 0; font-size: 1rem; }
+    .card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: #555; }
+    input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.9rem; margin-bottom: 10px; font-family: inherit; }
+    textarea { height: 80px; resize: vertical; }
+    button { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; margin-right: 8px; margin-top: 4px; }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-secondary { background: #e5e7eb; color: #374151; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-green { background: #059669; color: white; }
+    .result { margin-top: 12px; padding: 12px; border-radius: 6px; font-size: 0.85rem; white-space: pre-wrap; font-family: monospace; max-height: 300px; overflow-y: auto; }
+    .result.ok { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+    .result.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .result.info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+    .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row > * { flex: 1; min-width: 140px; }
+    .row > button { flex: 0 0 auto; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+    .badge-draft { background: #e5e7eb; color: #374151; }
+    .badge-scheduled { background: #dbeafe; color: #1d4ed8; }
+    .badge-sent { background: #dcfce7; color: #15803d; }
+    .badge-failed { background: #fee2e2; color: #dc2626; }
+    #draft-list-output { margin-top: 12px; }
+    .draft-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 6px; gap: 1rem; flex-wrap: wrap; }
+    .draft-row-info { font-size: 0.85rem; }
+    .draft-row-subject { font-weight: 700; }
+    .draft-row-meta { color: #6b7280; font-size: 0.78rem; margin-top: 2px; }
+    .draft-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+<h1>Newsletter API Test</h1>
+
+<!-- Auth -->
+<div class="card">
+  <h2>Auth</h2>
+  <div class="row">
+    <div>
+      <label>API Base URL</label>
+      <input id="api-base" value="https://dicebastion-memberships.ncalamaro.workers.dev">
+    </div>
+    <div>
+      <label>Session Token (X-Session-Token)</label>
+      <input id="session-token" placeholder="Paste from devtools → Application → localStorage → sessionToken">
+    </div>
+  </div>
+  <small style="color:#6b7280;">Open the admin panel, log in, then run <code>localStorage.getItem('sessionToken')</code> in the console to get your token.</small>
+</div>
+
+<!-- List drafts -->
+<div class="card">
+  <h2>GET /admin/newsletters — List all newsletters</h2>
+  <button class="btn-primary" onclick="listDrafts()">Load List</button>
+  <div id="draft-list-output"></div>
+</div>
+
+<!-- Create draft -->
+<div class="card">
+  <h2>POST /admin/newsletters — Create draft</h2>
+  <label>Subject</label>
+  <input id="create-subject" placeholder="April Newsletter" value="Test Newsletter">
+  <label>HTML Body</label>
+  <textarea id="create-html"><p>Hello from the test harness!</p></textarea>
+  <button class="btn-primary" onclick="createDraft()">Create Draft</button>
+  <div id="create-result" class="result info" style="display:none;"></div>
+</div>
+
+<!-- Get single -->
+<div class="card">
+  <h2>GET /admin/newsletters/:id — Fetch single</h2>
+  <div class="row">
+    <div>
+      <label>Draft ID</label>
+      <input id="get-id" placeholder="1" type="number">
+    </div>
+    <button class="btn-primary" onclick="getDraft()">Fetch</button>
+  </div>
+  <div id="get-result" class="result info" style="display:none;"></div>
+</div>
+
+<!-- Update -->
+<div class="card">
+  <h2>PUT /admin/newsletters/:id — Update</h2>
+  <div class="row">
+    <div>
+      <label>Draft ID</label>
+      <input id="update-id" placeholder="1" type="number">
+    </div>
+  </div>
+  <label>New Subject (leave blank to skip)</label>
+  <input id="update-subject" placeholder="Updated subject">
+  <label>New HTML (leave blank to skip)</label>
+  <textarea id="update-html" placeholder="<p>Updated content</p>"></textarea>
+  <label>Status (leave blank to skip)</label>
+  <select id="update-status">
+    <option value="">— no change —</option>
+    <option value="draft">draft</option>
+    <option value="scheduled">scheduled</option>
+  </select>
+  <label>scheduled_for (ISO 8601, only if setting status=scheduled)</label>
+  <input id="update-scheduled-for" placeholder="2026-04-15T10:00:00.000Z" type="datetime-local">
+  <button class="btn-primary" onclick="updateDraft()">Update</button>
+  <div id="update-result" class="result info" style="display:none;"></div>
+</div>
+
+<!-- Send immediately -->
+<div class="card">
+  <h2>POST /admin/newsletters/:id/send — Send immediately</h2>
+  <div class="row">
+    <div>
+      <label>Draft ID</label>
+      <input id="send-id" placeholder="1" type="number">
+    </div>
+    <button class="btn-green" onclick="sendDraft()">Send Now</button>
+  </div>
+  <small style="color:#dc2626;font-weight:600;">This sends to ALL opted-in recipients for real. Use a test draft.</small>
+  <div id="send-result" class="result info" style="display:none;"></div>
+</div>
+
+<!-- Delete -->
+<div class="card">
+  <h2>DELETE /admin/newsletters/:id — Delete</h2>
+  <div class="row">
+    <div>
+      <label>Draft ID</label>
+      <input id="delete-id" placeholder="1" type="number">
+    </div>
+    <button class="btn-danger" onclick="deleteDraft()">Delete</button>
+  </div>
+  <div id="delete-result" class="result info" style="display:none;"></div>
+</div>
+
+<!-- Trigger cron manually -->
+<div class="card">
+  <h2>GET /admin/newsletter/recipients — Recipient count</h2>
+  <button class="btn-secondary" onclick="getRecipients()">Check</button>
+  <div id="recipients-result" class="result info" style="display:none;"></div>
+</div>
+
+<script>
+function base() { return document.getElementById('api-base').value.replace(/\/$/, ''); }
+function token() { return document.getElementById('session-token').value.trim(); }
+function headers() { return { 'X-Session-Token': token(), 'Content-Type': 'application/json' }; }
+
+function show(elId, data, ok) {
+  const el = document.getElementById(elId);
+  el.style.display = 'block';
+  el.className = 'result ' + (ok ? 'ok' : 'err');
+  el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+async function callApi(method, path, body) {
+  const opts = { method, headers: headers() };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(base() + path, opts);
+  let data;
+  try { data = await res.json(); } catch(e) { data = { raw: await res.text() }; }
+  return { ok: res.ok, status: res.status, data };
+}
+
+async function listDrafts() {
+  const { ok, data } = await callApi('GET', '/admin/newsletters');
+  const out = document.getElementById('draft-list-output');
+  if (!ok || !Array.isArray(data)) {
+    out.innerHTML = `<div class="result err">${JSON.stringify(data, null, 2)}</div>`;
+    return;
+  }
+  if (data.length === 0) {
+    out.innerHTML = '<div class="result info">No newsletters yet.</div>';
+    return;
+  }
+  out.innerHTML = data.map(d => {
+    const badge = `<span class="badge badge-${d.status}">${d.status}</span>`;
+    let meta = `Updated ${d.updated_at}`;
+    if (d.status === 'scheduled' && d.scheduled_for) meta = `Scheduled for ${d.scheduled_for}`;
+    if (d.status === 'sent' && d.sent_at) meta = `Sent ${d.sent_at} &middot; ${d.recipients_count ?? '?'} recipients`;
+    return `<div class="draft-row">
+      <div class="draft-row-info">
+        <div class="draft-row-subject">#${d.id} — ${d.subject || '(no subject)'} ${badge}</div>
+        <div class="draft-row-meta">${meta}</div>
+      </div>
+      <div class="draft-row-actions">
+        <button class="btn-secondary" style="font-size:0.78rem;padding:4px 10px;" onclick="fillId(${d.id})">Use ID</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function fillId(id) {
+  ['get-id','update-id','send-id','delete-id'].forEach(el => document.getElementById(el).value = id);
+}
+
+async function createDraft() {
+  const subject = document.getElementById('create-subject').value;
+  const html = document.getElementById('create-html').value;
+  const { ok, data } = await callApi('POST', '/admin/newsletters', { subject, html });
+  show('create-result', data, ok);
+  if (ok && data.id) fillId(data.id);
+}
+
+async function getDraft() {
+  const id = document.getElementById('get-id').value;
+  const { ok, data } = await callApi('GET', `/admin/newsletters/${id}`);
+  show('get-result', data, ok);
+}
+
+async function updateDraft() {
+  const id = document.getElementById('update-id').value;
+  const body = {};
+  const subject = document.getElementById('update-subject').value;
+  const html = document.getElementById('update-html').value;
+  const status = document.getElementById('update-status').value;
+  const scheduledFor = document.getElementById('update-scheduled-for').value;
+  if (subject) body.subject = subject;
+  if (html) body.html = html;
+  if (status) body.status = status;
+  if (scheduledFor) body.scheduled_for = new Date(scheduledFor).toISOString();
+  const { ok, data } = await callApi('PUT', `/admin/newsletters/${id}`, body);
+  show('update-result', data, ok);
+}
+
+async function sendDraft() {
+  if (!confirm('Send this newsletter to ALL opted-in recipients for real?')) return;
+  const id = document.getElementById('send-id').value;
+  const { ok, data } = await callApi('POST', `/admin/newsletters/${id}/send`);
+  show('send-result', data, ok);
+}
+
+async function deleteDraft() {
+  if (!confirm('Delete this newsletter?')) return;
+  const id = document.getElementById('delete-id').value;
+  const { ok, data } = await callApi('DELETE', `/admin/newsletters/${id}`);
+  show('delete-result', data, ok);
+  if (ok) listDrafts();
+}
+
+async function getRecipients() {
+  const { ok, data } = await callApi('GET', '/admin/newsletter/recipients');
+  show('recipients-result', data, ok);
+}
+</script>
+</body>
+</html>

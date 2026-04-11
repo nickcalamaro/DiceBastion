@@ -1205,7 +1205,7 @@ async function logEmailHistory(db, emailData) {
  * @param {Object} params - Email parameters
  * @returns {Object} {success, error, skipped}
  */
-async function sendEmail(env, { to, subject, html, text, attachments = null, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null, replyTo = null }) {
+async function sendEmail(env, { to, subject, html, text, attachments = null, emailType = 'transactional', relatedId = null, relatedType = null, metadata = null, replyTo = null, sendAt = null }) {
   if (!env.MAILERSEND_API_KEY) {
     console.warn('MAILERSEND_API_KEY not configured, skipping email')
     return { skipped: true }
@@ -1223,6 +1223,12 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
     // Reply-To makes the email look like it comes from a real person
     if (replyTo) {
       body.reply_to = typeof replyTo === 'string' ? { email: replyTo } : replyTo
+    }
+
+    // MailerSend native scheduling: Unix timestamp, max 72 hours from now.
+    // Only set when the caller provides a future sendAt value.
+    if (sendAt && sendAt > Math.floor(Date.now() / 1000)) {
+      body.send_at = sendAt
     }
     
     // Add attachments if provided
@@ -7022,7 +7028,7 @@ app.get('/admin/newsletter/events', requireAdmin, async c => {
  * Fetches all opted-in recipients, sends per-recipient with unsubscribe token,
  * and optionally marks a newsletter_drafts record as 'sent'.
  */
-async function sendNewsletterCampaign(env, subject, html, draftId = null) {
+async function sendNewsletterCampaign(env, subject, html, draftId = null, sendAt = null) {
   const { results: recipients } = await env.DB.prepare(`
     SELECT u.email, u.name, ep.user_id
     FROM email_preferences ep
@@ -7067,7 +7073,8 @@ async function sendNewsletterCampaign(env, subject, html, draftId = null) {
       text: plainText,
       replyTo,
       emailType: 'newsletter',
-      metadata: JSON.stringify({ campaign: 'newsletter', draftId })
+      metadata: JSON.stringify({ campaign: 'newsletter', draftId }),
+      sendAt
     })
     if (result.success || result.skipped) {
       sent++
@@ -7125,7 +7132,7 @@ app.post('/admin/newsletters', requireAdmin, async c => {
     const result = await c.env.DB.prepare(`
       INSERT INTO newsletter_drafts (subject, html) VALUES (?, ?)
     `).bind(subject ?? '', html ?? '').run()
-    return c.json({ id: Number(result.lastInsertRowid), success: true }, 201)
+    return c.json({ id: result.meta.last_row_id, success: true }, 201)
   } catch (e) {
     console.error('[Newsletter] create error:', e)
     return c.json({ error: e.message }, 500)
@@ -7323,14 +7330,18 @@ async function processScheduledNewsletters(env) {
   let failed = 0
 
   try {
+    // Widen window to 72 hours — anything within that range can be handed to
+    // MailerSend's native send_at scheduling for precise delivery time.
+    // Newsletters further than 72 h away are skipped until the cron run that
+    // falls within the window (typically the day before).
     const { results: due } = await env.DB.prepare(`
       SELECT * FROM newsletter_drafts
       WHERE status = 'scheduled'
-        AND scheduled_for <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        AND scheduled_for <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+72 hours')
     `).all()
 
     if (!due || due.length === 0) {
-      console.log('[CRON] No scheduled newsletters due')
+      console.log('[CRON] No scheduled newsletters within 72h window')
       await logCronJob(env.DB, jobName, 'completed', {
         started_at: startedAt,
         records_processed: 0,
@@ -7340,12 +7351,23 @@ async function processScheduledNewsletters(env) {
       return
     }
 
+    const nowMs = Date.now()
+
     for (const draft of due) {
       processed++
       try {
-        await sendNewsletterCampaign(env, draft.subject, draft.html, draft.id)
+        // If the scheduled time is still in the future, pass it as a Unix
+        // timestamp so MailerSend delivers at the exact minute rather than
+        // immediately. If it's already past due, send immediately (sendAt=null).
+        const scheduledMs = new Date(draft.scheduled_for).getTime()
+        const sendAt = scheduledMs > nowMs ? Math.floor(scheduledMs / 1000) : null
+        if (sendAt) {
+          console.log(`[CRON] Scheduling newsletter id=${draft.id} via MailerSend at ${draft.scheduled_for}`)
+        } else {
+          console.log(`[CRON] Sending overdue newsletter id=${draft.id} immediately`)
+        }
+        await sendNewsletterCampaign(env, draft.subject, draft.html, draft.id, sendAt)
         succeeded++
-        console.log(`[CRON] Sent scheduled newsletter id=${draft.id}: "${draft.subject}"`)
       } catch (e) {
         failed++
         console.error(`[CRON] Failed to send newsletter id=${draft.id}:`, e)
