@@ -20,6 +20,8 @@ showPagination: false
 
 If you'd like to support us, get free bookings for game tables, and a whole range of other benefits, please consider becoming a member!
 
+For those able to give a bit more, or for those of you who can't afford a membership right now, please check out our <a href="#other-options-section" id="other-options-link" class="link">other membership options</a>.
+
   <div class="plans-grid" id="membership-plans">
   <!-- Monthly -->
   <div class="plan-card" data-plan="monthly">
@@ -81,7 +83,7 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
 
 <!-- ===== OTHER MEMBERSHIP OPTIONS (collapsible) ===== -->
-<div style="margin: 2.5rem 0 0;">
+<div id="other-options-section" style="margin: 2.5rem 0 0;">
   <button id="other-options-toggle" type="button"
     class="btn btn-secondary btn-full"
     style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;"
@@ -183,6 +185,22 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
   const toggleBtn = document.getElementById('other-options-toggle');
   const panel     = document.getElementById('other-options-panel');
   const chevron   = document.getElementById('other-options-chevron');
+
+  // ── Inline 'other membership options' link ──────────────────────────────
+  const inlineLink = document.getElementById('other-options-link');
+  if (inlineLink) {
+    inlineLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      const isOpen = panel.style.display !== 'none';
+      if (!isOpen) {
+        panel.style.display = 'block';
+        chevron.style.transform = 'rotate(180deg)';
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        loadSponsorPool();
+      }
+      document.getElementById('other-options-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
 
   toggleBtn.addEventListener('click', () => {
     const open = panel.style.display !== 'none';
