@@ -1865,10 +1865,7 @@ function getMembershipExpiryWarningEmail(membership, user, daysUntil, isSponsore
     <p>Your current membership was kindly funded by another community member through our sponsored membership scheme — we hope you've enjoyed the benefits!</p>
   ` : ''
   const renewalOptions = isSponsored ? `
-    <ul>
-      <li>Check if another <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}#other-options-section">sponsored membership</a> is available in the pool</li>
-      <li>Or take out a standard membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}">dicebastion.com/memberships</a></li>
-    </ul>
+    <p>If you still need a sponsored membership, <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}#other-options-section">click here</a> to see whether any are available. Alternatively, if you'd like to sign up for a standard membership, our plans are available <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}">here</a>.</p>
   ` : `
     <ul>
       <li>Renew now at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}">dicebastion.com/memberships</a></li>
@@ -1892,7 +1889,7 @@ function getMembershipExpiryWarningEmail(membership, user, daysUntil, isSponsore
   return {
     subject: `Reminder: Your Dice Bastion ${planName} Membership Expires ${urgency}`,
     html: createEmailTemplate({ headerTitle: 'Membership Expiring Soon', content, headerColor: '#f59e0b', headerGradient: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' }),
-    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership expires ${urgency} on ${formatDate(membership.end_date)}.\n\n${isSponsored ? 'Check if another sponsored membership is available, or renew at dicebastion.com/memberships.' : 'Renew at dicebastion.com/memberships to keep your access.'}\n\n— The Dice Bastion Team`
+    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership expires ${urgency} on ${formatDate(membership.end_date)}.\n\n${isSponsored ? 'If you still need a sponsored membership, visit dicebastion.com/memberships to see whether any are available. Alternatively, our standard membership plans are available at the same page.' : 'Renew at dicebastion.com/memberships to keep your access.'}\n\n— The Dice Bastion Team`
   }
 }
 
@@ -2774,28 +2771,73 @@ app.get('/account-setup/check', async c => {
 app.post('/account-setup/request', async c => {
   try {
     const { email, source } = await c.req.json()
-    
+
     if (!email) {
       return c.json({ error: 'email_required' }, 400)
     }
-    
-    // This endpoint is deprecated - all users must register with passwords
-    // Always return success for security (don't reveal if user exists)
-    console.log('[Account Setup Request] Endpoint deprecated - users must register with passwords')
-    
-    return c.json({ success: true })
+
+    const user = await findIdentityByEmail(c.env.DB, email)
+    if (!user || user.password_hash) {
+      return c.json({ success: true })
+    }
+
+    const resetToken = crypto.randomUUID() + '-' + crypto.randomUUID()
+    const tokenExpiry = toIso(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
+    await c.env.DB.prepare(`
+      INSERT INTO password_reset_tokens (user_id, token, expires_at, used, email_sent, source, created_at)
+      VALUES (?, ?, ?, 0, 1, ?, ?)
+    `).bind(user.user_id || user.id, resetToken, tokenExpiry, source || 'modal', toIso(new Date())).run()
+
+    return c.json({ success: true, token: resetToken })
   } catch (error) {
     console.error('[Account Setup Request] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
 
-// Complete account setup (set password)
 app.post('/account-setup/complete', async c => {
   try {
-    // This endpoint is deprecated - all users must register with passwords
-    console.log('[Account Setup Complete] Endpoint deprecated - users should use password reset if needed')
-    return c.json({ error: 'endpoint_deprecated', message: 'Please use the password reset flow' }, 410)
+    const { token, password, consent_essential, consent_marketing } = await c.req.json()
+
+    if (!token || !password) {
+      return c.json({ error: 'missing_fields' }, 400)
+    }
+    if (password.length < 8) {
+      return c.json({ error: 'password_too_short', message: 'Password must be at least 8 characters' }, 400)
+    }
+
+    const resetRecord = await c.env.DB.prepare(`
+      SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.password_hash
+      FROM password_reset_tokens prt
+      JOIN users u ON prt.user_id = u.user_id
+      WHERE prt.token = ? AND prt.used = 0
+    `).bind(token).first()
+
+    if (!resetRecord) {
+      return c.json({ error: 'invalid_token', message: 'This setup link is invalid or has already been used.' }, 400)
+    }
+
+    if (new Date(resetRecord.expires_at) < new Date()) {
+      return c.json({ error: 'token_expired', message: 'This setup link has expired. Please request a new one.' }, 400)
+    }
+
+    if (resetRecord.password_hash) {
+      return c.json({ error: 'account_exists', message: 'This account already has a password. Please log in instead.' }, 400)
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10)
+    await c.env.DB.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?')
+      .bind(passwordHash, toIso(new Date()), resetRecord.user_id).run()
+
+    await c.env.DB.prepare('UPDATE password_reset_tokens SET used = 1 WHERE id = ?')
+      .bind(resetRecord.id).run()
+
+    if (consent_marketing !== undefined) {
+      await handleEmailPreferencesOptIn(c.env.DB, resetRecord.user_id, !!consent_marketing)
+    }
+
+    console.log(`[Account Setup Complete] Password set for user ${resetRecord.user_id}`)
+    return c.json({ success: true })
   } catch (error) {
     console.error('[Account Setup Complete] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
@@ -4244,7 +4286,7 @@ app.get('/membership/sponsor/pool', async (c) => {
 
 /**
  * POST /membership/sponsor/checkout
- * Purchase a sponsorship — creates a SumUp checkout at the annual plan price.
+ * Purchase a sponsorship — creates a SumUp checkout at the quarterly plan price.
  * Does NOT create a membership for the buyer; instead creates a sponsored_membership record.
  */
 const sponsorCheckoutRateLimits = new Map()
@@ -8405,7 +8447,7 @@ async function processAutoRenewals(env) {
         CASE WHEN sm.id IS NOT NULL THEN 1 ELSE 0 END as is_sponsored
       FROM memberships m
       JOIN users u ON m.user_id = u.user_id
-      LEFT JOIN sponsored_memberships sm ON sm.order_ref = m.order_ref AND sm.status = 'claimed'
+      LEFT JOIN sponsored_memberships sm ON sm.claimed_by_user_id = m.user_id AND sm.status = 'claimed'
       WHERE DATE(m.end_date) <= DATE(?)
         AND DATE(m.end_date) >= DATE(?)
         AND m.auto_renew = 0

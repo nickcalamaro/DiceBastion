@@ -210,6 +210,16 @@ For those able to give a bit more, or for those of you who can't afford a member
     if (!open) loadSponsorPool();
   });
 
+  if (window.location.hash === '#other-options-section') {
+    panel.style.display = 'block';
+    chevron.style.transform = 'rotate(180deg)';
+    toggleBtn.setAttribute('aria-expanded', 'true');
+    loadSponsorPool();
+    setTimeout(() => {
+      document.getElementById('other-options-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+  }
+
   // ── Pool availability ───────────────────────────────────────────────────
   let sponsorPoolCount = null; // null = not yet loaded
 
