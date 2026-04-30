@@ -135,6 +135,62 @@ const checkPendingAccountSetup = () => {
   }
 };
 
+// Render success state for free trial
+const renderFreeTrialSuccess = (data) => {
+const { plan, endDate, trialEndDate, cardLast4, emailSent } = data;
+const urlParams = new URLSearchParams(window.location.search);
+const emailPending = urlParams.get('emailPending') === '1' || emailSent === false;
+const planNames = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' };
+const planLabel = planNames[plan] || plan;
+
+container.innerHTML = `
+<div class="card" style="max-width:640px; margin:0 auto;">
+<h2 class="card-header" style="text-align:center;">🎉 Your Free Trial Has Started!</h2>
+<div style="text-align:center;"><span class="ty-badge alert-success">Trial Active</span></div>
+
+<div class="alert alert-info" style="margin:1.25rem 0;">
+<strong>Your 1-Month Free Trial of the ${planLabel} Membership is Active</strong><br>
+You now have full access to all club facilities and member benefits. Your card will <strong>not be charged</strong> until your trial ends.
+</div>
+
+<div class="card-section">
+<div class="ty-details">
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Membership Plan</span>
+<span class="card-value">${planLabel}</span>
+</div>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Trial Ends</span>
+<span class="card-value">${formatDate(trialEndDate || endDate)}</span>
+</div>
+<div class="ty-row">
+<span class="card-label" style="margin:0;">First Charge</span>
+<span class="card-value">${formatDate(trialEndDate || endDate)}</span>
+</div>
+${cardLast4 ? `
+<div class="ty-row">
+<span class="card-label" style="margin:0;">Card on File</span>
+<span class="card-value">•••• ${cardLast4}</span>
+</div>
+` : ''}
+</div>
+</div>
+
+<div class="ty-actions">
+<a href="/events" class="btn btn-primary">Browse Events</a>
+<a href="/account" class="btn btn-secondary">My Account</a>
+</div>
+
+<p class="ty-note">
+${emailPending
+  ? '<strong class="alert-warning" style="padding:0.35rem 0.6rem; border-radius:4px; display:inline-block;">⚠️ Your confirmation email is being processed and will arrive shortly.</strong><br>'
+  : 'A confirmation email has been sent to your registered email address.'}
+We'll send you a reminder 2 days before your trial ends. You can cancel anytime from your <a href="/account">account page</a>.
+</p>
+</div>
+`;
+};
+
 // Render success state for membership
 const renderMembershipSuccess = (data) => {
 const { plan, endDate, amount, currency, autoRenew, cardLast4, emailSent } = data;
@@ -445,10 +501,13 @@ Your order has been placed and payment received. Please collect your items at th
     return;
   }
   
+  const isFreeTrial = params.get('trial') === '1';
   const type = (isEvent || isRegistration || isBundle) ? 'event' : 'membership';
   const endpoint = (isEvent || isRegistration || isBundle)
     ? `/events/confirm?orderRef=${encodeURIComponent(orderRef)}`
-    : `/membership/confirm?orderRef=${encodeURIComponent(orderRef)}`;
+    : isFreeTrial
+      ? `/membership/free-trial/confirm?orderRef=${encodeURIComponent(orderRef)}`
+      : `/membership/confirm?orderRef=${encodeURIComponent(orderRef)}`;
 
   // Immediate status check from URL params (quick feedback)
 if (status === 'failed' || status === 'cancelled') {
@@ -546,8 +605,17 @@ Confirmation emails for your membership and event ticket have been sent to your 
         return; // Success - stop polling
       }
       
-      // Regular membership or event
-      if (type === 'membership') {
+      // Regular membership, free trial, or event
+      if (type === 'membership' && (isFreeTrial || data.isFreeTrial)) {
+        renderFreeTrialSuccess({
+          plan: data.plan,
+          endDate: data.endDate,
+          trialEndDate: data.trialEndDate,
+          cardLast4: data.cardLast4,
+          emailSent: data.emailSent
+        });
+        checkPendingAccountSetup();
+      } else if (type === 'membership') {
         renderMembershipSuccess({
           plan: data.plan,
           endDate: data.endDate,

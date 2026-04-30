@@ -473,6 +473,33 @@ async function migrateToTransactions(db) {
 }
 
 // ============================================================================
+// FREE TRIAL SCHEMA MIGRATION
+// ============================================================================
+
+async function migrateFreeTrialColumns(db) {
+  const cols = [
+    { name: 'is_free_trial', def: 'INTEGER DEFAULT 0' },
+    { name: 'trial_end_date', def: 'TEXT' },
+    { name: 'trial_reminder_sent', def: 'INTEGER DEFAULT 0' }
+  ]
+  for (const col of cols) {
+    try {
+      await db.prepare(`ALTER TABLE memberships ADD COLUMN ${col.name} ${col.def}`).run()
+      console.log(`[migration] Added column memberships.${col.name}`)
+    } catch (e) {
+      if (!String(e).includes('duplicate column')) {
+        console.error(`[migration] Error adding column ${col.name}:`, e)
+      }
+    }
+  }
+}
+
+async function hasUsedFreeTrial(db, userId) {
+  const row = await db.prepare('SELECT 1 FROM memberships WHERE user_id = ? AND is_free_trial = 1 LIMIT 1').bind(userId).first()
+  return !!row
+}
+
+// ============================================================================
 // USER & IDENTITY MANAGEMENT
 // ============================================================================
 
@@ -1831,29 +1858,41 @@ function getUpcomingRenewalEmail(membership, user, daysUntil) {
   }
 }
 
-function getMembershipExpiryWarningEmail(membership, user, daysUntil) {
+function getMembershipExpiryWarningEmail(membership, user, daysUntil, isSponsored = false) {
   const planName = PLAN_NAMES[membership.plan] || membership.plan
   const urgency = daysUntil <= 1 ? 'today' : `in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`
-  const content = `
-    <p>Hi ${user.name || 'there'},</p>
-    <p>This is a friendly heads-up that your <strong>${planName} Membership</strong> expires <strong>${urgency}</strong> on <strong>${formatDate(membership.end_date)}</strong>.</p>
-    <div class="warning">
-      <strong>⚠️ Your membership is not set to auto-renew.</strong>
-      <p style="margin: 8px 0 0 0;">Once it expires you'll lose member benefits unless you renew.</p>
-    </div>
-    <p><strong>To keep your membership going:</strong></p>
+  const sponsoredNote = isSponsored ? `
+    <p>Your current membership was kindly funded by another community member through our sponsored membership scheme — we hope you've enjoyed the benefits!</p>
+  ` : ''
+  const renewalOptions = isSponsored ? `
+    <ul>
+      <li>Check if another <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}#other-options-section">sponsored membership</a> is available in the pool</li>
+      <li>Or take out a standard membership at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}">dicebastion.com/memberships</a></li>
+    </ul>
+  ` : `
     <ul>
       <li>Renew now at <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'expiry_warning')}">dicebastion.com/memberships</a></li>
       <li>You can also opt into auto-renewal during checkout so this never happens again</li>
       <li><a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'expiry_warning')}">Manage your membership</a> from your account page</li>
     </ul>
+  `
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>This is a friendly heads-up that your <strong>${planName} Membership</strong> expires <strong>${urgency}</strong> on <strong>${formatDate(membership.end_date)}</strong>.</p>
+    ${sponsoredNote}
+    <div class="warning">
+      <strong>Your membership is not set to auto-renew.</strong>
+      <p style="margin: 8px 0 0 0;">Once it expires you'll lose member benefits unless you renew.</p>
+    </div>
+    <p><strong>To keep your membership going:</strong></p>
+    ${renewalOptions}
     <p>Questions? Reach us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a></p>
     <p>— The Dice Bastion Team</p>
   `
   return {
     subject: `Reminder: Your Dice Bastion ${planName} Membership Expires ${urgency}`,
-    html: createEmailTemplate({ headerTitle: '⏰ Membership Expiring Soon', content, headerColor: '#f59e0b', headerGradient: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' }),
-    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership expires ${urgency} on ${formatDate(membership.end_date)}.\n\nRenew at dicebastion.com/memberships to keep your access.\n\n— The Dice Bastion Team`
+    html: createEmailTemplate({ headerTitle: 'Membership Expiring Soon', content, headerColor: '#f59e0b', headerGradient: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' }),
+    text: `Hi ${user.name || 'there'},\n\nYour ${planName} Membership expires ${urgency} on ${formatDate(membership.end_date)}.\n\n${isSponsored ? 'Check if another sponsored membership is available, or renew at dicebastion.com/memberships.' : 'Renew at dicebastion.com/memberships to keep your access.'}\n\n— The Dice Bastion Team`
   }
 }
 
@@ -1948,6 +1987,114 @@ function getExpiredPaymentMethodEmail(membership, user) {
     subject: `Action Required: Update Your Payment Method - Dice Bastion`,
     html: createEmailTemplate({ headerTitle: '💳 Update Payment Method', content }),
     text: `Hi ${user.name || 'there'},\n\nWe couldn't renew your ${planName} Membership because your saved payment method is no longer valid.\n\nAuto-renewal has been disabled. Your membership expires on ${formatDate(membership.end_date)}.\n\nTo continue: Visit dicebastion.com/memberships and purchase a new membership with your updated payment details.\n\nNeed help? Email support@dicebastion.com\n\n— The Dice Bastion Team`
+  }
+}
+
+// ============================================================================
+// FREE TRIAL EMAIL TEMPLATES
+// ============================================================================
+
+function getFreeTrialWelcomeEmail(membership, user, service) {
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const chargeDate = formatDate(membership.trial_end_date)
+  const amount = formatPrice(service.amount, service.currency || 'GBP')
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>Welcome to Dice Bastion! Your <strong>1-month free trial</strong> of the <strong>${planName} Membership</strong> has started.</p>
+    <div class="success">
+      <strong>Your trial details:</strong>
+      <ul style="margin: 10px 0;">
+        <li><strong>Plan:</strong> ${planName}</li>
+        <li><strong>Trial ends:</strong> ${chargeDate}</li>
+        <li><strong>First charge:</strong> ${amount} on ${chargeDate}</li>
+        <li><strong>Auto-Renewal:</strong> Enabled</li>
+      </ul>
+    </div>
+    <p>Your card has been saved but <strong>you will not be charged during the trial</strong>. We'll send you a reminder 2 days before your trial ends.</p>
+    <p>After the trial, your ${planName} membership will renew automatically so you never lose access. You can cancel anytime from your <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'free_trial_welcome')}">account page</a>.</p>
+    <div class="success">
+      <strong>Member Benefits:</strong>
+      <ul style="margin: 10px 0;">
+        <li>Free access to table bookings</li>
+        <li>Support our events and community</li>
+        <li>Discounted event tickets</li>
+        <li>And much more!</li>
+      </ul>
+    </div>
+    <p>See you at the club!</p>
+    <p>— The Dice Bastion Team</p>
+  `
+  return {
+    subject: `Your Dice Bastion Free Trial Has Started!`,
+    html: createEmailTemplate({
+      headerTitle: 'Welcome to Your Free Trial! 🎉',
+      content,
+      headerColor: '#10b981',
+      headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+    }),
+    text: `Hi ${user.name || 'there'},\n\nYour 1-month free trial of the ${planName} Membership has started!\n\nYour card will not be charged during the trial. Your first charge of ${amount} will be on ${chargeDate}.\n\nWe'll send you a reminder 2 days before. You can cancel anytime at dicebastion.com/account.\n\nSee you at the club!\n— The Dice Bastion Team`
+  }
+}
+
+function getFreeTrialEndingEmail(membership, user, daysUntil) {
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const chargeDate = formatDate(membership.trial_end_date || membership.end_date)
+  const amount = formatPrice(membership.amount, membership.currency || 'GBP')
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>Your <strong>free trial</strong> of the <strong>${planName} Membership</strong> ends in <strong>${daysUntil} day${daysUntil !== 1 ? 's' : ''}</strong>.</p>
+    <div class="warning">
+      <strong>What happens next:</strong>
+      <p style="margin: 8px 0 0 0;">On <strong>${chargeDate}</strong>, your saved card${membership.payment_instrument_last_4 ? ` ending in ${membership.payment_instrument_last_4}` : ''} will be charged <strong>${amount}</strong> for your ${planName} membership. Your membership will then renew automatically.</p>
+    </div>
+    <p><strong>Want to make changes?</strong></p>
+    <ul>
+      <li>To cancel before you're charged, visit your <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'free_trial_ending')}">account page</a> and disable auto-renewal</li>
+      <li>To change your plan or payment method, visit <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'transactional', 'free_trial_ending')}">dicebastion.com/memberships</a></li>
+    </ul>
+    <p>We hope you've enjoyed your trial! If you have any questions, reach us at <a href="mailto:support@dicebastion.com">support@dicebastion.com</a>.</p>
+    <p>— The Dice Bastion Team</p>
+  `
+  return {
+    subject: `Your Dice Bastion Free Trial Ends in ${daysUntil} Day${daysUntil !== 1 ? 's' : ''}`,
+    html: createEmailTemplate({
+      headerTitle: 'Your Free Trial is Ending Soon',
+      content,
+      headerColor: '#f59e0b',
+      headerGradient: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)'
+    }),
+    text: `Hi ${user.name || 'there'},\n\nYour free trial of the ${planName} Membership ends in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}.\n\nOn ${chargeDate}, your card will be charged ${amount} for your ${planName} membership.\n\nTo cancel before you're charged, visit dicebastion.com/account and disable auto-renewal.\n\nQuestions? Contact support@dicebastion.com\n\n— The Dice Bastion Team`
+  }
+}
+
+function getFreeTrialChargedEmail(membership, user, newEndDate) {
+  const planName = PLAN_NAMES[membership.plan] || membership.plan
+  const amount = formatPrice(membership.amount, membership.currency || 'GBP')
+  const content = `
+    <p>Hi ${user.name || 'there'},</p>
+    <p>Your free trial has ended, and your <strong>${planName} Membership</strong> is now fully active!</p>
+    <div class="success">
+      <strong>Your membership details:</strong>
+      <ul style="margin: 10px 0;">
+        <li><strong>Plan:</strong> ${planName}</li>
+        <li><strong>Amount charged:</strong> ${amount}</li>
+        <li><strong>Valid until:</strong> ${formatDate(newEndDate)}</li>
+        <li><strong>Auto-Renewal:</strong> Enabled</li>
+      </ul>
+    </div>
+    <p>Your membership will automatically renew before expiration. You can manage this at any time from your <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'transactional', 'free_trial_charged')}">account page</a>.</p>
+    <p>Thank you for being a valued member!</p>
+    <p>— The Dice Bastion Team</p>
+  `
+  return {
+    subject: `Your Dice Bastion ${planName} Membership is Now Active!`,
+    html: createEmailTemplate({
+      headerTitle: `${planName} Membership Active! 🎉`,
+      content,
+      headerColor: '#10b981',
+      headerGradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+    }),
+    text: `Hi ${user.name || 'there'},\n\nYour free trial has ended and your ${planName} Membership is now fully active!\n\nAmount charged: ${amount}\nValid until: ${formatDate(newEndDate)}\nAuto-Renewal: Enabled\n\nManage your membership at dicebastion.com/account.\n\nThank you!\n— The Dice Bastion Team`
   }
 }
 
@@ -3534,6 +3681,116 @@ app.post('/membership/checkout', async (c) => {
   }
 })
 
+// ============================================================================
+// FREE TRIAL MEMBERSHIP
+// ============================================================================
+
+app.post('/membership/free-trial/checkout', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    if (!checkRateLimit(ip, membershipCheckoutRateLimits, 3, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many requests. Please try again in a minute.' }, 429)
+    }
+
+    const idem = c.req.header('Idempotency-Key')?.trim()
+    const { email, name, plan, privacyConsent, turnstileToken } = await c.req.json()
+    if (!email || !plan) return c.json({ error: 'missing_fields' }, 400)
+    if (!EMAIL_RE.test(email) || email.length > 320) return c.json({ error: 'invalid_email' }, 400)
+    if (!privacyConsent) return c.json({ error: 'privacy_consent_required' }, 400)
+    if (name && name.length > 200) return c.json({ error: 'name_too_long' }, 400)
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
+    if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
+
+    await migrateFreeTrialColumns(c.env.DB)
+
+    const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name, 200))
+
+    const alreadyTrialed = await hasUsedFreeTrial(c.env.DB, ident.id)
+    if (alreadyTrialed) {
+      return c.json({ error: 'free_trial_already_used', message: 'You have already used your free trial. Please purchase a standard membership.' }, 400)
+    }
+
+    const activeExisting = await getActiveMembership(c.env.DB, ident.id)
+    if (activeExisting) {
+      return c.json({ error: 'already_active', message: 'You already have an active membership.' }, 400)
+    }
+
+    const svc = await getServiceForPlan(c.env.DB, plan)
+    if (!svc) return c.json({ error: 'unknown_plan' }, 400)
+    const amount = Number(svc.amount)
+    if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'invalid_amount' }, 400)
+    const currency = svc.currency || c.env.CURRENCY || 'GBP'
+
+    await migrateToTransactions(c.env.DB)
+
+    const order_ref = crypto.randomUUID()
+    if (idem) {
+      const existing = await c.env.DB.prepare(`
+        SELECT t.*, m.id as membership_id FROM transactions t
+        JOIN memberships m ON m.id = t.reference_id
+        WHERE t.transaction_type = 'free_trial' AND t.user_id = ? AND t.idempotency_key = ?
+        ORDER BY t.id DESC LIMIT 1
+      `).bind(ident.id, idem).first()
+      if (existing && existing.checkout_id) {
+        return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
+      }
+    }
+
+    const cols = ['user_id', 'plan', 'status', 'auto_renew', 'order_ref', 'is_free_trial']
+    const vals = [ident.id, plan, 'pending', 1, order_ref, 1]
+    const placeholders = cols.map(() => '?').join(',')
+    const mResult = await c.env.DB.prepare(`INSERT INTO memberships (${cols.join(',')}) VALUES (${placeholders}) RETURNING id`).bind(...vals).first()
+    const membershipId = mResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
+
+    let checkout
+    let customerId = null
+    try {
+      customerId = await getOrCreateSumUpCustomer(c.env, ident)
+      checkout = await createCheckout(c.env, {
+        amount,
+        currency,
+        orderRef: order_ref,
+        title: `Dice Bastion ${plan} membership free trial`,
+        description: `Card setup for ${plan} membership free trial`,
+        savePaymentInstrument: true,
+        customerId
+      })
+    } catch (err) {
+      console.error('free trial checkout error', err)
+      return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
+    }
+    if (!checkout.id) {
+      console.error('free trial checkout missing id', checkout)
+      return c.json({ error: 'sumup_missing_id' }, 502)
+    }
+
+    await c.env.DB.prepare(`
+      INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                                checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
+      VALUES ('free_trial', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).bind(membershipId, ident.id, email, clampStr(name, 200), order_ref, checkout.id,
+            String(amount), currency, idem || null, toIso(new Date())).run()
+
+    await handleEmailPreferencesOptIn(c.env.DB, ident.id, false)
+
+    return c.json({
+      orderRef: order_ref,
+      checkoutId: checkout.id,
+      membershipId,
+      userId: ident.id,
+      amount,
+      currency,
+      customerId: customerId || null,
+      isFreeTrial: true
+    })
+  } catch (e) {
+    const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
+    console.error('free trial checkout error', e)
+    return c.json(debugMode ? { error: 'internal_error', detail: String(e), stack: String(e?.stack || '') } : { error: 'internal_error' }, 500)
+  }
+})
+
 app.get('/membership/status', async (c) => {
   const email = c.req.query('email')
   if (!email) return c.json({ error: 'email required' }, 400)
@@ -3792,6 +4049,153 @@ app.get('/membership/confirm', async (c) => {
     cardLast4,
     userEmail: user?.email || transaction.email,
     emailSent,  // Let frontend know if welcome email was sent
+    needsAccountSetup: !user?.password_hash
+  })
+})
+
+// ============================================================================
+// FREE TRIAL CONFIRM
+// ============================================================================
+
+app.get('/membership/free-trial/confirm', async (c) => {
+  const orderRef = c.req.query('orderRef')
+  if (!orderRef || !UUID_RE.test(orderRef)) return c.json({ ok: false, error: 'invalid_orderRef' }, 400)
+
+  const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "free_trial"').bind(orderRef).first()
+  if (!transaction) return c.json({ ok: false, error: 'order_not_found' }, 404)
+
+  const pending = await c.env.DB.prepare('SELECT * FROM memberships WHERE id = ?').bind(transaction.reference_id).first()
+  if (!pending) return c.json({ ok: false, error: 'membership_not_found' }, 404)
+  if (pending.status === 'active') {
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(pending.user_id).first()
+    let cardLast4 = null
+    if (pending.payment_instrument_id) {
+      const instrument = await c.env.DB.prepare('SELECT last_4 FROM payment_instruments WHERE instrument_id = ?')
+        .bind(pending.payment_instrument_id).first()
+      cardLast4 = instrument?.last_4 || null
+    }
+    return c.json({
+      ok: true,
+      status: 'already_active',
+      plan: pending.plan,
+      endDate: pending.end_date,
+      trialEndDate: pending.trial_end_date,
+      isFreeTrial: true,
+      autoRenew: true,
+      cardLast4,
+      userEmail: user?.email || transaction.email
+    })
+  }
+
+  let payment
+  try { payment = await fetchPayment(c.env, transaction.checkout_id) }
+  catch { return c.json({ ok: false, error: 'verify_failed' }, 400) }
+
+  if (!isCheckoutPaid(payment)) {
+    const currentStatus = payment?.status || 'PENDING'
+    const txStatuses = payment?.transactions?.map(t => t.status) || []
+    const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+    const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    return c.json({
+      ok: false,
+      status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+      message: hasFailed ? 'Card verification failed. Please check your card details and try again.' :
+               hasDeclined ? 'Your card was declined. Please use a different payment method.' :
+               'Card verification is still processing.'
+    })
+  }
+
+  const identityId = pending.user_id
+  const svc = await getServiceForPlan(c.env.DB, pending.plan)
+  if (!svc) return c.json({ ok: false, error: 'plan_not_configured' }, 400)
+
+  let instrumentId = null
+  instrumentId = await savePaymentInstrument(c.env.DB, identityId, transaction.checkout_id, c.env)
+
+  const now = new Date()
+  const trialEnd = addMonths(now, 1)
+
+  await migrateFreeTrialColumns(c.env.DB)
+  await c.env.DB.prepare(`
+    UPDATE memberships
+    SET status = 'active',
+        start_date = ?,
+        end_date = ?,
+        is_free_trial = 1,
+        trial_end_date = ?,
+        auto_renew = 1,
+        payment_instrument_id = ?
+    WHERE id = ?
+  `).bind(toIso(now), toIso(trialEnd), toIso(trialEnd), instrumentId, pending.id).run()
+
+  await c.env.DB.prepare(`
+    UPDATE transactions
+    SET payment_status = 'PAID',
+        payment_id = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).bind(payment.id, toIso(now), transaction.id).run()
+
+  const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
+  let emailSent = false
+  if (user) {
+    try {
+      const updatedMembership = { ...pending, end_date: toIso(trialEnd), trial_end_date: toIso(trialEnd) }
+      const emailContent = getFreeTrialWelcomeEmail(updatedMembership, user, svc)
+      await sendEmail(c.env, {
+        to: user.email,
+        ...emailContent,
+        emailType: 'free_trial_welcome',
+        relatedId: pending.id,
+        relatedType: 'membership',
+        metadata: { plan: pending.plan, trial_end_date: toIso(trialEnd) }
+      })
+      emailSent = true
+    } catch (emailError) {
+      console.error('[free-trial/confirm] Failed to send welcome email:', emailError)
+    }
+  }
+
+  try {
+    const adminEmailContent = getAdminNotificationEmail('membership', {
+      plan: pending.plan,
+      customerName: user?.name || 'Customer',
+      customerEmail: user?.email || 'unknown@example.com',
+      amount: '0.00 (Free Trial)',
+      autoRenew: true,
+      membershipId: pending.id,
+      orderRef: transaction.order_ref
+    })
+    await sendEmail(c.env, {
+      to: 'admin@dicebastion.com',
+      ...adminEmailContent,
+      emailType: 'admin_free_trial_notification',
+      relatedId: pending.id,
+      relatedType: 'membership',
+      metadata: { plan: pending.plan, is_free_trial: true }
+    })
+  } catch (adminEmailError) {
+    console.error('[free-trial/confirm] Failed to send admin notification:', adminEmailError)
+  }
+
+  let cardLast4 = null
+  if (instrumentId) {
+    const instrument = await c.env.DB.prepare('SELECT last_4 FROM payment_instruments WHERE instrument_id = ? AND user_id = ?')
+      .bind(instrumentId, identityId).first()
+    cardLast4 = instrument?.last_4 || null
+  }
+
+  return c.json({
+    ok: true,
+    status: 'active',
+    plan: pending.plan,
+    endDate: toIso(trialEnd),
+    trialEndDate: toIso(trialEnd),
+    isFreeTrial: true,
+    autoRenew: true,
+    cardLast4,
+    userEmail: user?.email || transaction.email,
+    emailSent,
     needsAccountSetup: !user?.password_hash
   })
 })
@@ -4057,6 +4461,34 @@ app.post('/membership/sponsor/claim', async (c) => {
           relatedType: 'membership',
           metadata: { plan: 'quarterly', sponsored: true }
         })
+
+        // If this is a brand-new user (no password set), send an account setup email
+        // so they can log in to view and manage their membership.
+        if (!user.password_hash) {
+          try {
+            const resetToken = crypto.randomUUID() + '-' + crypto.randomUUID()
+            const tokenExpiry = toIso(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)) // 7-day window
+            await c.env.DB.prepare(`
+              INSERT INTO password_reset_tokens (user_id, token, expires_at, used, email_sent, source, created_at)
+              VALUES (?, ?, ?, 0, 1, 'modal', ?)
+            `).bind(user.user_id, resetToken, tokenExpiry, toIso(now)).run()
+
+            const setupLink = `https://dicebastion.com/reset-password?token=${resetToken}`
+            const setupEmailHtml = getAccountCreationInviteEmail(user.name || user.email, user.email, setupLink)
+            await sendEmail(c.env, {
+              to: user.email,
+              subject: 'One More Step – Set Up Your Dice Bastion Account',
+              html: setupEmailHtml,
+              emailType: 'account_setup_invite',
+              relatedId: user.user_id,
+              relatedType: 'user',
+              metadata: { source: 'sponsored_claim' }
+            })
+            console.log(`[sponsor/claim] Account setup email sent to new user ${user.email}`)
+          } catch (setupErr) {
+            console.error('[sponsor/claim] Failed to send account setup email:', setupErr)
+          }
+        }
       }
     } catch (emailError) {
       console.error('[sponsor/claim] Failed to send welcome email:', emailError)
@@ -4149,6 +4581,46 @@ app.post('/webhooks/sumup', async (c) => {
   const now = new Date()
   const s = await getSchema(c.env.DB)
   const identityId = pending.user_id
+
+  // ==================== FREE TRIAL WEBHOOK PATH ====================
+  if (pending.is_free_trial === 1) {
+    console.log('[webhook-free-trial] Processing free trial activation for order:', orderRef)
+    const instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
+    const trialEnd = addMonths(now, 1)
+
+    await migrateFreeTrialColumns(c.env.DB)
+    await c.env.DB.prepare(`
+      UPDATE memberships
+      SET status = 'active', start_date = ?, end_date = ?, is_free_trial = 1,
+          trial_end_date = ?, auto_renew = 1, payment_id = ?, payment_instrument_id = ?
+      WHERE id = ?
+    `).bind(toIso(now), toIso(trialEnd), toIso(trialEnd), paymentId, instrumentId, pending.id).run()
+
+    const trialTx = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "free_trial"').bind(orderRef).first()
+    if (trialTx) {
+      await c.env.DB.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
+        .bind(paymentId, toIso(now), trialTx.id).run()
+    }
+
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
+    if (user) {
+      try {
+        const updatedMembership = { ...pending, end_date: toIso(trialEnd), trial_end_date: toIso(trialEnd) }
+        const emailContent = getFreeTrialWelcomeEmail(updatedMembership, user, svc)
+        await sendEmail(c.env, {
+          to: user.email,
+          ...emailContent,
+          emailType: 'free_trial_welcome',
+          relatedId: pending.id,
+          relatedType: 'membership',
+          metadata: { plan: pending.plan, trial_end_date: toIso(trialEnd) }
+        })
+      } catch (err) { console.error('[webhook-free-trial] Email failed:', err) }
+    }
+    return c.json({ ok: true })
+  }
+
+  // ==================== STANDARD MEMBERSHIP WEBHOOK PATH ====================
   const memberActive = await getActiveMembership(c.env.DB, identityId)
   const baseStart = memberActive ? new Date(memberActive.end_date) : now
   const months = Number(svc.months || 0)
@@ -7670,6 +8142,188 @@ async function processAutoRenewals(env) {
     const gracePeriodStartStr = toIso(gracePeriodStart)
     
     // ========================================================================
+    // STEP 0a: Send free trial ending reminder emails (2 days before charge)
+    // ========================================================================
+    console.log(`[CRON] Step 0a: Checking for free trials needing ending reminders...`)
+    let trialRemindersSent = 0
+
+    try {
+      await migrateFreeTrialColumns(env.DB)
+      const trialReminderDate = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000))
+      const trialReminderDateStr = toIso(trialReminderDate)
+
+      const trialReminders = await env.DB.prepare(`
+        SELECT
+          m.id, m.user_id, m.plan, m.end_date, m.trial_end_date, m.payment_instrument_id,
+          u.email, u.name
+        FROM memberships m
+        JOIN users u ON m.user_id = u.user_id
+        WHERE m.is_free_trial = 1
+          AND m.status = 'active'
+          AND (m.trial_reminder_sent = 0 OR m.trial_reminder_sent IS NULL)
+          AND DATE(m.trial_end_date) <= DATE(?)
+          AND DATE(m.trial_end_date) >= DATE(?)
+      `).bind(trialReminderDateStr, today).all()
+
+      console.log(`[CRON] Found ${trialReminders.results?.length || 0} free trials needing reminders`)
+
+      for (const trial of (trialReminders.results || [])) {
+        try {
+          const instrument = await getActivePaymentInstrument(env.DB, trial.user_id)
+          const svc = await getServiceForPlan(env.DB, trial.plan)
+          const daysUntil = Math.max(1, Math.round((new Date(trial.trial_end_date) - now) / (24 * 60 * 60 * 1000)))
+          const trialForEmail = {
+            ...trial,
+            amount: svc ? svc.amount : null,
+            currency: svc ? (svc.currency || 'GBP') : 'GBP',
+            payment_instrument_last_4: instrument?.last_4 || null
+          }
+          const emailContent = getFreeTrialEndingEmail(trialForEmail, trial, daysUntil)
+          await sendEmail(env, {
+            to: trial.email,
+            ...emailContent,
+            emailType: 'free_trial_ending_reminder',
+            relatedId: trial.id,
+            relatedType: 'membership',
+            metadata: { plan: trial.plan, days_until_charge: daysUntil }
+          })
+          await env.DB.prepare('UPDATE memberships SET trial_reminder_sent = 1 WHERE id = ?').bind(trial.id).run()
+          trialRemindersSent++
+          console.log(`[CRON] Trial reminder sent for membership ${trial.id} (${trial.email})`)
+        } catch (err) {
+          console.error(`[CRON] Failed to send trial reminder for membership ${trial.id}:`, err)
+          errors.push({ membership_id: trial.id, email: trial.email, action: 'trial_reminder', error: err.message })
+        }
+      }
+    } catch (err) {
+      console.error('[CRON] Step 0a (trial reminders) failed:', err)
+      errors.push({ action: 'trial_reminders_batch', error: err.message })
+    }
+
+    // ========================================================================
+    // STEP 0b: Process free trial end charges
+    // ========================================================================
+    console.log(`[CRON] Step 0b: Checking for free trials to charge...`)
+    let trialChargesProcessed = 0
+    let trialChargesSucceeded = 0
+    let trialChargesFailed = 0
+
+    try {
+      const trialCharges = await env.DB.prepare(`
+        SELECT
+          m.id, m.user_id, m.plan, m.end_date, m.trial_end_date,
+          m.renewal_attempts, m.amount,
+          u.email, u.name
+        FROM memberships m
+        JOIN users u ON m.user_id = u.user_id
+        WHERE m.is_free_trial = 1
+          AND m.status = 'active'
+          AND m.auto_renew = 1
+          AND m.trial_end_date <= ?
+          AND m.trial_end_date >= ?
+          AND (m.renewal_attempts < 3 OR m.renewal_attempts IS NULL)
+      `).bind(today, gracePeriodStartStr).all()
+
+      trialChargesProcessed = trialCharges.results?.length || 0
+      console.log(`[CRON] Found ${trialChargesProcessed} free trials to charge`)
+
+      for (const trial of (trialCharges.results || [])) {
+        try {
+          const instrument = await getActivePaymentInstrument(env.DB, trial.user_id)
+          if (!instrument) {
+            await env.DB.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = COALESCE(renewal_attempts, 0) + 1 WHERE id = ?')
+              .bind(toIso(now), trial.id).run()
+            await env.DB.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message) VALUES (?, ?, ?, ?)')
+              .bind(trial.id, toIso(now), 'failed', 'No active payment instrument for trial charge').run()
+            trialChargesFailed++
+            continue
+          }
+
+          const svc = await getServiceForPlan(env.DB, trial.plan)
+          if (!svc) {
+            console.error(`[CRON] Plan not found for trial membership ${trial.id}`)
+            trialChargesFailed++
+            continue
+          }
+
+          const amount = Number(svc.amount)
+          const currency = svc.currency || env.CURRENCY || 'GBP'
+          const orderRef = `TRIAL-CHARGE-${trial.id}-${crypto.randomUUID()}`
+
+          let payment
+          try {
+            payment = await chargePaymentInstrument(
+              env, trial.user_id, instrument.instrument_id,
+              amount, currency, orderRef,
+              `Dice Bastion ${trial.plan} membership (post-trial)`
+            )
+          } catch (e) {
+            await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, e)
+            trialChargesFailed++
+            continue
+          }
+
+          if (!payment || !isCheckoutPaid(payment)) {
+            const statusErr = new Error(`Trial charge not successful: ${payment?.status || 'UNKNOWN'}`)
+            await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, statusErr)
+            trialChargesFailed++
+            continue
+          }
+
+          const months = Number(svc.months || 0)
+          const trialEndDate = new Date(trial.trial_end_date)
+          const newEnd = addMonths(trialEndDate, months)
+
+          await env.DB.prepare(`
+            UPDATE memberships
+            SET is_free_trial = 0,
+                trial_end_date = NULL,
+                end_date = ?,
+                renewal_failed_at = NULL,
+                renewal_attempts = 0,
+                renewal_warning_sent = 0,
+                trial_reminder_sent = 0
+            WHERE id = ?
+          `).bind(toIso(newEnd), trial.id).run()
+
+          await env.DB.prepare(`
+            INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                                      payment_id, amount, currency, payment_status)
+            VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID')
+          `).bind(trial.id, trial.user_id, trial.email, trial.name, orderRef, payment.id, String(amount), currency).run()
+
+          await env.DB.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, payment_id, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
+            .bind(trial.id, toIso(now), 'success', payment.id, String(amount), currency).run()
+
+          try {
+            const trialForEmail = { ...trial, amount: String(amount), currency }
+            const emailContent = getFreeTrialChargedEmail(trialForEmail, trial, toIso(newEnd))
+            await sendEmail(env, {
+              to: trial.email,
+              ...emailContent,
+              emailType: 'free_trial_charged',
+              relatedId: trial.id,
+              relatedType: 'membership',
+              metadata: { plan: trial.plan, new_end_date: toIso(newEnd) }
+            })
+          } catch (emailErr) {
+            console.error(`[CRON] Failed to send trial charged email for membership ${trial.id}:`, emailErr)
+          }
+
+          trialChargesSucceeded++
+          console.log(`[CRON] Successfully charged trial membership ${trial.id}`)
+        } catch (err) {
+          trialChargesFailed++
+          console.error(`[CRON] Exception processing trial charge for membership ${trial.id}:`, err)
+          errors.push({ membership_id: trial.id, email: trial.email, action: 'trial_charge', error: err.message })
+        }
+      }
+    } catch (err) {
+      console.error('[CRON] Step 0b (trial charges) failed:', err)
+      errors.push({ action: 'trial_charges_batch', error: err.message })
+    }
+
+    // ========================================================================
     // STEP 1: Send renewal warnings (3 days before expiry)
     // ========================================================================
     console.log(`[CRON] Step 1: Checking for memberships needing renewal warnings...`)
@@ -7688,6 +8342,7 @@ async function processAutoRenewals(env) {
         AND DATE(m.end_date) >= DATE(?)
         AND m.auto_renew = 1
         AND m.status = 'active'
+        AND (m.is_free_trial = 0 OR m.is_free_trial IS NULL)
         AND (m.renewal_warning_sent = 0 OR m.renewal_warning_sent IS NULL)
     `).bind(warningDateStr, today).all()
     
@@ -7744,10 +8399,13 @@ async function processAutoRenewals(env) {
         m.user_id,
         m.plan,
         m.end_date,
+        m.order_ref,
         u.email,
-        u.name
+        u.name,
+        CASE WHEN sm.id IS NOT NULL THEN 1 ELSE 0 END as is_sponsored
       FROM memberships m
       JOIN users u ON m.user_id = u.user_id
+      LEFT JOIN sponsored_memberships sm ON sm.order_ref = m.order_ref AND sm.status = 'claimed'
       WHERE DATE(m.end_date) <= DATE(?)
         AND DATE(m.end_date) >= DATE(?)
         AND m.auto_renew = 0
@@ -7760,7 +8418,7 @@ async function processAutoRenewals(env) {
     for (const membership of (expiryWarningMemberships.results || [])) {
       try {
         const daysLeft = Math.max(0, Math.round((new Date(membership.end_date) - now) / (24 * 60 * 60 * 1000)))
-        const emailContent = getMembershipExpiryWarningEmail(membership, membership, daysLeft)
+        const emailContent = getMembershipExpiryWarningEmail(membership, membership, daysLeft, !!membership.is_sponsored)
         await sendEmail(env, {
           to: membership.email,
           ...emailContent,
@@ -7806,6 +8464,7 @@ async function processAutoRenewals(env) {
         AND m.end_date >= ?
         AND m.auto_renew = 1
         AND m.status = 'active'
+        AND (m.is_free_trial = 0 OR m.is_free_trial IS NULL)
         AND (m.renewal_attempts < 3 OR m.renewal_attempts IS NULL)
     `).bind(today, gracePeriodStartStr).all()
     
@@ -7876,9 +8535,35 @@ async function processAutoRenewals(env) {
     
     expired = expiredNoAutoRenew + expiredGracePeriod
     console.log(`[CRON] Total memberships marked as expired: ${expired}`)
-    
+
+    // ========================================================================
+    // STEP 3b: Clean up stale pending sponsored membership checkouts
+    // ========================================================================
+    console.log(`[CRON] Step 3b: Cleaning up stale pending sponsored memberships...`)
+    const staleCutoff = toIso(new Date(now.getTime() - 24 * 60 * 60 * 1000)) // 24 hours ago
+    const staleCleanupResult = await env.DB.prepare(`
+      UPDATE sponsored_memberships
+      SET status = 'refunded'
+      WHERE status = 'pending'
+        AND purchased_at < ?
+    `).bind(staleCutoff).run()
+    const staleCount = staleCleanupResult.meta?.changes || 0
+    if (staleCount > 0) {
+      console.log(`[CRON] Cleaned up ${staleCount} stale pending sponsored membership checkout(s)`)
+      // Also mark their transactions as abandoned
+      await env.DB.prepare(`
+        UPDATE transactions
+        SET payment_status = 'abandoned', updated_at = ?
+        WHERE transaction_type = 'sponsorship'
+          AND payment_status = 'pending'
+          AND created_at < ?
+      `).bind(toIso(now), staleCutoff).run()
+    }
+
     // Log final results
     console.log(`[CRON] ${jobName} summary:`)
+    console.log(`  - Trial reminders sent: ${trialRemindersSent}`)
+    console.log(`  - Trial charges: ${trialChargesSucceeded}/${trialChargesProcessed} succeeded, ${trialChargesFailed} failed`)
     console.log(`  - Warnings sent: ${warningsSent}`)
     console.log(`  - Renewals processed: ${processed}`)
     console.log(`  - Renewals succeeded: ${succeeded}`)
@@ -7886,13 +8571,17 @@ async function processAutoRenewals(env) {
     console.log(`  - Memberships expired: ${expired}`)
     
     try {
-      await logCronJob(env.DB, jobName, failed > 0 ? 'partial' : 'completed', {
+      await logCronJob(env.DB, jobName, (failed > 0 || trialChargesFailed > 0) ? 'partial' : 'completed', {
         started_at: startedAt,
-        records_processed: processed,
-        records_succeeded: succeeded,
-        records_failed: failed,
+        records_processed: processed + trialChargesProcessed,
+        records_succeeded: succeeded + trialChargesSucceeded,
+        records_failed: failed + trialChargesFailed,
         extra: {
           warnings_sent: warningsSent,
+          trial_reminders_sent: trialRemindersSent,
+          trial_charges_processed: trialChargesProcessed,
+          trial_charges_succeeded: trialChargesSucceeded,
+          trial_charges_failed: trialChargesFailed,
           expired_count: expired,
           errors: errors.length > 0 ? errors : undefined
         }
@@ -8157,7 +8846,7 @@ async function processDelayedAccountSetupEmails(env) {
     // Send email for each pending token
     for (const tokenRecord of pendingTokens.results) {
       try {
-        const setupLink = `https://dicebastion.com/account-setup?token=${tokenRecord.token}`
+        const setupLink = `https://dicebastion.com/reset-password?token=${tokenRecord.token}`
         const emailHtml = getAccountCreationInviteEmail(tokenRecord.name || tokenRecord.email, tokenRecord.email, setupLink)
         
         await sendEmail(env, {
