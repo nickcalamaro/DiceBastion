@@ -13,6 +13,23 @@ showPagination: false
 
 <!-- Component Styles -->
 <link rel="stylesheet" href="/css/forms.css">
+<style>
+#trial-plans .plan-cta {
+  background: #2ac754 !important;
+  color: #ffffff;
+}
+#trial-plans .plan-cta:hover {
+  background: #00dd00 !important;
+}
+#trial-plans .plan-label {
+  color: #2ac754 !important;
+}
+#trial-plans .plan-badge {
+  background: #2ac754 !important;
+  color: #ffffff;
+}
+
+</style>
 
 <meta name="description" content="Gibraltar Dice Bastion is part of the Gibraltar Warhammer Club, and we’re completely funded by our members!">
 
