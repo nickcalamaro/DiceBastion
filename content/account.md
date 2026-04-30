@@ -315,6 +315,7 @@ if (data.membership && membershipActiveEl && membershipInactiveEl) {
 membershipActiveEl.style.display = 'block';
 membershipInactiveEl.style.display = 'none';
 
+const isFreeTrial = data.membership.is_free_trial === 1;
 const planNames = {
 monthly: 'Monthly Membership',
 quarterly: 'Quarterly Membership',
@@ -322,12 +323,25 @@ annual: 'Annual Membership'
 };
 
 const membershipPlanEl = document.getElementById('membership-plan');
+const membershipSubtitleEl = membershipActiveEl.querySelector('.text-muted');
+const validUntilLabel = membershipActiveEl.querySelector('.card-label');
 if (membershipPlanEl) {
-membershipPlanEl.textContent = planNames[data.membership.plan] || data.membership.plan;
+if (isFreeTrial) {
+    membershipPlanEl.textContent = 'Free Trial';
+    if (membershipSubtitleEl) membershipSubtitleEl.textContent = `${planNames[data.membership.plan] || data.membership.plan} — Trial`;
+} else {
+    membershipPlanEl.textContent = planNames[data.membership.plan] || data.membership.plan;
+    if (membershipSubtitleEl) membershipSubtitleEl.textContent = 'Active Member';
+}
 }
 
 const endDate = new Date(data.membership.end_date);
 const membershipEndDateEl = document.getElementById('membership-end-date');
+if (validUntilLabel && isFreeTrial) {
+validUntilLabel.textContent = 'Trial Expires';
+} else if (validUntilLabel) {
+validUntilLabel.textContent = 'Valid Until';
+}
 if (membershipEndDateEl) {
 membershipEndDateEl.textContent = endDate.toLocaleDateString('en-GB', {
     year: 'numeric',
@@ -338,7 +352,11 @@ membershipEndDateEl.textContent = endDate.toLocaleDateString('en-GB', {
 
 const membershipAutoRenewEl = document.getElementById('membership-auto-renew');
 if (membershipAutoRenewEl) {
-membershipAutoRenewEl.textContent = data.membership.auto_renew ? 'Enabled' : 'Disabled';
+if (isFreeTrial) {
+    membershipAutoRenewEl.textContent = data.membership.auto_renew ? 'Active — charges after trial' : 'Cancelled';
+} else {
+    membershipAutoRenewEl.textContent = data.membership.auto_renew ? 'Enabled' : 'Disabled';
+}
 }
 
 // Show/hide auto-renewal controls based on current state
@@ -351,6 +369,12 @@ if (autoRenewalControls) {
 autoRenewalControls.style.display = 'block';
 }
 
+// Adapt cancel section UI for free trial
+const cancelSectionTitle = cancelSection ? cancelSection.querySelector('h3') : null;
+const cancelSectionDesc = cancelSection ? cancelSection.querySelector('p') : null;
+const cancelSectionIcon = cancelSection ? cancelSection.querySelector('div[style*="flex"] > div:first-child') : null;
+const cancelAutoRenewalBtn = document.getElementById('cancel-auto-renewal-btn');
+
 if (data.membership.auto_renew) {
 // Auto-renewal is enabled - show cancel option
 if (enableSection) enableSection.style.display = 'none';
@@ -362,6 +386,16 @@ if (cancelSection) {
         month: 'long',
         day: 'numeric'
     });
+    }
+    if (isFreeTrial) {
+    if (cancelSectionIcon) cancelSectionIcon.textContent = '🎁';
+    if (cancelSectionTitle) cancelSectionTitle.textContent = 'Free Trial Active';
+    if (cancelSectionDesc) cancelSectionDesc.innerHTML = `Your free trial is active until <strong><span id="cancel-expiry-date">${endDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}</span></strong>. After that, your saved card will be charged for your chosen plan. <strong>If you cancel, your trial will remain active until the end date but you will not be charged.</strong>`;
+    if (cancelAutoRenewalBtn) cancelAutoRenewalBtn.textContent = 'Cancel Free Trial';
+    } else {
+    if (cancelSectionIcon) cancelSectionIcon.textContent = '✅';
+    if (cancelSectionTitle) cancelSectionTitle.textContent = 'Auto-Renewal Active';
+    if (cancelAutoRenewalBtn) cancelAutoRenewalBtn.textContent = 'Cancel Auto-Renewal';
     }
 }
 } else {
@@ -380,6 +414,9 @@ if (enableSection) {
     }
 }
 }
+
+// Store free trial flag for use by event listeners
+window.__membershipIsFreeTrial = isFreeTrial;
 
 // Payment failed notice
 const paymentFailedSection = document.getElementById('payment-failed-section');
@@ -776,14 +813,31 @@ try {
 
 if (cancelBtn) {
 cancelBtn.addEventListener('click', async () => {
-// Confirm cancellation
-const confirmed = await Modal.confirm({
-    title: 'Cancel Auto-Renewal',
-    message: 'Are you sure you want to cancel auto-renewal? Your membership will remain active until it expires, but will not renew automatically.',
-    confirmText: 'Cancel Auto-Renewal',
-    cancelText: 'Keep Auto-Renewal'
+const isTrial = window.__membershipIsFreeTrial;
+const modalOpts = isTrial
+    ? {
+        title: 'Cancel Free Trial',
+        message: 'Are you sure you want to cancel your free trial? You will <strong>not be charged</strong>, but you will lose access to all member benefits when your trial ends. Your trial will remain active until its expiry date.',
+        confirmText: 'Cancel Free Trial',
+        cancelText: 'Keep My Trial',
+        confirmStyle: 'danger'
+    }
+    : {
+        title: 'Cancel Auto-Renewal',
+        message: 'Are you sure you want to cancel auto-renewal? Your membership will remain active until it expires, but will not renew automatically.',
+        confirmText: 'Cancel Auto-Renewal',
+        cancelText: 'Keep Auto-Renewal'
+    };
+
+// Modal.confirm uses callbacks, wrap in a promise
+const userConfirmed = await new Promise(resolve => {
+    Modal.confirm({
+    ...modalOpts,
+    onConfirm: () => resolve(true),
+    onCancel: () => resolve(false)
+    });
 });
-if (!confirmed) {
+if (!userConfirmed) {
     return;
 }
 
@@ -791,7 +845,6 @@ const sessionToken = localStorage.getItem('admin_session');
 const originalText = cancelBtn.textContent;
 
 try {
-    // Disable button and show loading state
     cancelBtn.disabled = true;
     cancelBtn.textContent = 'Processing...';
     
@@ -806,25 +859,27 @@ try {
     const data = await response.json();
 
     if (response.ok && data.success) {
-    messageEl.textContent = data.message || 'Auto-renewal cancelled successfully.';
+    messageEl.textContent = isTrial
+        ? (data.message || 'Free trial cancellation confirmed. You will not be charged.')
+        : (data.message || 'Auto-renewal cancelled successfully.');
     messageEl.style.background = '#d1fae5';
     messageEl.style.color = '#065f46';
     messageEl.style.display = 'block';
     
-    // Reload account data to update UI
     setTimeout(() => {
         loadAccountData();
     }, 1500);
     } else {
-    throw new Error(data.error || 'Failed to cancel auto-renewal');
+    throw new Error(data.error || (isTrial ? 'Failed to cancel free trial' : 'Failed to cancel auto-renewal'));
     }
 } catch (error) {
-    console.error('Error cancelling auto-renewal:', error);
-    messageEl.textContent = 'Failed to cancel auto-renewal. Please try again or contact support.';
+    console.error('Error cancelling:', error);
+    messageEl.textContent = isTrial
+    ? 'Failed to cancel free trial. Please try again or contact support.'
+    : 'Failed to cancel auto-renewal. Please try again or contact support.';
     messageEl.style.background = '#fee2e2';
     messageEl.style.color = '#991b1b';
     messageEl.style.display = 'block';
-      // Re-enable button
     cancelBtn.disabled = false;
     cancelBtn.textContent = originalText;
 }

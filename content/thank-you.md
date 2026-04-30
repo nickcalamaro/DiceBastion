@@ -13,11 +13,22 @@ layout: "simple"
 
 <div id="thank-you-content">
 <div id="loading-state" class="card" style="max-width:640px; margin:0 auto; text-align:center;">
-<h2 class="card-header">Processing Your Payment...</h2>
+<h2 class="card-header" id="loading-title">Processing Your Payment...</h2>
 <div class="spinner"></div>
-<p class="ty-note" style="margin-top:0;">Please wait while we confirm your transaction.</p>
+<p class="ty-note" style="margin-top:0;" id="loading-subtitle">Please wait while we confirm your transaction.</p>
 </div>
 </div>
+<script>
+(function(){
+  var p = new URLSearchParams(location.search);
+  if (p.get('trial') === '1') {
+    var t = document.getElementById('loading-title');
+    var s = document.getElementById('loading-subtitle');
+    if (t) t.textContent = 'Setting Up Your Free Trial...';
+    if (s) s.textContent = 'Your card has been verified. Please wait while we activate your trial.';
+  }
+})();
+</script>
 
 <style>
 .spinner {
