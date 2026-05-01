@@ -731,16 +731,16 @@ function renderQuickAddBlock(product) {
   const soldOut = product.stock_quantity === 0;
   const room = remainingForProduct(product);
   if (soldOut) {
-    return `<div class="product-quick-add" onclick="event.stopPropagation();">
+    return `<div class="product-quick-add">
       <button type="button" class="add-to-cart-btn" disabled>Out of stock</button>
     </div>`;
   }
   if (room <= 0) {
-    return `<div class="product-quick-add" onclick="event.stopPropagation();">
+    return `<div class="product-quick-add">
       <button type="button" class="add-to-cart-btn" disabled>Maximum in cart</button>
     </div>`;
   }
-  return `<div class="product-quick-add" onclick="event.stopPropagation();">
+  return `<div class="product-quick-add">
     <div class="qty-stepper" data-product-id="${product.id}">
       <button type="button" class="qty-stepper-btn" data-action="dec" aria-label="Decrease quantity">−</button>
       <input type="number" class="qty-stepper-input" min="1" max="${room}" value="1" aria-label="Quantity" />

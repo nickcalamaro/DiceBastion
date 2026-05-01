@@ -730,15 +730,19 @@ throw new Error(detail);
 // Store order number for later
 currentOrderNumber = result.order_number;
 
-// Mount SumUp widget with checkoutId
-const sumUpUtils = typeof window !== 'undefined' ? window.utils : null;
-const SumUpCardMount = typeof window !== 'undefined' && window.SumUpCard ? window.SumUpCard : (typeof SumUpCard !== 'undefined' ? SumUpCard : null);
-if (!sumUpUtils || typeof sumUpUtils.loadSumUpSdk !== 'function') {
-throw new Error('SumUp checkout could not start (payment SDK missing). Refresh the page or check browser extensions blocking scripts.');
+// Mount SumUp widget with checkoutId (current SDK exposes SumUpCard only; legacy builds had utils.loadSumUpSdk)
+const SumUpCardMount =
+  typeof window !== 'undefined' && window.SumUpCard
+    ? window.SumUpCard
+    : typeof SumUpCard !== 'undefined'
+      ? SumUpCard
+      : null;
+const sumUpUtils = typeof window !== 'undefined' && window.utils ? window.utils : null;
+if (sumUpUtils && typeof sumUpUtils.loadSumUpSdk === 'function') {
+  await sumUpUtils.loadSumUpSdk();
 }
-await sumUpUtils.loadSumUpSdk();
 if (!SumUpCardMount || typeof SumUpCardMount.mount !== 'function') {
-throw new Error('SumUp card widget is not available.');
+throw new Error('SumUp card widget is not available. Refresh the page or check that gateway.sumup.com is not blocked.');
 }
 await SumUpCardMount.mount({
 id: 'sumup-card',
