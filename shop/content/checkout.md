@@ -614,7 +614,9 @@ country: 'GB',
 onResponse: async function(type, body) {
 if (type === 'success') {
 localStorage.removeItem('shop_cart');
-window.location.href = `/order-confirmation?order=${currentOrderNumber}&status=success`;
+window.location.href = '/order-confirmation?order=' + encodeURIComponent(currentOrderNumber)
+  + '&email=' + encodeURIComponent(orderData.email || '')
+  + '&status=success';
 } else if (type === 'error') {
 console.error('Payment error:', body);
 alert('Payment failed. Please try again.');

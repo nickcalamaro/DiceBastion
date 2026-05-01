@@ -339,7 +339,7 @@ let attempts = 0;
 const maxAttempts = 5;
 
 while (attempts < maxAttempts) {
-const response = await fetch(`${API_BASE}/orders/${order}?email=${encodeURIComponent(email || '')}`);
+const response = await fetch(`${API_BASE}/shop/order/${encodeURIComponent(order)}${email ? `?email=${encodeURIComponent(email)}` : ''}`);
 
 if (response.ok) {
 const orderData = await response.json();

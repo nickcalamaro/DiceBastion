@@ -1644,16 +1644,18 @@ Order Reference: ${details.orderRef}
     
     case 'shop_order':
       subject = `🛒 New Shop Order: ${details.orderNumber}`
-      const itemsHtml = details.items.map(item => 
-        `<li>${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal)}</li>`
+      const itemsHtml = details.items.map(item =>
+        `<li>${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal / 100)}</li>`
       ).join('')
-      
+
       htmlContent = `
         <h2>New Shop Order</h2>
         <p><strong>Order Number:</strong> ${details.orderNumber}</p>
         <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
         <p><strong>Total Amount:</strong> ${formatPrice(details.total)}</p>
         <p><strong>Delivery Method:</strong> ${details.deliveryMethod}</p>
+        ${details.orderNotes ? `<p><strong>Customer notes:</strong> ${String(details.orderNotes).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 800)}</p>` : ''}
+        ${details.shippingPlain ? `<p><strong>Ship to:</strong></p><p style="margin:0;">${String(details.shippingPlain).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\r?\n/g, '<br>')}</p>` : ''}
         <p><strong>Purchase Date:</strong> ${new Date().toLocaleString('en-GB')}</p>
         <p><strong>Items Ordered:</strong></p>
         <ul>${itemsHtml}</ul>
@@ -1666,9 +1668,10 @@ Customer: ${details.customerName} (${details.customerEmail})
 Total Amount: ${formatPrice(details.total)}
 Delivery Method: ${details.deliveryMethod}
 Purchase Date: ${new Date().toLocaleString('en-GB')}
+${details.shippingPlain ? `Ship to:\n${details.shippingPlain}\n` : ''}
 
 Items Ordered:
-${details.items.map(item => `• ${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal)}`).join('\n')}
+${details.items.map(item => `• ${item.product_name} x ${item.quantity} - ${formatPrice(item.subtotal / 100)}`).join('\n')}
       `.trim()
       break
       case 'event_ticket':
@@ -4575,10 +4578,11 @@ app.post('/webhooks/sumup', async (c) => {
 
   // Detect if this is a bundle purchase (BUNDLE-{eventId}-{uuid})
   const isBundle = orderRef.startsWith('BUNDLE-')
+  const isShopOrder = orderRef.startsWith('ORD-')
 
   // Check for duplicate webhook processing
   const webhookId = `${paymentId}-${orderRef}`
-  const entityType = isBundle ? 'bundle' : 'membership'
+  const entityType = isBundle ? 'bundle' : isShopOrder ? 'shop_order' : 'membership'
   const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, entityType, orderRef)
   if (isDuplicate) {
     console.log(`Duplicate ${entityType} webhook received, skipping processing`)
@@ -4613,6 +4617,24 @@ app.post('/webhooks/sumup', async (c) => {
       return c.json({ ok: false, error: err.message }, 400)
     }
 
+    return c.json({ ok: true })
+  }
+
+  // ==================== SHOP ORDER WEBHOOK ====================
+  if (isShopOrder) {
+    console.log('[webhook-shop] Processing shop order:', orderRef)
+    const shopOrderRow = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderRef).first()
+    if (!shopOrderRow) {
+      console.warn('[webhook-shop] Order not found for checkout reference:', orderRef)
+      return c.json({ ok: true })
+    }
+    try {
+      const outcome = await completePaidShopOrder(c.env.DB, c.env, shopOrderRow, paymentId)
+      console.log('[webhook-shop] Completed shop order', shopOrderRow.id, outcome)
+    } catch (err) {
+      console.error('[webhook-shop] Failed to complete shop order:', err)
+      return c.json({ ok: false, error: String(err?.message || err) }, 400)
+    }
     return c.json({ ok: true })
   }
 
@@ -9230,6 +9252,396 @@ app.get('/donations/confirm', async c => {
   } catch (error) {
     console.error('[donations/confirm] Error:', error)
     return c.json({ ok: false, error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * Dice Bastion shop order emails (buyer + admin MailerSend) and payment completion logic.
+ */
+
+function pennyToMoneyLine(pence) {
+  return `£${(Number(pence || 0) / 100).toFixed(2)}`
+}
+
+function parseOrderShippingSnippet(raw) {
+  if (!raw) return ''
+  try {
+    const addr = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!addr || typeof addr !== 'object') return ''
+    const parts = [
+      addr.line1,
+      addr.line2,
+      `${addr.city || ''}${addr.city && addr.postcode ? ', ' : ''}${addr.postcode || ''}`,
+      addr.country
+    ].filter(Boolean)
+    return parts.map(p => String(p)).join('\n').replace(/\n/g, '<br>')
+  } catch {
+    return ''
+  }
+}
+
+function formatPlainShipping(raw) {
+  if (!raw) return ''
+  try {
+    const addr = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!addr || typeof addr !== 'object') return ''
+    return [
+      addr.line1,
+      addr.line2,
+      [addr.city, addr.postcode].filter(Boolean).join(', '),
+      addr.country
+    ].filter(Boolean).join('\n')
+  } catch {
+    return ''
+  }
+}
+
+function buildShopBuyerEmail(order, items) {
+  const isDelivery = !!order.shipping_address
+  const deliveryLabel = isDelivery ? 'Local delivery (£4)' : 'Collection (free) — Gibraltar Warhammer Club'
+
+  const itemsRows = (items || []).map(item => `
+    <tr>
+      <td style="padding:0.65rem;border-bottom:1px solid #e5e7eb;">${item.product_name}</td>
+      <td style="padding:0.65rem;border-bottom:1px solid #e5e7eb;text-align:center;">${item.quantity}</td>
+      <td style="padding:0.65rem;border-bottom:1px solid #e5e7eb;text-align:right;">${pennyToMoneyLine(item.subtotal)}</td>
+    </tr>
+  `).join('')
+
+  const shippingBlock = parseOrderShippingSnippet(order.shipping_address)
+  const plainShip = formatPlainShipping(order.shipping_address)
+  const humanNotes = String(order.notes || '').replace(/^\[delivery:[^\]]+\]\s*/, '').trim()
+
+  const content = `
+    <p>Hi ${order.name || 'there'},</p>
+    <p>Thank you for your Dice Bastion shop order.</p>
+
+    <p><strong>Order number:</strong> ${order.order_number}<br/>
+    <strong>Delivery:</strong> ${deliveryLabel}</p>
+
+    ${shippingBlock ? `<p><strong>Delivery address</strong></p><p>${shippingBlock}</p>` : ''}
+
+    ${humanNotes ? `<p><strong>Your notes</strong><br/>${humanNotes.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 600)}</p>` : ''}
+
+    <table style="width:100%;border-collapse:collapse;margin-top:1rem;margin-bottom:1rem;">
+      <thead>
+        <tr style="background:#f3f4f6;">
+          <th style="text-align:left;padding:0.65rem;border-bottom:2px solid #e5e7eb;">Item</th>
+          <th style="text-align:center;padding:0.65rem;border-bottom:2px solid #e5e7eb;">Qty</th>
+          <th style="text-align:right;padding:0.65rem;border-bottom:2px solid #e5e7eb;">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody>${itemsRows}</tbody>
+    </table>
+
+    <p style="margin:0.25rem 0;"><strong>Subtotal:</strong> ${pennyToMoneyLine(order.subtotal)}</p>
+    <p style="margin:0.25rem 0;"><strong>Shipping:</strong> ${order.shipping ? pennyToMoneyLine(order.shipping) : 'FREE'}</p>
+    <p style="margin:0.25rem 0;"><strong>Total:</strong> ${pennyToMoneyLine(order.total)}</p>
+
+    <p>We'll email when your items are ready. Questions? Reply to this email or contact <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+    <p>— Dice Bastion</p>
+  `
+
+  const textLines = [
+    `Hi ${order.name || 'there'},`,
+    '',
+    `Your order ${order.order_number} is confirmed.`,
+    `Delivery: ${isDelivery ? 'Local delivery' : 'Collection'}`,
+    ...(plainShip ? ['', plainShip] : []),
+    ...(humanNotes ? ['', humanNotes.slice(0, 800)] : []),
+    '',
+    ...(items || []).map(i => `• ${i.product_name} x ${i.quantity} — ${pennyToMoneyLine(i.subtotal)}`),
+    '',
+    `Subtotal: ${pennyToMoneyLine(order.subtotal)}`,
+    `Shipping: ${order.shipping ? pennyToMoneyLine(order.shipping) : 'FREE'}`,
+    `Total: ${pennyToMoneyLine(order.total)}`,
+    '',
+    `— Dice Bastion`
+  ]
+
+  return {
+    subject: `Order confirmed — ${order.order_number}`,
+    html: createEmailTemplate({
+      headerTitle: 'Shop order confirmed',
+      content,
+      headerColor: '#2563eb',
+      headerGradient: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)'
+    }),
+    text: textLines.join('\n')
+  }
+}
+
+async function completePaidShopOrder(db, env, orderRow, paymentId) {
+  const orderId = orderRow.id
+  const nowIso = toIso(new Date())
+
+  const updateResult = await db.prepare(`
+    UPDATE orders
+    SET status = 'completed',
+        payment_status = 'paid',
+        payment_id = ?,
+        updated_at = ?,
+        completed_at = COALESCE(completed_at, ?)
+    WHERE id = ?
+      AND IFNULL(status, '') != 'completed'
+  `).bind(paymentId, nowIso, nowIso, orderId).run()
+
+  const changed = Number(updateResult.meta?.changes ?? 0)
+  if (!changed) {
+    return { alreadyCompleted: true }
+  }
+
+  const itemsQuery = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(orderId).all()
+  const itemRows = itemsQuery.results || []
+
+  for (const item of itemRows) {
+    const q = Number(item.quantity) || 0
+    await db.prepare(`
+      UPDATE products
+      SET stock_quantity = stock_quantity - ?,
+          updated_at = ?
+      WHERE id = ? AND stock_quantity >= ?
+    `).bind(q, nowIso, item.product_id, q).run()
+  }
+
+  const refreshed = await db.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
+  if (!refreshed) return { alreadyCompleted: false }
+
+  const items = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(orderId).all()
+
+  const shippingPlain = formatPlainShipping(refreshed?.shipping_address)
+  try {
+    const buyerContent = buildShopBuyerEmail(refreshed, items.results || [])
+    await sendEmail(env, {
+      to: refreshed.email,
+      ...buyerContent,
+      emailType: 'shop_order_confirmation',
+      relatedId: orderId,
+      relatedType: 'order',
+      metadata: { order_number: refreshed.order_number }
+    })
+  } catch (buyerErr) {
+    console.error('[shop] Buyer confirmation email failed:', buyerErr)
+  }
+
+  try {
+    const adminContent = getAdminNotificationEmail('shop_order', {
+      orderNumber: refreshed.order_number,
+      customerName: refreshed.name,
+      customerEmail: refreshed.email,
+      total: Number(refreshed.total || 0) / 100,
+      deliveryMethod: refreshed.shipping_address ? 'Local delivery' : 'Collection',
+      orderNotes: String(refreshed.notes || '').replace(/^\[delivery:[^\]]+\]\s*/, '').trim(),
+      shippingPlain,
+      items: items.results || []
+    })
+    await sendEmail(env, {
+      to: 'admin@dicebastion.com',
+      ...adminContent,
+      emailType: 'admin_shop_order',
+      relatedId: orderId,
+      relatedType: 'order',
+      metadata: { order_number: refreshed.order_number }
+    })
+  } catch (adminErr) {
+    console.error('[shop] Admin notification email failed:', adminErr)
+  }
+
+  return { alreadyCompleted: false }
+}
+
+// ==================== SHOP CHECKOUT ====================
+
+const shopCheckoutRateLimits = new Map()
+
+app.post('/shop/checkout', async c => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, shopCheckoutRateLimits, 8, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many checkout attempts. Try again shortly.' }, 429)
+    }
+
+    const body = await c.req.json().catch(() => ({}))
+    const { email, name, items, shipping_address: shippingAddressRaw, delivery_method: deliveryMethod, notes, consent_at: consentAt } = body
+
+    if (!email || !name || !items?.length || !consentAt) {
+      return c.json({ error: 'missing_required_fields' }, 400)
+    }
+    if (!['collection', 'delivery'].includes(deliveryMethod || '')) {
+      return c.json({ error: 'invalid_delivery_method' }, 400)
+    }
+    if (deliveryMethod === 'delivery' && (!shippingAddressRaw || !shippingAddressRaw.line1)) {
+      return c.json({ error: 'shipping_address_required_for_delivery' }, 400)
+    }
+    if (!EMAIL_RE.test(email) || String(email).length > 320) {
+      return c.json({ error: 'invalid_email' }, 400)
+    }
+
+    const orderItemsPayload = []
+    let subtotal = 0
+    let resolvedCurrency = null
+
+    for (const item of items) {
+      const productId = parseInt(item.product_id ?? item.id, 10)
+      const quantity = Math.min(99, Math.max(1, parseInt(item.quantity, 10) || 1))
+      if (!(productId > 0)) return c.json({ error: 'invalid_item' }, 400)
+
+      const product = await c.env.DB.prepare('SELECT id, name, price, currency, stock_quantity FROM products WHERE id = ? AND is_active = 1')
+        .bind(productId).first()
+      if (!product) return c.json({ error: `product_not_found: ${productId}` }, 400)
+      const stockQty = Number(product.stock_quantity || 0)
+      if (stockQty < quantity) {
+        return c.json({ error: `insufficient_stock: ${product.name}` }, 400)
+      }
+
+      const cur = product.currency || 'GBP'
+      if (resolvedCurrency === null) resolvedCurrency = cur
+      else if (cur !== resolvedCurrency) return c.json({ error: 'mixed_currency_not_supported' }, 400)
+
+      const unitPrice = Number(product.price)
+      const lineSubtotal = unitPrice * quantity
+      subtotal += lineSubtotal
+      orderItemsPayload.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity,
+        unit_price: unitPrice,
+        subtotal: lineSubtotal
+      })
+    }
+
+    const shippingPence = deliveryMethod === 'delivery' ? 400 : 0
+    const taxPence = 0
+    const totalPence = subtotal + shippingPence + taxPence
+    const currencyResolved = resolvedCurrency || 'GBP'
+
+    const orderNumber = `ORD-${crypto.randomUUID()}`
+    const now = toIso(new Date())
+    const notesExtra = `[delivery:${deliveryMethod}]${notes ? ` ${clampStr(notes, 500)}` : ''}`
+    const shipJson = shippingAddressRaw ? JSON.stringify({
+      line1: clampStr(shippingAddressRaw.line1, 180),
+      line2: clampStr(shippingAddressRaw.line2 || '', 180),
+      city: clampStr(shippingAddressRaw.city, 120),
+      postcode: clampStr(shippingAddressRaw.postcode, 40),
+      country: clampStr(shippingAddressRaw.country || 'GI', 4)
+    }) : null
+
+    const checkout = await createCheckout(c.env, {
+      amount: totalPence / 100,
+      currency: currencyResolved,
+      orderRef: orderNumber,
+      title: `Order ${orderNumber}`,
+      description: `Shop (${orderItemsPayload.length} line(s))`
+    })
+    if (!checkout?.id) return c.json({ error: 'sumup_checkout_failed' }, 502)
+
+    const insertOrder = await c.env.DB.prepare(`
+      INSERT INTO orders (
+        order_number, email, name, status,
+        subtotal, tax, shipping, total, currency,
+        payment_status, checkout_id,
+        shipping_address, billing_address, notes,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      orderNumber,
+      clampStr(email, 320).trim(),
+      clampStr(name, 200),
+      'pending',
+      subtotal,
+      taxPence,
+      shippingPence,
+      totalPence,
+      resolvedCurrency,
+      'pending',
+      checkout.id,
+      shipJson,
+      shipJson,
+      clampStr(notesExtra, 1000),
+      now,
+      now
+    ).run()
+
+    const orderId = insertOrder.meta?.last_row_id
+    if (!orderId) {
+      console.error('[shop/checkout] INSERT returned no row id')
+      return c.json({ error: 'order_creation_failed' }, 500)
+    }
+
+    const batchStatements = orderItemsPayload.map(r =>
+      c.env.DB.prepare(`
+        INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(orderId, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal)
+    )
+    if (batchStatements.length) await c.env.DB.batch(batchStatements)
+
+    return c.json({
+      success: true,
+      order_number: orderNumber,
+      checkoutId: checkout.id
+    })
+  } catch (e) {
+    console.error('[shop/checkout] Error:', e)
+    return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
+  }
+})
+
+app.post('/shop/confirm-payment/:orderNumber', async c => {
+  try {
+    const orderNumber = c.req.param('orderNumber')
+    if (!orderNumber) return c.json({ error: 'missing_order' }, 400)
+
+    const orderRow = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
+    if (!orderRow) return c.json({ error: 'order_not_found' }, 404)
+
+    if (orderRow.status === 'completed' && ['paid', 'PAID'].includes(String(orderRow.payment_status || '').toUpperCase())) {
+      return c.json({ success: true, status: 'completed', order: orderRow })
+    }
+
+    let payment
+    try {
+      payment = await fetchPayment(c.env, orderRow.checkout_id)
+    } catch (err) {
+      console.error('[shop/confirm-payment] fetchPayment:', err)
+      return c.json({ success: false, status: 'pending', order: orderRow })
+    }
+
+    if (!payment || !isCheckoutPaid(payment)) {
+      return c.json({ success: true, status: 'pending', order: orderRow })
+    }
+
+    await completePaidShopOrder(c.env.DB, c.env, orderRow, payment.id || payment.payment_id || orderRow.payment_id)
+
+    const updatedOrder = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
+    return c.json({ success: true, status: 'completed', order: updatedOrder })
+  } catch (e) {
+    console.error('[shop/confirm-payment] Error:', e)
+    return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
+  }
+})
+
+app.get('/shop/order/:orderNumber', async c => {
+  try {
+    const orderNumber = c.req.param('orderNumber')
+    const emailQ = (c.req.query('email') || '').trim().toLowerCase()
+    const row = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
+    if (!row) return c.json({ error: 'not_found' }, 404)
+    if (emailQ && String(row.email || '').toLowerCase() !== emailQ) {
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+
+    const itemList = await c.env.DB.prepare('SELECT product_id, product_name, quantity, unit_price, subtotal FROM order_items WHERE order_id = ?').bind(row.id).all()
+
+    return c.json({
+      ...row,
+      items: itemList.results || [],
+      payment_status: String(row.payment_status || '').toLowerCase(),
+      status: row.status || 'pending'
+    })
+  } catch (e) {
+    console.error('[shop/order] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
   }
 })
 
