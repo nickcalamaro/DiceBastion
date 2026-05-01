@@ -9548,7 +9548,7 @@ function buildShopBuyerEmail(order, items) {
     <p style="margin:0.25rem 0;"><strong>Total:</strong> ${pennyToMoneyLine(order.total)}</p>
 
     <p>We'll email when your items are ready. Questions? Reply to this email or contact <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
-    <p>— Dice Bastion</p>
+    <p>— The Dice Bastion Team</p>
   `
 
   const textLines = [

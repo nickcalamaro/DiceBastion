@@ -38,10 +38,10 @@ title: "Order Confirmation"
 <div class="info-box">
 <h3>What's Next?</h3>
 <ul>
-<li>📧 You'll receive an order confirmation email shortly</li>
-<li>📦 We'll prepare your items for shipping/pickup</li>
-<li>🚚 You'll be notified when your order ships</li>
-<li>💬 Contact us if you have any questions</li>
+<li>You'll receive an order confirmation email shortly</li>
+<li>We'll prepare your items for shipping/pickup</li>
+<li>You'll be notified when your order is ready to collect</li>
+<p>In the meantime, please contact us if you have any questions!</p>
 </ul>
 </div>
 

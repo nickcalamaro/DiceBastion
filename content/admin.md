@@ -190,6 +190,7 @@ Logout
 <!-- Tabs -->
 <div class="admin-tab-bar">
 <button class="admin-tab-btn tab-btn active" data-tab="products">Products</button>
+<button class="admin-tab-btn tab-btn" data-tab="shop-promos">Shop promo codes</button>
 <button class="admin-tab-btn tab-btn" data-tab="events">Events</button>
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
@@ -299,6 +300,97 @@ Logout
 
 <h2>Products</h2>
 <div id="products-list"></div>
+</div>
+
+<!-- Shop promo codes (checkout on shop.dicebastion.com) -->
+<div id="shop-promos-tab" class="tab-content" style="display: none;">
+<div class="admin-info-box admin-mb-2">
+<p class="admin-m-0" style="color: rgb(var(--color-neutral-700));">
+These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live in <code>rules_json</code> (members-only, product IDs, categories, <code>apply_scope</code>).
+</p>
+</div>
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-mt-0">New / edit promo code</h2>
+<form id="shop-promo-form">
+<input type="hidden" id="shop-promo-id">
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="shop-promo-code">Code (customer enters) *</label>
+<input type="text" id="shop-promo-code" required class="form-input" placeholder="SAVE10" autocomplete="off">
+<small class="admin-text-small">Stored uppercase; spaces stripped</small>
+</div>
+<div>
+<label class="form-label" for="shop-promo-label">Admin label</label>
+<input type="text" id="shop-promo-label" class="form-input" placeholder="Spring sale">
+</div>
+</div>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="shop-promo-discount-type">Discount type *</label>
+<select id="shop-promo-discount-type" class="form-input">
+<option value="percent">Percent off eligible amount</option>
+<option value="fixed_pence">Fixed amount (pence) off eligible amount</option>
+</select>
+</div>
+<div>
+<label class="form-label" for="shop-promo-discount-value">Discount value *</label>
+<input type="number" id="shop-promo-discount-value" required min="1" value="10" class="form-input">
+<small class="admin-text-small" id="shop-promo-value-hint">Percent (1–100) or whole pence (£1 = 100)</small>
+</div>
+</div>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="shop-promo-starts">Starts at (optional)</label>
+<input type="datetime-local" id="shop-promo-starts" class="form-input">
+</div>
+<div>
+<label class="form-label" for="shop-promo-ends">Ends at (optional)</label>
+<input type="datetime-local" id="shop-promo-ends" class="form-input">
+</div>
+</div>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="shop-promo-max-uses">Max redemptions</label>
+<input type="number" id="shop-promo-max-uses" min="0" class="form-input" placeholder="Unlimited">
+</div>
+<div>
+<label class="form-label" for="shop-promo-min-subtotal">Minimum subtotal (pence)</label>
+<input type="number" id="shop-promo-min-subtotal" min="0" class="form-input" placeholder="None">
+</div>
+</div>
+<div class="checkbox-group admin-mb-1">
+<input type="checkbox" id="shop-promo-active" checked class="checkbox-input">
+<label for="shop-promo-active" class="checkbox-label">Active (visible at checkout)</label>
+</div>
+<div class="checkbox-group admin-mb-1">
+<input type="checkbox" id="shop-promo-require-member" class="checkbox-input">
+<label for="shop-promo-require-member" class="checkbox-label">Require active Dice Bastion membership (checkout email must match a member)</label>
+</div>
+<div class="admin-mb-1">
+<label class="form-label" for="shop-promo-product-ids">Restrict to product IDs (comma-separated)</label>
+<input type="text" id="shop-promo-product-ids" class="form-input" placeholder="e.g. 12, 44">
+<small class="admin-text-small">Leave empty for all products</small>
+</div>
+<div class="admin-mb-1">
+<label class="form-label" for="shop-promo-categories">Restrict to categories (comma-separated)</label>
+<input type="text" id="shop-promo-categories" class="form-input" placeholder="e.g. Miniatures, Dice">
+<small class="admin-text-small">Must match product category tags exactly</small>
+</div>
+<div class="admin-mb-1">
+<label class="form-label" for="shop-promo-apply-scope">Apply scope</label>
+<select id="shop-promo-apply-scope" class="form-input">
+<option value="eligible_lines">Eligible lines only</option>
+<option value="whole_subtotal_if_any_match">Whole basket subtotal if any line matches</option>
+</select>
+</div>
+<div class="admin-flex">
+<button type="submit" id="shop-promo-save-btn" class="btn btn-primary">Save promo code</button>
+<button type="button" id="shop-promo-cancel-btn" class="btn btn-secondary" style="display: none;">Cancel edit</button>
+</div>
+</form>
+</div>
+<h2>Existing codes</h2>
+<div id="shop-promo-list"></div>
 </div>
 
 <!-- Events Tab -->
@@ -989,6 +1081,234 @@ let sessionToken = null;
 let currentUser = null;
 let uploadedProductImage = null;
 let uploadedEventImage = null;
+let editingShopPromoId = null;
+
+function adminJsonHeaders() {
+return { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken };
+}
+
+function escapeHtmlPromo(s) {
+if (s == null) return '';
+return String(s)
+.replace(/&/g, '&amp;')
+.replace(/</g, '&lt;')
+.replace(/>/g, '&gt;')
+.replace(/"/g, '&quot;');
+}
+
+function isoToDatetimeLocalPromo(iso) {
+if (!iso) return '';
+const d = new Date(iso);
+if (Number.isNaN(d.getTime())) return '';
+const pad = n => String(n).padStart(2, '0');
+return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function parseShopPromoRulesJson(raw) {
+try {
+const o = typeof raw === 'string' ? JSON.parse(raw) : raw;
+return o && typeof o === 'object' ? o : {};
+} catch (_) {
+return {};
+}
+}
+
+function shopPromoRulesToFormFields(rulesRaw) {
+const r = parseShopPromoRulesJson(rulesRaw);
+document.getElementById('shop-promo-require-member').checked = !!r.require_active_membership;
+document.getElementById('shop-promo-product-ids').value = Array.isArray(r.product_ids)
+? r.product_ids.join(', ')
+: '';
+document.getElementById('shop-promo-categories').value = Array.isArray(r.categories)
+? r.categories.join(', ')
+: '';
+document.getElementById('shop-promo-apply-scope').value =
+r.apply_scope === 'whole_subtotal_if_any_match'
+? 'whole_subtotal_if_any_match'
+: 'eligible_lines';
+}
+
+async function loadShopPromoCodes() {
+const host = document.getElementById('shop-promo-list');
+if (!host || !sessionToken) return;
+try {
+const res = await fetch(`${API_BASE}/admin/promo-codes`, { headers: { 'X-Session-Token': sessionToken } });
+if (!res.ok) throw new Error('list failed');
+const data = await res.json();
+const rows = data.promo_codes || [];
+if (!rows.length) {
+host.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No promo codes yet.</p>';
+return;
+}
+host.innerHTML = rows.map(p => {
+const rr = parseShopPromoRulesJson(p.rules_json);
+const flags = [];
+if (rr.require_active_membership) flags.push('members only');
+if ((rr.product_ids || []).length) flags.push(`${rr.product_ids.length} products`);
+if ((rr.categories || []).length) flags.push(`${rr.categories.length} categories`);
+const disc = String(p.discount_type).includes('fixed')
+? `${p.discount_value}p off`
+: `${p.discount_value}% off`;
+return `
+<div class="item-card">
+<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:0.75rem;align-items:center;">
+<div>
+<h3 class="admin-m-0">${escapeHtmlPromo(p.code)}${p.label ? ' — ' + escapeHtmlPromo(p.label) : ''}</h3>
+<p style="margin:0.35rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));">${escapeHtmlPromo(disc)} · Uses ${Number(p.uses_count) || 0}${p.max_uses != null ? ' / ' + p.max_uses : ''}${Number(p.active) === 1 ? '' : ' · inactive'}</p>
+${flags.length ? `<p style="margin:0.35rem 0 0;font-size:0.8rem;color:rgb(var(--color-primary-600));">${escapeHtmlPromo(flags.join(' · '))}</p>` : ''}
+</div>
+<div class="item-actions" style="margin-top:0;">
+<button type="button" class="btn btn-secondary btn-sm" onclick="editShopPromo(${p.id})">Edit</button>
+<button type="button" class="btn btn-secondary btn-sm" onclick="deleteShopPromo(${p.id}, ${JSON.stringify(String(p.code))})" style="color:#b91c1c;">Delete</button>
+</div>
+</div>
+</div>`;
+}).join('');
+} catch (e) {
+console.error(e);
+host.innerHTML = '<p style="color:#c00;">Could not load promo codes.</p>';
+}
+}
+
+function resetShopPromoForm() {
+editingShopPromoId = null;
+document.getElementById('shop-promo-form').reset();
+document.getElementById('shop-promo-id').value = '';
+document.getElementById('shop-promo-active').checked = true;
+document.getElementById('shop-promo-require-member').checked = false;
+document.getElementById('shop-promo-product-ids').value = '';
+document.getElementById('shop-promo-categories').value = '';
+document.getElementById('shop-promo-apply-scope').value = 'eligible_lines';
+document.getElementById('shop-promo-discount-value').value = '10';
+document.getElementById('shop-promo-cancel-btn').style.display = 'none';
+}
+
+async function editShopPromo(id) {
+try {
+const res = await fetch(`${API_BASE}/admin/promo-codes`, { headers: { 'X-Session-Token': sessionToken } });
+const data = await res.json();
+const p = (data.promo_codes || []).find(row => Number(row.id) === Number(id));
+if (!p) {
+alert('Promo not found');
+return;
+}
+editingShopPromoId = id;
+document.getElementById('shop-promo-id').value = id;
+document.getElementById('shop-promo-code').value = p.code;
+document.getElementById('shop-promo-label').value = p.label || '';
+document.getElementById('shop-promo-discount-type').value = String(p.discount_type).includes('fixed')
+? 'fixed_pence'
+: 'percent';
+document.getElementById('shop-promo-discount-value').value = String(p.discount_value);
+document.getElementById('shop-promo-active').checked = Number(p.active) === 1;
+document.getElementById('shop-promo-starts').value = isoToDatetimeLocalPromo(p.starts_at);
+document.getElementById('shop-promo-ends').value = isoToDatetimeLocalPromo(p.ends_at);
+document.getElementById('shop-promo-max-uses').value =
+p.max_uses != null && p.max_uses !== '' ? String(p.max_uses) : '';
+document.getElementById('shop-promo-min-subtotal').value =
+p.min_subtotal_pence != null && p.min_subtotal_pence !== ''
+? String(p.min_subtotal_pence)
+: '';
+shopPromoRulesToFormFields(p.rules_json);
+document.getElementById('shop-promo-cancel-btn').style.display = 'inline-block';
+document.getElementById('shop-promo-form').scrollIntoView({ behavior: 'smooth' });
+const hint = document.getElementById('shop-promo-value-hint');
+if (hint) {
+hint.textContent = document.getElementById('shop-promo-discount-type').value === 'fixed_pence'
+? 'Whole pence (e.g. 500 = £5.00) off eligible amount.'
+: 'Percent (1–100) off eligible amount.';
+}
+} catch (e) {
+console.error(e);
+alert('Failed to load promo');
+}
+}
+
+async function deleteShopPromo(id, codeStr) {
+if (!confirm('Delete promo "' + codeStr + '"? This cannot be undone.')) return;
+try {
+const res = await fetch(`${API_BASE}/admin/promo-codes/${id}`, {
+method: 'DELETE',
+headers: { 'X-Session-Token': sessionToken }
+});
+if (!res.ok) throw new Error();
+loadShopPromoCodes();
+if (Number(editingShopPromoId) === Number(id)) resetShopPromoForm();
+} catch (_) {
+alert('Delete failed');
+}
+}
+
+document.getElementById('shop-promo-discount-type')?.addEventListener('change', e => {
+const hint = document.getElementById('shop-promo-value-hint');
+if (!hint) return;
+hint.textContent =
+e.target.value === 'fixed_pence'
+? 'Whole pence (e.g. 500 = £5.00) off eligible amount.'
+: 'Percent (1–100) off eligible amount.';
+});
+
+document.getElementById('shop-promo-cancel-btn')?.addEventListener('click', () => resetShopPromoForm());
+
+document.getElementById('shop-promo-form')?.addEventListener('submit', async e => {
+e.preventDefault();
+function dtInputToIso(val) {
+if (!val) return null;
+const d = new Date(val);
+return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+const pidStr = document.getElementById('shop-promo-product-ids').value;
+const catStr = document.getElementById('shop-promo-categories').value;
+const ids = pidStr.split(/[\s,]+/).map(x => parseInt(String(x).trim(), 10)).filter(n => n > 0);
+const cats = catStr.split(',').map(x => String(x).trim()).filter(Boolean);
+const payload = {
+code: document.getElementById('shop-promo-code').value,
+label: document.getElementById('shop-promo-label').value.trim() || null,
+discount_type: document.getElementById('shop-promo-discount-type').value,
+discount_value: parseInt(String(document.getElementById('shop-promo-discount-value').value), 10),
+active: document.getElementById('shop-promo-active').checked ? 1 : 0,
+starts_at: dtInputToIso(document.getElementById('shop-promo-starts').value),
+ends_at: dtInputToIso(document.getElementById('shop-promo-ends').value),
+max_uses: document.getElementById('shop-promo-max-uses').value
+? parseInt(document.getElementById('shop-promo-max-uses').value, 10)
+: null,
+min_subtotal_pence: document.getElementById('shop-promo-min-subtotal').value
+? parseInt(document.getElementById('shop-promo-min-subtotal').value, 10)
+: null,
+rules: {
+require_active_membership: document.getElementById('shop-promo-require-member').checked,
+product_ids: ids,
+categories: cats,
+apply_scope:
+document.getElementById('shop-promo-apply-scope').value === 'whole_subtotal_if_any_match'
+? 'whole_subtotal_if_any_match'
+: 'eligible_lines'
+}
+};
+const btn = document.getElementById('shop-promo-save-btn');
+btn.disabled = true;
+try {
+const url =
+editingShopPromoId != null
+? `${API_BASE}/admin/promo-codes/${editingShopPromoId}`
+: `${API_BASE}/admin/promo-codes`;
+const method = editingShopPromoId != null ? 'PUT' : 'POST';
+const res = await fetch(url, {
+method,
+headers: adminJsonHeaders(),
+body: JSON.stringify(payload)
+});
+const j = await res.json().catch(() => ({}));
+if (!res.ok) throw new Error(j.error || res.statusText);
+resetShopPromoForm();
+await loadShopPromoCodes();
+alert('Promo saved.');
+} catch (err) {
+alert('Save failed: ' + String(err.message || err));
+} finally {
+btn.disabled = false;
+}
+});
 
 // Auth
 function checkAuth() {
@@ -1007,6 +1327,7 @@ loadEvents();
 loadOrders();
 loadRegistrations();
 loadCronLogs();
+loadShopPromoCodes();
 // Verify session is still valid in background
 verifySession();
 } else {
@@ -1079,9 +1400,10 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       loadProducts();
       loadEvents();
       loadOrders();
-      loadRegistrations();
-      loadCronLogs();
-    } else {
+loadRegistrations();
+loadCronLogs();
+loadShopPromoCodes();
+} else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
 errorEl.style.display = 'block';
 }
@@ -1601,6 +1923,9 @@ if (tab === 'newsletter') {
   loadNewsletterRecipients();
   loadNewsletterEvents();
   nlInitEditor();
+}
+if (tab === 'shop-promos') {
+  loadShopPromoCodes();
 }
 });
 });

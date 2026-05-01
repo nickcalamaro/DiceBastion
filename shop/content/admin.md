@@ -20,153 +20,16 @@ title: "Admin - Product Management"
 
   <!-- Admin Dashboard -->
   <div id="admin-dashboard" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-      <h1>Shop admin</h1>
-      <button id="logout-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">Logout</button>
-</div>
-
-<!-- Add/Edit Product Form -->
-<div id="product-form-container" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
-<h2 id="form-title">Add New Product</h2>
-<form id="product-form">
-<input type="hidden" id="product-id">
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-  <div>
-    <label for="product-name" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Product Name *</label>
-    <input type="text" id="product-name" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-  </div>
-  <div>
-    <label for="product-slug" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
-    <input type="text" id="product-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">e.g., warhammer-starter-set</small>
-  </div>
-</div>
-
-<div style="margin-bottom: 1rem;">
-  <label for="product-description" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Description</label>
-  <textarea id="product-description" rows="3" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="Short description shown on product cards..."></textarea>
-  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Brief text shown on product listing cards.</small>
-</div>
-
-<div style="margin-bottom: 1rem;">
-  <label for="product-summary" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Summary</label>
-  <textarea id="product-summary" rows="2" maxlength="160" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="One-line summary for search results and social previews..."></textarea>
-  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Used for Google meta description &amp; social previews. Max 160 chars recommended.</small>
-</div>
-
-<div style="margin-bottom: 1rem;">
-  <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Full Description</label>
-  <div class="shop-editor">
-    <div class="shop-editor-toolbar">
-      <button type="button" onclick="formatProductText('bold')" class="shop-editor-btn" style="font-weight: bold;">B</button>
-      <button type="button" onclick="formatProductText('italic')" class="shop-editor-btn" style="font-style: italic;">I</button>
-      <button type="button" onclick="formatProductText('underline')" class="shop-editor-btn" style="text-decoration: underline;">U</button>
-      <button type="button" onclick="formatProductText('insertUnorderedList')" class="shop-editor-btn">• List</button>
-      <button type="button" onclick="insertProductLink()" class="shop-editor-btn">🔗 Link</button>
-    </div>
-    <div id="product-full-description" contenteditable="true" class="shop-editor-content" placeholder="Detailed product information, features, specifications..."></div>
-  </div>
-  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Rich text shown on the product detail page. Also used by Google for SEO if Summary is empty.</small>
-</div>
-
-<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-  <div>
-    <label for="product-price" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Price (pence) *</label>
-    <input type="number" id="product-price" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">£10.00 = 1000 pence</small>
-  </div>
-  <div>
-    <label for="product-stock" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Stock Quantity *</label>
-    <input type="number" id="product-stock" required value="0" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-  </div>
-  <div>
-    <label for="product-category" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Category</label>
-    <input type="text" id="product-category" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-  </div>
-</div>
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-  <div>
-    <label for="product-image" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Image URL</label>
-    <input type="text" id="product-image" placeholder="https://..." style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-  </div>
-  <div>
-    <label for="product-release-date" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Release Date</label>
-    <input type="date" id="product-release-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
-    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">For pre-order products. Google will show "Pre-Order" status.</small>
-  </div>
-</div>
-
-<div style="margin-bottom: 1rem;">
-  <label style="display: flex; align-items: center; cursor: pointer;">
-    <input type="checkbox" id="product-active" checked style="margin-right: 0.5rem;">
-    <span style="font-weight: 600;">Active (visible in shop)</span>
-  </label>
-</div>
-
-<!-- Collapsible SEO Section -->
-<div style="margin-bottom: 1.5rem;">
-  <button type="button" class="seo-toggle-btn" onclick="toggleShopSeoSection()">
-    <span class="seo-chevron">▶</span> 🔍 Google Product SEO Settings
-  </button>
-  <div id="shop-seo-section-body" class="seo-section-body">
-    <div class="seo-info-banner">
-      <span>ℹ️</span>
-      <span>These settings show how your product appears in Google Shopping results, search snippets, and social media link previews (WhatsApp, Discord, Facebook, etc.). All data is derived from the fields above.</span>
-    </div>
-
-    <div style="margin-bottom: 1rem;">
-      <h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">📋 How Your Fields Map to Google</h4>
-      <div class="seo-field-map">
-        <div class="seo-field-map-grid">
-          <strong>Title:</strong> <span>Product Name</span>
-          <strong>Description:</strong> <span>Full Description → Summary → Description (first non-empty, HTML stripped)</span>
-          <strong>Image:</strong> <span>Image URL (720px+ wide recommended)</span>
-          <strong>Price:</strong> <span>Price field (auto-converted from pence to £)</span>
-          <strong>Availability:</strong> <span id="seo-availability-preview">In Stock</span>
-          <strong>Category:</strong> <span>Category field (becomes breadcrumbs in Google)</span>
-          <strong>URL:</strong> <span id="seo-url-preview">shop.dicebastion.com/products/...</span>
-        </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 0.75rem;">
+      <h1 style="margin: 0;">Shop admin</h1>
+      <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+        <a href="#promo-section" style="font-size: 0.9rem; font-weight: 600; color: rgb(var(--color-primary-600)); text-decoration: none;">Promo codes</a>
+        <button id="logout-btn" style="padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">Logout</button>
       </div>
     </div>
 
-    <div class="seo-preview-box">
-      <h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">🔎 Google Search Preview</h4>
-      <div style="font-family: Arial, sans-serif;">
-        <div id="seo-preview-title" style="color: #1a0dab; font-size: 1.1rem; line-height: 1.3; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Product Name | Dice Bastion Shop</div>
-        <div id="seo-preview-url" style="color: #006621; font-size: 0.8rem; margin-bottom: 4px;">shop.dicebastion.com › products › slug</div>
-        <div id="seo-preview-price" style="color: #70757a; font-size: 0.8rem; margin-bottom: 2px;">£0.00 · <span id="seo-preview-stock" style="color: #188038;">In stock</span></div>
-        <div id="seo-preview-desc" style="color: #545454; font-size: 0.85rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">Product description will appear here...</div>
-      </div>
-    </div>
-
-    <div class="seo-info-banner seo-tip-banner">
-      <span>💡</span>
-      <span><strong>Image Tips:</strong> Google recommends product images be at least 720px wide (1920px preferred). Use .jpg, .png or .webp format. Provide 1:1 or 4:3 aspect ratios for best results in Shopping.</span>
-    </div>
-  </div>
-</div>
-
-<div style="display: flex; gap: 1rem;">
-  <button type="submit" id="save-btn" style="flex: 1; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
-    Save Product
-  </button>
-  <button type="button" id="cancel-btn" style="display: none; padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">
-    Cancel
-  </button>
-</div>
-</form>
-</div>
-
-<!-- Products List -->
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
-<h2>Products</h2>
-<div id="products-list"></div>
-</div>
-
-<!-- Promo codes -->
-<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-top: 2rem;">
+<!-- Promo codes (placed high so Goldmark/layout never buries it below long pages) -->
+<div id="promo-section" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
 <h2>Promotional codes</h2>
 <p style="color: rgb(var(--color-neutral-600)); margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
 Applied at checkout. Rules are stored in <code style="background:rgb(var(--color-neutral-100)); padding: 0 0.25rem; border-radius: 4px;">rules_json</code> for future promo types:
@@ -256,6 +119,146 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 </div>
 
 <div id="promo-list"></div>
+</div>
+
+<!-- Add/Edit Product Form -->
+<div id="product-form-container" style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
+<h2 id="form-title">Add New Product</h2>
+<form id="product-form">
+<input type="hidden" id="product-id">
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+  <div>
+    <label for="product-name" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Product Name *</label>
+    <input type="text" id="product-name" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+  <div>
+    <label for="product-slug" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">URL Slug *</label>
+    <input type="text" id="product-slug" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">e.g., warhammer-starter-set</small>
+  </div>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label for="product-description" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Description</label>
+  <textarea id="product-description" rows="3" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="Short description shown on product cards..."></textarea>
+  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Brief text shown on product listing cards.</small>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label for="product-summary" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Summary</label>
+  <textarea id="product-summary" rows="2" maxlength="160" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; font-family: inherit;" placeholder="One-line summary for search results and social previews..."></textarea>
+  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Used for Google meta description &amp; social previews. Max 160 chars recommended.</small>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Full Description</label>
+  <div class="shop-editor">
+    <div class="shop-editor-toolbar">
+      <button type="button" onclick="formatProductText('bold')" class="shop-editor-btn" style="font-weight: bold;">B</button>
+      <button type="button" onclick="formatProductText('italic')" class="shop-editor-btn" style="font-style: italic;">I</button>
+      <button type="button" onclick="formatProductText('underline')" class="shop-editor-btn" style="text-decoration: underline;">U</button>
+      <button type="button" onclick="formatProductText('insertUnorderedList')" class="shop-editor-btn">• List</button>
+      <button type="button" onclick="insertProductLink()" class="shop-editor-btn">🔗 Link</button>
+    </div>
+    <div id="product-full-description" contenteditable="true" class="shop-editor-content" placeholder="Detailed product information, features, specifications..."></div>
+  </div>
+  <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">Rich text shown on the product detail page. Also used by Google for SEO if Summary is empty.</small>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+  <div>
+    <label for="product-price" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Price (pence) *</label>
+    <input type="number" id="product-price" required style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.875rem;">£10.00 = 1000 pence</small>
+  </div>
+  <div>
+    <label for="product-stock" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Stock Quantity *</label>
+    <input type="number" id="product-stock" required value="0" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+  <div>
+    <label for="product-category" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Category</label>
+    <input type="text" id="product-category" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+  <div>
+    <label for="product-image" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Image URL</label>
+    <input type="text" id="product-image" placeholder="https://..." style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+  </div>
+  <div>
+    <label for="product-release-date" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Release Date</label>
+    <input type="date" id="product-release-date" style="width: 100%; padding: 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+    <small style="color: rgb(var(--color-neutral-500)); font-size: 0.813rem;">For pre-order products. Google will show "Pre-Order" status.</small>
+  </div>
+</div>
+
+<div style="margin-bottom: 1rem;">
+  <label style="display: flex; align-items: center; cursor: pointer;">
+    <input type="checkbox" id="product-active" checked style="margin-right: 0.5rem;">
+    <span style="font-weight: 600;">Active (visible in shop)</span>
+  </label>
+</div>
+
+<!-- Collapsible SEO Section -->
+<div style="margin-bottom: 1.5rem;">
+<button type="button" class="seo-toggle-btn" onclick="toggleShopSeoSection()">
+<span class="seo-chevron">▶</span> 🔍 Google Product SEO Settings
+</button>
+<div id="shop-seo-section-body" class="seo-section-body">
+<div class="seo-info-banner">
+<span>ℹ️</span>
+<span>These settings show how your product appears in Google Shopping results, search snippets, and social media link previews (WhatsApp, Discord, Facebook, etc.). All data is derived from the fields above.</span>
+</div>
+
+<div style="margin-bottom: 1rem;">
+<h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">📋 How Your Fields Map to Google</h4>
+<div class="seo-field-map">
+<div class="seo-field-map-grid">
+<strong>Title:</strong> <span>Product Name</span>
+<strong>Description:</strong> <span>Full Description → Summary → Description (first non-empty, HTML stripped)</span>
+<strong>Image:</strong> <span>Image URL (720px+ wide recommended)</span>
+<strong>Price:</strong> <span>Price field (auto-converted from pence to £)</span>
+<strong>Availability:</strong> <span id="seo-availability-preview">In Stock</span>
+<strong>Category:</strong> <span>Category field (becomes breadcrumbs in Google)</span>
+<strong>URL:</strong> <span id="seo-url-preview">shop.dicebastion.com/products/...</span>
+</div>
+</div>
+</div>
+
+<div class="seo-preview-box">
+<h4 style="margin: 0 0 0.5rem; font-size: 0.875rem;">🔎 Google Search Preview</h4>
+<div style="font-family: Arial, sans-serif;">
+<div id="seo-preview-title" style="color: #1a0dab; font-size: 1.1rem; line-height: 1.3; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Product Name | Dice Bastion Shop</div>
+<div id="seo-preview-url" style="color: #006621; font-size: 0.8rem; margin-bottom: 4px;">shop.dicebastion.com › products › slug</div>
+<div id="seo-preview-price" style="color: #70757a; font-size: 0.8rem; margin-bottom: 2px;">£0.00 · <span id="seo-preview-stock" style="color: #188038;">In stock</span></div>
+<div id="seo-preview-desc" style="color: #545454; font-size: 0.85rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">Product description will appear here...</div>
+</div>
+</div>
+
+<div class="seo-info-banner seo-tip-banner">
+<span>💡</span>
+<span><strong>Image Tips:</strong> Google recommends product images be at least 720px wide (1920px preferred). Use .jpg, .png or .webp format. Provide 1:1 or 4:3 aspect ratios for best results in Shopping.</span>
+</div>
+</div>
+</div>
+
+<div style="display: flex; gap: 1rem;">
+  <button type="submit" id="save-btn" style="flex: 1; padding: 0.75rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+    Save Product
+  </button>
+  <button type="button" id="cancel-btn" style="display: none; padding: 0.75rem 1.5rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer;">
+    Cancel
+  </button>
+</div>
+</form>
+</div>
+
+<!-- Products List -->
+<div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 2rem;">
+<h2>Products</h2>
+<div id="products-list"></div>
 </div>
 
 <!-- SEO Documentation -->
@@ -992,6 +995,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('admin-dashboard').style.display = 'block';
     loadProducts();
     loadPromoCodes();
+  }
+});
+
 function toggleShopSeoSection() {
   const btn = document.querySelector('.seo-toggle-btn');
   const body = document.getElementById('shop-seo-section-body');
