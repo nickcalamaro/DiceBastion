@@ -304,17 +304,27 @@ localStorage.setItem('shop_session_id', sessionId);
 return sessionId;
 }
 
-// Load cart from localStorage
 function loadCart() {
+if (typeof ShopCartStorage !== 'undefined') {
+return ShopCartStorage.load();
+}
+try {
 const stored = localStorage.getItem('shop_cart');
 return stored ? JSON.parse(stored) : [];
+} catch (e) {
+return [];
+}
 }
 
-// Save cart to localStorage
 function saveCart(cartData) {
-localStorage.setItem('shop_cart', JSON.stringify(cartData));
-cart = cartData;
+cart = Array.isArray(cartData) ? cartData : [];
+if (typeof ShopCartStorage !== 'undefined') {
+ShopCartStorage.save(cart);
+} else {
+localStorage.setItem('shop_cart', JSON.stringify(cart));
 updateCartDisplay();
+}
+renderCart();
 }
 
 // Format currency

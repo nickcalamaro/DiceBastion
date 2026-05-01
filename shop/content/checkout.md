@@ -42,7 +42,6 @@ title: "Checkout"
 <p class="delivery-description">Collect from Gibraltar Warhammer Club</p>
 <div class="collection-info">
 <small><strong>Location:</strong> <a href="https://maps.app.goo.gl/xRVr1Jq58ANZ9DLY6" target="_blank" rel="noopener noreferrer">Gibraltar Warhammer Club (View on Map)</a></small>
-<small><strong>Hours:</strong> Thursdays 6pm-10pm, Saturdays 2pm-8pm</small>
 <small>We'll email you when your order is ready for collection (usually within 24 hours)</small>
 </div>
 </div>
@@ -470,8 +469,15 @@ return '£' + (pence / 100).toFixed(2);
 }
 
 function loadCart() {
+if (typeof ShopCartStorage !== 'undefined') {
+return ShopCartStorage.load();
+}
+try {
 const stored = localStorage.getItem('shop_cart');
 return stored ? JSON.parse(stored) : [];
+} catch (e) {
+return [];
+}
 }
 
 function renderOrderSummary() {
@@ -613,7 +619,7 @@ locale: 'en-GB',
 country: 'GB',
 onResponse: async function(type, body) {
 if (type === 'success') {
-localStorage.removeItem('shop_cart');
+if (typeof ShopCartStorage !== 'undefined') ShopCartStorage.clear(); else localStorage.removeItem('shop_cart');
 window.location.href = '/order-confirmation?order=' + encodeURIComponent(currentOrderNumber)
   + '&email=' + encodeURIComponent(orderData.email || '')
   + '&status=success';

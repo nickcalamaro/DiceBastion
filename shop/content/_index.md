@@ -313,29 +313,44 @@ color: rgb(var(--color-neutral-800));
 
 .product-quick-add {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
   width: 100%;
   margin-top: auto;
+}
+
+.product-quick-add .add-to-cart-btn {
+  flex: 1 1 auto;
+  min-width: min(140px, 100%);
+  min-height: 48px;
+}
+
+.product-quick-add .add-to-cart-btn:only-child {
+  flex: 1 1 100%;
+  width: 100%;
 }
 
 .qty-stepper {
   display: inline-flex;
   align-items: stretch;
+  flex-shrink: 0;
   border: 1px solid rgb(var(--color-neutral-300));
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   background: rgb(var(--color-neutral-50));
-  align-self: center;
 }
 
 .qty-stepper-btn {
-  width: 36px;
-  min-width: 36px;
+  width: 48px;
+  min-width: 48px;
+  min-height: 48px;
   border: none;
   background: rgb(var(--color-neutral-100));
   color: rgb(var(--color-neutral-800));
-  font-size: 1.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
   cursor: pointer;
   line-height: 1;
   display: flex;
@@ -354,13 +369,15 @@ color: rgb(var(--color-neutral-800));
 }
 
 .qty-stepper-input {
-  width: 44px;
+  width: 3.25rem;
+  min-width: 3.25rem;
+  min-height: 48px;
   text-align: center;
   border: none;
   border-left: 1px solid rgb(var(--color-neutral-200));
   border-right: 1px solid rgb(var(--color-neutral-200));
   background: rgb(var(--color-neutral));
-  font-size: 0.9375rem;
+  font-size: 1.125rem;
   font-weight: 600;
   color: rgb(var(--color-neutral-800));
   -moz-appearance: textfield;
@@ -374,6 +391,27 @@ color: rgb(var(--color-neutral-800));
 
 .modal-product-actions {
   margin-top: 1.5rem;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.modal-product-actions .qty-stepper {
+  border-radius: 10px;
+}
+
+.modal-product-actions #modal-add-btn {
+  flex: 1 1 auto;
+  min-width: min(200px, 100%);
+  min-height: 48px;
+  margin-top: 0;
+}
+
+.modal-product-actions .modal-add-success {
+  flex-basis: 100%;
+  width: 100%;
 }
 
 .modal-add-success {
@@ -521,15 +559,25 @@ let allProducts = [];
 let currentFilter = null;
 let currentSearchTerm = '';
 
-// Load cart from localStorage
 function loadCart() {
-  const stored = localStorage.getItem('shop_cart');
-  return stored ? JSON.parse(stored) : [];
+  if (typeof ShopCartStorage !== 'undefined') {
+    return ShopCartStorage.load();
+  }
+  try {
+    const stored = localStorage.getItem('shop_cart');
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
 }
 
-// Save cart to localStorage
 function saveCart(cart) {
-  localStorage.setItem('shop_cart', JSON.stringify(cart));
+  const data = Array.isArray(cart) ? cart : [];
+  if (typeof ShopCartStorage !== 'undefined') {
+    ShopCartStorage.save(data);
+    return;
+  }
+  localStorage.setItem('shop_cart', JSON.stringify(data));
   updateCartBadge();
 }
 
@@ -1037,12 +1085,12 @@ window.showProductDetail = async function (productId, slug, skipPushState) {
     } else {
       actionsHtml = `
         <div class="modal-product-actions">
-          <div class="qty-stepper" style="width: fit-content;">
+          <div class="qty-stepper">
             <button type="button" class="qty-stepper-btn" id="modal-qty-dec" aria-label="Decrease quantity">−</button>
             <input type="number" class="qty-stepper-input" id="modal-qty-input" min="1" max="${room}" value="1" aria-label="Quantity" />
             <button type="button" class="qty-stepper-btn" id="modal-qty-inc" aria-label="Increase quantity">+</button>
           </div>
-          <button type="button" class="add-to-cart-btn" id="modal-add-btn" style="width: 100%; padding: 1rem; font-size: 1.1rem; margin-top: 0.75rem;">Add to cart</button>
+          <button type="button" class="add-to-cart-btn" id="modal-add-btn" style="width: auto; padding: 1rem 1.25rem; font-size: 1.1rem;">Add to cart</button>
           <div id="modal-add-success" class="modal-add-success" hidden role="status">
             <span id="modal-add-success-line"></span>
             <div class="modal-add-success-actions">

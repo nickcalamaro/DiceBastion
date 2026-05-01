@@ -25,7 +25,10 @@
   
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="/img/logo.png" />
-  
+
+  <!-- Cart: shared TTL (cookie + localStorage); must load before page scripts -->
+  <script src="{{ "js/shopCartStorage.js" | relURL }}" charset="utf-8"></script>
+
   <style>
     /* Blowfish color scheme */
     :root {
@@ -227,10 +230,23 @@
   <script>
     // Update cart badge across all pages
     function updateGlobalCartBadge() {
-      const cart = JSON.parse(localStorage.getItem('shop_cart') || '[]');
-      const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+      let cart = [];
+      try {
+        cart =
+          typeof ShopCartStorage !== 'undefined'
+            ? ShopCartStorage.load()
+            : JSON.parse(localStorage.getItem('shop_cart') || '[]');
+      } catch (_) {
+        cart = [];
+      }
+      const totalItems = cart.reduce(
+        function (sum, item) {
+          return sum + (item.quantity || 0);
+        },
+        0
+      );
       const badge = document.getElementById('cart-badge');
-      
+
       if (badge) {
         if (totalItems > 0) {
           badge.textContent = totalItems;
@@ -240,11 +256,9 @@
         }
       }
     }
-    
-    // Listen for cart updates
+
     window.addEventListener('cartUpdated', updateGlobalCartBadge);
-    
-    // Update on page load
+
     document.addEventListener('DOMContentLoaded', updateGlobalCartBadge);
   </script>
 </body>

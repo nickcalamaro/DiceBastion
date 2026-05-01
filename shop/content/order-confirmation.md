@@ -401,9 +401,11 @@ document.getElementById('confirmation-error').style.display = 'block';
 }
 
 function clearCart() {
+if (typeof ShopCartStorage !== 'undefined') ShopCartStorage.clear(); else {
 localStorage.removeItem('shop_cart');
-const event = new CustomEvent('cartUpdated', { detail: { count: 0 } });
-window.dispatchEvent(event);
+localStorage.removeItem('shop_cart_expires_at');
+window.dispatchEvent(new CustomEvent('cartUpdated', { detail: { count: 0 } }));
+}
 }
 
 window.checkOrderStatus = checkOrderStatus;
