@@ -20,13 +20,15 @@ description: "Board games, miniatures, accessories, and more"
   </div>
   
   <div id="category-filter" class="category-filter">
-    <button class="category-btn active" onclick="filterByCategory(null)">All Products</button>
+    <button type="button" class="category-btn active" onclick="filterByCategory(null, this)">All Products</button>
   </div>
   
   <div id="product-grid" class="product-grid">
     <div class="loading">Loading products...</div>
   </div>
 </div>
+
+<div id="cart-toast" class="cart-toast" role="status" aria-live="polite" aria-hidden="true"></div>
 
 <!-- Product Detail Modal -->
 <div id="product-modal" class="modal">
@@ -252,9 +254,9 @@ color: rgb(var(--color-neutral-800));
 
 .product-footer {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
   margin-top: auto;
 }
 
@@ -307,6 +309,129 @@ color: rgb(var(--color-neutral-800));
 
 .add-to-cart-btn.added {
   background: rgb(16, 185, 129);
+}
+
+.product-quick-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: auto;
+}
+
+.qty-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid rgb(var(--color-neutral-300));
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgb(var(--color-neutral-50));
+  align-self: center;
+}
+
+.qty-stepper-btn {
+  width: 36px;
+  min-width: 36px;
+  border: none;
+  background: rgb(var(--color-neutral-100));
+  color: rgb(var(--color-neutral-800));
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qty-stepper-btn:hover:not(:disabled) {
+  background: rgb(var(--color-primary-50));
+  color: rgb(var(--color-primary-600));
+}
+
+.qty-stepper-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.qty-stepper-input {
+  width: 44px;
+  text-align: center;
+  border: none;
+  border-left: 1px solid rgb(var(--color-neutral-200));
+  border-right: 1px solid rgb(var(--color-neutral-200));
+  background: rgb(var(--color-neutral));
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-800));
+  -moz-appearance: textfield;
+}
+
+.qty-stepper-input::-webkit-outer-spin-button,
+.qty-stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.modal-product-actions {
+  margin-top: 1.5rem;
+}
+
+.modal-add-success {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgb(var(--color-primary-50));
+  border: 1px solid rgb(var(--color-primary-200));
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  color: rgb(var(--color-neutral-800));
+  line-height: 1.5;
+}
+
+.modal-add-success[hidden] {
+  display: none !important;
+}
+
+.modal-add-success-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.modal-add-success-actions button,
+.modal-add-success-actions a {
+  font-size: 0.875rem;
+}
+
+.cart-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(120%);
+  z-index: 2100;
+  padding: 0.875rem 1.25rem;
+  background: rgb(var(--color-neutral-900));
+  color: white;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  visibility: hidden;
+  transition: transform 0.28s ease, opacity 0.28s ease, visibility 0.28s;
+  max-width: min(92vw, 420px);
+  text-align: center;
+  font-size: 0.9375rem;
+}
+
+.cart-toast.visible {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
+}
+
+.cart-toast-link {
+  color: rgb(var(--color-primary-300));
+  font-weight: 600;
+  margin-left: 0.5rem;
 }
 
 .loading {
@@ -423,6 +548,279 @@ function formatPrice(pence) {
   return '£' + (pence / 100).toFixed(2);
 }
 
+function escapeHtml(text) {
+  if (text == null || text === '') return '';
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+let toastHideTimer = null;
+
+function showToast(message, options) {
+  const el = document.getElementById('cart-toast');
+  if (!el) return;
+  const opts = options || {};
+  clearTimeout(toastHideTimer);
+  el.setAttribute('aria-hidden', 'false');
+  let html = escapeHtml(message);
+  if (opts.actionHref) {
+    html +=
+      ' <a class="cart-toast-link" href="' +
+      encodeURI(opts.actionHref) +
+      '">' +
+      escapeHtml(opts.actionLabel || 'View cart') +
+      '</a>';
+  }
+  el.innerHTML = html;
+  requestAnimationFrame(() => el.classList.add('visible'));
+  toastHideTimer = setTimeout(() => {
+    el.classList.remove('visible');
+    el.setAttribute('aria-hidden', 'true');
+  }, opts.durationMs || 4200);
+}
+
+function remainingForProduct(product) {
+  if (!product) return 0;
+  const cart = loadCart();
+  const line = cart.find(item => item.id === product.id);
+  const inCart = line ? line.quantity : 0;
+  return Math.max(0, product.stock_quantity - inCart);
+}
+
+function addProductToCart(product, requestedQty, options) {
+  const opts = options || {};
+  if (!product || product.stock_quantity === 0) return 0;
+
+  let cart = loadCart();
+  const existing = cart.find(item => item.id === product.id);
+  const inCart = existing ? existing.quantity : 0;
+  const room = product.stock_quantity - inCart;
+
+  let want = requestedQty !== undefined ? Number(requestedQty) : 1;
+  want = Math.floor(want);
+  if (!Number.isFinite(want) || want < 1) want = 1;
+
+  const toAdd = Math.min(want, room);
+  if (toAdd < 1) {
+    showToast(
+      'You already have all available units of this product in your cart.',
+      { durationMs: 3600 }
+    );
+    return 0;
+  }
+
+  const isPreorder =
+    !!(product.release_date && new Date(product.release_date) > new Date());
+
+  if (existing) {
+    existing.quantity += toAdd;
+  } else {
+    cart.push({
+      id: product.id,
+      name: product.name,
+      price: product.price,
+      quantity: toAdd,
+      stock_quantity: product.stock_quantity,
+      image_url: product.image_url || '',
+      is_preorder: isPreorder,
+      release_date: product.release_date || ''
+    });
+  }
+
+  saveCart(cart);
+
+  if (!opts.silentToast) {
+    let msg =
+      toAdd === 1
+        ? `Added "${product.name}" to your cart.`
+        : `Added ${toAdd} x "${product.name}" to your cart.`;
+    if (toAdd < want) {
+      msg += ` (${toAdd} is the maximum you can add.)`;
+    }
+    showToast(msg, { actionHref: '/cart', actionLabel: 'View cart' });
+  }
+
+  if (opts.feedbackButton) flashAddedButton(opts.feedbackButton);
+  return toAdd;
+}
+
+function flashAddedButton(btn) {
+  if (!btn) return;
+  const prev = btn.textContent;
+  btn.textContent = '✓ Added';
+  btn.classList.add('added');
+  clearTimeout(btn._addedFlashT);
+  btn._addedFlashT = setTimeout(() => {
+    btn.textContent = prev;
+    btn.classList.remove('added');
+  }, 1600);
+}
+
+function clampGridQtyInput(input, product) {
+  if (!input || !product) return;
+  const maxSel = Math.max(1, remainingForProduct(product));
+  let v = parseInt(input.value, 10);
+  if (!Number.isFinite(v) || v < 1) v = 1;
+  input.value = Math.min(v, maxSel);
+  const wrap = input.closest('.qty-stepper');
+  if (!wrap) return;
+  v = parseInt(input.value, 10) || 1;
+  const dec = wrap.querySelector('[data-action="dec"]');
+  const inc = wrap.querySelector('[data-action="inc"]');
+  if (dec) dec.disabled = v <= 1;
+  if (inc) inc.disabled = v >= maxSel;
+}
+
+function renderQuickAddBlock(product) {
+  const soldOut = product.stock_quantity === 0;
+  const room = remainingForProduct(product);
+  if (soldOut) {
+    return `<div class="product-quick-add" onclick="event.stopPropagation();">
+      <button type="button" class="add-to-cart-btn" disabled>Out of stock</button>
+    </div>`;
+  }
+  if (room <= 0) {
+    return `<div class="product-quick-add" onclick="event.stopPropagation();">
+      <button type="button" class="add-to-cart-btn" disabled>Maximum in cart</button>
+    </div>`;
+  }
+  return `<div class="product-quick-add" onclick="event.stopPropagation();">
+    <div class="qty-stepper" data-product-id="${product.id}">
+      <button type="button" class="qty-stepper-btn" data-action="dec" aria-label="Decrease quantity">−</button>
+      <input type="number" class="qty-stepper-input" min="1" max="${room}" value="1" aria-label="Quantity" />
+      <button type="button" class="qty-stepper-btn" data-action="inc" aria-label="Increase quantity">+</button>
+    </div>
+    <button type="button" class="add-to-cart-btn" data-product-id="${product.id}">Add to cart</button>
+  </div>`;
+}
+
+function wireModalCartUI(product) {
+  const qtyInput = document.getElementById('modal-qty-input');
+  const addBtn = document.getElementById('modal-add-btn');
+  const successBox = document.getElementById('modal-add-success');
+  if (!qtyInput || !addBtn || !successBox) return;
+
+  const dec = document.getElementById('modal-qty-dec');
+  const inc = document.getElementById('modal-qty-inc');
+  const successLine = document.getElementById('modal-add-success-line');
+
+  function clampModalQty() {
+    const r = remainingForProduct(product);
+    if (product.stock_quantity === 0 || r < 1) {
+      qtyInput.value = '1';
+      if (dec) dec.disabled = true;
+      if (inc) inc.disabled = true;
+      addBtn.disabled = true;
+      return;
+    }
+    let v = parseInt(qtyInput.value, 10);
+    if (!Number.isFinite(v) || v < 1) v = 1;
+    qtyInput.value = Math.min(v, r);
+    v = parseInt(qtyInput.value, 10);
+    if (dec) dec.disabled = v <= 1;
+    if (inc) inc.disabled = v >= r;
+    addBtn.disabled = false;
+  }
+
+  const stepBy = delta => {
+    successBox.hidden = true;
+    let v = parseInt(qtyInput.value, 10) || 1;
+    qtyInput.value = v + delta;
+    clampModalQty();
+  };
+
+  if (dec) dec.addEventListener('click', () => stepBy(-1));
+  if (inc) inc.addEventListener('click', () => stepBy(1));
+  qtyInput.addEventListener('change', () => {
+    successBox.hidden = true;
+    clampModalQty();
+  });
+
+  addBtn.addEventListener('click', () => {
+    successBox.hidden = true;
+    const want = parseInt(qtyInput.value, 10) || 1;
+    const added = addProductToCart(product, want, { silentToast: true });
+    if (added > 0) {
+      flashAddedButton(addBtn);
+      successLine.textContent =
+        added === 1
+          ? 'Added 1 item to your cart.'
+          : `Added ${added} items to your cart.`;
+      successBox.hidden = false;
+      clampModalQty();
+      applyFilters();
+      let msg =
+        added === 1
+          ? `Added "${product.name}" to your cart.`
+          : `Added ${added} x "${product.name}" to your cart.`;
+      if (added < want) msg += ` (${added} is the maximum you can add.)`;
+      showToast(msg, { actionHref: '/cart', actionLabel: 'View cart' });
+    }
+  });
+
+  clampModalQty();
+}
+
+function bindProductGridActions() {
+  const grid = document.getElementById('product-grid');
+  if (!grid || grid.dataset.cartBound === '1') return;
+  grid.dataset.cartBound = '1';
+
+  grid.addEventListener('change', function (e) {
+    const input = e.target.closest ? e.target.closest('.qty-stepper-input') : null;
+    if (!input || !grid.contains(input)) return;
+    const wrap = input.closest('.qty-stepper');
+    if (!wrap) return;
+    const pid = parseInt(wrap.dataset.productId, 10);
+    const product = allProducts.find(p => p.id === pid);
+    if (product) clampGridQtyInput(input, product);
+  });
+
+  grid.addEventListener('click', function (e) {
+    const card = e.target.closest('.product-card');
+
+    const stepBtn = e.target.closest('.qty-stepper-btn');
+    if (stepBtn && card) {
+      e.preventDefault();
+      e.stopPropagation();
+      const wrap = stepBtn.closest('.qty-stepper');
+      if (!wrap) return;
+      const pid = parseInt(wrap.dataset.productId, 10);
+      const product = allProducts.find(p => p.id === pid);
+      if (!product) return;
+      const input = wrap.querySelector('.qty-stepper-input');
+      if (!input) return;
+      let v = parseInt(input.value, 10) || 1;
+      const maxSel = Math.max(1, remainingForProduct(product));
+      if (stepBtn.dataset.action === 'inc') {
+        input.value = Math.min(v + 1, maxSel);
+      } else {
+        input.value = Math.max(1, v - 1);
+      }
+      clampGridQtyInput(input, product);
+      return;
+    }
+
+    const addBtn = e.target.closest('.add-to-cart-btn[data-product-id]');
+    if (addBtn && card) {
+      e.preventDefault();
+      e.stopPropagation();
+      const pid = parseInt(addBtn.dataset.productId, 10);
+      const product = allProducts.find(p => p.id === pid);
+      if (!product || product.stock_quantity === 0) return;
+      const row = card.querySelector('.qty-stepper-input');
+      const qtyRaw = row ? parseInt(row.value, 10) : 1;
+      const qty = Math.max(1, Number.isFinite(qtyRaw) ? qtyRaw : 1);
+      const added = addProductToCart(product, qty, { feedbackButton: addBtn });
+      if (added > 0) {
+        if (row) clampGridQtyInput(row, product);
+        applyFilters();
+      }
+    }
+  });
+}
+
 // Load products from API
 async function loadProducts() {
   try {
@@ -464,9 +862,10 @@ function buildCategoryFilter(products) {
   const filterContainer = document.getElementById('category-filter');
   
   // Build filter buttons
-  const buttons = ['<button class="category-btn active" onclick="filterByCategory(null)">All Products</button>'];
+  const buttons = ['<button type="button" class="category-btn active" onclick="filterByCategory(null, this)">All Products</button>'];
   topCategories.forEach(cat => {
-    buttons.push(`<button class="category-btn" onclick="filterByCategory('${cat}')">${cat}</button>`);
+    const safe = cat.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    buttons.push(`<button type="button" class="category-btn" onclick="filterByCategory('${safe}', this)">${cat}</button>`);
   });
   
   filterContainer.innerHTML = buttons.join('');
@@ -500,23 +899,21 @@ function applyFilters() {
 }
 
 // Filter products by category
-function filterByCategory(category) {
+function filterByCategory(category, btnElement) {
   currentFilter = category;
-  
-  // Update active button
   document.querySelectorAll('.category-btn').forEach(btn => {
     btn.classList.remove('active');
   });
-  event.target.classList.add('active');
-  
-  // Apply both filters
+  if (btnElement) {
+    btnElement.classList.add('active');
+  }
   applyFilters();
 }
 
 // Render products
 function renderProducts(products) {
   const grid = document.getElementById('product-grid');
-  
+
   if (!products || products.length === 0) {
     grid.innerHTML = `
       <div class="empty-state">
@@ -526,165 +923,159 @@ function renderProducts(products) {
     `;
     return;
   }
-  
-  grid.innerHTML = products.map(product => {
-    const isPreorder = product.release_date && new Date(product.release_date) > new Date();
-    const releaseDate = isPreorder ? new Date(product.release_date).toLocaleDateString('en-GB', { 
-      day: 'numeric', 
-      month: 'long', 
-      year: 'numeric' 
-    }) : null;
-    
-    return `
-    <a href="/products/${product.slug}" class="product-card-link" onclick="event.preventDefault(); showProductDetail(${product.id}, '${product.slug}')">
+
+  grid.innerHTML = products
+    .map(product => {
+      const isPreorder =
+        product.release_date && new Date(product.release_date) > new Date();
+      const releaseDate = isPreorder
+        ? new Date(product.release_date).toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+          })
+        : null;
+
+      const nameHtml = escapeHtml(product.name || '');
+      const summaryHtml =
+        typeof product.summary === 'string' ? product.summary : '';
+
+      const quickAdd = renderQuickAddBlock(product);
+
+      return `
+    <a href="/products/${
+      product.slug
+    }" class="product-card-link" onclick="event.preventDefault(); showProductDetail(${
+      product.id
+    }, ${JSON.stringify(product.slug || '')});">
     <div class="product-card">
-      ${product.image_url ? 
-        `<img src="${product.image_url}" alt="${product.name}" class="product-image">` :
-        '<div class="product-image"></div>'
+      ${
+        product.image_url
+          ? `<img src="${escapeHtml(product.image_url)}" alt="${nameHtml}" class="product-image">`
+          : '<div class="product-image"></div>'
       }
-      ${isPreorder ? 
-        `<div style="position: absolute; top: 10px; left: 10px; background: rgb(var(--color-primary-600)); color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">PRE-ORDER</div>` : 
-        ''
+      ${
+        isPreorder
+          ? `<div style="position: absolute; top: 10px; left: 10px; background: rgb(var(--color-primary-600)); color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">PRE-ORDER</div>`
+          : ''
       }
       <div class="product-content">
-        <div class="product-name">${product.name}</div>
-        <div class="product-description">${product.summary || ''}</div>
-        ${isPreorder ? 
-          `<div style="font-size: 0.875rem; color: rgb(var(--color-primary-600)); margin: 0.5rem 0; font-weight: 500;">Available ${releaseDate}</div>` : 
-          ''
+        <div class="product-name">${nameHtml}</div>
+        <div class="product-description">${summaryHtml}</div>
+        ${
+          isPreorder
+            ? `<div style="font-size: 0.875rem; color: rgb(var(--color-primary-600)); margin: 0.5rem 0; font-weight: 500;">Available ${releaseDate}</div>`
+            : ''
         }
         <div class="product-footer">
           <div>
             <div class="product-price">${formatPrice(product.price)}</div>
-            <div class="product-stock ${product.stock_quantity < 5 && product.stock_quantity > 0 ? 'low' : ''} ${product.stock_quantity === 0 ? 'out' : ''}">
-              ${product.stock_quantity > 0 ? 
-                `${product.stock_quantity} in stock` : 
-                'Out of stock'
+            <div class="product-stock ${
+              product.stock_quantity < 5 && product.stock_quantity > 0
+                ? 'low'
+                : ''
+            } ${product.stock_quantity === 0 ? 'out' : ''}">
+              ${
+                product.stock_quantity > 0
+                  ? `${product.stock_quantity} in stock`
+                  : 'Out of stock'
               }
             </div>
           </div>
-          <button 
-            class="add-to-cart-btn" 
-            onclick="event.stopPropagation(); addToCart(${product.id}, '${product.name}', ${product.price}, ${product.stock_quantity}, '${product.image_url || ''}', ${isPreorder}, '${product.release_date || ''}', this)"
-            ${product.stock_quantity === 0 ? 'disabled' : ''}
-            data-product-id="${product.id}"
-          >
-            ${product.stock_quantity > 0 ? 'Add to Cart' : 'Out of Stock'}
-          </button>
+          ${quickAdd}
         </div>
       </div>
     </div>
     </a>
   `;
-  }).join('');
-}
+    })
+    .join('');
 
-// Add to cart function
-window.addToCart = function(productId, name, price, stock, imageUrl, isPreorder, releaseDate, btnElement) {
-  let cart = loadCart();
-  
-  // Check if item already in cart
-  const existingItem = cart.find(item => item.id === productId);
-  
-  if (existingItem) {
-    // Check stock limit
-    if (existingItem.quantity < stock) {
-      existingItem.quantity += 1;
-    } else {
-      alert('Cannot add more - stock limit reached');
-      return;
-    }
-  } else {
-    // Add new item
-    cart.push({
-      id: productId,
-      name: name,
-      price: price,
-      quantity: 1,
-      stock_quantity: stock,
-      image_url: imageUrl,
-      is_preorder: isPreorder,
-      release_date: releaseDate
-    });
-  }
-  
-  saveCart(cart);
-  
-  // Visual feedback
-  btnElement.textContent = '✓ Added!';
-  btnElement.classList.add('added');
-  
-  setTimeout(() => {
-    btnElement.textContent = 'Add to Cart';
-    btnElement.classList.remove('added');
-  }, 1500);
-};
+  products.forEach(p => {
+    const row = grid.querySelector(
+      `.qty-stepper[data-product-id="${p.id}"] .qty-stepper-input`
+    );
+    if (row) clampGridQtyInput(row, p);
+  });
+}
 
 // Show product detail modal
-window.showProductDetail = async function(productId, slug, skipPushState) {
-try {
-const response = await fetch(`${API_BASE}/products/${productId}`);
-const product = await response.json();
+window.showProductDetail = async function (productId, slug, skipPushState) {
+  try {
+    const response = await fetch(`${API_BASE}/products/${productId}`);
+    const product = await response.json();
 
-// Update URL with product slug (use slug param or fall back to product.slug)
-if (!skipPushState) {
-  const productSlug = slug || product.slug;
-  if (productSlug) {
-    const newUrl = `${window.location.pathname}?product=${encodeURIComponent(productSlug)}`;
-    history.pushState({ product: productSlug }, '', newUrl);
-  }
-}
+    if (!skipPushState) {
+      const productSlug = slug || product.slug;
+      if (productSlug) {
+        const newUrl = `${window.location.pathname}?product=${encodeURIComponent(productSlug)}`;
+        history.pushState({ product: productSlug }, '', newUrl);
+      }
+    }
 
-const isPreorder = product.release_date && new Date(product.release_date) > new Date();
-const releaseDate = isPreorder ? new Date(product.release_date).toLocaleDateString('en-GB', { 
-  day: 'numeric', 
-  month: 'long', 
-  year: 'numeric' 
-}) : null;
+    const isPreorder =
+      product.release_date && new Date(product.release_date) > new Date();
+    const releaseDate = isPreorder
+      ? new Date(product.release_date).toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        })
+      : null;
 
-const modal = document.getElementById('product-modal');
-const modalBody = document.getElementById('modal-body');
+    const modal = document.getElementById('product-modal');
+    const modalBody = document.getElementById('modal-body');
+    const nameHtml = escapeHtml(product.name || '');
+    const imgUrl = escapeHtml(product.image_url || '');
+    const room = remainingForProduct(product);
 
-modalBody.innerHTML = `
+    let actionsHtml;
+    if (product.stock_quantity === 0) {
+      actionsHtml = `<button type="button" class="add-to-cart-btn" disabled style="width: 100%; padding: 1rem; font-size: 1.1rem;">Out of stock</button>`;
+    } else if (room <= 0) {
+      actionsHtml = `<button type="button" class="add-to-cart-btn" disabled style="width: 100%; padding: 1rem; font-size: 1.1rem;">Maximum in cart</button>`;
+    } else {
+      actionsHtml = `
+        <div class="modal-product-actions">
+          <div class="qty-stepper" style="width: fit-content;">
+            <button type="button" class="qty-stepper-btn" id="modal-qty-dec" aria-label="Decrease quantity">−</button>
+            <input type="number" class="qty-stepper-input" id="modal-qty-input" min="1" max="${room}" value="1" aria-label="Quantity" />
+            <button type="button" class="qty-stepper-btn" id="modal-qty-inc" aria-label="Increase quantity">+</button>
+          </div>
+          <button type="button" class="add-to-cart-btn" id="modal-add-btn" style="width: 100%; padding: 1rem; font-size: 1.1rem; margin-top: 0.75rem;">Add to cart</button>
+          <div id="modal-add-success" class="modal-add-success" hidden role="status">
+            <span id="modal-add-success-line"></span>
+            <div class="modal-add-success-actions">
+              <button type="button" id="modal-keep-shopping" style="padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid rgb(var(--color-neutral-300)); background: rgb(var(--color-neutral-100)); cursor: pointer; font-weight: 600; color: rgb(var(--color-neutral-800));">Keep shopping</button>
+              <a href="/cart" style="padding: 0.5rem 1rem; border-radius: 8px; display: inline-block; text-decoration: none; background: rgb(var(--color-primary-600)); color: white; font-weight: 600;">View cart</a>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    modalBody.innerHTML = `
 <div style="padding: 2rem;">
-${product.image_url ? 
-`<img src="${product.image_url}" alt="${product.name}" style="width: 100%; max-height: 400px; object-fit: cover; border-radius: 8px; margin-bottom: 1.5rem;">` :
-''
-}
-${isPreorder ? 
-`<div style="display: inline-block; background: rgb(var(--color-primary-600)); color: white; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem;">PRE-ORDER</div>` : 
-''
-}
-<h2 style="margin: 0 0 1rem 0; color: rgb(var(--color-neutral-800));">${product.name}</h2>
-${isPreorder ? 
-`<div style="font-size: 1rem; color: rgb(var(--color-primary-600)); margin-bottom: 1rem; font-weight: 500;">Available from ${releaseDate}</div>` : 
-''
-}
+${product.image_url ? `<img src="${imgUrl}" alt="${nameHtml}" style="width: 100%; max-height: 400px; object-fit: cover; border-radius: 8px; margin-bottom: 1.5rem;">` : ''}
+${isPreorder ? `<div style="display: inline-block; background: rgb(var(--color-primary-600)); color: white; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem;">PRE-ORDER</div>` : ''}
+<h2 style="margin: 0 0 1rem 0; color: rgb(var(--color-neutral-800));">${nameHtml}</h2>
+${isPreorder ? `<div style="font-size: 1rem; color: rgb(var(--color-primary-600)); margin-bottom: 1rem; font-weight: 500;">Available from ${releaseDate}</div>` : ''}
 <div style="font-size: 2rem; font-weight: 700; color: rgb(var(--color-primary-600)); margin-bottom: 1rem;">${formatPrice(product.price)}</div>
 <div style="margin-bottom: 1rem; color: rgb(var(--color-neutral-600));">
 <strong>Stock:</strong> ${product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
 </div>
-${product.full_description ? 
-`<div style="line-height: 1.6; margin-bottom: 1.5rem; color: rgb(var(--color-neutral-700));">${product.full_description}</div>` :
-(product.summary ? `<div style="line-height: 1.6; margin-bottom: 1.5rem; color: rgb(var(--color-neutral-700));">${product.summary}</div>` : '')
-}
-<button 
-class="add-to-cart-btn" 
-onclick="addToCart(${product.id}, '${product.name}', ${product.price}, ${product.stock_quantity}, '${product.image_url || ''}', ${isPreorder}, '${product.release_date || ''}', this); closeProductModal();"
-${product.stock_quantity === 0 ? 'disabled' : ''}
-style="width: 100%; padding: 1rem; font-size: 1.1rem;"
->
-${product.stock_quantity > 0 ? 'Add to Cart' : 'Out of Stock'}
-</button>
-</div>
-`;
+${product.full_description ? `<div style="line-height: 1.6; margin-bottom: 1.5rem; color: rgb(var(--color-neutral-700));">${product.full_description}</div>` : product.summary ? `<div style="line-height: 1.6; margin-bottom: 1.5rem; color: rgb(var(--color-neutral-700));">${product.summary}</div>` : ''}
+${actionsHtml}
+</div>`;
 
-modal.classList.add('active');
-} catch (error) {
-console.error('Failed to load product details:', error);
-}
+    modal.classList.add('active');
+    if (product.stock_quantity > 0 && room > 0) {
+      wireModalCartUI(product);
+      document.getElementById('modal-keep-shopping')?.addEventListener('click', () => closeProductModal());
+    }
+  } catch (error) {
+    console.error('Failed to load product details:', error);
+  }
 };
-
 window.closeProductModal = function() {
 document.getElementById('product-modal').classList.remove('active');
 // Restore clean URL
@@ -718,6 +1109,7 @@ if (productSlug && allProducts.length > 0) {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async function() {
+  bindProductGridActions();
   // Check for ?category= param to auto-filter
   const params = new URLSearchParams(window.location.search);
   const categoryParam = params.get('category');
