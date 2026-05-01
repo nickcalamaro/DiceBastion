@@ -1652,6 +1652,7 @@ Order Reference: ${details.orderRef}
         <h2>New Shop Order</h2>
         <p><strong>Order Number:</strong> ${details.orderNumber}</p>
         <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
+        ${details.discountPence > 0 ? `<p><strong>Discount:</strong> −${formatPrice(details.discountPence / 100)}${details.promoCodeApplied ? ` (code ${String(details.promoCodeApplied).replace(/</g,'')})` : ''}</p>` : ''}
         <p><strong>Total Amount:</strong> ${formatPrice(details.total)}</p>
         <p><strong>Delivery Method:</strong> ${details.deliveryMethod}</p>
         ${details.orderNotes ? `<p><strong>Customer notes:</strong> ${String(details.orderNotes).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 800)}</p>` : ''}
@@ -1665,6 +1666,7 @@ New Shop Order
 
 Order Number: ${details.orderNumber}
 Customer: ${details.customerName} (${details.customerEmail})
+${details.discountPence > 0 ? `Discount: −${formatPrice(details.discountPence / 100)}${details.promoCodeApplied ? ` (${details.promoCodeApplied})` : ''}\n` : ''}
 Total Amount: ${formatPrice(details.total)}
 Delivery Method: ${details.deliveryMethod}
 Purchase Date: ${new Date().toLocaleString('en-GB')}
@@ -7448,6 +7450,211 @@ app.get('/admin/orders', async (c) => {
   }
 })
 
+function normalizeIncomingPromoRules(body) {
+  if (body.rules && typeof body.rules === 'object') {
+    const r = body.rules
+    return {
+      require_active_membership: !!r.require_active_membership,
+      product_ids: Array.isArray(r.product_ids)
+        ? r.product_ids.map(x => parseInt(String(x), 10)).filter(n => n > 0)
+        : [],
+      categories: Array.isArray(r.categories) ? r.categories.map(s => String(s).trim()).filter(Boolean) : [],
+      apply_scope: r.apply_scope === 'whole_subtotal_if_any_match' ? 'whole_subtotal_if_any_match' : 'eligible_lines'
+    }
+  }
+  const ids = String(body.product_ids_csv || body.product_ids || '')
+    .split(/[,\s]+/)
+    .map(s => parseInt(s.trim(), 10))
+    .filter(n => n > 0)
+  const cats = String(body.categories_csv || body.categories || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+  return {
+    require_active_membership: !!body.require_active_membership,
+    product_ids: ids,
+    categories: cats,
+    apply_scope: body.apply_scope === 'whole_subtotal_if_any_match' ? 'whole_subtotal_if_any_match' : 'eligible_lines'
+  }
+}
+
+function normalizeDiscountTypeStored(t) {
+  const s = String(t || '').toLowerCase()
+  if (s === 'percent' || s === 'percentage') return 'percent'
+  if (s === 'fixed_pence' || s === 'fixed') return 'fixed_pence'
+  return null
+}
+
+app.get('/admin/promo-codes', requireAdmin, async c => {
+  try {
+    await ensureShopPromoSchema(c.env.DB)
+    const rows = await c.env.DB.prepare('SELECT * FROM promo_codes ORDER BY datetime(created_at) DESC').all()
+    return c.json({ promo_codes: rows.results || [] })
+  } catch (e) {
+    console.error('[admin/promo-codes] list:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/promo-codes', requireAdmin, async c => {
+  try {
+    await ensureShopPromoSchema(c.env.DB)
+    const body = await c.req.json()
+    const code = normalizePromoCodeInput(body.code)
+    if (!code) return c.json({ error: 'code_required' }, 400)
+
+    const dtype = normalizeDiscountTypeStored(body.discount_type)
+    if (!dtype) return c.json({ error: 'invalid_discount_type' }, 400)
+
+    const dval = parseInt(String(body.discount_value), 10)
+    if (!Number.isFinite(dval) || dval <= 0) return c.json({ error: 'invalid_discount_value' }, 400)
+    if (dtype === 'percent' && dval > 100) return c.json({ error: 'percent_too_high' }, 400)
+
+    const rulesObj = normalizeIncomingPromoRules(body)
+    const rulesJson = JSON.stringify(rulesObj)
+    const active = body.active === 0 || body.active === false ? 0 : 1
+    const maxUses = body.max_uses != null && body.max_uses !== '' ? parseInt(String(body.max_uses), 10) : null
+    const minSub =
+      body.min_subtotal_pence != null && body.min_subtotal_pence !== ''
+        ? parseInt(String(body.min_subtotal_pence), 10)
+        : null
+
+    const now = toIso(new Date())
+    const startsAt = body.starts_at ? clampStr(String(body.starts_at), 40) : null
+    const endsAt = body.ends_at ? clampStr(String(body.ends_at), 40) : null
+    const label = body.label ? clampStr(String(body.label), 120) : null
+
+    const ins = await c.env.DB
+      .prepare(
+        `
+      INSERT INTO promo_codes (
+        code, label, discount_type, discount_value, rules_json, active,
+        starts_at, ends_at, max_uses, min_subtotal_pence, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+      )
+      .bind(
+        code,
+        label,
+        dtype,
+        dval,
+        rulesJson,
+        active,
+        startsAt,
+        endsAt,
+        Number.isFinite(maxUses) ? maxUses : null,
+        Number.isFinite(minSub) ? minSub : null,
+        now,
+        now
+      )
+      .run()
+
+    return c.json({ success: true, id: ins.meta?.last_row_id })
+  } catch (e) {
+    console.error('[admin/promo-codes] create:', e)
+    if (String(e?.message || e).includes('UNIQUE')) return c.json({ error: 'code_already_exists' }, 400)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/promo-codes/:id', requireAdmin, async c => {
+  try {
+    await ensureShopPromoSchema(c.env.DB)
+    const id = parseInt(c.req.param('id'), 10)
+    if (!(id > 0)) return c.json({ error: 'invalid_id' }, 400)
+
+    const existing = await c.env.DB.prepare('SELECT id FROM promo_codes WHERE id = ?').bind(id).first()
+    if (!existing) return c.json({ error: 'not_found' }, 404)
+
+    const body = await c.req.json()
+    const updates = []
+    const binds = []
+
+    if (body.code != null) {
+      const nc = normalizePromoCodeInput(body.code)
+      if (!nc) return c.json({ error: 'invalid_code' }, 400)
+      updates.push('code = ?')
+      binds.push(nc)
+    }
+    if (body.label !== undefined) {
+      updates.push('label = ?')
+      binds.push(body.label ? clampStr(String(body.label), 120) : null)
+    }
+    if (body.discount_type != null) {
+      const dtype = normalizeDiscountTypeStored(body.discount_type)
+      if (!dtype) return c.json({ error: 'invalid_discount_type' }, 400)
+      updates.push('discount_type = ?')
+      binds.push(dtype)
+    }
+    if (body.discount_value != null) {
+      const v = parseInt(String(body.discount_value), 10)
+      if (!Number.isFinite(v) || v <= 0) return c.json({ error: 'invalid_discount_value' }, 400)
+      updates.push('discount_value = ?')
+      binds.push(v)
+    }
+    if (
+      body.rules != null ||
+      body.require_active_membership != null ||
+      body.product_ids_csv != null ||
+      body.categories_csv != null
+    ) {
+      const rulesObj = normalizeIncomingPromoRules({ ...body, rules: body.rules || undefined })
+      updates.push('rules_json = ?')
+      binds.push(JSON.stringify(rulesObj))
+    }
+    if (body.active !== undefined) {
+      updates.push('active = ?')
+      binds.push(body.active === 0 || body.active === false ? 0 : 1)
+    }
+    if (body.starts_at !== undefined) {
+      updates.push('starts_at = ?')
+      binds.push(body.starts_at ? clampStr(String(body.starts_at), 40) : null)
+    }
+    if (body.ends_at !== undefined) {
+      updates.push('ends_at = ?')
+      binds.push(body.ends_at ? clampStr(String(body.ends_at), 40) : null)
+    }
+    if (body.max_uses !== undefined) {
+      const m = body.max_uses !== null && body.max_uses !== '' ? parseInt(String(body.max_uses), 10) : null
+      updates.push('max_uses = ?')
+      binds.push(Number.isFinite(m) ? m : null)
+    }
+    if (body.min_subtotal_pence !== undefined) {
+      const m =
+        body.min_subtotal_pence !== null && body.min_subtotal_pence !== ''
+          ? parseInt(String(body.min_subtotal_pence), 10)
+          : null
+      updates.push('min_subtotal_pence = ?')
+      binds.push(Number.isFinite(m) ? m : null)
+    }
+
+    if (!updates.length) return c.json({ error: 'no_updates' }, 400)
+    updates.push('updated_at = ?')
+    binds.push(toIso(new Date()))
+    binds.push(id)
+
+    await c.env.DB.prepare(`UPDATE promo_codes SET ${updates.join(', ')} WHERE id = ?`).bind(...binds).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[admin/promo-codes] update:', e)
+    if (String(e?.message || e).includes('UNIQUE')) return c.json({ error: 'code_already_exists' }, 400)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.delete('/admin/promo-codes/:id', requireAdmin, async c => {
+  try {
+    await ensureShopPromoSchema(c.env.DB)
+    const id = parseInt(c.req.param('id'), 10)
+    if (!(id > 0)) return c.json({ error: 'invalid_id' }, 400)
+    await c.env.DB.prepare('DELETE FROM promo_codes WHERE id = ?').bind(id).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[admin/promo-codes] delete:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // ============================================================================
 // GOOGLE INDEXING API - Admin Endpoints
 // ============================================================================
@@ -9299,6 +9506,7 @@ function formatPlainShipping(raw) {
 function buildShopBuyerEmail(order, items) {
   const isDelivery = !!order.shipping_address
   const deliveryLabel = isDelivery ? 'Local delivery (£4)' : 'Collection (free) — Gibraltar Warhammer Club'
+  const disc = Number(order.discount_pence || 0)
 
   const itemsRows = (items || []).map(item => `
     <tr>
@@ -9335,6 +9543,7 @@ function buildShopBuyerEmail(order, items) {
     </table>
 
     <p style="margin:0.25rem 0;"><strong>Subtotal:</strong> ${pennyToMoneyLine(order.subtotal)}</p>
+    ${disc > 0 ? `<p style="margin:0.25rem 0;"><strong>Promotion${order.promo_code_applied ? ` (${String(order.promo_code_applied).slice(0, 40)})` : ''}:</strong> −${pennyToMoneyLine(disc)}</p>` : ''}
     <p style="margin:0.25rem 0;"><strong>Shipping:</strong> ${order.shipping ? pennyToMoneyLine(order.shipping) : 'FREE'}</p>
     <p style="margin:0.25rem 0;"><strong>Total:</strong> ${pennyToMoneyLine(order.total)}</p>
 
@@ -9353,6 +9562,7 @@ function buildShopBuyerEmail(order, items) {
     ...(items || []).map(i => `• ${i.product_name} x ${i.quantity} — ${pennyToMoneyLine(i.subtotal)}`),
     '',
     `Subtotal: ${pennyToMoneyLine(order.subtotal)}`,
+    ...(disc > 0 ? [`Discount: −${pennyToMoneyLine(disc)}${order.promo_code_applied ? ` (${order.promo_code_applied})` : ''}`] : []),
     `Shipping: ${order.shipping ? pennyToMoneyLine(order.shipping) : 'FREE'}`,
     `Total: ${pennyToMoneyLine(order.total)}`,
     '',
@@ -9389,6 +9599,14 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
   const changed = Number(updateResult.meta?.changes ?? 0)
   if (!changed) {
     return { alreadyCompleted: true }
+  }
+
+  if (Number(orderRow.promo_code_id) > 0) {
+    try {
+      await db.prepare('UPDATE promo_codes SET uses_count = uses_count + 1 WHERE id = ?').bind(Number(orderRow.promo_code_id)).run()
+    } catch (e) {
+      console.error('[shop] promo uses_count bump:', e)
+    }
   }
 
   const itemsQuery = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(orderId).all()
@@ -9430,6 +9648,8 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
       customerName: refreshed.name,
       customerEmail: refreshed.email,
       total: Number(refreshed.total || 0) / 100,
+      discountPence: Number(refreshed.discount_pence || 0),
+      promoCodeApplied: refreshed.promo_code_applied || '',
       deliveryMethod: refreshed.shipping_address ? 'Local delivery' : 'Collection',
       orderNotes: String(refreshed.notes || '').replace(/^\[delivery:[^\]]+\]\s*/, '').trim(),
       shippingPlain,
@@ -9450,9 +9670,300 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
   return { alreadyCompleted: false }
 }
 
+/** Minimum card charge after discounts (SumUp GBP). */
+const SHOP_MIN_PAYMENT_PENCE = 100
+
+/**
+ * Extendable promo rules JSON (persisted):
+ * require_active_membership?: boolean — checkout email must have active Dice Bastion membership
+ * product_ids?: number[] — if non-empty, only these catalog IDs are eligible for the discount base
+ * categories?: string[] — if non-empty, product.category must contain one tag (comma-separated catalog field)
+ * apply_scope?: 'eligible_lines' | 'whole_subtotal_if_any_match' —
+ *    eligible_lines (default): % or fixed applies only to matched lines' subtotal
+ *    whole_subtotal_if_any_match: matched lines unlock discount on entire basket subtotal
+ */
+function safeParsePromoRules(rawJson) {
+  const base = {
+    require_active_membership: false,
+    product_ids: [],
+    categories: [],
+    apply_scope: 'eligible_lines'
+  }
+  if (!rawJson || typeof rawJson !== 'string') return base
+  try {
+    const o = JSON.parse(rawJson)
+    if (typeof o !== 'object' || !o) return base
+    if (typeof o.require_active_membership === 'boolean') base.require_active_membership = o.require_active_membership
+    if (Array.isArray(o.product_ids)) {
+      base.product_ids = o.product_ids.map(n => parseInt(String(n), 10)).filter(n => n > 0)
+    }
+    if (Array.isArray(o.categories)) {
+      base.categories = o.categories.map(c => String(c).trim()).filter(Boolean)
+    }
+    if (o.apply_scope === 'whole_subtotal_if_any_match') base.apply_scope = 'whole_subtotal_if_any_match'
+    return base
+  } catch {
+    return base
+  }
+}
+
+function normalizePromoCodeInput(code) {
+  return String(code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 64)
+}
+
+function productMatchesPromoScopes(productId, categoryStr, rules) {
+  const pidList = rules.product_ids
+  const catList = rules.categories
+  const hasPid = pidList?.length > 0
+  const hasCat = catList?.length > 0
+  if (!hasPid && !hasCat) return true
+  const pidOk =
+    !hasPid ||
+    pidList.includes(Number(productId))
+  let catOk =
+    !hasCat
+  if (!catOk && categoryStr) {
+    const tags = String(categoryStr).split(',').map(s => s.trim()).filter(Boolean)
+    catOk = catList.some(c => tags.includes(c))
+  }
+  if (!hasPid) return catOk
+  if (!hasCat) return pidOk
+  return pidOk && catOk
+}
+
+async function emailHasActiveMembershipForShopPromo(db, email) {
+  const em = String(email || '').trim().toLowerCase()
+  if (!em) return false
+  const user = await db.prepare('SELECT user_id FROM users WHERE LOWER(email) = ?').bind(em).first()
+  if (!user) return false
+  const m = await getActiveMembership(db, user.user_id)
+  return !!m
+}
+
+async function ensureShopPromoSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      label TEXT,
+      discount_type TEXT NOT NULL,
+      discount_value INTEGER NOT NULL,
+      rules_json TEXT NOT NULL DEFAULT '{}',
+      active INTEGER NOT NULL DEFAULT 1,
+      starts_at TEXT,
+      ends_at TEXT,
+      max_uses INTEGER,
+      uses_count INTEGER NOT NULL DEFAULT 0,
+      min_subtotal_pence INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `).run()
+  const alters = [
+    'ALTER TABLE orders ADD COLUMN promo_code_id INTEGER',
+    'ALTER TABLE orders ADD COLUMN discount_pence INTEGER DEFAULT 0',
+    'ALTER TABLE orders ADD COLUMN promo_code_applied TEXT'
+  ]
+  for (const sql of alters) {
+    try {
+      await db.prepare(sql).run()
+    } catch (e) {
+      const msg = String(e?.message || e)
+      if (!msg.includes('duplicate column')) {
+        console.warn('[promo/schema] ALTER skipped or failed:', msg)
+      }
+    }
+  }
+}
+
+/**
+ * Validates promo and computes discount against built line items + full subtotal.
+ * @returns {Promise<{ ok: boolean, discountPence?: number, promoRow?: Object, promoCodeSnap?: string, error?: string }>}
+ */
+async function validateAndComputeShopPromo(db, { promoCodeInput, checkoutEmail, orderLines, subtotalPence, nowIso }) {
+  const code = normalizePromoCodeInput(promoCodeInput)
+  if (!code) return { ok: false, error: 'missing_promo_code' }
+
+  const row = await db.prepare(
+    'SELECT * FROM promo_codes WHERE upper(code) = ? AND active = 1'
+  ).bind(code).first()
+  if (!row) return { ok: false, error: 'promo_not_found' }
+
+  const now = nowIso || toIso(new Date())
+  if (row.starts_at && String(row.starts_at) > now) return { ok: false, error: 'promo_not_started' }
+  if (row.ends_at && String(row.ends_at) < now) return { ok: false, error: 'promo_expired' }
+
+  const maxUses = row.max_uses != null ? Number(row.max_uses) : null
+  if (Number.isFinite(maxUses) && maxUses >= 0 && Number(row.uses_count || 0) >= maxUses) {
+    return { ok: false, error: 'promo_max_uses' }
+  }
+
+  const minSub = row.min_subtotal_pence != null ? Number(row.min_subtotal_pence) : null
+  if (Number.isFinite(minSub) && minSub > 0 && subtotalPence < minSub) {
+    return { ok: false, error: 'promo_min_subtotal_not_met' }
+  }
+
+  const rules = safeParsePromoRules(row.rules_json)
+  if (rules.require_active_membership) {
+    const okMem = await emailHasActiveMembershipForShopPromo(db, checkoutEmail)
+    if (!okMem) return { ok: false, error: 'promo_membership_required' }
+  }
+
+  let eligibleSubtotal = 0
+  for (const line of orderLines) {
+    if (productMatchesPromoScopes(line.product_id, line.category, rules)) {
+      eligibleSubtotal += Number(line.subtotal) || 0
+    }
+  }
+
+  const baseSubtotal =
+    rules.apply_scope === 'whole_subtotal_if_any_match' && eligibleSubtotal > 0
+      ? subtotalPence
+      : eligibleSubtotal
+
+  if (baseSubtotal <= 0) {
+    return { ok: false, error: 'promo_no_eligible_lines' }
+  }
+
+  const dtype = String(row.discount_type || '').toLowerCase()
+  const dval = Number(row.discount_value)
+  let discountPence = 0
+  if (dtype === 'percent' || dtype === 'percentage') {
+    if (!Number.isFinite(dval) || dval <= 0 || dval > 100) return { ok: false, error: 'promo_invalid_config' }
+    discountPence = Math.floor((baseSubtotal * dval) / 100)
+  } else if (dtype === 'fixed_pence' || dtype === 'fixed') {
+    if (!Number.isFinite(dval) || dval <= 0) return { ok: false, error: 'promo_invalid_config' }
+    discountPence = Math.min(Math.floor(dval), baseSubtotal)
+  } else {
+    return { ok: false, error: 'promo_invalid_config' }
+  }
+
+  discountPence = Math.max(0, Math.min(discountPence, subtotalPence))
+  if (discountPence <= 0) return { ok: false, error: 'promo_zero_discount' }
+
+  return {
+    ok: true,
+    discountPence,
+    promoRow: row,
+    promoCodeSnap: row.code
+  }
+}
+
 // ==================== SHOP CHECKOUT ====================
 
 const shopCheckoutRateLimits = new Map()
+const shopPromoQuoteRateLimits = new Map()
+
+app.post('/shop/promo/quote', async c => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, shopPromoQuoteRateLimits, 30, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many requests. Try again shortly.' }, 429)
+    }
+
+    await ensureShopPromoSchema(c.env.DB)
+
+    const body = await c.req.json().catch(() => ({}))
+    const { email, items, promo_code: promoCodeRaw, delivery_method: deliveryMethod } = body
+
+    if (!items?.length) {
+      return c.json({ error: 'missing_items' }, 400)
+    }
+    if (!['collection', 'delivery'].includes(deliveryMethod || '')) {
+      return c.json({ error: 'invalid_delivery_method' }, 400)
+    }
+
+    const checkoutEmail = clampStr(email || '', 320).trim()
+    if (email && (!EMAIL_RE.test(checkoutEmail) || checkoutEmail.length > 320)) {
+      return c.json({ error: 'invalid_email' }, 400)
+    }
+
+    const orderLines = []
+    let subtotal = 0
+    let resolvedCurrency = null
+
+    for (const item of items) {
+      const productId = parseInt(item.product_id ?? item.id, 10)
+      const quantity = Math.min(99, Math.max(1, parseInt(item.quantity, 10) || 1))
+      if (!(productId > 0)) return c.json({ error: 'invalid_item' }, 400)
+
+      const product = await c.env.DB.prepare(
+        'SELECT id, name, price, currency, stock_quantity, category FROM products WHERE id = ? AND is_active = 1'
+      ).bind(productId).first()
+      if (!product) return c.json({ error: `product_not_found: ${productId}` }, 400)
+      const stockQty = Number(product.stock_quantity || 0)
+      if (stockQty < quantity) {
+        return c.json({ error: `insufficient_stock: ${product.name}` }, 400)
+      }
+
+      const cur = product.currency || 'GBP'
+      if (resolvedCurrency === null) resolvedCurrency = cur
+      else if (cur !== resolvedCurrency) return c.json({ error: 'mixed_currency_not_supported' }, 400)
+
+      const unitPrice = Number(product.price)
+      const lineSubtotal = unitPrice * quantity
+      subtotal += lineSubtotal
+      orderLines.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity,
+        unit_price: unitPrice,
+        subtotal: lineSubtotal,
+        category: product.category || ''
+      })
+    }
+
+    const shippingPence = deliveryMethod === 'delivery' ? 400 : 0
+    const now = toIso(new Date())
+
+    if (!normalizePromoCodeInput(promoCodeRaw)) {
+      return c.json({
+        ok: true,
+        promo_applied: false,
+        subtotal_pence: subtotal,
+        discount_pence: 0,
+        shipping_pence: shippingPence,
+        total_pence: subtotal + shippingPence
+      })
+    }
+
+    const promo = await validateAndComputeShopPromo(c.env.DB, {
+      promoCodeInput: promoCodeRaw,
+      checkoutEmail,
+      orderLines,
+      subtotalPence: subtotal,
+      nowIso: now
+    })
+
+    if (!promo.ok) {
+      return c.json({
+        ok: false,
+        promo_applied: false,
+        error: promo.error,
+        subtotal_pence: subtotal,
+        shipping_pence: shippingPence,
+        total_pence: subtotal + shippingPence
+      }, 400)
+    }
+
+    const rawTotal = subtotal + shippingPence - promo.discountPence
+    const totalAfter = rawTotal >= SHOP_MIN_PAYMENT_PENCE ? rawTotal : null
+    return c.json({
+      ok: true,
+      promo_applied: true,
+      promo_label: promo.promoRow?.label || promo.promoCodeSnap,
+      subtotal_pence: subtotal,
+      discount_pence: promo.discountPence,
+      shipping_pence: shippingPence,
+      total_pence: totalAfter,
+      total_below_minimum: totalAfter == null,
+      minimum_total_pence: SHOP_MIN_PAYMENT_PENCE
+    })
+  } catch (e) {
+    console.error('[shop/promo/quote] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
 
 app.post('/shop/checkout', async c => {
   try {
@@ -9461,8 +9972,19 @@ app.post('/shop/checkout', async c => {
       return c.json({ error: 'rate_limit_exceeded', message: 'Too many checkout attempts. Try again shortly.' }, 429)
     }
 
+    await ensureShopPromoSchema(c.env.DB)
+
     const body = await c.req.json().catch(() => ({}))
-    const { email, name, items, shipping_address: shippingAddressRaw, delivery_method: deliveryMethod, notes, consent_at: consentAt } = body
+    const {
+      email,
+      name,
+      items,
+      shipping_address: shippingAddressRaw,
+      delivery_method: deliveryMethod,
+      notes,
+      consent_at: consentAt,
+      promo_code: promoCodeRaw
+    } = body
 
     if (!email || !name || !items?.length || !consentAt) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -9478,6 +10000,7 @@ app.post('/shop/checkout', async c => {
     }
 
     const orderItemsPayload = []
+    const promoLines = []
     let subtotal = 0
     let resolvedCurrency = null
 
@@ -9486,8 +10009,9 @@ app.post('/shop/checkout', async c => {
       const quantity = Math.min(99, Math.max(1, parseInt(item.quantity, 10) || 1))
       if (!(productId > 0)) return c.json({ error: 'invalid_item' }, 400)
 
-      const product = await c.env.DB.prepare('SELECT id, name, price, currency, stock_quantity FROM products WHERE id = ? AND is_active = 1')
-        .bind(productId).first()
+      const product = await c.env.DB.prepare(
+        'SELECT id, name, price, currency, stock_quantity, category FROM products WHERE id = ? AND is_active = 1'
+      ).bind(productId).first()
       if (!product) return c.json({ error: `product_not_found: ${productId}` }, 400)
       const stockQty = Number(product.stock_quantity || 0)
       if (stockQty < quantity) {
@@ -9508,15 +10032,50 @@ app.post('/shop/checkout', async c => {
         unit_price: unitPrice,
         subtotal: lineSubtotal
       })
+      promoLines.push({
+        product_id: product.id,
+        category: product.category || '',
+        subtotal: lineSubtotal
+      })
     }
 
     const shippingPence = deliveryMethod === 'delivery' ? 400 : 0
     const taxPence = 0
-    const totalPence = subtotal + shippingPence + taxPence
+    const now = toIso(new Date())
+
+    let discountPence = 0
+    let promoRowId = null
+    let promoCodeSnap = null
+
+    if (normalizePromoCodeInput(promoCodeRaw)) {
+      const promo = await validateAndComputeShopPromo(c.env.DB, {
+        promoCodeInput: promoCodeRaw,
+        checkoutEmail: clampStr(email, 320).trim(),
+        orderLines: promoLines,
+        subtotalPence: subtotal,
+        nowIso: now
+      })
+      if (!promo.ok) {
+        return c.json({ error: promo.error, message: promo.error }, 400)
+      }
+      discountPence = promo.discountPence
+      promoRowId = promo.promoRow?.id ?? null
+      promoCodeSnap = promo.promoCodeSnap || null
+    }
+
+    let totalPence = subtotal + shippingPence + taxPence - discountPence
+    if (totalPence < SHOP_MIN_PAYMENT_PENCE) {
+      return c.json({
+        error: 'checkout_total_below_minimum',
+        message: `Order total must be at least £${(SHOP_MIN_PAYMENT_PENCE / 100).toFixed(2)} after promotions. Reduce the discount or add items.`,
+        minimum_pence: SHOP_MIN_PAYMENT_PENCE,
+        computed_total_pence: totalPence
+      }, 400)
+    }
+
     const currencyResolved = resolvedCurrency || 'GBP'
 
     const orderNumber = `ORD-${crypto.randomUUID()}`
-    const now = toIso(new Date())
     const notesExtra = `[delivery:${deliveryMethod}]${notes ? ` ${clampStr(notes, 500)}` : ''}`
     const shipJson = shippingAddressRaw ? JSON.stringify({
       line1: clampStr(shippingAddressRaw.line1, 180),
@@ -9541,8 +10100,9 @@ app.post('/shop/checkout', async c => {
         subtotal, tax, shipping, total, currency,
         payment_status, checkout_id,
         shipping_address, billing_address, notes,
+        promo_code_id, discount_pence, promo_code_applied,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       orderNumber,
       clampStr(email, 320).trim(),
@@ -9558,6 +10118,9 @@ app.post('/shop/checkout', async c => {
       shipJson,
       shipJson,
       clampStr(notesExtra, 1000),
+      promoRowId,
+      discountPence,
+      promoCodeSnap,
       now,
       now
     ).run()
@@ -9579,7 +10142,9 @@ app.post('/shop/checkout', async c => {
     return c.json({
       success: true,
       order_number: orderNumber,
-      checkoutId: checkout.id
+      checkoutId: checkout.id,
+      discount_pence: discountPence,
+      promo_applied: !!promoCodeSnap
     })
   } catch (e) {
     console.error('[shop/checkout] Error:', e)

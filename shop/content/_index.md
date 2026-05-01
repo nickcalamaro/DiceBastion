@@ -199,7 +199,11 @@ color: rgb(var(--color-neutral-800));
 .product-card-link {
   text-decoration: none;
   color: inherit;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  cursor: pointer;
 }
 
 .product-card {
@@ -213,7 +217,10 @@ color: rgb(var(--color-neutral-800));
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  cursor: pointer;
+}
+
+.product-card-actions {
+  padding: 0 1.5rem 1.5rem;
 }
 
 .product-card:hover {
@@ -991,17 +998,17 @@ function renderProducts(products) {
       const quickAdd = renderQuickAddBlock(product);
 
       return `
+<div class="product-card">
     <a href="/products/${
       product.slug
     }" class="product-card-link" onclick="event.preventDefault(); showProductDetail(${
       product.id
     }, ${JSON.stringify(product.slug || '')});">
-    <div class="product-card">
-      ${
-        product.image_url
-          ? `<img src="${escapeHtml(product.image_url)}" alt="${nameHtml}" class="product-image">`
-          : '<div class="product-image"></div>'
-      }
+    ${
+      product.image_url
+        ? `<img src="${escapeHtml(product.image_url)}" alt="${nameHtml}" class="product-image">`
+        : '<div class="product-image"></div>'
+    }
       ${
         isPreorder
           ? `<div style="position: absolute; top: 10px; left: 10px; background: rgb(var(--color-primary-600)); color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">PRE-ORDER</div>`
@@ -1030,11 +1037,13 @@ function renderProducts(products) {
               }
             </div>
           </div>
-          ${quickAdd}
         </div>
       </div>
-    </div>
     </a>
+    <div class="product-card-actions">
+      ${quickAdd}
+    </div>
+</div>
   `;
     })
     .join('');

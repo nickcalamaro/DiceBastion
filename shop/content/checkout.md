@@ -135,10 +135,22 @@ Place Order
 </div>
 </div>
 </div>
+<div class="promo-box" style="margin: 1rem 0 0; padding: 1rem; background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px;">
+<label for="promo-code-input" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Promo code</label>
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+<input type="text" id="promo-code-input" name="promo_code" placeholder="Enter code" autocomplete="off" autocapitalize="characters" style="flex: 1; min-width: 140px; padding: 0.6rem 0.75rem; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px;">
+<button type="button" id="promo-apply-btn" class="btn btn-secondary" style="padding: 0.6rem 1rem; margin: 0;">Apply</button>
+</div>
+<p id="promo-message" style="margin: 0.5rem 0 0; font-size: 0.8125rem; min-height: 1.2em;"></p>
+</div>
 <div class="summary-totals">
 <div class="summary-line">
 <span>Subtotal</span>
 <span id="summary-subtotal">£0.00</span>
+</div>
+<div class="summary-line summary-discount" id="summary-discount-row" style="display: none; color: rgb(22, 163, 74);">
+<span>Promotion</span>
+<span id="summary-discount">−£0.00</span>
 </div>
 <div class="summary-line">
 <span>Shipping</span>
@@ -463,6 +475,23 @@ grid-template-columns: 1fr;
 const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
 let cart = [];
 let currentOrderNumber = null;
+let appliedDiscountPence = 0;
+
+const PROMO_ERR_MSG = {
+  promo_not_found: 'That promo code could not be found.',
+  promo_not_started: 'This code is not active yet.',
+  promo_expired: 'This promo code has expired.',
+  promo_max_uses: 'This code has reached its maximum number of uses.',
+  promo_min_subtotal_not_met: 'Basket subtotal is too low for this code.',
+  promo_membership_required: 'This code is only for active members — use your membership email at checkout.',
+  promo_no_eligible_lines: 'No items in your basket qualify for this code.',
+  promo_zero_discount: 'This code does not reduce your order.',
+  promo_invalid_config: 'This promotion is misconfigured. Please contact support.',
+  checkout_total_below_minimum: 'Discount would make your order total too low; add items or reduce the discount.',
+  missing_items: '',
+  invalid_delivery_method: '',
+  insufficient_stock: ''
+};
 
 function formatPrice(pence) {
 return '£' + (pence / 100).toFixed(2);
@@ -514,18 +543,100 @@ const itemsHtml = cart.map(item => `
 `).join('');
 
 document.getElementById('summary-items').innerHTML = itemsHtml;
+appliedDiscountPence = 0;
+const pm = document.getElementById('promo-message');
+if (pm) pm.textContent = '';
 updateTotals();
 }
 
 function updateTotals() {
 const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 const deliveryMethod = document.querySelector('input[name="delivery_method"]:checked')?.value || 'collection';
-const shipping = deliveryMethod === 'delivery' ? 400 : 0; // £4.00 in pence
-const total = subtotal + shipping;
+const shipping = deliveryMethod === 'delivery' ? 400 : 0;
+const disc = Math.max(0, appliedDiscountPence);
+const total = Math.max(0, subtotal + shipping - disc);
 
 document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
+const discRow = document.getElementById('summary-discount-row');
+if (disc > 0 && discRow) {
+discRow.style.display = 'flex';
+document.getElementById('summary-discount').textContent = '−' + formatPrice(disc);
+} else if (discRow) {
+discRow.style.display = 'none';
+}
 document.getElementById('summary-shipping').textContent = formatPrice(shipping);
 document.getElementById('summary-total').textContent = formatPrice(total);
+}
+
+async function fetchPromoQuote(opts) {
+const silent = !!(opts && opts.silent);
+const msg = document.getElementById('promo-message');
+const codeInput = document.getElementById('promo-code-input');
+const code = (codeInput && codeInput.value ? codeInput.value : '').trim();
+if (!code) {
+appliedDiscountPence = 0;
+updateTotals();
+if (msg && !silent) msg.textContent = '';
+return { ok: true, cleared: true };
+}
+
+const email = document.getElementById('email')?.value?.trim();
+const deliveryMethod = document.querySelector('input[name="delivery_method"]:checked')?.value || 'collection';
+
+const res = await fetch(`${API_BASE}/shop/promo/quote`, {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+email: email || undefined,
+items: cart.map(item => ({ product_id: item.id, quantity: item.quantity })),
+promo_code: code,
+delivery_method: deliveryMethod
+})
+});
+
+const data = await res.json().catch(() => ({}));
+if (!res.ok) {
+appliedDiscountPence = 0;
+updateTotals();
+const errKey = data.error || '';
+let line = PROMO_ERR_MSG[errKey] || 'That code could not be applied.';
+if (errKey === 'promo_membership_required' && !email) {
+line = 'Enter the email on your Dice Bastion account, then apply the code again.';
+}
+if (msg && !silent) {
+msg.style.color = '#b91c1c';
+msg.textContent = line;
+}
+return { ok: false };
+}
+
+if (!data.promo_applied) {
+appliedDiscountPence = 0;
+updateTotals();
+if (msg && !silent) {
+msg.style.color = 'rgb(var(--color-neutral-600))';
+msg.textContent = '';
+}
+return { ok: true };
+}
+
+if (data.total_below_minimum) {
+appliedDiscountPence = 0;
+updateTotals();
+if (msg && !silent) {
+msg.style.color = '#b91c1c';
+msg.textContent = 'This discount would make your order total too low to pay online. Add more items or use a smaller discount.';
+}
+return { ok: false };
+}
+
+appliedDiscountPence = Number(data.discount_pence) || 0;
+updateTotals();
+if (msg && !silent) {
+msg.style.color = 'rgb(22, 163, 74)';
+msg.textContent = 'Promo applied: ' + (data.promo_label || code) + '.';
+}
+return { ok: true };
 }
 
 function toggleDeliveryAddress() {
@@ -548,6 +659,8 @@ field.value = '';
 });
 }
 updateTotals();
+const pc = document.getElementById('promo-code-input');
+if (pc && pc.value.trim()) fetchPromoQuote({ silent: true }).catch(() => {});
 }
 
 async function handleCheckout(e) {
@@ -577,6 +690,12 @@ notes: formData.get('notes') || null,
 consent_at: new Date().toISOString()
 };
 
+const promoInput = document.getElementById('promo-code-input');
+const promoTrim = promoInput && promoInput.value ? promoInput.value.trim() : '';
+if (promoTrim) {
+orderData.promo_code = promoTrim;
+}
+
 // Only include shipping address if delivery is selected
 if (deliveryMethod === 'delivery') {
 orderData.shipping_address = {
@@ -604,15 +723,24 @@ body: JSON.stringify(orderData)
 const result = await response.json();
 
 if (!response.ok || !result.checkoutId) {
-throw new Error(result.error || 'Failed to create checkout');
+const detail = result.message || PROMO_ERR_MSG[result.error] || result.error || 'Failed to create checkout';
+throw new Error(detail);
 }
 
 // Store order number for later
 currentOrderNumber = result.order_number;
 
 // Mount SumUp widget with checkoutId
-await utils.loadSumUpSdk();
-await SumUpCard.mount({
+const sumUpUtils = typeof window !== 'undefined' ? window.utils : null;
+const SumUpCardMount = typeof window !== 'undefined' && window.SumUpCard ? window.SumUpCard : (typeof SumUpCard !== 'undefined' ? SumUpCard : null);
+if (!sumUpUtils || typeof sumUpUtils.loadSumUpSdk !== 'function') {
+throw new Error('SumUp checkout could not start (payment SDK missing). Refresh the page or check browser extensions blocking scripts.');
+}
+await sumUpUtils.loadSumUpSdk();
+if (!SumUpCardMount || typeof SumUpCardMount.mount !== 'function') {
+throw new Error('SumUp card widget is not available.');
+}
+await SumUpCardMount.mount({
 id: 'sumup-card',
 checkoutId: result.checkoutId,
 locale: 'en-GB',
@@ -632,7 +760,7 @@ submitBtn.disabled = false;
 submitBtn.textContent = 'Place Order';
 }
 }
-});// Hide spinner, show widget
+}); // Hide spinner, show widget
 document.querySelector('.processing-card').style.display = 'none';
 
 } catch (error) {
@@ -663,5 +791,16 @@ option.addEventListener('change', toggleDeliveryAddress);
 
 // Initialize delivery address visibility
 toggleDeliveryAddress();
+
+document.getElementById('promo-apply-btn')?.addEventListener('click', () => {
+fetchPromoQuote({ silent: false }).catch(() => {});
+});
+
+document.getElementById('promo-code-input')?.addEventListener('keydown', e => {
+if (e.key === 'Enter') {
+e.preventDefault();
+fetchPromoQuote({ silent: false }).catch(() => {});
+}
+});
 });
 </script>
