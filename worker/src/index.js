@@ -2253,9 +2253,12 @@ function getTicketConfirmationEmail(event, user, transaction) {
   const sym = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$'
   const isFree = !transaction.order_ref || amount === '0.00'
   
-  // Generate calendar attachment
+  // Generate calendar attachment (use TextEncoder for UTF-8 safety)
   const icsContent = generateIcsCalendar(event)
-  const icsBase64 = btoa(icsContent)
+  const icsBytes = new TextEncoder().encode(icsContent)
+  let icsBinary = ''
+  for (const b of icsBytes) icsBinary += String.fromCharCode(b)
+  const icsBase64 = btoa(icsBinary)
   
   if (isFree) {
     // Free event registration email
