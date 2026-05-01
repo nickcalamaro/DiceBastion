@@ -515,7 +515,7 @@ function parsePromoRulesJson(raw) {
   try {
     const o = typeof raw === 'string' ? JSON.parse(raw) : raw;
     return o && typeof o === 'object' ? o : {};
-  } catch {
+  } catch (_) {
     return {};
   }
 }
@@ -644,7 +644,7 @@ async function deletePromo(id, codeStr) {
     if (!res.ok) throw new Error();
     loadPromoCodes();
     if (Number(editingPromoId) === Number(id)) resetPromoForm();
-  } catch {
+  } catch (_) {
     alert('Delete failed');
   }
 }

@@ -573,7 +573,7 @@ function loadCart() {
   try {
     const stored = localStorage.getItem('shop_cart');
     return stored ? JSON.parse(stored) : [];
-  } catch {
+  } catch (_) {
     return [];
   }
 }
