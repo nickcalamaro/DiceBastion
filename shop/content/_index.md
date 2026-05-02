@@ -6,7 +6,7 @@ description: "Board games, miniatures, accessories, and more"
 <div id="shop-app">
   <div class="shop-header">
     <h1>Welcome to the Dice Bastion Shop</h1>
-    <p>Browse our collection of board games, miniatures, and gaming accessories.</p>
+    <p>Browse our collection of board games, trading cards, and gaming accessories.</p>
   </div>
   
   <!-- Search Bar -->

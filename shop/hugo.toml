@@ -7,7 +7,7 @@ copyright = "© 2025 Dice Bastion"
 disableKinds = ["taxonomy", "term"]
 
 [params]
-  description = "Board games, miniatures, and gaming accessories from Dice Bastion Gibraltar"
+  description = "Board games, trading cards, and gaming accessories from Dice Bastion Gibraltar"
 
 [markup.goldmark.renderer]
   unsafe = true

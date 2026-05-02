@@ -6973,7 +6973,7 @@ function generateCategorySeoPage(categoryName, products) {
   const shop = 'https://shop.dicebastion.com';
   const catDisplay = e(categoryName);
   const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
-  const desc = `Shop ${catDisplay} at Dice Bastion Gibraltar. Board games, miniatures, and gaming accessories.`;
+  const desc = `Shop ${catDisplay} at Dice Bastion Gibraltar. Board games, trading cards, and gaming accessories.`;
 
   // CollectionPage + ItemList schema
   const schema = {
