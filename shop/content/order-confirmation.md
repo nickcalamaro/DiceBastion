@@ -41,8 +41,8 @@ title: "Order Confirmation"
 <li>You'll receive an order confirmation email shortly</li>
 <li>We'll prepare your items for shipping/pickup</li>
 <li>You'll be notified when your order is ready to collect</li>
-<p>In the meantime, please contact us if you have any questions!</p>
 </ul>
+<p>In the meantime, please contact us if you have any questions!</p>
 </div>
 
 <div class="actions">

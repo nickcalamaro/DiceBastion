@@ -61,6 +61,27 @@ const addMonths = (date, months) => {
 
 const toIso = (d) => new Date(d).toISOString()
 
+/** RFC 4648 base64 for Uint8Array (avoids Workers btoa Latin1 quirks on large/binary strings). */
+const _B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+function base64EncodeBytes (bytes) {
+  const len = bytes.length
+  let out = ''
+  let i = 0
+  for (; i + 3 <= len; i += 3) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]
+    out += _B64[(n >> 18) & 63] + _B64[(n >> 12) & 63] + _B64[(n >> 6) & 63] + _B64[n & 63]
+  }
+  const remainder = len - i
+  if (remainder === 1) {
+    const n = bytes[i] << 16
+    out += _B64[(n >> 18) & 63] + _B64[(n >> 12) & 63] + '=='
+  } else if (remainder === 2) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8)
+    out += _B64[(n >> 18) & 63] + _B64[(n >> 12) & 63] + _B64[(n >> 6) & 63] + '='
+  }
+  return out
+}
+
 // ============================================================================
 // GOOGLE INDEXING API - JWT Auth + URL Notification
 // ============================================================================
@@ -78,9 +99,7 @@ function b64url(input) {
   const bytes = typeof input === 'string'
     ? new TextEncoder().encode(input)
     : new Uint8Array(input)
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return base64EncodeBytes(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 /**
@@ -2258,12 +2277,10 @@ function getTicketConfirmationEmail(event, user, transaction) {
   const sym = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$'
   const isFree = !transaction.order_ref || amount === '0.00'
   
-  // Generate calendar attachment (use TextEncoder for UTF-8 safety)
+  // Generate calendar attachment (UTF-8 bytes → base64 without btoa Latin1 restrictions)
   const icsContent = generateIcsCalendar(event)
   const icsBytes = new TextEncoder().encode(icsContent)
-  let icsBinary = ''
-  for (const b of icsBytes) icsBinary += String.fromCharCode(b)
-  const icsBase64 = btoa(icsBinary)
+  const icsBase64 = base64EncodeBytes(icsBytes)
   
   if (isFree) {
     // Free event registration email
