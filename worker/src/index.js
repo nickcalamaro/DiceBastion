@@ -6817,7 +6817,11 @@ function generateProductSeoPage(product, allCategories) {
   const img = product.image_url || `${shop}/img/og-image.png`;
   const rawDesc = product.full_description || product.summary || product.description || '';
   const plainDesc = stripHtml(rawDesc);
-  const desc = e(plainDesc.length > 160 ? plainDesc.substring(0, 157) + '...' : plainDesc);
+  const fallbackBlurb =
+    'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local pickup at Gibraltar Warhammer Club.';
+  const plainForMeta = plainDesc || fallbackBlurb;
+  const descTrunc = plainForMeta.length > 160 ? plainForMeta.substring(0, 157) + '...' : plainForMeta;
+  const desc = e(descTrunc);
   const fullDescHtml = rawDesc;  // Keep HTML for visual display
   const url = `${shop}/products/${slug}`;
   const priceNum = (Number(product.price) || 0) / 100;
@@ -6832,7 +6836,7 @@ function generateProductSeoPage(product, allCategories) {
     '@context': 'https://schema.org',
     '@type': 'Product',
     'name': product.name || 'Product',
-    'description': plainDesc || desc,
+    'description': plainForMeta,
     'image': img,
     'url': url,
     'sku': slug,
@@ -6851,7 +6855,8 @@ function generateProductSeoPage(product, allCategories) {
       'seller': {
         '@type': 'Organization',
         'name': 'Dice Bastion',
-        'url': shop
+        'url': shop,
+        'areaServed': { '@type': 'Country', 'name': 'Gibraltar' }
       },
       'shippingDetails': {
         '@type': 'OfferShippingDetails',
@@ -6901,7 +6906,7 @@ function generateProductSeoPage(product, allCategories) {
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${name} | Dice Bastion Shop</title>
+<title>${name} | Dice Bastion Shop, Gibraltar</title>
 <meta name="description" content="${desc}">
 <meta property="og:type" content="product"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${name}"><meta property="og:description" content="${desc}">
@@ -6955,7 +6960,7 @@ ${img ? `<img src="${img}" alt="${name}">` : ''}
 <h1>${name}</h1>
 ${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${shop}/products/category/${encodeURIComponent(c)}">${e(c)}</a>`).join('')}</div>` : ''}
 <div class="price">£${priceDisplay}</div>
-${fullDescHtml ? `<div class="desc">${fullDescHtml}</div>` : ''}
+${fullDescHtml ? `<div class="desc">${fullDescHtml}</div>` : `<div class="desc">${e(plainForMeta)}</div>`}
 <div class="meta">
 <div class="meta-item"><span class="meta-label">Availability</span><span class="meta-value">${isPreorder ? `<span class="badge badge-preorder">Pre-order · ${releaseDateStr}</span>` : inStock ? `<span class="badge badge-stock">${product.stock_quantity} in stock</span>` : '<span class="badge badge-out">Out of stock</span>'}</span></div>
 <div class="meta-item"><span class="meta-label">Pickup</span><span class="meta-value">Gibraltar Warhammer Club</span></div>
@@ -6973,13 +6978,13 @@ function generateCategorySeoPage(categoryName, products) {
   const shop = 'https://shop.dicebastion.com';
   const catDisplay = e(categoryName);
   const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
-  const desc = `Shop ${catDisplay} at Dice Bastion Gibraltar. Board games, trading cards, and gaming accessories.`;
+  const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local pickup at Gibraltar Warhammer Club.`;
 
   // CollectionPage + ItemList schema
   const schema = {
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
-    'name': `${categoryName} | Dice Bastion Shop`,
+    'name': `${categoryName} | Dice Bastion Shop, Gibraltar`,
     'description': desc,
     'url': url,
     'mainEntity': {
@@ -7012,13 +7017,13 @@ ${p.image_url ? `<img src="${p.image_url}" alt="${e(p.name)}">` : '<div class="c
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${catDisplay} | Dice Bastion Shop</title>
-<meta name="description" content="${desc}">
+<title>${catDisplay} | Dice Bastion Shop, Gibraltar</title>
+<meta name="description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
 <meta property="og:type" content="website"><meta property="og:url" content="${url}">
-<meta property="og:title" content="${catDisplay} | Dice Bastion Shop"><meta property="og:description" content="${desc}">
+<meta property="og:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar"><meta property="og:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
 <meta property="og:site_name" content="Dice Bastion Shop">
-<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop">
-<meta name="twitter:description" content="${desc}">
+<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
+<meta name="twitter:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
 <link rel="canonical" href="${url}">
@@ -8271,7 +8276,8 @@ async function processSeoFreshness(env) {
     // 1. Ping search-engine sitemap endpoints (lightweight GET)
     const sitemaps = [
       'https://dicebastion.com/sitemap.xml',
-      'https://dicebastion.com/events/sitemap.xml'
+      'https://dicebastion.com/events/sitemap.xml',
+      'https://shop.dicebastion.com/products/sitemap.xml'
     ]
     for (const sm of sitemaps) {
       try {

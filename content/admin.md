@@ -3544,6 +3544,19 @@ function loadBookingsAndCalendar() {
 }
 
 // ==================== Google Indexing API ====================
+function formatIndexingError(data) {
+  if (!data || typeof data !== 'object') return 'Unknown error';
+  if (data.error) return String(data.error);
+  const b = data.body;
+  if (b && typeof b === 'object') {
+    if (b.error && b.error.message) return String(b.error.message);
+    if (b.error && typeof b.error === 'object' && b.error.status) return JSON.stringify(b.error);
+    return JSON.stringify(b);
+  }
+  if (data.message) return String(data.message);
+  return JSON.stringify(data);
+}
+
 async function requestIndexing(type, slug, btn) {
   const urlMap = {
     event: `https://dicebastion.com/events/${encodeURIComponent(slug)}`,
@@ -3555,6 +3568,7 @@ async function requestIndexing(type, slug, btn) {
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = '⏳ Sending…';
+  btn.removeAttribute('title');
 
   try {
     const res = await fetch(`${API_BASE}/admin/indexing/notify`, {
@@ -3562,21 +3576,33 @@ async function requestIndexing(type, slug, btn) {
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
       body: JSON.stringify({ url, type: 'URL_UPDATED' })
     });
-    const data = await res.json();
-    if (data.ok) {
-      btn.textContent = '✅ Indexed';
+    let data;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = { error: 'invalid_response', rawStatus: res.status };
+    }
+    if (res.ok && data.ok) {
+      btn.textContent = '✅ Request submitted';
       btn.style.background = '#059669';
-      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 3000);
+      btn.title = 'Google received the request. Crawling and ranking are not immediate; use Search Console to verify. Product URLs may be declined if not Indexing API–eligible — sitemap ping still helps.';
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.removeAttribute('title'); }, 4000);
     } else {
+      const detail = formatIndexingError(data);
       btn.textContent = '❌ Failed';
       btn.style.background = '#dc2626';
+      btn.title = detail;
       console.error('Indexing failed:', data);
-      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+      alert('Indexing request failed:\n\n' + detail + '\n\nURL: ' + url);
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.removeAttribute('title'); }, 4000);
     }
   } catch (err) {
     btn.textContent = '❌ Error';
+    btn.style.background = '#dc2626';
+    btn.title = err && err.message ? err.message : String(err);
     console.error('Indexing error:', err);
-    setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+    alert('Indexing error: ' + (err && err.message ? err.message : String(err)));
+    setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.removeAttribute('title'); }, 4000);
   }
 }
 

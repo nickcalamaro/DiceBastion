@@ -1,13 +1,13 @@
 # Shop Site Configuration
 baseURL = "https://shop.dicebastion.com/"
 languageCode = "en-gb"
-title = "Dice Bastion Shop"
+title = "Dice Bastion Shop - Gibraltar Board Games, Trading Cards, and Accessories"
 copyright = "© 2025 Dice Bastion"
 
 disableKinds = ["taxonomy", "term"]
 
 [params]
-  description = "Board games, trading cards, and gaming accessories from Dice Bastion Gibraltar"
+  description = "Shop board games, Magic: The Gathering (MTG), trading cards, and accessories in Gibraltar."
 
 [markup.goldmark.renderer]
   unsafe = true

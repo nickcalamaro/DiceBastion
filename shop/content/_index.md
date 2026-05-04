@@ -1,12 +1,12 @@
 ---
-title: "Dice Bastion Shop"
-description: "Board games, miniatures, accessories, and more"
+title: "Dice Bastion Shop - Gibraltar board games, trading cards and accessories"
+description: "Shop board games, Magic: The Gathering (MTG), trading cards, and accessories in Gibraltar."
 ---
 
 <div id="shop-app">
   <div class="shop-header">
     <h1>Welcome to the Dice Bastion Shop</h1>
-    <p>Browse our collection of board games, trading cards, and gaming accessories.</p>
+    <p>Browse our collection in Gibraltar: board games, <strong>Magic: The Gathering</strong> (MTG), trading cards, miniatures, dice, and gaming accessories — with local pickup at the Gibraltar Warhammer Club.</p>
   </div>
   
   <!-- Search Bar -->
