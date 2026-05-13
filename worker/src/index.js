@@ -1,4 +1,4 @@
-gimport { Hono } from 'hono'
+import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { createHmac } from 'crypto'
 import { calculateNextOccurrence } from './utils/recurring.js'
@@ -9292,12 +9292,16 @@ app.post('/donations/checkout', async c => {
     const campaign = 'pokemon-day-2026'
     const order_ref = `DON-${campaign}-${crypto.randomUUID()}`
 
-    // Idempotency check
-    if (idem) {
+    // Idempotency: only reuse a pending checkout when email is known AND amount matches.
+    // Otherwise a user who first tried £5 (abandoned) then chose £20 would still get the £5 SumUp checkout.
+    if (idem && email && String(email).trim()) {
+      const em = String(email).trim()
       const existing = await c.env.DB.prepare(`
-        SELECT * FROM donations WHERE order_ref LIKE 'DON-%' AND donor_email = ? AND payment_status = 'pending'
+        SELECT * FROM donations WHERE order_ref LIKE 'DON-%' AND donor_email = ?
+          AND payment_status = 'pending'
+          AND ABS(CAST(amount AS REAL) - ?) < 0.005
         ORDER BY id DESC LIMIT 1
-      `).bind(email || '').first()
+      `).bind(em, donationAmount).first()
       if (existing && existing.checkout_id) {
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
