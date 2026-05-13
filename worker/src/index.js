@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+gimport { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { createHmac } from 'crypto'
 import { calculateNextOccurrence } from './utils/recurring.js'
@@ -5350,23 +5350,24 @@ app.get('/events/confirm', async c => {
       return c.json({ ok:false, error:'verify_failed' },400) 
     }
     
-    const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
-    if (!paid) {
+    // Use isCheckoutPaid (not top-level status only): SumUp may leave checkout.status as
+    // PENDING while transactions[] contains SUCCESSFUL/PAID — same pattern as membership tokenization.
+    if (!isCheckoutPaid(payment)) {
       const currentStatus = payment?.status || 'PENDING'
-      console.log('[events/confirm] Payment not yet paid, status:', currentStatus)
-      
-      // Return specific status for frontend to handle appropriately
-      // FAILED/DECLINED should stop polling and show error
-      return c.json({ 
-        ok: false, 
-        status: currentStatus,
-        message: currentStatus === 'FAILED' ? 'Payment failed. Please check your card details and try again.' :
-                 currentStatus === 'DECLINED' ? 'Your card was declined. Please use a different payment method.' :
+      const txStatuses = payment?.transactions?.map(t => t.status) || []
+      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+      console.log('[events/confirm] Payment not yet paid, status:', currentStatus, 'txStatuses:', txStatuses)
+      return c.json({
+        ok: false,
+        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+        message: hasFailed ? 'Payment failed. Please check your card details and try again.' :
+                 hasDeclined ? 'Your card was declined. Please use a different payment method.' :
                  'Payment is still processing.'
       })
     }
-    
-    console.log('[events/confirm] Payment verified as PAID')
+
+    console.log('[events/confirm] Payment verified as paid (top-level or transactions[])')
     
     // Verify amount/currency
     if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
@@ -9402,19 +9403,21 @@ app.get('/donations/confirm', async c => {
       return c.json({ ok: false, error: 'verify_failed' }, 400)
     }
 
-    const paid = payment && (payment.status === 'PAID' || payment.status === 'SUCCESSFUL')
-    if (!paid) {
+    if (!isCheckoutPaid(payment)) {
       const currentStatus = payment?.status || 'PENDING'
+      const txStatuses = payment?.transactions?.map(t => t.status) || []
+      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
       return c.json({
         ok: false,
-        status: currentStatus,
-        message: currentStatus === 'FAILED' ? 'Payment failed. Please try again.' :
-                 currentStatus === 'DECLINED' ? 'Your card was declined. Please try a different payment method.' :
+        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+        message: hasFailed ? 'Payment failed. Please try again.' :
+                 hasDeclined ? 'Your card was declined. Please try a different payment method.' :
                  'Payment is still processing.'
       })
     }
 
-    console.log('[donations/confirm] Payment verified as PAID')
+    console.log('[donations/confirm] Payment verified as paid (top-level or transactions[])')
 
     // Update donation and transaction records
     await c.env.DB.batch([
@@ -10292,7 +10295,7 @@ app.get('/orders/confirm', async c => {
   if (order.payment_status === 'PAID') return c.json({ ok: true, status: 'active' })
 
   const payment = await fetchPayment(c.env, order.checkout_id)
-  if (payment?.status !== 'PAID' && payment?.status !== 'SUCCESSFUL') return c.json({ ok: false, status: payment?.status || 'PENDING' })
+  if (!isCheckoutPaid(payment)) return c.json({ ok: false, status: payment?.status || 'PENDING' })
 
   await c.env.DB.prepare('UPDATE orders SET payment_status = ?, payment_id = ?, status = ?, updated_at = ? WHERE order_number = ?')
     .bind('PAID', payment.id, 'completed', toIso(new Date()), ref).run()
