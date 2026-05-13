@@ -5,21 +5,23 @@
 <article class="max-w-full">
   <div class="page-container" style="max-width: 900px;">
 
-
-    <!-- Hero Banner -->
+    <!-- Hero -->
     <div class="donate-hero-banner">
-      <img src="/img/childline/ChildlineDonationBanner.png" alt="Pokémon Day Fundraiser - Supporting Childline Gibraltar & our gaming community" class="donate-hero-img">
+      <img src="/img/clubempty.png" alt="Dice Bastion and the Gibraltar Warhammer Club gaming space in Gibraltar" class="donate-hero-img">
     </div>
 
-        <h1 class="card-header" style="text-align: center; font-size: 2.5rem; margin: 1.5rem 0 2rem; padding: 0.25rem 0 0.6rem; line-height: 1.3; background: linear-gradient(135deg, rgb(var(--color-primary-600)), rgb(var(--color-primary-400))); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Thank you for your support!!</h1>
+    <h1 class="card-header" style="text-align: center; font-size: 2.25rem; margin: 1.5rem 0 1.25rem; padding: 0.25rem 0 0.6rem; line-height: 1.3; background: linear-gradient(135deg, rgb(var(--color-primary-600)), rgb(var(--color-primary-400))); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Support Dice Bastion and the Gibraltar Warhammer Club</h1>
 
+    <p style="text-align: center; max-width: 36rem; margin: 0 auto 2rem; color: rgb(var(--color-neutral-600)); font-size: 1rem; line-height: 1.6;">
+      Dice Bastion and the Gibraltar Warhammer Club are run for the community and are <strong>fully funded by our members</strong> — membership keeps the lights on and the tables open. <strong>Kind donations like yours</strong> go straight into improvements that make the club more comfortable and welcoming year-round, so we can keep offering a fun, inclusive space for <strong>all kinds of tabletop games</strong> in Gibraltar — from board games and card games to RPGs and wargames — for everyone who wants to play.
+    </p>
 
-    <!-- Progress Tracker -->
+    <!-- Progress: Aircon & improvements (net after charitable allocation — see donation wall) -->
     <div class="card" id="donation-progress-card">
       <div class="donate-progress-header">
         <div>
           <div class="donate-progress-amount" id="total-raised">£0.00</div>
-          <div class="donate-progress-label">raised!</div>
+          <div class="donate-progress-label" id="progress-fund-label">Aircon &amp; improvements fund</div>
         </div>
         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem;">
           <div class="donate-progress-count">
@@ -33,49 +35,129 @@
       </div>
     </div>
 
-    <!-- About Section -->
+    <!-- About -->
     <div class="card">
-      <h2 class="card-header" style="font-size: 1.25rem;">Where does the money go?</h2>
-      <div class="donate-about-grid">
+      <h2 class="card-header" style="font-size: 1.25rem;">Where your donation goes</h2>
+      <div class="donate-about-grid" style="grid-template-columns: 1fr;">
         <div class="donate-about-item">
-          <img src="/img/childline/childlinelogo.png" alt="Childline Gibraltar" class="donate-about-logo">
-          <h3>Childline Gibraltar</h3>
-          <p>Half of all proceeds go directly to Childline Gibraltar, who run a confidential helpline, support services for families, and a 24/7 appropriate adult service for young people without representation.</p>
-        </div>
-        <div class="donate-about-item">
-          <img src="/img/childline/Club%20logo.png" alt="Gibraltar Warhammer Club" class="donate-about-logo">
-          <h3>Club Improvements</h3>
-          <p>The other half goes towards refurbishing our space and getting some much-needed AC before the summer heat makes the club unusable!</p>
+          <img src="/img/childline/Club%20logo.png" alt="Dice Bastion and the Gibraltar Warhammer Club" class="donate-about-logo">
+          <h3>Club improvements</h3>
+          <p>Your gift adds to our <strong>Aircon and improvements fund</strong> — things like cooling, furniture, and upkeep so the venue stays pleasant through summer and ready for games every week.</p>
         </div>
       </div>
-      <p style="text-align: center; margin-top: 1rem; color: rgb(var(--color-neutral-600)); font-size: 0.95rem;">
-        Hope to see you there! At the <strong>Gibraltar Warhammer Club</strong>, from <strong>11AM on Saturday 14th March</strong>. 🎮
+    </div>
+
+    <!-- Donation Form -->
+    <div class="card" id="donation-form-card">
+      <h2 class="card-header" style="font-size: 1.25rem;">Make a donation</h2>
+
+      <div class="form-group">
+        <label class="form-label">Choose an amount</label>
+        <div class="donate-amount-grid">
+          <button type="button" class="donate-amount-btn" data-amount="5">£5</button>
+          <button type="button" class="donate-amount-btn" data-amount="10">£10</button>
+          <button type="button" class="donate-amount-btn donate-amount-btn-popular" data-amount="20">
+            £20
+            <span class="donate-popular-tag">Popular</span>
+          </button>
+          <button type="button" class="donate-amount-btn" data-amount="50">£50</button>
+          <button type="button" class="donate-amount-btn" id="custom-amount-toggle">Other</button>
+        </div>
+        <div class="donate-custom-amount" id="custom-amount-wrapper" style="display:none;">
+          <div class="donate-input-prefix">
+            <span class="donate-currency-symbol">£</span>
+            <input type="number" id="custom-amount" class="form-input" min="1" max="10000" step="0.01" placeholder="Enter your amount">
+          </div>
+        </div>
+        <div id="amount-error" class="alert alert-error" style="display:none;"></div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="donor-name">Your name <span style="font-weight:400; color: rgb(var(--color-neutral-500));">(optional)</span></label>
+        <input type="text" id="donor-name" class="form-input" placeholder="Your name" maxlength="200">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="donor-email">Email <span style="font-weight:400; color: rgb(var(--color-neutral-500));">(optional, for receipt)</span></label>
+        <input type="email" id="donor-email" class="form-input" placeholder="you@example.com">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="donor-message">Leave a message <span style="font-weight:400; color: rgb(var(--color-neutral-500));">(optional, max 500 characters)</span></label>
+        <textarea id="donor-message" class="form-textarea" rows="3" maxlength="500" placeholder="Good luck with the club!"></textarea>
+        <div style="text-align: right; font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-top: 0.25rem;">
+          <span id="message-char-count">0</span>/500
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="show-name" class="checkbox-input" checked>
+          <label for="show-name" class="checkbox-label">Show my name on the donation wall</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="show-message" class="checkbox-input" checked>
+          <label for="show-message" class="checkbox-label">Show my message on the donation wall</label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="privacy-consent" class="checkbox-input">
+          <label for="privacy-consent" class="checkbox-label">
+            I agree to the <a href="/privacy-policy/" class="link" target="_blank" rel="noopener">privacy policy</a> and consent to my data being processed for this donation.
+          </label>
+        </div>
+      </div>
+
+      <div id="donation-error" class="alert alert-error" style="display:none;"></div>
+      <div id="donation-status" class="alert alert-info" style="display:none;"></div>
+
+      <button type="button" id="donate-btn" class="btn btn-primary btn-full btn-lg" disabled>
+        🎁 Donate now
+      </button>
+
+      <p style="text-align:center; font-size:0.8rem; color:rgb(var(--color-neutral-500)); margin-top:0.75rem;">
+        Payments processed securely via SumUp. All transactions are in GBP (£).
       </p>
     </div>
 
-
-
-    <!-- Donation Wall -->
-    <div class="card" id="donation-wall-card">
-      <h2 class="card-header" style="font-size:1.25rem;">Donation Wall</h2>
-      <div id="donation-wall-empty" class="card-empty">
-        <p>Be the first to donate and leave a message! ✨</p>
+    <div id="sumup-payment-section" class="card" style="display:none;">
+      <h2 class="card-header" style="font-size:1.25rem;">💳 Enter payment details</h2>
+      <div id="donation-sumup-card"></div>
+      <div id="payment-processing" class="alert alert-info" style="display:none;">
+        Processing your payment… please wait.
       </div>
-      <div id="donation-wall-list"></div>
     </div>
 
-    <!-- Childline Photos -->
-    <div class="card">
-      <div class="donate-photo-grid donate-photo-grid-3">
-        <div class="donate-photo-item">
-          <img src="/img/childline/childline%20photo%201.jpg" alt="Childline Gibraltar community outreach">
-        </div>
-        <div class="donate-photo-item">
-          <img src="/img/childline/childline%20photo%202.jpg" alt="Childline Gibraltar supporting young people">
-        </div>
-        <div class="donate-photo-item">
-          <img src="/img/childline/Childline%20photo%203.png" alt="Childline Gibraltar certificate of appreciation presented to the Warhammer Club">
-        </div>
+    <div id="donation-thank-you" class="card" style="display:none;">
+      <div style="text-align:center; padding:1rem 0;">
+        <div style="font-size:3rem; margin-bottom:0.5rem;">🎉</div>
+        <h2 class="card-header" style="font-size:1.5rem;">Thank you</h2>
+        <p style="color:rgb(var(--color-neutral-600)); margin-bottom:1rem;">
+          Your donation of <strong id="ty-amount"></strong> has been received.<br>
+          It will help us keep improving the club for everyone who plays here.
+        </p>
+        <button type="button" class="btn btn-primary" onclick="window.location.reload()">Make another donation</button>
+      </div>
+    </div>
+
+    <!-- Donation wall + transparency -->
+    <div class="card" id="donation-wall-card">
+      <h2 class="card-header" style="font-size:1.25rem;">Donation wall</h2>
+      <div id="donation-wall-empty" class="card-empty">
+        <p>Be the first to donate and leave a message.</p>
+      </div>
+      <div id="donation-wall-list"></div>
+
+      <div class="donate-wall-ledger" style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid rgb(var(--color-neutral-200)); font-size: 0.95rem; color: rgb(var(--color-neutral-700)); line-height: 1.6;">
+        <p style="margin: 0 0 0.75rem;"><strong>How we use what has been raised</strong></p>
+        <p style="margin: 0 0 0.75rem;">
+          <strong>£647</strong> from our community fundraising was paid to <strong>Childline Gibraltar</strong> on behalf of Dice Bastion and the Gibraltar Warhammer Club, together with our supporters.
+        </p>
+        <p style="margin: 0;">
+          The running total at the top of this page is our <strong>Aircon and improvements fund</strong>: everything raised so far for the club <em>after</em> that payment. The same pot includes what was collected from our <strong>Pokémon Day</strong> fundraiser and these online donations.
+        </p>
       </div>
     </div>
 
@@ -83,64 +165,4 @@
 </article>
 
 <script src="/js/donate.js"></script>
-<script>
-(function () {
-  const canvas = document.createElement('canvas');
-  canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999';
-  document.body.appendChild(canvas);
-  const ctx = canvas.getContext('2d');
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-
-  const COLOURS = ['#4f46e5','#818cf8','#facc15','#34d399','#f472b6','#60a5fa'];
-  const COUNT = 120;
-  const pieces = Array.from({ length: COUNT }, () => ({
-    x: Math.random() * canvas.width,
-    y: Math.random() * canvas.height * 0.5 - canvas.height * 0.1,
-    r: Math.random() * 7 + 4,
-    d: Math.random() * COUNT,
-    colour: COLOURS[Math.floor(Math.random() * COLOURS.length)],
-    tilt: Math.random() * 10 - 10,
-    tiltAngle: 0,
-    tiltSpeed: Math.random() * 0.1 + 0.05
-  }));
-
-  let angle = 0;
-  let frame;
-  let startTime = null;
-  const DURATION = 6000;
-
-  function draw(ts) {
-    if (!startTime) startTime = ts;
-    const elapsed = ts - startTime;
-    const progress = Math.min(elapsed / DURATION, 1);
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    angle += 0.008;
-
-    pieces.forEach((p, i) => {
-      p.tiltAngle += p.tiltSpeed * 0.75;
-      p.y += (Math.cos(angle + p.d) + 1.5 + p.r / 5) * 1.1;
-      p.x += Math.sin(angle) * 1.2;
-      p.tilt = Math.sin(p.tiltAngle) * 15;
-
-      ctx.globalAlpha = 1 - progress;
-      ctx.beginPath();
-      ctx.lineWidth = p.r;
-      ctx.strokeStyle = p.colour;
-      ctx.moveTo(p.x + p.tilt + p.r / 4, p.y);
-      ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r / 4);
-      ctx.stroke();
-    });
-
-    if (progress < 1) {
-      frame = requestAnimationFrame(draw);
-    } else {
-      canvas.remove();
-    }
-  }
-
-  requestAnimationFrame(draw);
-})();
-</script>
 {{ end }}

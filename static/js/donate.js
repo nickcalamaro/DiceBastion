@@ -1,11 +1,8 @@
 /**
- * Dice Bastion - Donation Page
- * Handles the Pokémon Day Fundraiser donation flow:
- *  - Amount selection (presets + custom)
- *  - Donation wall loading
- *  - Progress bar
- *  - SumUp checkout integration
- *  - Payment confirmation polling
+ * Dice Bastion and the Gibraltar Warhammer Club — donations page (/donations)
+ * Amount selection, donation wall, progress (Aircon fund = gross total − charity allocation),
+ * SumUp checkout, payment confirmation polling.
+ * Campaign slug remains pokemon-day-2026 for D1 continuity with existing rows.
  */
 
 (function () {
@@ -13,6 +10,8 @@
 
   const API_BASE = window.utils.getApiBase();
   const CAMPAIGN = 'pokemon-day-2026';
+  /** Paid to Childline; subtracted from displayed club / Aircon fund total only */
+  const CHILDLINE_PAID_GBP = 647;
   const MILESTONES = [100, 200, 300, 500, 750, 1000];
 
   function getCurrentGoal(total) {
@@ -61,17 +60,17 @@
       const data = await res.json();
       if (!data.ok) return;
 
-      // Update progress
-      const total = parseFloat(data.total_raised) || 0;
-      const goal = getCurrentGoal(total);
-      animateValue($totalRaised, 0, total, 1200, v => `£${v.toFixed(2)}`);
+      // Progress reflects Aircon & club improvements: gross raised minus Childline payment
+      const gross = parseFloat(data.total_raised) || 0;
+      const airconTotal = Math.max(0, gross - CHILDLINE_PAID_GBP);
+      const goal = getCurrentGoal(airconTotal);
+      animateValue($totalRaised, 0, airconTotal, 1200, v => `£${v.toFixed(2)}`);
       $donationCount.textContent = data.donation_count || 0;
 
-      // Show current goal
       const $goalLabel = document.getElementById('goal-label');
       if ($goalLabel) $goalLabel.textContent = `Goal: £${goal}`;
 
-      const pct = Math.min((total / goal) * 100, 100);
+      const pct = Math.min((airconTotal / goal) * 100, 100);
       setTimeout(() => { $progressBar.style.width = pct + '%'; }, 200);
 
       // Render messages
