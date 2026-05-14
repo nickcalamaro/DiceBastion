@@ -1620,9 +1620,10 @@ const EVENT_IMAGE_MASTER_W = 1600;
 const EVENT_IMAGE_MASTER_H = 758;
 /** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
 const EVENT_IMAGE_EXPORT_SPECS = [
-  /** At least fill target height (no transparent top/bottom after compose); only zoom past contain when needed. */
+  /** At least fill target height when needed; blur fills any letterbox. */
   { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg', fit: 'fillHeight' },
-  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'fillHeight' },
+  /** Full artwork visible in 400×238; blur above/below (or sides) — never side-crop wide art. */
+  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'contain' },
   /** Hero stays contain so the full crop stays visible on the wide frame. */
   { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'contain' }
 ];
