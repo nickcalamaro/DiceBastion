@@ -109,6 +109,13 @@ showDate: false
 
 /* Image cropper */
 .image-preview { max-width: 200px; max-height: 200px; border-radius: 6px; margin-top: 0.5rem; }
+/* Event export previews: fixed frame + cover so card/hero match how they render on site */
+.event-export-thumb { margin-top: 0.5rem; border-radius: 6px; overflow: hidden; background: rgb(var(--color-neutral-200)); }
+.dark .event-export-thumb { background: rgb(var(--color-neutral-700)); }
+.event-export-thumb--main { width: 200px; aspect-ratio: 800 / 379; }
+.event-export-thumb--card { width: 200px; aspect-ratio: 400 / 238; }
+.event-export-thumb--hero { width: 200px; aspect-ratio: 885 / 300; }
+.event-export-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; margin: 0; max-width: none; max-height: none; }
 #crop-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 9999; align-items: center; justify-content: center; }
 #crop-modal.is-open { display: flex; }
 .crop-container { background: white; border-radius: 12px; padding: 1rem 2rem 2rem 2rem; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; overflow-y: auto; }
@@ -2052,9 +2059,9 @@ showCropModal(file, (bundle) => {
   document.getElementById('event-image-hero').value = bundle.image_url_hero || '';
   document.getElementById('event-image-preview').innerHTML =
     `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><img src="${bundle.image_url}" class="image-preview" alt="Main"></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><img src="${bundle.image_url_card}" class="image-preview" style="max-width:200px;height:auto;" alt="Card"></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><img src="${bundle.image_url_hero}" class="image-preview" style="max-width:280px;height:auto;" alt="Hero"></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.image_url}" alt="Main"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.image_url_card}" alt="Card"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.image_url_hero}" alt="Hero"></div></div>
     </div>`;
 }, 800 / 379, 'event');
 }
@@ -2582,9 +2589,9 @@ async function editEvent(id) {
       const hero = event.image_url_hero || event.image_url;
       document.getElementById('event-image-preview').innerHTML =
         `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
-          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main</div><img src="${event.image_url}" class="image-preview" alt="Current"></div>
-          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card</div><img src="${card}" class="image-preview" style="max-width:200px;height:auto;" alt="Card"></div>
-          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero</div><img src="${hero}" class="image-preview" style="max-width:280px;height:auto;" alt="Hero"></div>
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main</div><div class="event-export-thumb event-export-thumb--main"><img src="${event.image_url}" alt="Current"></div></div>
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card</div><div class="event-export-thumb event-export-thumb--card"><img src="${card}" alt="Card"></div></div>
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero</div><div class="event-export-thumb event-export-thumb--hero"><img src="${hero}" alt="Hero"></div></div>
         </div>`;
     }
 
