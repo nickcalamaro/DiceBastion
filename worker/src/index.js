@@ -8314,7 +8314,8 @@ async function processSeoFreshness(env) {
     const sitemaps = [
       'https://dicebastion.com/sitemap.xml',
       'https://dicebastion.com/events/sitemap.xml',
-      'https://shop.dicebastion.com/products/sitemap.xml'
+      // Shop index lists pages-sitemap.xml + products/sitemap.xml (single ping)
+      'https://shop.dicebastion.com/sitemap.xml'
     ]
     for (const sm of sitemaps) {
       try {

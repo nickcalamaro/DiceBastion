@@ -313,9 +313,12 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 <p>When shared on WhatsApp, Discord, Facebook, or Twitter, these links will show a rich preview card with the product image, name, price, and description — pulled from the Open Graph and Twitter Card meta tags on the SEO page.</p>
 
 <h3>🗺️ Sitemap</h3>
-<p>All active products are automatically included in a dynamic XML sitemap at:</p>
-<p><code>shop.dicebastion.com/products/sitemap.xml</code></p>
-<p>This sitemap is auto-generated from the database and includes all product URLs plus category pages. Submit this URL to Google Search Console to accelerate indexing.</p>
+<p><strong>Root sitemap (submit this in Search Console):</strong> <code>https://shop.dicebastion.com/sitemap.xml</code> — a <em>sitemap index</em> that points at:</p>
+<ul>
+  <li><code>pages-sitemap.xml</code> — Hugo static pages (home, cart, checkout, etc.)</li>
+  <li><code>products/sitemap.xml</code> — dynamic list of every active product and category URL from the database</li>
+</ul>
+<p>The old Hugo-only URL <code>/sitemap.xml</code> used to list <em>no</em> products; Google only saw shop shell pages. After deploy, use the root URL above so crawlers discover products.</p>
 
 <h3>🕸️ Crawlable Internal Links</h3>
 <p>The shop homepage is automatically injected with hidden <code>&lt;a&gt;</code> links to every active product's SEO page. This gives Google a crawl path from your shop to each product — critical for discovery and indexing. These links are invisible to visitors but fully visible to search crawlers.</p>
@@ -335,7 +338,7 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
   <li><strong>Direct test:</strong> Visit <code>shop.dicebastion.com/products/your-slug</code> — you'll be redirected to the shop (that's correct!)</li>
   <li><strong>Bot test:</strong> Use <a href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Google Rich Results Test</a> to see the Product schema</li>
   <li><strong>Social test:</strong> Use <a href="https://developers.facebook.com/tools/debug/" target="_blank" rel="noopener">Facebook Debugger</a> or share the link in a Discord DM to yourself</li>
-  <li><strong>Sitemap:</strong> Check <code>shop.dicebastion.com/products/sitemap.xml</code> to verify all products appear</li>
+  <li><strong>Sitemap:</strong> Open <code>shop.dicebastion.com/sitemap.xml</code> (index) and <code>shop.dicebastion.com/products/sitemap.xml</code> to verify products</li>
 </ul>
 </div>
 </div>
@@ -1112,16 +1115,22 @@ async function requestIndexing(slug, btn) {
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
       body: JSON.stringify({ url, type: 'URL_UPDATED' })
     });
-    const data = await res.json();
-    if (data.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
       btn.textContent = '✅ Indexed';
       btn.style.background = '#059669';
       setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 3000);
     } else {
+      const err =
+        data.error ||
+        data.body?.error?.message ||
+        data.body?.error ||
+        (res.status ? `HTTP ${res.status}` : 'Request failed');
       btn.textContent = '❌ Failed';
+      btn.title = typeof err === 'string' ? err : JSON.stringify(err);
       btn.style.background = '#dc2626';
-      console.error('Indexing failed:', data);
-      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 4000);
+      console.error('Indexing failed:', data, res.status);
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.title = ''; }, 8000);
     }
   } catch (err) {
     btn.textContent = '❌ Error';
