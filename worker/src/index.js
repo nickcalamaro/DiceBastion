@@ -7093,6 +7093,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </body></html>`;
 }
 
+/** YYYY-MM-DD for product sitemap <lastmod> (D1 may return ISO string or unix ms). */
+function formatProductSitemapLastMod(updatedAt) {
+  if (updatedAt == null || updatedAt === '') return ''
+  let d
+  if (typeof updatedAt === 'number') {
+    d = new Date(updatedAt > 1e12 ? updatedAt : updatedAt * 1000)
+  } else {
+    const s = String(updatedAt)
+    d = new Date(s.includes('T') ? s : s.replace(' ', 'T'))
+  }
+  if (Number.isNaN(d.getTime())) return ''
+  return `<lastmod>${d.toISOString().slice(0, 10)}</lastmod>`
+}
+
 // ---------- Product Sitemap ----------
 app.get('/products/sitemap.xml', async c => {
   try {
@@ -7116,7 +7130,7 @@ app.get('/products/sitemap.xml', async c => {
 
     // Product pages
     for (const p of (results || [])) {
-      const lastmod = p.updated_at ? `<lastmod>${p.updated_at.split('T')[0]}</lastmod>` : ''
+      const lastmod = formatProductSitemapLastMod(p.updated_at)
       xml += `\n<url><loc>${shop}/products/${encodeURIComponent(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.8</priority></url>`
     }
 
@@ -8292,13 +8306,13 @@ async function processScheduledNewsletters(env) {
 }
 
 // ============================================================================
-// CRON JOB: Daily SEO freshness – sitemap ping + re-index active events
+// CRON JOB: Daily SEO freshness – sitemap ping + Indexing API (events + shop products)
 // ============================================================================
 
 /**
- * Ping Google & Bing with sitemap URLs so they know content has changed,
- * then batch-notify the Indexing API for any events updated in the last 48 h
- * (or all active events on Sundays for a weekly full sweep).
+ * Always: GET Google’s sitemap ping URL for each sitemap (asks Google to refresh crawl lists).
+ * If GOOGLE_SA_KEY is set: Indexing API for events + shop products (shared daily quota; events first).
+ * Cron schedule: worker wrangler.toml [triggers] crons (e.g. daily 02:00 UTC).
  */
 async function processSeoFreshness(env) {
   const jobName = 'seo_freshness'
@@ -8308,9 +8322,12 @@ async function processSeoFreshness(env) {
   let processed = 0
   let succeeded = 0
   let failed = 0
+  let prodProcessed = 0
+  let prodSucceeded = 0
+  let prodFailed = 0
 
   try {
-    // 1. Ping search-engine sitemap endpoints (lightweight GET)
+    // 1. Ping Google sitemap endpoint (lightweight GET)
     const sitemaps = [
       'https://dicebastion.com/sitemap.xml',
       'https://dicebastion.com/events/sitemap.xml',
@@ -8327,7 +8344,7 @@ async function processSeoFreshness(env) {
       }
     }
 
-    // 2. Batch re-index events via Google Indexing API
+    // 2. Google Indexing API (optional — requires GOOGLE_SA_KEY)
     if (!env.GOOGLE_SA_KEY) {
       console.log('[SEO] GOOGLE_SA_KEY not configured – skipping Indexing API')
       await logCronJob(env.DB, jobName, 'completed', {
@@ -8335,14 +8352,14 @@ async function processSeoFreshness(env) {
         records_processed: 0,
         records_succeeded: 0,
         records_failed: 0,
-        extra: { note: 'sitemap pinged only, no SA key' }
+        extra: { note: 'sitemap_ping_only_no_GOOGLE_SA_KEY', sitemaps_pinged: sitemaps.length }
       })
       return
     }
 
-    // On Sundays (day 0) re-index ALL active events for a weekly sweep.
-    // Other days only re-index events updated in the last 48 hours.
     const dayOfWeek = new Date().getUTCDay()
+
+    // --- Events: Sunday = all active; else last 48h ---
     let events
     if (dayOfWeek === 0) {
       const { results } = await env.DB.prepare(`
@@ -8363,8 +8380,8 @@ async function processSeoFreshness(env) {
       console.log(`[SEO] Daily delta: ${events.length} recently updated events`)
     }
 
-    // Google Indexing API allows 200 requests/day – cap at 100 to leave room
-    const batch = events.slice(0, 100)
+    const eventCap = 100
+    const batch = events.slice(0, eventCap)
     processed = batch.length
 
     for (const e of batch) {
@@ -8383,22 +8400,73 @@ async function processSeoFreshness(env) {
       }
     }
 
-    console.log(`[SEO] Batch indexing done: ${succeeded}/${processed} succeeded`)
+    console.log(`[SEO] Event indexing: ${succeeded}/${processed} succeeded`)
 
-    await logCronJob(env.DB, jobName, failed === 0 ? 'completed' : 'partial', {
+    // --- Shop products: remaining budget toward ~200/day total with events ---
+    const shopBudget = Math.max(0, 200 - batch.length)
+    let products = []
+    if (shopBudget > 0) {
+      if (dayOfWeek === 0) {
+        const { results } = await env.DB.prepare(`
+          SELECT slug FROM products
+          WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+          ORDER BY updated_at DESC
+        `).all()
+        products = (results || []).slice(0, shopBudget)
+        console.log(`[SEO] Sunday shop sweep: notifying up to ${shopBudget} products (pool ${(results || []).length})`)
+      } else {
+        const { results } = await env.DB.prepare(`
+          SELECT slug FROM products
+          WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+            AND updated_at >= datetime('now', '-48 hours')
+          ORDER BY updated_at DESC
+        `).all()
+        products = (results || []).slice(0, shopBudget)
+        console.log(`[SEO] Shop product delta: ${products.length} URLs (budget ${shopBudget})`)
+      }
+
+      prodProcessed = products.length
+      for (const p of products) {
+        try {
+          const url = `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`
+          const result = await notifyGoogleIndexing(env, url, 'URL_UPDATED')
+          if (result.ok) {
+            prodSucceeded++
+          } else {
+            prodFailed++
+            console.error(`[SEO] Product index notify failed for ${p.slug}:`, result.body)
+          }
+        } catch (err) {
+          prodFailed++
+          console.error(`[SEO] Product index notify error for ${p.slug}:`, err)
+        }
+      }
+      console.log(`[SEO] Product indexing: ${prodSucceeded}/${prodProcessed} succeeded`)
+    }
+
+    const totalProcessed = processed + prodProcessed
+    const totalSucceeded = succeeded + prodSucceeded
+    const totalFailed = failed + prodFailed
+
+    await logCronJob(env.DB, jobName, totalFailed === 0 ? 'completed' : 'partial', {
       started_at: startedAt,
-      records_processed: processed,
-      records_succeeded: succeeded,
-      records_failed: failed,
-      extra: { day: dayOfWeek === 0 ? 'sunday_sweep' : 'daily_delta' }
+      records_processed: totalProcessed,
+      records_succeeded: totalSucceeded,
+      records_failed: totalFailed,
+      extra: {
+        day: dayOfWeek === 0 ? 'sunday_sweep' : 'daily_delta',
+        events: { processed, succeeded, failed },
+        products: { processed: prodProcessed, succeeded: prodSucceeded, failed: prodFailed },
+        sitemaps_pinged: sitemaps.length
+      }
     })
   } catch (err) {
     console.error(`[CRON] ${jobName} FAILED:`, err)
     await logCronJob(env.DB, jobName, 'failed', {
       started_at: startedAt,
-      records_processed: processed,
-      records_succeeded: succeeded,
-      records_failed: failed,
+      records_processed: processed + prodProcessed,
+      records_succeeded: succeeded + prodSucceeded,
+      records_failed: failed + prodFailed,
       error_message: err.message
     })
     throw err
@@ -10346,7 +10414,8 @@ app.get('/orders/confirm', async c => {
 
 /**
  * Main scheduled handler - runs all cron jobs
- * Scheduled to run daily at 2 AM UTC
+ * Scheduled to run daily at 2 AM UTC (see wrangler.toml [triggers] crons).
+ * Includes sitemap pings + optional Indexing API for events and shop products.
  */
 async function handleScheduled(event, env, ctx) {
   const runStarted = new Date().toISOString()
@@ -10441,6 +10510,36 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
     const host = request.headers.get('Host') || ''
+    const pathNorm = url.pathname.replace(/\/+$/, '') || '/'
+
+    // Hugo writes /pages-sitemap.xml to Pages; shop custom domain only routed /products/* to Worker → 404.
+    // Proxy from Pages project host (see SHOP_PAGES_ORIGIN) so GSC can read the child sitemap.
+    if (host.includes('shop.dicebastion.com') && pathNorm === '/pages-sitemap.xml') {
+      const pagesBase = String(env.SHOP_PAGES_ORIGIN || 'https://dicebastion-shop.pages.dev').replace(/\/+$/, '')
+      const target = `${pagesBase}/pages-sitemap.xml`
+      try {
+        const res = await fetch(target, {
+          headers: {
+            Accept: 'application/xml, text/xml, */*',
+            'User-Agent': request.headers.get('User-Agent') || 'DiceBastion-sitemap-proxy/1'
+          }
+        })
+        const body = await res.arrayBuffer()
+        return new Response(body, {
+          status: res.status,
+          headers: {
+            'Content-Type': 'application/xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=300'
+          }
+        })
+      } catch (e) {
+        console.error('[pages-sitemap proxy]', e)
+        return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
+          status: 502,
+          headers: { 'Content-Type': 'application/xml; charset=utf-8' }
+        })
+      }
+    }
 
     // ====== SHOP: shop.dicebastion.com/products/* ======
     if (host.includes('shop.dicebastion.com') && url.pathname.startsWith('/products')) {
