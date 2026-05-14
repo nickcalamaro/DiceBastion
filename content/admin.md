@@ -1613,9 +1613,9 @@ const EVENT_IMAGE_MASTER_W = 1600;
 const EVENT_IMAGE_MASTER_H = 758;
 /** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
 const EVENT_IMAGE_EXPORT_SPECS = [
-  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg' },
-  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg' },
-  { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg' }
+  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg', fit: 'contain' },
+  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'cover' },
+  { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'cover' }
 ];
 
 function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
@@ -1629,6 +1629,23 @@ function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
   c.height = targetH;
   const ctx = c.getContext('2d');
   ctx.clearRect(0, 0, targetW, targetH);
+  const ox = Math.floor((targetW - dw) / 2);
+  const oy = Math.floor((targetH - dh) / 2);
+  ctx.drawImage(sourceCanvas, ox, oy, dw, dh);
+  return c;
+}
+
+/** Scale source to cover target WxH (center crop). No transparent letterboxing — avoids white JPEG gutters on card/hero. */
+function coverCenterOnCanvas(sourceCanvas, targetW, targetH) {
+  const sw = sourceCanvas.width;
+  const sh = sourceCanvas.height;
+  const scale = Math.max(targetW / sw, targetH / sh);
+  const dw = Math.ceil(sw * scale);
+  const dh = Math.ceil(sh * scale);
+  const c = document.createElement('canvas');
+  c.width = targetW;
+  c.height = targetH;
+  const ctx = c.getContext('2d');
   const ox = Math.floor((targetW - dw) / 2);
   const oy = Math.floor((targetH - dh) / 2);
   ctx.drawImage(sourceCanvas, ox, oy, dw, dh);
@@ -1921,7 +1938,9 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       const batchId = Date.now();
       const bundle = {};
       for (const spec of EVENT_IMAGE_EXPORT_SPECS) {
-        const sized = containCenterOnCanvas(masterCropped, spec.w, spec.h);
+        const sized = spec.fit === 'cover'
+          ? coverCenterOnCanvas(masterCropped, spec.w, spec.h)
+          : containCenterOnCanvas(masterCropped, spec.w, spec.h);
         const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
         const uploadRes = await fetch(`${API_BASE}/admin/images`, {
           method: 'POST',
