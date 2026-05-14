@@ -1,15 +1,17 @@
 ---
-title: "Pokémon Day Fundraiser"
-description: "Donate to support Childline Gibraltar and help us refurbish our gaming space! Join us on Saturday 14th March from 11AM at the Gibraltar Warhammer Club. Half of all proceeds go directly to Childline Gibraltar."
+title: "Donate"
+description: "Support Dice Bastion and the Gibraltar Warhammer Club with a kind donation. Member fees and gifts like yours help us run a welcoming home for tabletop games in Gibraltar."
 layout: "donate"
+url: "/donations/"
+aliases:
+  - /donate/
 images:
-  - /img/childline/Childline%20photo%203.png
+  - /img/clubempty.png
 keywords:
-  - Pokémon Day
-  - fundraiser
-  - Childline Gibraltar
-  - charity
-  - donation
-  - Gibraltar Warhammer Club
-  - Dice Bastion
+  - donate
+  - Dice Bastion and the Gibraltar Warhammer Club
+  - Gibraltar
+  - tabletop games
+  - board games
+  - gaming club
 ---

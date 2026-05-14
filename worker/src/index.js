@@ -1,4 +1,4 @@
-gimport { Hono } from 'hono'
+import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { createHmac } from 'crypto'
 import { calculateNextOccurrence } from './utils/recurring.js'
@@ -9245,7 +9245,7 @@ async function processDelayedAccountSetupEmails(env) {
 
 /**
  * Get donation totals and public messages for a campaign
- * GET /donations/wall?campaign=pokemon-day-2026
+ * GET /donations/wall?campaign=pokemon-day-2026 (slug retained for historical D1 rows)
  */
 app.get('/donations/wall', async c => {
   try {
@@ -9328,12 +9328,16 @@ app.post('/donations/checkout', async c => {
     const campaign = 'pokemon-day-2026'
     const order_ref = `DON-${campaign}-${crypto.randomUUID()}`
 
-    // Idempotency check
-    if (idem) {
+    // Idempotency: only reuse a pending checkout when email is known AND amount matches.
+    // Otherwise a user who first tried £5 (abandoned) then chose £20 would still get the £5 SumUp checkout.
+    if (idem && email && String(email).trim()) {
+      const em = String(email).trim()
       const existing = await c.env.DB.prepare(`
-        SELECT * FROM donations WHERE order_ref LIKE 'DON-%' AND donor_email = ? AND payment_status = 'pending'
+        SELECT * FROM donations WHERE order_ref LIKE 'DON-%' AND donor_email = ?
+          AND payment_status = 'pending'
+          AND ABS(CAST(amount AS REAL) - ?) < 0.005
         ORDER BY id DESC LIMIT 1
-      `).bind(email || '').first()
+      `).bind(em, donationAmount).first()
       if (existing && existing.checkout_id) {
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
@@ -9346,8 +9350,8 @@ app.post('/donations/checkout', async c => {
         amount: donationAmount,
         currency,
         orderRef: order_ref,
-        title: 'Pokémon Day Fundraiser Donation',
-        description: `Donation of £${donationAmount.toFixed(2)} for Pokémon Day Fundraiser`
+        title: 'Dice Bastion and the Gibraltar Warhammer Club donation',
+        description: `Donation of £${donationAmount.toFixed(2)} to Dice Bastion and the Gibraltar Warhammer Club (club improvements fund)`
       })
     } catch (e) {
       console.error('[donations/checkout] SumUp checkout failed:', e)
@@ -9467,7 +9471,7 @@ app.get('/donations/confirm', async c => {
     try {
       await sendEmail(c.env, {
         to: 'admin@dicebastion.com',
-        subject: `💰 New Donation: £${donation.amount} - Pokémon Day Fundraiser`,
+        subject: `💰 New Donation: £${donation.amount} - Dice Bastion and the Gibraltar Warhammer Club`,
         html: `<h2>New Donation Received!</h2>
                <p><strong>Amount:</strong> £${donation.amount}</p>
                <p><strong>Donor:</strong> ${donation.donor_name || 'Anonymous'}</p>
@@ -9489,19 +9493,19 @@ app.get('/donations/confirm', async c => {
         const donorDisplayName = donation.donor_name || 'there'
         await sendEmail(c.env, {
           to: donation.donor_email,
-          subject: `Thank you for your donation to Dice Bastion`,
+          subject: `Thank you for your donation to Dice Bastion and the Gibraltar Warhammer Club`,
           html: `<h2>Thank you for your generosity, ${donorDisplayName}!</h2>
-                 <p>We've received your donation of <strong>&pound;${donation.amount}</strong> to the Pokemon Day Fundraiser.</p>
-                 <p>Your support means a lot to the Dice Bastion community and helps us keep running great events for everyone.</p>
+                 <p>We've received your donation of <strong>&pound;${donation.amount}</strong> to Dice Bastion and the Gibraltar Warhammer Club.</p>
+                 <p>Your support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.</p>
                  <p><strong>Donation details:</strong></p>
                  <ul>
                    <li>Amount: &pound;${donation.amount}</li>
-                   <li>Campaign: Pokemon Day Fundraiser</li>
+                   <li>Purpose: club improvements (Aircon &amp; venue fund)</li>
                    <li>Reference: ${orderRef}</li>
                  </ul>
                  <p>If you have any questions, feel free to get in touch at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
-                 <p>Thanks again,<br>The Dice Bastion Team</p>`,
-          text: `Thank you for your generosity, ${donorDisplayName}!\n\nWe've received your donation of £${donation.amount} to the Pokemon Day Fundraiser.\n\nYour support means a lot to the Dice Bastion community and helps us keep running great events for everyone.\n\nDonation details:\n- Amount: £${donation.amount}\n- Campaign: Pokemon Day Fundraiser\n- Reference: ${orderRef}\n\nIf you have any questions, feel free to get in touch at admin@dicebastion.com.\n\nThanks again,\nThe Dice Bastion Team`,
+                 <p>Thanks again,<br>Dice Bastion and the Gibraltar Warhammer Club</p>`,
+          text: `Thank you for your generosity, ${donorDisplayName}!\n\nWe've received your donation of £${donation.amount} to Dice Bastion and the Gibraltar Warhammer Club.\n\nYour support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.\n\nDonation details:\n- Amount: £${donation.amount}\n- Purpose: club improvements (Aircon & venue fund)\n- Reference: ${orderRef}\n\nIf you have any questions, feel free to get in touch at admin@dicebastion.com.\n\nThanks again,\nDice Bastion and the Gibraltar Warhammer Club`,
           emailType: 'donation_thank_you',
           relatedId: donation.id,
           relatedType: 'donation'

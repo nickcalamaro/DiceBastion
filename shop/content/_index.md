@@ -6,7 +6,7 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
 <div id="shop-app">
   <div class="shop-header">
     <h1>Welcome to the Dice Bastion Shop</h1>
-    <p>Browse our collection in Gibraltar: board games, <strong>Magic: The Gathering</strong> (MTG), trading cards, miniatures, dice, and gaming accessories — with local pickup at the Gibraltar Warhammer Club.</p>
+    <p>Browse our collection in Gibraltar: board games, <strong>Magic: The Gathering</strong> (MTG), trading cards, miniatures, dice, and gaming accessories. Local pickup and delivery available accross Gibraltar.</p>
   </div>
   
   <!-- Search Bar -->
