@@ -518,6 +518,26 @@ async function hasUsedFreeTrial(db, userId) {
   return !!row
 }
 
+let __eventImageVariantColsReady = false
+/**
+ * Add optional per-layout event image URLs (card grid vs modal hero). Safe to call repeatedly.
+ */
+async function ensureEventImageVariantColumns(db) {
+  if (__eventImageVariantColsReady) return
+  for (const col of ['image_url_card', 'image_url_hero']) {
+    try {
+      await db.prepare(`ALTER TABLE events ADD COLUMN ${col} TEXT`).run()
+      console.log(`[migration] Added events.${col}`)
+    } catch (e) {
+      const msg = String(e.message || e)
+      if (!msg.includes('duplicate column') && !msg.includes('already exists')) {
+        console.error(`[migration] events.${col}:`, e)
+      }
+    }
+  }
+  __eventImageVariantColsReady = true
+}
+
 // ============================================================================
 // USER & IDENTITY MANAGEMENT
 // ============================================================================
@@ -5115,6 +5135,7 @@ ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span cl
 // Get all active events (public endpoint)
 app.get('/events', async c => {
   try {
+    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -5133,6 +5154,8 @@ app.get('/events', async c => {
         capacity,
         tickets_sold,
         image_url,
+        image_url_card,
+        image_url_hero,
         requires_purchase,
         is_recurring,
         recurrence_pattern,
@@ -5545,6 +5568,7 @@ app.get('/events/:slug', async c => {
       return c.json({ error: 'not_found' }, 404)
     }
     
+    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -5563,6 +5587,8 @@ app.get('/events/:slug', async c => {
         capacity,
         tickets_sold,
         image_url,
+        image_url_card,
+        image_url_hero,
         requires_purchase,
         is_recurring,
         recurrence_pattern,
@@ -5981,6 +6007,7 @@ app.get('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
     
+    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -5999,6 +6026,8 @@ app.get('/admin/events/:id', requireAdmin, async c => {
         capacity,
         tickets_sold,
         image_url,
+        image_url_card,
+        image_url_hero,
         requires_purchase,
         is_active,
         is_recurring,
@@ -6023,7 +6052,8 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
-    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    await ensureEventImageVariantColumns(c.env.DB)
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -6033,8 +6063,8 @@ app.post('/admin/events', requireAdmin, async c => {
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
     
     const result = await c.env.DB.prepare(`
-      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date, end_time)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date, end_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       title,
       slug,
@@ -6050,6 +6080,8 @@ app.post('/admin/events', requireAdmin, async c => {
       non_membership_price || 0,
       max_attendees || null,
       image_url || null,
+      image_url_card || null,
+      image_url_hero || null,
       requires_purchase !== undefined ? requires_purchase : 1,
       is_active !== undefined ? is_active : 1,
       is_recurring || 0,
@@ -6077,7 +6109,8 @@ app.post('/admin/events', requireAdmin, async c => {
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
-    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    await ensureEventImageVariantColumns(c.env.DB)
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -6088,7 +6121,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     await c.env.DB.prepare(`
       UPDATE events 
-      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?, end_time = ?
+      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, image_url_card = ?, image_url_hero = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?, end_time = ?
       WHERE event_id = ?
     `).bind(
       title,
@@ -6105,6 +6138,8 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       non_membership_price || 0,
       max_attendees || null,
       image_url || null,
+      image_url_card || null,
+      image_url_hero || null,
       requires_purchase !== undefined ? requires_purchase : 1,
       is_active !== undefined ? is_active : 1,
       is_recurring || 0,
@@ -7775,8 +7810,9 @@ app.get('/admin/newsletter/recipients', requireAdmin, async c => {
  */
 app.get('/admin/newsletter/events', requireAdmin, async c => {
   try {
+    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
-      SELECT event_id, event_name, description, event_datetime, location, image_url, slug
+      SELECT event_id, event_name, description, event_datetime, location, image_url, image_url_card, slug
       FROM events
       WHERE is_active = 1 AND event_datetime >= datetime('now')
       ORDER BY event_datetime ASC

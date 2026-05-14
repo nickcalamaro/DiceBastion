@@ -408,7 +408,7 @@ async function loadEvents() {
               <div class="event-organiser-ribbon">${event.organiser}</div>
             </div>
           ` : ''}
-          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url}');"><img src="${event.image_url}" alt="${event.title}"></div>` : ''}
+          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url_card || event.image_url}');"><img src="${event.image_url_card || event.image_url}" alt="${event.title}" width="400" height="238" loading="lazy"></div>` : ''}
           <div class="event-content">
             <h3 class="event-title">
               ${event.title}

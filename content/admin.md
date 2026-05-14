@@ -612,7 +612,9 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="form-group">
 <label class="form-label">Image URL</label>
 <input type="url" id="event-image" placeholder="https://..." class="form-input">
-<small class="admin-text-small">Or upload an image below</small>
+<small class="admin-text-small">Or upload below — one crop produces 800×379 (general), 400×238 (cards), and 885×300 (modal hero), each with the same edge treatment.</small>
+<input type="hidden" id="event-image-card" value="">
+<input type="hidden" id="event-image-hero" value="">
 </div>
 
 <div class="form-group">
@@ -1080,7 +1082,8 @@ const API_BASE = utils.getApiBase();
 let sessionToken = null;
 let currentUser = null;
 let uploadedProductImage = null;
-let uploadedEventImage = null;
+/** After crop upload: { image_url, image_url_card, image_url_hero } or null */
+let uploadedEventBundle = null;
 let editingShopPromoId = null;
 
 function adminJsonHeaders() {
@@ -1601,8 +1604,82 @@ document.getElementById('event-location')?.addEventListener('input', (e) => {
 let cropper = null;
 let currentCropCallback = null;
 let currentAspectRatio = 336 / 220;
+/** 'event' = multi-size event pack; 'product' = single product image */
+let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
+
+const EVENT_IMAGE_MASTER_W = 1600;
+const EVENT_IMAGE_MASTER_H = 758;
+/** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
+const EVENT_IMAGE_EXPORT_SPECS = [
+  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg' },
+  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg' },
+  { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg' }
+];
+
+function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
+  const sw = sourceCanvas.width;
+  const sh = sourceCanvas.height;
+  const scale = Math.min(targetW / sw, targetH / sh);
+  const dw = Math.round(sw * scale);
+  const dh = Math.round(sh * scale);
+  const c = document.createElement('canvas');
+  c.width = targetW;
+  c.height = targetH;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, targetW, targetH);
+  const ox = Math.floor((targetW - dw) / 2);
+  const oy = Math.floor((targetH - dh) / 2);
+  ctx.drawImage(sourceCanvas, ox, oy, dw, dh);
+  return c;
+}
+
+function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
+  const baseArea = 800 * 379;
+  const area = targetWidth * targetHeight;
+  const blurPx = Math.max(12, Math.round(28 * Math.sqrt(area / baseArea)));
+  const pad = Math.round(blurPx * 1.07);
+
+  let fillCol;
+  if (cropBgMode === 'white') {
+    fillCol = '#ffffff';
+  } else if (cropBgMode === 'pick' && cropBgPickedCol) {
+    fillCol = cropBgPickedCol;
+  } else {
+    const srcCtx = croppedCanvas.getContext('2d');
+    const px = srcCtx.getImageData(0, 0, targetWidth, targetHeight).data;
+    let rSum = 0, gSum = 0, bSum = 0, cnt = 0;
+    const samplePx = (x, y) => {
+      const i = (y * targetWidth + x) * 4;
+      if (px[i + 3] > 128) { rSum += px[i]; gSum += px[i + 1]; bSum += px[i + 2]; cnt++; }
+    };
+    for (let x = 0; x < targetWidth; x += 3) {
+      for (let d = 0; d < 3; d++) { samplePx(x, d); samplePx(x, targetHeight - 1 - d); }
+    }
+    for (let y = 0; y < targetHeight; y += 3) {
+      for (let d = 0; d < 3; d++) { samplePx(d, y); samplePx(targetWidth - 1 - d, y); }
+    }
+    fillCol = cnt > 0
+      ? `rgb(${Math.round(rSum / cnt)},${Math.round(gSum / cnt)},${Math.round(bSum / cnt)})`
+      : '#ffffff';
+  }
+
+  const finalCanvas = document.createElement('canvas');
+  finalCanvas.width = targetWidth;
+  finalCanvas.height = targetHeight;
+  const ctx = finalCanvas.getContext('2d');
+  ctx.fillStyle = fillCol;
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
+  if (cropBgMode === 'auto') {
+    ctx.save();
+    ctx.filter = `blur(${blurPx}px)`;
+    ctx.drawImage(croppedCanvas, -pad, -pad, targetWidth + pad * 2, targetHeight + pad * 2);
+    ctx.restore();
+  }
+  ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
+  return finalCanvas.toDataURL('image/jpeg', 0.92);
+}
 
 // Background fill mode buttons
 document.querySelectorAll('.crop-bg-btn').forEach(btn => {
@@ -1653,8 +1730,9 @@ document.querySelector('.crop-image-container').addEventListener('click', (e) =>
   document.getElementById('crop-bg-pick-hint').textContent = `Sampled: ${cropBgPickedCol}`;
 });
 
-function showCropModal(file, callback, aspectRatio = 336 / 220) {
+function showCropModal(file, callback, aspectRatio = 336 / 220, cropKind = 'product') {
   currentAspectRatio = aspectRatio;
+  currentCropKind = cropKind;
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = document.getElementById('crop-image');
@@ -1789,86 +1867,88 @@ document.querySelector('.crop-image-container').classList.remove('eyedropper-act
 document.getElementById('crop-confirm').addEventListener('click', async () => {
   if (!cropper || !currentCropCallback) return;
 
-  // Determine target dimensions based on aspect ratio
-  let targetWidth, targetHeight;
-  if (Math.abs(currentAspectRatio - (800 / 379)) < 0.01) {
-    // Event image (800x379)
-    targetWidth = 800;
-    targetHeight = 379;
-  } else {
-    // Product image (672x440, which is 336/220 * 2)
-    targetWidth = 672;
-    targetHeight = 440;
-  }
-
-  // Get the cropped portion (transparent where crop extends beyond image)
-  const croppedCanvas = cropper.getCroppedCanvas({
-    width: targetWidth,
-    height: targetHeight,
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: 'high',
-    fillColor: 'transparent',
-  });
-
-  // Build final canvas with background fill
-  const finalCanvas = document.createElement('canvas');
-  finalCanvas.width = targetWidth;
-  finalCanvas.height = targetHeight;
-  const ctx = finalCanvas.getContext('2d');
-
-  // Determine fill colour based on selected mode
-  let fillCol;
-  if (cropBgMode === 'white') {
-    fillCol = '#ffffff';
-  } else if (cropBgMode === 'pick' && cropBgPickedCol) {
-    fillCol = cropBgPickedCol;
-  } else {
-    // Auto: sample average colour from opaque edge pixels
-    const srcCtx = croppedCanvas.getContext('2d');
-    const px = srcCtx.getImageData(0, 0, targetWidth, targetHeight).data;
-    let rSum = 0, gSum = 0, bSum = 0, cnt = 0;
-    const samplePx = (x, y) => {
-      const i = (y * targetWidth + x) * 4;
-      if (px[i + 3] > 128) { rSum += px[i]; gSum += px[i+1]; bSum += px[i+2]; cnt++; }
-    };
-    for (let x = 0; x < targetWidth; x += 3) {
-      for (let d = 0; d < 3; d++) { samplePx(x, d); samplePx(x, targetHeight - 1 - d); }
+  const closeCropModal = () => {
+    document.getElementById('crop-modal').classList.remove('is-open');
+    if (cropper) {
+      cropper.destroy();
+      cropper = null;
     }
-    for (let y = 0; y < targetHeight; y += 3) {
-      for (let d = 0; d < 3; d++) { samplePx(d, y); samplePx(targetWidth - 1 - d, y); }
-    }
-    fillCol = cnt > 0
-      ? `rgb(${Math.round(rSum/cnt)},${Math.round(gSum/cnt)},${Math.round(bSum/cnt)})`
-      : '#ffffff';
-  }
+    currentCropCallback = null;
+    cropBgMode = 'auto';
+    cropBgPickedCol = null;
+  };
 
-  // 1) Fill entire canvas with the chosen colour
-  ctx.fillStyle = fillCol;
-  ctx.fillRect(0, 0, targetWidth, targetHeight);
-
-  // 2) For auto mode, draw a blurred copy so edges bleed softly
-  if (cropBgMode === 'auto') {
-    ctx.save();
-    ctx.filter = 'blur(28px)';
-    ctx.drawImage(croppedCanvas, -30, -30, targetWidth + 60, targetHeight + 60);
-    ctx.restore();
-  }
-
-  // 3) Draw the sharp crop on top
-  ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
-
-  // Convert to JPEG (no transparency needed)
-  const croppedImage = finalCanvas.toDataURL('image/jpeg', 0.92);
-
-  // Upload to R2
   try {
+    if (currentCropKind === 'event') {
+      const masterCropped = cropper.getCroppedCanvas({
+        width: EVENT_IMAGE_MASTER_W,
+        height: EVENT_IMAGE_MASTER_H,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        fillColor: 'transparent'
+      });
+      if (!masterCropped) {
+        Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
+        return;
+      }
+      const batchId = Date.now();
+      const bundle = {};
+      for (const spec of EVENT_IMAGE_EXPORT_SPECS) {
+        const sized = containCenterOnCanvas(masterCropped, spec.w, spec.h);
+        const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+        const uploadRes = await fetch(`${API_BASE}/admin/images`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': sessionToken
+          },
+          body: JSON.stringify({
+            image: dataUrl,
+            filename: `${batchId}-${spec.filename}`
+          })
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadData.success) {
+          Modal.alert({ title: 'Upload Failed', message: uploadData.error || 'Failed to upload an event image variant.' });
+          console.error('Upload error:', uploadData);
+          return;
+        }
+        bundle[spec.key] = uploadData.url;
+      }
+      currentCropCallback(bundle);
+      closeCropModal();
+      return;
+    }
+
+    // Product (or other single-size) crop
+    let targetWidth, targetHeight;
+    if (Math.abs(currentAspectRatio - (800 / 379)) < 0.01) {
+      targetWidth = 800;
+      targetHeight = 379;
+    } else {
+      targetWidth = 672;
+      targetHeight = 440;
+    }
+
+    const croppedCanvas = cropper.getCroppedCanvas({
+      width: targetWidth,
+      height: targetHeight,
+      imageSmoothingEnabled: true,
+      imageSmoothingQuality: 'high',
+      fillColor: 'transparent'
+    });
+
+    const croppedImage = composeBlurredBackgroundJpeg(
+      croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol
+    );
+
     const uploadRes = await fetch(`${API_BASE}/admin/images`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Session-Token': sessionToken
       },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         image: croppedImage,
         filename: 'product-image.jpg'
       })
@@ -1878,14 +1958,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 
     if (uploadData.success) {
       currentCropCallback(uploadData.url);
-      document.getElementById('crop-modal').classList.remove('is-open');
-      if (cropper) {
-        cropper.destroy();
-        cropper = null;
-      }
-      currentCropCallback = null;
-      cropBgMode = 'auto';
-      cropBgPickedCol = null;
+      closeCropModal();
     } else {
       Modal.alert({ title: 'Upload Failed', message: 'Failed to upload image. Please try again.' });
       console.error('Upload error:', uploadData);
@@ -1945,11 +2018,18 @@ document.getElementById('product-image-preview').innerHTML =
 document.getElementById('event-image-upload').addEventListener('change', (e) => {
 const file = e.target.files[0];
 if (file) {
-showCropModal(file, (croppedImage) => {
-uploadedEventImage = croppedImage;
-document.getElementById('event-image-preview').innerHTML = 
-`<img src="${croppedImage}" class="image-preview" alt="Preview">`;
-}, 800 / 379);
+showCropModal(file, (bundle) => {
+  uploadedEventBundle = bundle;
+  document.getElementById('event-image').value = bundle.image_url || '';
+  document.getElementById('event-image-card').value = bundle.image_url_card || '';
+  document.getElementById('event-image-hero').value = bundle.image_url_hero || '';
+  document.getElementById('event-image-preview').innerHTML =
+    `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><img src="${bundle.image_url}" class="image-preview" alt="Main"></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><img src="${bundle.image_url_card}" class="image-preview" style="max-width:200px;height:auto;" alt="Card"></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><img src="${bundle.image_url_hero}" class="image-preview" style="max-width:280px;height:auto;" alt="Hero"></div>
+    </div>`;
+}, 800 / 379, 'event');
 }
 });
 
@@ -2267,7 +2347,7 @@ const eventId = e.id || e.event_id;
 return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
-${e.image_url ? `<img src="${e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
+${e.image_url ? `<img src="${e.image_url_card || e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
 <div style="flex: 1;">
 <h3>${e.title} ${e.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'} ${requiresPurchase ? '' : '<span style="color: #2563eb; font-size: 0.875rem;">(Free Event)</span>'}</h3>
 <p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${e.description || ''}</p>
@@ -2291,7 +2371,9 @@ console.error('Load events error:', err);
 document.getElementById('event-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('event-id').value;
-  const imageUrl = uploadedEventImage || document.getElementById('event-image').value;
+  const imageUrl = uploadedEventBundle?.image_url || document.getElementById('event-image').value.trim();
+  const imageUrlCard = uploadedEventBundle?.image_url_card ?? (document.getElementById('event-image-card').value.trim() || null);
+  const imageUrlHero = uploadedEventBundle?.image_url_hero ?? (document.getElementById('event-image-hero').value.trim() || null);
   const requiresPurchase = document.getElementById('event-requires-purchase').checked;
   const isRecurring = document.getElementById('event-is-recurring').checked;
 
@@ -2312,7 +2394,9 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     non_membership_price: requiresPurchase ? parseFloat(document.getElementById('event-nonmember-price').value) : 0,
     max_attendees: requiresPurchase ? (parseInt(document.getElementById('event-max-attendees').value) || null) : null,
     location: document.getElementById('event-location').value,
-    image_url: imageUrl,
+    image_url: imageUrl || null,
+    image_url_card: imageUrlCard || null,
+    image_url_hero: imageUrlHero || null,
     is_active: document.getElementById('event-active').checked ? 1 : 0,
     is_recurring: isRecurring ? 1 : 0,
     recurrence_pattern: isRecurring ? getRecurrencePattern() : null,
@@ -2342,7 +2426,9 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
       document.getElementById('event-full-description').innerHTML = '';
       document.getElementById('event-seo-organizer').value = '';
       document.getElementById('event-seo-image').value = '';
-uploadedEventImage = null;
+      document.getElementById('event-image-card').value = '';
+      document.getElementById('event-image-hero').value = '';
+uploadedEventBundle = null;
 loadEvents();
 alert('Event saved successfully!');
 } else {
@@ -2352,6 +2438,15 @@ alert('Failed to save event: ' + (error.error || error.message || 'Unknown error
 } catch (err) {
 alert('Error saving event: ' + err.message);
 }
+});
+
+document.getElementById('event-image')?.addEventListener('input', () => {
+  const v = document.getElementById('event-image').value.trim();
+  if (!uploadedEventBundle || v !== uploadedEventBundle.image_url) {
+    uploadedEventBundle = null;
+    document.getElementById('event-image-card').value = '';
+    document.getElementById('event-image-hero').value = '';
+  }
 });
 
 document.getElementById('cancel-event-edit').addEventListener('click', () => {
@@ -2370,11 +2465,13 @@ document.getElementById('event-form-title').textContent = 'Add New Event';
 document.getElementById('event-submit-text').textContent = 'Add Event';
 document.getElementById('cancel-event-edit').style.display = 'none';
 document.getElementById('event-image-preview').innerHTML = '';
+document.getElementById('event-image-card').value = '';
+document.getElementById('event-image-hero').value = '';
 const seoBody = document.getElementById('seo-section-body');
 const seoBtn = seoBody?.previousElementSibling;
 if (seoBody) seoBody.classList.remove('is-open');
 if (seoBtn) seoBtn.classList.remove('is-open');
-uploadedEventImage = null;
+uploadedEventBundle = null;
 });
 
 async function editEvent(id) {
@@ -2424,6 +2521,8 @@ async function editEvent(id) {
 
     document.getElementById('event-location').value = event.location || '';
     document.getElementById('event-image').value = event.image_url || '';
+    document.getElementById('event-image-card').value = event.image_url_card || '';
+    document.getElementById('event-image-hero').value = event.image_url_hero || '';
 
     // Pricing
     const requiresPurchase = event.requires_purchase === 1;
@@ -2452,8 +2551,14 @@ async function editEvent(id) {
     }
 
     if (event.image_url) {
-      document.getElementById('event-image-preview').innerHTML = 
-        `<img src="${event.image_url}" class="image-preview" alt="Current">`;
+      const card = event.image_url_card || event.image_url;
+      const hero = event.image_url_hero || event.image_url;
+      document.getElementById('event-image-preview').innerHTML =
+        `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main</div><img src="${event.image_url}" class="image-preview" alt="Current"></div>
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card</div><img src="${card}" class="image-preview" style="max-width:200px;height:auto;" alt="Card"></div>
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero</div><img src="${hero}" class="image-preview" style="max-width:280px;height:auto;" alt="Hero"></div>
+        </div>`;
     }
 
     document.getElementById('event-form-title').textContent = 'Edit Event';
@@ -4063,7 +4168,7 @@ function renderNlEventPickerList() {
     const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
     const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const imgHtml = ev.image_url
-      ? `<img class="nl-event-pick-img" src="${ev.image_url}" alt="">`
+      ? `<img class="nl-event-pick-img" src="${ev.image_url_card || ev.image_url}" alt="">`
       : `<div class="nl-event-pick-img"></div>`;
     const locationSuffix = ev.location ? ` &middot; ${ev.location}` : '';
     return `
@@ -4099,7 +4204,7 @@ function insertNlEventBlock(idx) {
 
   // Images are always 400x190 - use natural aspect ratio, no cropping
   const imgPart = ev.image_url
-    ? '<img src="' + ev.image_url + '" alt="" width="400" height="190" style="width:100%;height:auto;display:block;">'
+    ? '<img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="400" height="190" style="width:100%;height:auto;display:block;">'
     : '';
   const locationPart = ev.location
     ? '<p style="margin:4px 0;font-size:14px;color:#64748b;">' + ev.location + '</p>'
@@ -4144,7 +4249,7 @@ function buildCalendarHtml(events) {
   function buildCard(ev) {
     const p = fmtDate(ev.event_datetime);
     const imgRow = ev.image_url
-      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + ev.image_url + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
+      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
       : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
     const href = ev.slug ? 'https://dicebastion.com/events/' + ev.slug : 'https://dicebastion.com/events';
     return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
