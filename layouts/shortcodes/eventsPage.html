@@ -69,15 +69,16 @@
   width: 400px;
   align-self: stretch;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   margin: 0;
   padding: 0;
   line-height: 0;
   position: relative;
   background: transparent;
   border-radius: 16px 0 0 16px;
+  /* Match row height so the photo can fill it vertically (object-fit: cover on img) */
+  min-height: 240px;
+  height: 100%;
 }
 
 .event-card-image::before {
@@ -102,12 +103,16 @@
 }
 
 .event-card-image img {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
   display: block;
   margin: 0;
   padding: 0;
-  position: relative;
   z-index: 1;
   transition: transform 0.3s ease;
 }
@@ -361,6 +366,13 @@
   
   .event-card-image {
     flex: none;
+    width: 100%;
+    min-height: 0;
+    height: auto;
+  }
+
+  .event-card-image img {
+    position: static;
     width: 100%;
     height: auto;
   }
