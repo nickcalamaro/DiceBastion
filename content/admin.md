@@ -1625,10 +1625,12 @@ const EVENT_IMAGE_EXPORT_SPECS = [
   { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg' }
 ];
 
-function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
+/** Scale source to fill target WxH, centered; crops overflow (object-fit: cover).
+ *  Event master is 800:379 but card/hero use different aspects — contain would add solid bars. */
+function coverCenterOnCanvas(sourceCanvas, targetW, targetH) {
   const sw = sourceCanvas.width;
   const sh = sourceCanvas.height;
-  const scale = Math.min(targetW / sw, targetH / sh);
+  const scale = Math.max(targetW / sw, targetH / sh);
   const dw = Math.round(sw * scale);
   const dh = Math.round(sh * scale);
   const c = document.createElement('canvas');
@@ -1642,7 +1644,7 @@ function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
   return c;
 }
 
-/** Mean RGB of opaque pixels — used when letterboxing leaves transparent gutters (card/hero exports). */
+/** Mean RGB of opaque pixels — used when flattening transparent pixels before blur/JPEG. */
 function averageOpaqueRgb(canvas) {
   const w = canvas.width;
   const h = canvas.height;
@@ -1928,7 +1930,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       const batchId = Date.now();
       const bundle = {};
       for (const spec of EVENT_IMAGE_EXPORT_SPECS) {
-        const sized = containCenterOnCanvas(masterCropped, spec.w, spec.h);
+        const sized = coverCenterOnCanvas(masterCropped, spec.w, spec.h);
         const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
         const uploadRes = await fetch(`${API_BASE}/admin/images`, {
           method: 'POST',
