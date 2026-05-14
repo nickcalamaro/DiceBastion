@@ -99,16 +99,15 @@
   opacity: 1;
 }
 
-/* Centered in the stretched column: max bounds = cell; intrinsic aspect preserved (no side crop). */
+/* Fill the cell; object-fit: contain letterboxes (wide → bands top/bottom, tall → bands left/right). */
 #events-container .event-card-image img {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  max-width: none;
+  max-height: none;
   object-fit: contain;
   object-position: center;
   display: block;
@@ -119,7 +118,8 @@
 }
 
 .event-card:hover .event-card-image img {
-  transform: translate(-50%, -50%) scale(1.05);
+  transform: scale(1.05);
+  transform-origin: center center;
 }
 
 .event-content {
@@ -432,7 +432,7 @@ async function loadEvents() {
               <div class="event-organiser-ribbon">${event.organiser}</div>
             </div>
           ` : ''}
-          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url_card || event.image_url}');"><img src="${event.image_url_card || event.image_url}" alt="${event.title}" width="400" height="238" loading="lazy"></div>` : ''}
+          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url_card || event.image_url}');"><img src="${event.image_url_card || event.image_url}" alt="${event.title}" loading="lazy" decoding="async"></div>` : ''}
           <div class="event-content">
             <h3 class="event-title">
               ${event.title}
