@@ -90,15 +90,16 @@
   background-image: var(--card-bg-image);
   background-size: cover;
   background-position: center;
-  filter: blur(80px) saturate(1.2);
-  transform: scale(1.3);
-  opacity: 0.9;
+  /* Match .event-detail-hero::before so the wash stays rich, not blown out to white */
+  filter: blur(60px) brightness(0.9);
+  transform: scale(1.2);
+  opacity: 0.95;
   z-index: 0;
 }
 
 .dark .event-card-image::before {
-  filter: blur(80px) brightness(0.7) saturate(1.2);
-  opacity: 0.85;
+  filter: blur(60px) brightness(0.7);
+  opacity: 0.95;
 }
 
 .event-card-image img {
