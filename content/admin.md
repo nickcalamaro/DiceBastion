@@ -1620,16 +1620,52 @@ const EVENT_IMAGE_MASTER_W = 1600;
 const EVENT_IMAGE_MASTER_H = 758;
 /** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
 const EVENT_IMAGE_EXPORT_SPECS = [
-  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg', fit: 'cover' },
-  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'cover' },
-  /** Hero is much wider than the master crop — cover crops heavily; keep contain so the full crop stays visible. */
+  /** At least fill target height (no transparent top/bottom after compose); only zoom past contain when needed. */
+  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg', fit: 'fillHeight' },
+  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'fillHeight' },
+  /** Hero stays contain so the full crop stays visible on the wide frame. */
   { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'contain' }
 ];
 
-/** Fit entire source inside target (object-fit: contain); may letterbox. */
-function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
-  const sw = sourceCanvas.width;
-  const sh = sourceCanvas.height;
+/** Tight axis-aligned bbox of sufficiently opaque pixels, or null if none. */
+function getOpaqueBoundingBox(canvas, alphaThreshold = 24) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const data = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      if (data[row + x * 4 + 3] > alphaThreshold) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+/**
+ * Opaque artwork rect on the master (alpha-weighted). No flush-to-full shortcut — margin size
+ * flows through to how much extra zoom fillHeight needs vs pure contain.
+ */
+function getExportFitSourceRect(canvas) {
+  const cw = canvas.width;
+  const ch = canvas.height;
+  const bbox = getOpaqueBoundingBox(canvas);
+  if (!bbox || bbox.w * bbox.h < cw * ch * 0.02) {
+    return { sx: 0, sy: 0, sw: cw, sh: ch };
+  }
+  return { sx: bbox.x, sy: bbox.y, sw: bbox.w, sh: bbox.h };
+}
+
+function containCenterOnCanvasRegion(sourceCanvas, sx, sy, sw, sh, targetW, targetH) {
   const scale = Math.min(targetW / sw, targetH / sh);
   const dw = Math.round(sw * scale);
   const dh = Math.round(sh * scale);
@@ -1640,15 +1676,19 @@ function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
   ctx.clearRect(0, 0, targetW, targetH);
   const ox = Math.floor((targetW - dw) / 2);
   const oy = Math.floor((targetH - dh) / 2);
-  ctx.drawImage(sourceCanvas, ox, oy, dw, dh);
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, ox, oy, dw, dh);
   return c;
 }
 
-/** Scale source to fill target WxH, centered; crops overflow (object-fit: cover). */
-function coverCenterOnCanvas(sourceCanvas, targetW, targetH) {
-  const sw = sourceCanvas.width;
-  const sh = sourceCanvas.height;
-  const scale = Math.max(targetW / sw, targetH / sh);
+/**
+ * Uniform scale, centered: never less than contain; add zoom only until the artwork fills the
+ * target height (so no transparent band top/bottom). If contain already touches top and bottom,
+ * scale stays at contain (no extra zoom). Wider than target width → horizontal crop only.
+ */
+function fillHeightMinCenterOnCanvasRegion(sourceCanvas, sx, sy, sw, sh, targetW, targetH) {
+  const sContain = Math.min(targetW / sw, targetH / sh);
+  const sFillHeight = targetH / sh;
+  const scale = Math.max(sContain, sFillHeight);
   const dw = Math.round(sw * scale);
   const dh = Math.round(sh * scale);
   const c = document.createElement('canvas');
@@ -1658,7 +1698,7 @@ function coverCenterOnCanvas(sourceCanvas, targetW, targetH) {
   ctx.clearRect(0, 0, targetW, targetH);
   const ox = Math.floor((targetW - dw) / 2);
   const oy = Math.floor((targetH - dh) / 2);
-  ctx.drawImage(sourceCanvas, ox, oy, dw, dh);
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, ox, oy, dw, dh);
   return c;
 }
 
@@ -1945,11 +1985,30 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
         Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
         return;
       }
+      const fitRect = getExportFitSourceRect(masterCropped);
       const batchId = Date.now();
       const bundle = {};
       for (const spec of EVENT_IMAGE_EXPORT_SPECS) {
-        const fitCanvas = spec.fit === 'contain' ? containCenterOnCanvas : coverCenterOnCanvas;
-        const sized = fitCanvas(masterCropped, spec.w, spec.h);
+        const sized =
+          spec.fit === 'contain'
+            ? containCenterOnCanvasRegion(
+                masterCropped,
+                fitRect.sx,
+                fitRect.sy,
+                fitRect.sw,
+                fitRect.sh,
+                spec.w,
+                spec.h
+              )
+            : fillHeightMinCenterOnCanvasRegion(
+                masterCropped,
+                fitRect.sx,
+                fitRect.sy,
+                fitRect.sw,
+                fitRect.sh,
+                spec.w,
+                spec.h
+              );
         const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
         const uploadRes = await fetch(`${API_BASE}/admin/images`, {
           method: 'POST',

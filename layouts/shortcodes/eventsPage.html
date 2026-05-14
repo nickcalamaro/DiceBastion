@@ -380,7 +380,9 @@
     max-width: 100%;
     height: auto;
     min-height: 0;
-    position: static;
+    /* relative so z-index applies; static ignored z-index and ::before sat on top (grey veil until hover) */
+    position: relative;
+    z-index: 1;
   }
 }
 </style>
