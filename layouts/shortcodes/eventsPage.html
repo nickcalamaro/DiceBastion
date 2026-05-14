@@ -70,14 +70,20 @@
   align-self: stretch;
   overflow: hidden;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   margin: 0;
   padding: 0;
   line-height: 0;
   position: relative;
-  background: transparent;
+  /* Solid base so we never “wash out” to the white card behind (matches baked-in hero/main look) */
+  background: rgb(var(--color-neutral-200));
   border-radius: 16px 0 0 16px;
+  min-height: 238px;
+}
+
+.dark .event-card-image {
+  background: rgb(var(--color-neutral-700));
 }
 
 .event-card-image::before {
@@ -90,21 +96,22 @@
   background-image: var(--card-bg-image);
   background-size: cover;
   background-position: center;
-  /* Match .event-detail-hero::before so the wash stays rich, not blown out to white */
   filter: blur(60px) brightness(0.9);
   transform: scale(1.2);
-  opacity: 0.95;
+  opacity: 1;
   z-index: 0;
 }
 
 .dark .event-card-image::before {
   filter: blur(60px) brightness(0.7);
-  opacity: 0.95;
+  opacity: 1;
 }
 
 .event-card-image img {
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
   display: block;
   margin: 0;
   padding: 0;
@@ -364,7 +371,8 @@
     flex: none;
     width: 100%;
     height: auto;
-    aspect-ratio: 800 / 379;
+    aspect-ratio: 400 / 238;
+    min-height: 0;
   }
 }
 </style>
