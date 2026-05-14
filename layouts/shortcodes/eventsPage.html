@@ -107,9 +107,10 @@
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
+  height: 100%;
   max-width: none;
-  height: auto;
-  object-fit: cover;
+  max-height: none;
+  object-fit: contain;
   object-position: center;
   display: block;
   margin: 0;
@@ -370,18 +371,24 @@
     flex: none;
     width: 100%;
     min-height: 0;
-    height: auto;
+    aspect-ratio: 400 / 238;
     display: block;
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px 16px 0 0;
   }
 
   #events-container .event-card-image img {
-    flex: none;
+    position: absolute;
+    left: 0;
+    top: 0;
     width: 100%;
-    max-width: 100%;
-    height: auto;
-    min-height: 0;
-    /* relative so z-index applies; static ignored z-index and ::before sat on top (grey veil until hover) */
-    position: relative;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    max-width: none;
+    max-height: none;
+    margin: 0;
     z-index: 1;
   }
 }
