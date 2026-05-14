@@ -1635,35 +1635,62 @@ function containCenterOnCanvas(sourceCanvas, targetW, targetH) {
   return c;
 }
 
+/** Mean RGB of opaque pixels — used when letterboxing leaves transparent gutters (card/hero exports). */
+function averageOpaqueRgb(canvas) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] > 128) {
+      r += d[i];
+      g += d[i + 1];
+      b += d[i + 2];
+      n++;
+    }
+  }
+  if (!n) return { r: 100, g: 116, b: 139 };
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+}
+
+function hexToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
+  if (!m) return { r: 255, g: 255, b: 255 };
+  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+
+/** Paint under transparent pixels so blur/JPEG never composites against white letterbox. */
+function flattenTransparentWithFill(src, rgb) {
+  const c = document.createElement('canvas');
+  c.width = src.width;
+  c.height = src.height;
+  const x = c.getContext('2d');
+  x.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+  x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(src, 0, 0);
+  return c;
+}
+
 function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
   const baseArea = 800 * 379;
   const area = targetWidth * targetHeight;
   const blurPx = Math.max(12, Math.round(28 * Math.sqrt(area / baseArea)));
   const pad = Math.round(blurPx * 1.07);
 
-  let fillCol;
+  let fillRgb;
   if (cropBgMode === 'white') {
-    fillCol = '#ffffff';
+    fillRgb = { r: 255, g: 255, b: 255 };
   } else if (cropBgMode === 'pick' && cropBgPickedCol) {
-    fillCol = cropBgPickedCol;
+    fillRgb = hexToRgb(cropBgPickedCol);
   } else {
-    const srcCtx = croppedCanvas.getContext('2d');
-    const px = srcCtx.getImageData(0, 0, targetWidth, targetHeight).data;
-    let rSum = 0, gSum = 0, bSum = 0, cnt = 0;
-    const samplePx = (x, y) => {
-      const i = (y * targetWidth + x) * 4;
-      if (px[i + 3] > 128) { rSum += px[i]; gSum += px[i + 1]; bSum += px[i + 2]; cnt++; }
-    };
-    for (let x = 0; x < targetWidth; x += 3) {
-      for (let d = 0; d < 3; d++) { samplePx(x, d); samplePx(x, targetHeight - 1 - d); }
-    }
-    for (let y = 0; y < targetHeight; y += 3) {
-      for (let d = 0; d < 3; d++) { samplePx(d, y); samplePx(targetWidth - 1 - d, y); }
-    }
-    fillCol = cnt > 0
-      ? `rgb(${Math.round(rSum / cnt)},${Math.round(gSum / cnt)},${Math.round(bSum / cnt)})`
-      : '#ffffff';
+    fillRgb = averageOpaqueRgb(croppedCanvas);
   }
+
+  const fillCol = `rgb(${fillRgb.r},${fillRgb.g},${fillRgb.b})`;
+  const opaqueSrc = flattenTransparentWithFill(croppedCanvas, fillRgb);
 
   const finalCanvas = document.createElement('canvas');
   finalCanvas.width = targetWidth;
@@ -1674,10 +1701,10 @@ function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, 
   if (cropBgMode === 'auto') {
     ctx.save();
     ctx.filter = `blur(${blurPx}px)`;
-    ctx.drawImage(croppedCanvas, -pad, -pad, targetWidth + pad * 2, targetHeight + pad * 2);
+    ctx.drawImage(opaqueSrc, -pad, -pad, targetWidth + pad * 2, targetHeight + pad * 2);
     ctx.restore();
   }
-  ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
+  ctx.drawImage(opaqueSrc, 0, 0, targetWidth, targetHeight);
   return finalCanvas.toDataURL('image/jpeg', 0.92);
 }
 
