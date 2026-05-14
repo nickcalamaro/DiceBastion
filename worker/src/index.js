@@ -149,7 +149,17 @@ async function getGoogleAccessToken(env) {
     return _googleTokenCache.token
   }
 
-  const sa = JSON.parse(env.GOOGLE_SA_KEY)
+  let sa
+  try {
+    sa = JSON.parse(env.GOOGLE_SA_KEY)
+  } catch (e) {
+    throw new Error(
+      'GOOGLE_SA_KEY must be valid JSON (paste the full service account .json). Parse error: ' + (e.message || e)
+    )
+  }
+  if (!sa.client_email || !sa.private_key) {
+    throw new Error('GOOGLE_SA_KEY JSON must include client_email and private_key')
+  }
   const jwt = await buildJWT(sa.client_email, sa.private_key)
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -189,12 +199,18 @@ async function notifyGoogleIndexing(env, url, type = 'URL_UPDATED') {
       },
       body: JSON.stringify({ url, type })
     })
-    const body = await res.json()
+    const raw = await res.text()
+    let body
+    try {
+      body = raw ? JSON.parse(raw) : {}
+    } catch {
+      body = { parseError: true, raw: raw.slice(0, 500) }
+    }
     console.log(`Google Indexing [${type}] ${url} → ${res.status}`, JSON.stringify(body))
     return { ok: res.ok, status: res.status, body }
   } catch (err) {
     console.error('Google Indexing error:', err)
-    return { ok: false, status: 0, body: { error: err.message } }
+    return { ok: false, status: 0, body: { error: err.message || String(err) } }
   }
 }
 
@@ -7736,13 +7752,19 @@ app.post('/admin/indexing/notify', requireAdmin, async (c) => {
   try {
     const { url, type } = await c.req.json()
     if (!url) return c.json({ error: 'url_required' }, 400)
-    if (!c.env.GOOGLE_SA_KEY) return c.json({ error: 'google_sa_key_not_configured' }, 500)
+    if (!c.env.GOOGLE_SA_KEY) {
+      return c.json({ ok: false, error: 'google_sa_key_not_configured' }, 200)
+    }
 
     const result = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
-    return c.json(result, result.ok ? 200 : 502)
+    // Always 200 so the browser exposes JSON; client checks result.ok (502 hid details in some setups).
+    return c.json(result, 200)
   } catch (e) {
     console.error('Admin indexing notify error:', e)
-    return c.json({ error: e.message }, 500)
+    return c.json(
+      { ok: false, status: 0, body: { error: e.message || String(e) } },
+      200
+    )
   }
 })
 
@@ -7752,7 +7774,9 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
     const { urls, type } = await c.req.json()
     if (!Array.isArray(urls) || urls.length === 0) return c.json({ error: 'urls_array_required' }, 400)
     if (urls.length > 100) return c.json({ error: 'max_100_urls_per_batch' }, 400)
-    if (!c.env.GOOGLE_SA_KEY) return c.json({ error: 'google_sa_key_not_configured' }, 500)
+    if (!c.env.GOOGLE_SA_KEY) {
+      return c.json({ ok: false, error: 'google_sa_key_not_configured' }, 200)
+    }
 
     const results = await Promise.allSettled(
       urls.map(u => notifyGoogleIndexing(c.env, u, type || 'URL_UPDATED'))
@@ -7771,7 +7795,7 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
     })
   } catch (e) {
     console.error('Admin batch indexing error:', e)
-    return c.json({ error: e.message }, 500)
+    return c.json({ ok: false, error: e.message || String(e) }, 200)
   }
 })
 

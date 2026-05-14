@@ -3769,6 +3769,7 @@ function formatIndexingError(data) {
   if (data.error) return String(data.error);
   const b = data.body;
   if (b && typeof b === 'object') {
+    if (typeof b.error === 'string') return b.error;
     if (b.error && b.error.message) return String(b.error.message);
     if (b.error && typeof b.error === 'object' && b.error.status) return JSON.stringify(b.error);
     return JSON.stringify(b);
@@ -3802,7 +3803,7 @@ async function requestIndexing(type, slug, btn) {
     } catch (_) {
       data = { error: 'invalid_response', rawStatus: res.status };
     }
-    if (res.ok && data.ok) {
+    if (data.ok) {
       btn.textContent = '✅ Request submitted';
       btn.style.background = '#059669';
       btn.title = 'Google received the request. Crawling and ranking are not immediate; use Search Console to verify. Product URLs may be declined if not Indexing API–eligible — sitemap ping still helps.';

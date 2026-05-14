@@ -1117,21 +1117,26 @@ async function requestIndexing(slug, btn) {
       body: JSON.stringify({ url, type: 'URL_UPDATED' })
     });
     const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok) {
+    if (data.ok) {
       btn.textContent = '✅ Indexed';
       btn.style.background = '#059669';
       setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; }, 3000);
     } else {
       const err =
         data.error ||
+        (typeof data.body?.error === 'string' ? data.body.error : null) ||
         data.body?.error?.message ||
-        data.body?.error ||
-        (res.status ? `HTTP ${res.status}` : 'Request failed');
+        data.body?.message ||
+        (data.body && typeof data.body === 'object' ? JSON.stringify(data.body) : '') ||
+        (res.status >= 400 ? `HTTP ${res.status}` : 'Indexing failed');
       btn.textContent = '❌ Failed';
       btn.title = typeof err === 'string' ? err : JSON.stringify(err);
       btn.style.background = '#dc2626';
-      console.error('Indexing failed:', data, res.status);
-      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.title = ''; }, 8000);
+      console.error('Indexing failed:', data, 'http', res.status);
+      if (window.Modal && typeof window.Modal.alert === 'function') {
+        window.Modal.alert({ title: 'Indexing failed', message: String(err).slice(0, 800) });
+      }
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.title = ''; }, 12000);
     }
   } catch (err) {
     btn.textContent = '❌ Error';
