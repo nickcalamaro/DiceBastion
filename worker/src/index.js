@@ -3824,6 +3824,9 @@ app.post('/membership/free-trial/checkout', async (c) => {
     const amount = Number(svc.amount)
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'invalid_amount' }, 400)
     const currency = svc.currency || c.env.CURRENCY || 'GBP'
+    // Use a small auth amount for free-trial card setup to reduce false declines.
+    const setupAmount = Number(c.env.FREE_TRIAL_SETUP_AUTH_AMOUNT || 1)
+    const effectiveSetupAmount = Number.isFinite(setupAmount) && setupAmount > 0 ? setupAmount : 1
 
     await migrateToTransactions(c.env.DB)
 
@@ -3851,7 +3854,7 @@ app.post('/membership/free-trial/checkout', async (c) => {
     try {
       customerId = await getOrCreateSumUpCustomer(c.env, ident)
       checkout = await createCheckout(c.env, {
-        amount,
+        amount: effectiveSetupAmount,
         currency,
         orderRef: order_ref,
         title: `Dice Bastion ${plan} membership free trial`,

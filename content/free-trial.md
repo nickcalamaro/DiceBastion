@@ -343,14 +343,17 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
             if (sumupCardEl) {
               sumupCardEl.innerHTML = `
                 <div style="text-align:center; padding: 2rem 1rem;">
-                  <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">✅</div>
-                  <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Card Verified Successfully!</div>
-                  <div style="color: #666; font-size: 0.9rem;">Setting up your free trial…</div>
+                  <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Verifying your card…</div>
+                  <div style="color: #666; font-size: 0.9rem;">Please wait while we confirm with our payment provider.</div>
                   <div class="spinner" style="border: 3px solid rgba(128,128,128,0.2); border-left-color: rgb(var(--color-primary-500)); border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; margin: 1rem auto 0;"></div>
                 </div>
               `;
             }
-            await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
+            const ok = await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
+            if (!ok && sumupCardEl) {
+              sumupCardEl.innerHTML = '';
+              sumupCardEl.style.display = 'none';
+            }
           } else if (t === 'error' || t === 'fail') {
             showError('Card verification failed. Please try again.');
           } else if (t === 'cancel') {

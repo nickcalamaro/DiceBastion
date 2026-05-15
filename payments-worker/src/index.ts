@@ -357,11 +357,22 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 		}
 
 		const payment: any = await res.json()
+		const failedTx = (payment.transactions || []).filter((t: any) => t?.status === 'FAILED')
+		const failedDetails = failedTx.map((t: any) => ({
+			id: t.id,
+			status: t.status,
+			result_code: t.result_code ?? t.resultCode ?? null,
+			response_code: t.response_code ?? t.responseCode ?? null,
+			auth_code: t.auth_code ?? t.authCode ?? null,
+			error_code: t.error_code ?? t.errorCode ?? null,
+			error_message: t.error_message ?? t.errorMessage ?? null
+		}))
 		console.log('[Payment] Retrieved checkout:', checkoutId, 'status:', payment.status,
 			'purpose:', payment.purpose || 'none',
 			'transactions:', payment.transactions?.length || 0,
 			'txStatuses:', payment.transactions?.map((t: any) => t.status) || [],
-			'hasInstrument:', !!payment.payment_instrument
+			'hasInstrument:', !!payment.payment_instrument,
+			'failedTxDetails:', failedDetails
 		)
 		return c.json(payment)
 	} catch (error: any) {
