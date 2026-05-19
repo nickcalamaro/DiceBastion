@@ -64,13 +64,34 @@ showDate: false
 .dark .admin-jump-links { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
 .admin-jump-links a { color: rgb(var(--color-primary-600)); text-decoration: none; }
 .admin-jump-links a:hover { text-decoration: underline; }
+/* Schedule greens/reds — Blowfish scheme has no --color-success/danger tokens */
+#bookings-tab {
+  --sch-green-50: 240, 253, 244;
+  --sch-green-100: 220, 252, 231;
+  --sch-green-200: 167, 243, 208;
+  --sch-green-300: 110, 231, 183;
+  --sch-green-500: 16, 185, 129;
+  --sch-green-600: 5, 150, 105;
+  --sch-green-700: 4, 120, 87;
+  --sch-green-800: 6, 95, 70;
+  --sch-green-900: 6, 78, 59;
+  --sch-red-50: 254, 242, 242;
+  --sch-red-100: 254, 226, 226;
+  --sch-red-200: 254, 202, 202;
+  --sch-red-300: 252, 165, 165;
+  --sch-red-500: 239, 68, 68;
+  --sch-red-600: 220, 38, 38;
+  --sch-red-700: 185, 28, 28;
+  --sch-red-800: 153, 27, 27;
+  --sch-red-900: 127, 29, 29;
+}
 .admin-schedule-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0 0 1rem 0; padding: 0; list-style: none; }
 .admin-schedule-legend li { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-600)); }
 .dark .admin-schedule-legend li { color: rgb(var(--color-neutral-400)); }
 .admin-schedule-legend-swatch { width: 0.65rem; height: 0.65rem; border-radius: 2px; flex-shrink: 0; }
-.admin-schedule-legend-swatch--event { background: rgb(var(--color-success-600)); }
-.admin-schedule-legend-swatch--booking { background: rgb(var(--color-primary-600)); }
-.admin-schedule-legend-swatch--block { background: rgb(var(--color-danger-600)); }
+.admin-schedule-legend-swatch--event { background: rgb(var(--sch-green-500)); }
+.admin-schedule-legend-swatch--booking { background: rgb(var(--color-primary-500)); }
+.admin-schedule-legend-swatch--block { background: rgb(var(--sch-red-500)); }
 .admin-schedule-month { display: flex; align-items: center; gap: 0.85rem; margin: 1.35rem 0 0.65rem; }
 .admin-schedule-month:first-child { margin-top: 0; }
 .admin-schedule-month-label { font-size: 0.9375rem; font-weight: 700; color: rgb(var(--color-neutral-800)); white-space: nowrap; letter-spacing: -0.01em; }
@@ -90,12 +111,12 @@ showDate: false
   border-left-width: 4px;
 }
 .dark .admin-schedule-row { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
-.admin-schedule-row--event { border-left-color: rgb(var(--color-success-600)); background: rgb(var(--color-success-50)); }
-.dark .admin-schedule-row--event { background: rgba(var(--color-success-900), 0.12); border-left-color: rgb(var(--color-success-500)); }
-.admin-schedule-row--booking { border-left-color: rgb(var(--color-primary-600)); background: rgb(var(--color-primary-50)); }
-.dark .admin-schedule-row--booking { background: rgba(var(--color-primary-900), 0.15); border-left-color: rgb(var(--color-primary-500)); }
-.admin-schedule-row--block { border-left-color: rgb(var(--color-danger-600)); background: rgb(var(--color-danger-50)); }
-.dark .admin-schedule-row--block { background: rgba(var(--color-danger-900), 0.12); border-left-color: rgb(var(--color-danger-500)); }
+.admin-schedule-row--event { border-left-color: rgb(var(--sch-green-500)); }
+.dark .admin-schedule-row--event { border-left-color: rgb(var(--sch-green-500)); }
+.admin-schedule-row--booking { border-left-color: rgb(var(--color-primary-500)); }
+.dark .admin-schedule-row--booking { border-left-color: rgb(var(--color-primary-500)); }
+.admin-schedule-row--block { border-left-color: rgb(var(--sch-red-500)); }
+.dark .admin-schedule-row--block { border-left-color: rgb(var(--sch-red-500)); }
 .admin-schedule-date-box {
   display: flex;
   flex-direction: column;
@@ -109,33 +130,22 @@ showDate: false
   line-height: 1.15;
 }
 .dark .admin-schedule-date-box { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); }
-.admin-schedule-row--event .admin-schedule-date-box { border-color: rgb(var(--color-success-200)); background: rgb(var(--color-success-100)); }
-.dark .admin-schedule-row--event .admin-schedule-date-box { border-color: rgba(var(--color-success-500), 0.35); background: rgba(var(--color-success-900), 0.25); }
-.admin-schedule-row--booking .admin-schedule-date-box { border-color: rgb(var(--color-primary-200)); background: rgb(var(--color-primary-100)); }
-.dark .admin-schedule-row--booking .admin-schedule-date-box { border-color: rgba(var(--color-primary-500), 0.35); background: rgba(var(--color-primary-900), 0.25); }
-.admin-schedule-row--block .admin-schedule-date-box { border-color: rgb(var(--color-danger-200)); background: rgb(var(--color-danger-100)); }
-.dark .admin-schedule-row--block .admin-schedule-date-box { border-color: rgba(var(--color-danger-500), 0.35); background: rgba(var(--color-danger-900), 0.25); }
 .admin-schedule-date-dow { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; color: rgb(var(--color-neutral-500)); margin-bottom: 0.15rem; }
-.admin-schedule-row--event .admin-schedule-date-day { color: rgb(var(--color-success-700)); }
-.dark .admin-schedule-row--event .admin-schedule-date-day { color: rgb(var(--color-success-300)); }
-.admin-schedule-row--booking .admin-schedule-date-day { color: rgb(var(--color-primary-700)); }
-.dark .admin-schedule-row--booking .admin-schedule-date-day { color: rgb(var(--color-primary-300)); }
-.admin-schedule-row--block .admin-schedule-date-day { color: rgb(var(--color-danger-700)); }
-.dark .admin-schedule-row--block .admin-schedule-date-day { color: rgb(var(--color-danger-300)); }
-.admin-schedule-date-day { font-size: 1.625rem; font-weight: 700; }
+.admin-schedule-date-day { font-size: 1.625rem; font-weight: 700; color: rgb(var(--color-neutral-800)); }
+.dark .admin-schedule-date-day { color: rgb(var(--color-neutral-100)); }
 .admin-schedule-date-month { font-size: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-600)); margin-top: 0.1rem; }
 .dark .admin-schedule-date-month { color: rgb(var(--color-neutral-400)); }
 .admin-schedule-body-title { font-weight: 600; font-size: 1rem; margin: 0 0 0.25rem 0; color: rgb(var(--color-neutral-900)); }
 .dark .admin-schedule-body-title { color: rgb(var(--color-neutral-100)); }
 .admin-schedule-body-meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); line-height: 1.45; margin: 0; }
 .dark .admin-schedule-body-meta { color: rgb(var(--color-neutral-400)); }
-.admin-schedule-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.2rem 0.5rem; border-radius: 4px; margin-right: 0.35rem; vertical-align: middle; }
-.admin-schedule-badge--event { background: rgb(var(--color-success-100)); color: rgb(var(--color-success-800)); }
-.dark .admin-schedule-badge--event { background: rgba(var(--color-success-900), 0.4); color: rgb(var(--color-success-200)); }
-.admin-schedule-badge--booking { background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-800)); }
-.dark .admin-schedule-badge--booking { background: rgba(var(--color-primary-900), 0.4); color: rgb(var(--color-primary-200)); }
-.admin-schedule-badge--block { background: rgb(var(--color-danger-100)); color: rgb(var(--color-danger-800)); }
-.dark .admin-schedule-badge--block { background: rgba(var(--color-danger-900), 0.4); color: rgb(var(--color-danger-200)); }
+.admin-schedule-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.15rem 0.45rem; border-radius: 4px; margin-right: 0.35rem; vertical-align: middle; }
+.admin-schedule-badge--event { background: rgb(var(--sch-green-50)); color: rgb(var(--sch-green-700)); }
+.dark .admin-schedule-badge--event { background: rgba(var(--sch-green-900), 0.25); color: rgb(var(--sch-green-300)); }
+.admin-schedule-badge--booking { background: rgb(var(--color-primary-50)); color: rgb(var(--color-primary-700)); }
+.dark .admin-schedule-badge--booking { background: rgba(var(--color-primary-900), 0.25); color: rgb(var(--color-primary-300)); }
+.admin-schedule-badge--block { background: rgb(var(--sch-red-50)); color: rgb(var(--sch-red-700)); }
+.dark .admin-schedule-badge--block { background: rgba(var(--sch-red-900), 0.25); color: rgb(var(--sch-red-300)); }
 .admin-schedule-actions { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; }
 @media (max-width: 640px) {
   .admin-schedule-row { grid-template-columns: 64px 1fr; }
@@ -3684,7 +3694,7 @@ function buildScheduleBookingItems(bookings) {
         '<br>' + adminEscapeHtml(b.user_email || '');
       const title = adminEscapeHtml(b.user_name || 'Guest');
       const actions = status !== 'cancelled'
-        ? '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="background:rgb(var(--color-danger-600));color:white;border:none;">Cancel</button>'
+        ? '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="background:#dc2626;color:white;border:none;">Cancel</button>'
         : '';
       return { when, html: adminScheduleRow({ type: 'booking', when, title, meta, actionsHtml: actions }) };
     });
@@ -3697,7 +3707,7 @@ function buildScheduleBlockItems(blocks) {
       const when = adminParseDateTime(block.block_date, block.start_time);
       const title = adminEscapeHtml(block.reason || 'Time blocked');
       const meta = adminEscapeHtml(block.start_time) + ' – ' + adminEscapeHtml(block.end_time);
-      const actions = '<button type="button" onclick="deleteTimeBlock(' + block.id + ')" class="btn btn-secondary btn-sm" style="background:rgb(var(--color-danger-600));color:white;border:none;">Delete</button>';
+      const actions = '<button type="button" onclick="deleteTimeBlock(' + block.id + ')" class="btn btn-secondary btn-sm" style="background:#dc2626;color:white;border:none;">Delete</button>';
       return { when, html: adminScheduleRow({ type: 'block', when, title, meta, actionsHtml: actions }) };
     });
 }
@@ -3921,11 +3931,12 @@ async function loadCalendarWeek() {
           </div>
           
           ${day.blocks.length > 0 ? day.blocks.map(block => `
-            <div style="padding: 1rem; background: rgb(var(--color-danger-50)); border-left: 4px solid rgb(var(--color-danger-600)); border-radius: 6px; margin-bottom: 1rem;">
-              <div style="font-weight: 600; color: rgb(var(--color-danger-900)); margin-bottom: 0.25rem;">
-                ⛔ BLOCKED • ${block.start_time} - ${block.end_time}
+            <div style="padding: 1rem; background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-left: 4px solid rgb(var(--sch-red-500)); border-radius: 6px; margin-bottom: 1rem;">
+              <div style="font-weight: 600; color: rgb(var(--color-neutral-800)); margin-bottom: 0.25rem;">
+                <span style="display:inline-block;font-size:0.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;padding:0.15rem 0.45rem;border-radius:4px;background:rgb(var(--sch-red-50));color:rgb(var(--sch-red-700));margin-right:0.35rem;">Blocked</span>
+                ${block.start_time} – ${block.end_time}
               </div>
-              ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-danger-700));">${block.reason}</div>` : ''}
+              ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">${block.reason}</div>` : ''}
             </div>
           `).join('') : ''}
           
@@ -3969,7 +3980,7 @@ async function loadCalendarWeek() {
     }).join('');
   } catch (err) {
     console.error('Error loading calendar:', err);
-    calendarGrid.innerHTML = '<div style="text-align: center; padding: 2rem; color: rgb(var(--color-danger-600));">Failed to load calendar</div>';
+    calendarGrid.innerHTML = '<div style="text-align: center; padding: 2rem; color: #dc2626;">Failed to load calendar</div>';
   }
 }
 
