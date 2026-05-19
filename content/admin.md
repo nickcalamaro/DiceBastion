@@ -137,6 +137,8 @@ showDate: false
 .dark .admin-schedule-date-month { color: rgb(var(--color-neutral-400)); }
 .admin-schedule-body-title { font-weight: 600; font-size: 1rem; margin: 0 0 0.25rem 0; color: rgb(var(--color-neutral-900)); }
 .dark .admin-schedule-body-title { color: rgb(var(--color-neutral-100)); }
+.admin-schedule-body-subtitle { font-size: 0.8125rem; font-weight: 400; color: rgb(var(--color-neutral-600)); line-height: 1.4; margin: -0.1rem 0 0.35rem 0; }
+.dark .admin-schedule-body-subtitle { color: rgb(var(--color-neutral-400)); }
 .admin-schedule-body-meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); line-height: 1.45; margin: 0; }
 .dark .admin-schedule-body-meta { color: rgb(var(--color-neutral-400)); }
 .admin-schedule-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.15rem 0.45rem; border-radius: 4px; margin-right: 0.35rem; vertical-align: middle; }
@@ -3621,6 +3623,7 @@ function adminScheduleRow(opts) {
     adminScheduleDateBox(opts.when) +
     '<div class="admin-schedule-body">' +
     '<h4 class="admin-schedule-body-title"><span class="' + badgeClass + '">' + badgeLabel + '</span> ' + opts.title + '</h4>' +
+    (opts.subtitle ? '<p class="admin-schedule-body-subtitle">' + opts.subtitle + '</p>' : '') +
     (opts.meta ? '<p class="admin-schedule-body-meta">' + opts.meta + '</p>' : '') +
     '</div>' +
     (actions ? '<div class="admin-schedule-actions">' + actions + '</div>' : '') +
@@ -3692,7 +3695,9 @@ function buildScheduleBookingItems(bookings) {
         (b.table_type ? '<br>Table: ' + adminEscapeHtml(b.table_type) : '') +
         '<br>' + adminEscapeHtml(b.user_email || '');
       const title = adminEscapeHtml(b.user_name || 'Guest');
-      return { when, html: adminScheduleRow({ type: 'booking', when, title, meta }) };
+      const notesRaw = b.notes != null ? String(b.notes).trim() : '';
+      const subtitle = notesRaw ? adminEscapeHtml(notesRaw) : '';
+      return { when, html: adminScheduleRow({ type: 'booking', when, title, subtitle, meta }) };
     });
 }
 
