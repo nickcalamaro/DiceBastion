@@ -56,6 +56,28 @@ showDate: false
 .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-600)); color: rgb(var(--color-primary-600)); }
 .dark .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-400)); color: rgb(var(--color-primary-400)); }
 
+/* Deep-link section headings (e.g. /admin#bookings-upcoming) */
+.admin-section-heading { scroll-margin-top: 5rem; margin: 0 0 1rem 0; font-size: 1.125rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.admin-section-heading .admin-permalink { font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-neutral-400)); text-decoration: none; opacity: 0.65; }
+.admin-section-heading .admin-permalink:hover { opacity: 1; text-decoration: underline; color: rgb(var(--color-primary-600)); }
+.admin-jump-links { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin-bottom: 1.25rem; padding: 0.65rem 1rem; background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; font-size: 0.875rem; }
+.dark .admin-jump-links { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.admin-jump-links a { color: rgb(var(--color-primary-600)); text-decoration: none; }
+.admin-jump-links a:hover { text-decoration: underline; }
+.admin-upcoming-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
+.admin-upcoming-col h4 { margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: rgb(var(--color-neutral-500)); }
+.admin-mini-item { padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid rgb(var(--color-neutral-200)); background: rgb(var(--color-neutral-50)); margin-bottom: 0.5rem; }
+.dark .admin-mini-item { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.admin-mini-item:last-child { margin-bottom: 0; }
+.admin-mini-item-title { font-weight: 600; font-size: 0.9375rem; margin-bottom: 0.2rem; color: rgb(var(--color-neutral-900)); }
+.dark .admin-mini-item-title { color: rgb(var(--color-neutral-100)); }
+.admin-mini-item-meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); line-height: 1.4; }
+.dark .admin-mini-item-meta { color: rgb(var(--color-neutral-400)); }
+.admin-mini-item-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.35rem; vertical-align: middle; }
+.admin-mini-item-badge--event { background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-800)); }
+.admin-mini-item-badge--booking { background: #dbeafe; color: #1e40af; }
+.admin-mini-item-badge--block { background: #fee2e2; color: #991b1b; }
+
 /* Info/category containers */
 .admin-info-box { background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
 .dark .admin-info-box { background: rgb(var(--color-neutral-900)); }
@@ -207,10 +229,24 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="newsletter">Newsletter</button>
 </div>
 
+<nav class="admin-jump-links admin-mb-2" aria-label="Admin sections">
+<span style="color: rgb(var(--color-neutral-500));">Quick links:</span>
+<a href="#products">Products</a>
+<a href="#shop-promos">Shop promos</a>
+<a href="#events">Events</a>
+<a href="#registrations">Registrations</a>
+<a href="#orders">Orders</a>
+<a href="#memberships">Memberships</a>
+<a href="#bookings">Bookings</a>
+<a href="#bookings-upcoming">Upcoming</a>
+<a href="#cron">Cron</a>
+<a href="#newsletter">Newsletter</a>
+</nav>
+
 <!-- Products Tab -->
 <div id="products-tab" class="tab-content">
 <div class="card card-compact">
-<h2 id="product-form-title">Add New Product</h2>
+<h2 id="product-form-title" class="admin-section-heading">Add New Product</h2>
 <form id="product-form">
 <input type="hidden" id="product-id">
 
@@ -305,7 +341,7 @@ Logout
 </form>
 </div>
 
-<h2>Products</h2>
+<h2 id="admin-section-products" class="admin-section-heading">Products <a href="#products" class="admin-permalink" aria-label="Link to products">#</a></h2>
 <div id="products-list"></div>
 </div>
 
@@ -317,7 +353,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </p>
 </div>
 <div class="card card-compact admin-mb-2">
-<h2 class="admin-mt-0">New / edit promo code</h2>
+<h2 id="admin-section-shop-promos" class="admin-section-heading admin-mt-0">New / edit promo code <a href="#shop-promos" class="admin-permalink" aria-label="Link to shop promos">#</a></h2>
 <form id="shop-promo-form">
 <input type="hidden" id="shop-promo-id">
 <div class="admin-grid-2 admin-mb-1">
@@ -403,7 +439,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <!-- Events Tab -->
 <div id="events-tab" class="tab-content" style="display: none;">
 <div class="card card-compact">
-<h2 id="event-form-title">Add New Event</h2>
+<h2 id="event-form-title" class="admin-section-heading">Add New Event</h2>
 <form id="event-form">
 <input type="hidden" id="event-id">
 
@@ -644,27 +680,27 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </form>
 </div>
 
-<h2>Events</h2>
+<h2 id="admin-section-events" class="admin-section-heading">Events <a href="#events" class="admin-permalink" aria-label="Link to events list">#</a></h2>
 <div id="events-list"></div>
 </div>
 
 <!-- Registrations Tab -->
 <div id="registrations-tab" class="tab-content" style="display: none;">
-<h2>Event Registrations</h2>
+<h2 id="admin-section-registrations" class="admin-section-heading">Event Registrations <a href="#registrations" class="admin-permalink" aria-label="Link to registrations">#</a></h2>
 <p style="color: rgb(var(--color-neutral-600)); margin-bottom: 2rem;">View and manage event registrations and ticket purchases</p>
 <div id="registrations-list"></div>
 </div>
 
 <!-- Orders Tab -->
 <div id="orders-tab" class="tab-content" style="display: none;">
-<h2>Recent Orders</h2>
+<h2 id="admin-section-orders" class="admin-section-heading">Recent Orders <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
 <div id="orders-list"></div>
 </div>
 
 <!-- Memberships Tab -->
 <div id="memberships-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">Active Memberships</h2>
+<h2 id="admin-section-memberships" class="admin-section-heading admin-m-0">Active Memberships <a href="#memberships" class="admin-permalink" aria-label="Link to memberships">#</a></h2>
 <div class="admin-flex">
 <select id="membership-filter" onchange="loadMemberships()" class="form-select" style="padding: 0.5rem 1rem; font-size: 0.875rem;">
 <option value="all">All Memberships</option>
@@ -729,7 +765,7 @@ Loading memberships...
 <!-- Bookings & Calendar Tab -->
 <div id="bookings-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">📅 Bookings & Calendar</h2>
+<h2 id="admin-section-bookings" class="admin-section-heading admin-m-0">📅 Bookings &amp; Calendar <a href="#bookings" class="admin-permalink" aria-label="Link to bookings tab">#</a></h2>
 <div class="admin-flex">
 <button id="create-block-btn" class="btn btn-primary" onclick="showCreateBlockModal()">
 + Block Time
@@ -740,8 +776,35 @@ Loading memberships...
 </div>
 </div>
 
+<nav class="admin-jump-links" aria-label="Bookings sections">
+<span style="color: rgb(var(--color-neutral-500));">Jump to:</span>
+<a href="#bookings-upcoming">Upcoming</a>
+<a href="#bookings-calendar">Week view</a>
+<a href="#bookings-blocks">Time blocks</a>
+</nav>
+
+<section id="admin-section-bookings-upcoming" class="card card-compact admin-mb-2">
+<h3 class="admin-section-heading admin-mt-0">📋 Upcoming <a href="#bookings-upcoming" class="admin-permalink" aria-label="Link to upcoming section">#</a></h3>
+<p class="admin-text-small admin-mb-1">Events and table bookings from today onward (next 12 of each).</p>
+<div class="admin-upcoming-grid">
+<div class="admin-upcoming-col">
+<h4>Events</h4>
+<div id="upcoming-events-list">
+<div class="admin-text-small" style="padding: 1rem; text-align: center;">Loading events…</div>
+</div>
+</div>
+<div class="admin-upcoming-col">
+<h4>Table bookings</h4>
+<div id="upcoming-bookings-list">
+<div class="admin-text-small" style="padding: 1rem; text-align: center;">Loading bookings…</div>
+</div>
+</div>
+</div>
+</section>
+
 <!-- Calendar Week View -->
-<div class="card card-compact">
+<section id="admin-section-bookings-calendar" class="card card-compact admin-mb-2">
+<h3 class="admin-section-heading admin-mt-0">🗓️ Week view <a href="#bookings-calendar" class="admin-permalink" aria-label="Link to week calendar">#</a></h3>
 <div id="calendar-nav" class="admin-flex-between admin-mb-1">
 <button id="prev-week-btn" class="btn btn-secondary btn-sm" onclick="changeWeek(-1)">
 ← Previous
@@ -754,23 +817,23 @@ Next →
 <div id="calendar-grid" style="display: grid; gap: 1rem;">
 <!-- Days will be populated by JavaScript -->
 </div>
-</div>
+</section>
 
-<!-- Active Time Blocks -->
-<div class="card card-compact">
-<h3 class="admin-mt-0">⛔ Active Time Blocks</h3>
+<section id="admin-section-bookings-blocks" class="card card-compact">
+<h3 class="admin-section-heading admin-mt-0">⛔ Upcoming time blocks <a href="#bookings-blocks" class="admin-permalink" aria-label="Link to time blocks">#</a></h3>
+<p class="admin-text-small admin-mb-1">Blocked slots from now onward. Past blocks are hidden.</p>
 <div id="blocks-list" style="display: grid; gap: 0.75rem;">
 <div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">
-Loading time blocks...
+Loading time blocks…
 </div>
 </div>
-</div>
+</section>
 </div>
 
 <!-- Cron Jobs Tab -->
 <div id="cron-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">Automated Jobs</h2>
+<h2 id="admin-section-cron" class="admin-section-heading admin-m-0">Automated Jobs <a href="#cron" class="admin-permalink" aria-label="Link to cron jobs">#</a></h2>
 <div class="admin-flex">
 <button id="sync-board-games-btn" onclick="syncBoardGames()" class="btn btn-sm" style="background: rgb(var(--color-secondary-600));">
 🎲 Sync Board Games
@@ -834,7 +897,7 @@ Loading cron job logs...
 <!-- Newsletter Tab -->
 <div id="newsletter-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">Newsletter Builder</h2>
+<h2 id="admin-section-newsletter" class="admin-section-heading admin-m-0">Newsletter Builder <a href="#newsletter" class="admin-permalink" aria-label="Link to newsletter">#</a></h2>
 <div style="display:flex;gap:0.75rem;align-items:center;">
   <button type="button" id="nl-newsletters-btn" onclick="nlToggleNewslettersPanel()" class="btn btn-secondary btn-sm">Saved Newsletters</button>
   <div id="nl-recipient-badge" class="nl-badge">Loading recipients...</div>
@@ -1338,6 +1401,7 @@ loadOrders();
 loadRegistrations();
 loadCronLogs();
 loadShopPromoCodes();
+handleAdminHash();
 // Verify session is still valid in background
 verifySession();
 } else {
@@ -1412,7 +1476,8 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       loadOrders();
 loadRegistrations();
 loadCronLogs();
-loadShopPromoCodes();
+      loadShopPromoCodes();
+      handleAdminHash();
 } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
 errorEl.style.display = 'block';
@@ -2084,38 +2149,71 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
   }
 });
 
-// Tabs
+// Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
+const ADMIN_TABS = ['products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'bookings', 'cron', 'newsletter'];
+
+function scrollToAdminSection(sectionId) {
+  const el = document.getElementById(sectionId);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function switchAdminTab(tab, options = {}) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+  if (!btn) return false;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.borderBottomColor = 'transparent';
+    b.style.color = 'rgb(var(--color-neutral-600))';
+  });
+  btn.classList.add('active');
+  btn.style.borderBottomColor = 'rgb(var(--color-primary-600))';
+  btn.style.color = 'rgb(var(--color-primary-600))';
+  document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+  const panel = document.getElementById(tab + '-tab');
+  if (panel) panel.style.display = 'block';
+  if (tab === 'bookings') loadBookingsAndCalendar();
+  if (tab === 'memberships') loadMemberships();
+  if (tab === 'newsletter') {
+    loadNewsletterRecipients();
+    loadNewsletterEvents();
+    nlInitEditor();
+  }
+  if (tab === 'shop-promos') loadShopPromoCodes();
+  if (options.sectionId) {
+    setTimeout(() => scrollToAdminSection(options.sectionId), 80);
+  }
+  return true;
+}
+
+function handleAdminHash() {
+  const raw = (location.hash || '').replace(/^#/, '');
+  if (!raw) return;
+  if (document.getElementById('admin-dashboard').style.display === 'none') return;
+  let tab = null;
+  let sectionId = null;
+  if (ADMIN_TABS.includes(raw)) {
+    tab = raw;
+  } else {
+    for (const t of ADMIN_TABS) {
+      if (raw === t || raw.startsWith(t + '-')) {
+        tab = t;
+        if (raw !== t) sectionId = 'admin-section-' + raw;
+        break;
+      }
+    }
+  }
+  if (!tab) return;
+  switchAdminTab(tab, { sectionId });
+}
+
+window.addEventListener('hashchange', handleAdminHash);
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
-btn.addEventListener('click', () => {
-const tab = btn.dataset.tab;
-document.querySelectorAll('.tab-btn').forEach(b => {
-b.classList.remove('active');
-b.style.borderBottomColor = 'transparent';
-b.style.color = 'rgb(var(--color-neutral-600))';
-});
-btn.classList.add('active');
-btn.style.borderBottomColor = 'rgb(var(--color-primary-600))';
-btn.style.color = 'rgb(var(--color-primary-600))';
-
-document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-document.getElementById(tab + '-tab').style.display = 'block';
-
-// Auto-load data when switching to specific tabs
-if (tab === 'bookings') {
-  loadBookingsAndCalendar();
-}
-if (tab === 'memberships') {
-  loadMemberships();
-}
-if (tab === 'newsletter') {
-  loadNewsletterRecipients();
-  loadNewsletterEvents();
-  nlInitEditor();
-}
-if (tab === 'shop-promos') {
-  loadShopPromoCodes();
-}
-});
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    if (tab) history.replaceState(null, '', '#' + tab);
+    switchAdminTab(tab);
+  });
 });
 
 // Image Upload Handlers
@@ -3409,93 +3507,91 @@ function showCronDetails(logId, details) {
   }
 }
 
-async function loadBookings() {
-  const container = document.getElementById('bookings-list');
-  
+function adminEscapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function adminParseDateTime(dateStr, timeStr) {
+  const t = String(timeStr || '00:00').slice(0, 5);
+  return new Date(`${dateStr}T${t}:00`);
+}
+
+function isUpcomingBooking(booking) {
+  if (!booking || booking.status === 'cancelled') return false;
+  if (!booking.booking_date) return false;
+  return adminParseDateTime(booking.booking_date, booking.end_time || booking.start_time) >= new Date();
+}
+
+function isUpcomingTimeBlock(block) {
+  if (!block || !block.block_date) return false;
+  return adminParseDateTime(block.block_date, block.end_time || block.start_time) >= new Date();
+}
+
+function adminFormatBookingDate(dateStr) {
   try {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
-        Loading bookings...
-      </div>
-    `;
-    
-    const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', {
-      headers: {
-        'Authorization': `Bearer ${sessionToken}`
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch bookings');
-    }
-    
-    const data = await response.json();
-    const bookings = data.bookings || [];
-    
-    if (bookings.length === 0) {
-      container.innerHTML = `
-        <div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
-          📅 No upcoming bookings found.
-        </div>
-      `;
-      return;
-    }
-    
-    container.innerHTML = bookings.map(booking => {
-      const statusColor = booking.status === 'confirmed' ? '#10b981' : booking.status === 'cancelled' ? '#ef4444' : '#f59e0b';
-      const statusIcon = booking.status === 'confirmed' ? '✓' : booking.status === 'cancelled' ? '✕' : '⏳';
-      
-      return `
-        <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 1.5rem;">
-          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-            <div style="flex: 1;">
-              <h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">${booking.table_type || 'Table Booking'}</h3>
-              <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
-                📅 ${formatDate(booking.booking_date)} • 🕐 ${booking.start_time} - ${booking.end_time}
-              </div>
-            </div>
-            <span style="background: ${statusColor}; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;">
-              ${statusIcon} ${booking.status.toUpperCase()}
-            </span>
-          </div>
-          
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 8px; margin-bottom: 1rem;">
-            <div>
-              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Customer</div>
-              <div style="font-weight: 600;">${booking.user_name || 'N/A'}</div>
-            </div>
-            <div>
-              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Email</div>
-              <div style="font-weight: 500; font-size: 0.875rem;">${booking.user_email}</div>
-            </div>
-          </div>
-          
-          ${booking.notes ? `
-            <div style="padding: 1rem; background: rgb(var(--color-neutral-50)); border-left: 3px solid rgb(var(--color-primary-600)); border-radius: 4px; margin-bottom: 1rem;">
-              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Notes</div>
-              <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-700));">${booking.notes}</div>
-            </div>
-          ` : ''}
-          
-          ${booking.status !== 'cancelled' ? `
-            <div style="text-align: right;">
-              <button onclick="cancelBookingAdmin(${booking.id})" class="admin-btn-secondary-sm" style="background: #ef4444; color: white;">
-                Cancel Booking
-              </button>
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }).join('');
-    
+    const [y, m, d] = String(dateStr).split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  } catch { return dateStr; }
+}
+
+function renderUpcomingEvents(events) {
+  if (!events.length) return '<p class="admin-text-small" style="margin:0;">No upcoming events.</p>';
+  return events.map(e => {
+    const dt = e.event_datetime ? new Date(e.event_datetime) : null;
+    const dateLine = dt ? dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'Date TBC';
+    const loc = e.location ? ' · ' + adminEscapeHtml(e.location) : '';
+    return '<div class="admin-mini-item"><div class="admin-mini-item-title">' + adminEscapeHtml(e.title) + '</div><div class="admin-mini-item-meta">' + dateLine + loc + '</div></div>';
+  }).join('');
+}
+
+function renderUpcomingBookings(bookings) {
+  if (!bookings.length) return '<p class="admin-text-small" style="margin:0;">No upcoming table bookings.</p>';
+  return bookings.map(b => {
+    const status = String(b.status || 'pending').toLowerCase();
+    let html = '<div class="admin-mini-item"><div class="admin-mini-item-title">' + adminEscapeHtml(b.user_name || 'Guest') + '<span class="admin-mini-item-badge admin-mini-item-badge--booking">' + adminEscapeHtml(status) + '</span></div>';
+    html += '<div class="admin-mini-item-meta">' + adminFormatBookingDate(b.booking_date) + ' · ' + adminEscapeHtml(b.start_time) + '–' + adminEscapeHtml(b.end_time);
+    if (b.table_type) html += ' · ' + adminEscapeHtml(b.table_type);
+    html += '</div><div class="admin-mini-item-meta">' + adminEscapeHtml(b.user_email || '') + '</div>';
+    if (status !== 'cancelled') html += '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="margin-top:0.5rem;background:#ef4444;color:white;border:none;">Cancel</button>';
+    return html + '</div>';
+  }).join('');
+}
+
+async function loadUpcomingOverview() {
+  const eventsEl = document.getElementById('upcoming-events-list');
+  const bookingsEl = document.getElementById('upcoming-bookings-list');
+  if (!eventsEl || !bookingsEl) return;
+  eventsEl.innerHTML = '<p class="admin-text-small">Loading…</p>';
+  bookingsEl.innerHTML = '<p class="admin-text-small">Loading…</p>';
+  try {
+    const headers = sessionToken ? { 'Authorization': 'Bearer ' + sessionToken } : {};
+    const [eventsRes, bookingsRes] = await Promise.all([
+      fetch(API_BASE + '/events'),
+      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', { headers })
+    ]);
+    const events = eventsRes.ok ? await eventsRes.json() : [];
+    const bookingsData = bookingsRes.ok ? await bookingsRes.json() : { bookings: [] };
+    const now = new Date();
+    const upcomingEvents = (Array.isArray(events) ? events : [])
+      .filter(e => e.is_active === 1 && e.event_datetime && new Date(e.event_datetime) >= now)
+      .sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime))
+      .slice(0, 12);
+    const upcomingBookings = (bookingsData.bookings || [])
+      .filter(isUpcomingBooking)
+      .sort((a, b) => adminParseDateTime(a.booking_date, a.start_time) - adminParseDateTime(b.booking_date, b.start_time))
+      .slice(0, 12);
+    eventsEl.innerHTML = renderUpcomingEvents(upcomingEvents);
+    bookingsEl.innerHTML = renderUpcomingBookings(upcomingBookings);
   } catch (err) {
-    console.error('Error loading bookings:', err);
-    container.innerHTML = `
-      <div style="text-align: center; padding: 3rem; color: #f44336;">
-        ❌ Error loading bookings: ${err.message}
-      </div>
-    `;
+    console.error('Error loading upcoming overview:', err);
+    eventsEl.innerHTML = '<p class="admin-text-small" style="color:#dc2626;">Failed to load events.</p>';
+    bookingsEl.innerHTML = '<p class="admin-text-small" style="color:#dc2626;">Failed to load bookings.</p>';
   }
+}
+
+async function loadBookings() {
+  await loadUpcomingOverview();
 }
 
 async function cancelBookingAdmin(bookingId) {
@@ -3519,7 +3615,7 @@ async function cancelBookingAdmin(bookingId) {
     
     if (data.success) {
       alert('Booking cancelled successfully');
-      loadBookings(); // Reload the list
+      loadBookingsAndCalendar();
     } else {
       throw new Error(data.error || 'Unknown error');
     }
@@ -3545,12 +3641,13 @@ async function loadTimeBlocks() {
     
     const container = document.getElementById('blocks-list');
     
-    if (!data.blocks || data.blocks.length === 0) {
-      container.innerHTML = '<div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">No time blocks active</div>';
+    const upcoming = (data.blocks || []).filter(isUpcomingTimeBlock)
+      .sort((a, b) => adminParseDateTime(a.block_date, a.start_time) - adminParseDateTime(b.block_date, b.start_time));
+    if (!upcoming.length) {
+      container.innerHTML = '<p style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500)); margin: 0;">No upcoming time blocks</p>';
       return;
     }
-    
-    container.innerHTML = data.blocks.map(block => `
+    container.innerHTML = upcoming.map(block => `
       <div class="card" style="padding: 1rem; display: flex; justify-content: space-between; align-items: center;">
         <div style="flex: 1;">
           <div style="font-weight: 600; color: rgb(var(--color-neutral-900)); margin-bottom: 0.25rem;">
@@ -3685,7 +3782,7 @@ async function loadCalendarWeek() {
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       
       const dayBookings = bookingsData.bookings?.filter(b => b.booking_date === dateStr && b.status !== 'cancelled') || [];
-      const dayBlocks = blocksData.blocks?.filter(b => b.block_date === dateStr) || [];
+      const dayBlocks = blocksData.blocks?.filter(b => b.block_date === dateStr && isUpcomingTimeBlock(b)) || [];
       
       days.push({ date, dateStr, bookings: dayBookings, blocks: dayBlocks });
     }
@@ -3759,6 +3856,7 @@ function changeWeek(direction) {
 }
 
 function loadBookingsAndCalendar() {
+  loadUpcomingOverview();
   loadTimeBlocks();
   loadCalendarWeek();
 }
