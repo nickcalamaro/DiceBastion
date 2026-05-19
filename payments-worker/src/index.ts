@@ -282,12 +282,20 @@ app.post('/internal/checkout', async (c) => {
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
 			checkoutBody.customer_id = customerId
-			console.log('[Checkout] Creating tokenization checkout (auth + instant reimburse):', JSON.stringify(checkoutBody))
+			console.log('[Checkout] Creating tokenization checkout (auth + instant reimburse):', JSON.stringify({
+				...checkoutBody,
+				checkout_reference: orderRef,
+				note: 'checkout_reference is our orderRef; SumUp checkout id returned after create'
+			}))
 		} else {
 			// Regular payment (no card saving) — use the provided amount
 			checkoutBody.amount = Number(amount)
 			checkoutBody.currency = currency
-			console.log('[Checkout] Creating regular payment checkout:', JSON.stringify(checkoutBody))
+			console.log('[Checkout] Creating regular payment checkout:', JSON.stringify({
+				...checkoutBody,
+				checkout_reference: orderRef,
+				note: 'checkout_reference is our orderRef; SumUp checkout id returned after create'
+			}))
 		}
 
 		const res = await fetch('https://api.sumup.com/v0.1/checkouts', {
@@ -309,6 +317,13 @@ app.post('/internal/checkout', async (c) => {
 		if (!json || !json.id) {
 			throw new Error('missing_checkout_id')
 		}
+
+		console.log('[Checkout] SumUp checkout created:', {
+			sumup_checkout_id: json.id,
+			checkout_reference: orderRef,
+			status: json.status,
+			purpose: json.purpose || null
+		})
 
 		return c.json(json)
 	} catch (error: any) {
@@ -367,13 +382,16 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 			error_code: t.error_code ?? t.errorCode ?? null,
 			error_message: t.error_message ?? t.errorMessage ?? null
 		}))
-		console.log('[Payment] Retrieved checkout:', checkoutId, 'status:', payment.status,
-			'purpose:', payment.purpose || 'none',
-			'transactions:', payment.transactions?.length || 0,
-			'txStatuses:', payment.transactions?.map((t: any) => t.status) || [],
-			'hasInstrument:', !!payment.payment_instrument,
-			'failedTxDetails:', failedDetails
-		)
+		console.log('[Payment] Retrieved checkout:', {
+			sumup_checkout_id: checkoutId,
+			checkout_reference: payment.checkout_reference || null,
+			status: payment.status,
+			purpose: payment.purpose || 'none',
+			transactionCount: payment.transactions?.length || 0,
+			txStatuses: payment.transactions?.map((t: any) => t.status) || [],
+			hasInstrument: !!payment.payment_instrument,
+			failedTxDetails: failedDetails
+		})
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Fetch payment error:', error)

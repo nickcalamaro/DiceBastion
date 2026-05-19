@@ -3705,16 +3705,26 @@ app.post('/membership/checkout', async (c) => {
     // Ensure schema is up to date
     await migrateToTransactions(c.env.DB)
 
-    // Idempotency check in transactions table
+    // Idempotency check in transactions table (same key = same checkout for double-submit protection)
     const order_ref = crypto.randomUUID()
     if (idem){
       const existing = await c.env.DB.prepare(`
-        SELECT t.*, m.id as membership_id FROM transactions t
+        SELECT t.*, m.id as membership_id, m.plan as membership_plan FROM transactions t
         JOIN memberships m ON m.id = t.reference_id
         WHERE t.transaction_type = 'membership' AND t.user_id = ? AND t.idempotency_key = ?
         ORDER BY t.id DESC LIMIT 1
       `).bind(ident.id, idem).first()
       if (existing && existing.checkout_id){
+        if (existing.membership_plan && existing.membership_plan !== plan) {
+          console.warn('[membership/checkout] Idempotency key reused with different plan:', { idem, existingPlan: existing.membership_plan, requestedPlan: plan })
+          return c.json({ error: 'idempotency_plan_mismatch' }, 409)
+        }
+        console.log('[membership/checkout] Idempotent reuse:', {
+          orderRef: existing.order_ref,
+          sumupCheckoutId: existing.checkout_id,
+          idempotencyKey: idem,
+          plan
+        })
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
     }    // Auto-renewal is always enabled — users get a 7-day reminder email before renewal
@@ -3755,8 +3765,18 @@ app.post('/membership/checkout', async (c) => {
     if (!checkout.id) {
       console.error('membership checkout missing id', checkout)
       return c.json({ error: 'sumup_missing_id' }, 502)
-    }    // Store payment details in transactions table
-    console.log('Creating transaction record with order_ref:', order_ref, 'checkout_id:', checkout.id)
+    }
+    // Store payment details in transactions table
+    // order_ref is sent to SumUp as checkout_reference; checkout.id is the SumUp checkout UUID for the widget
+    console.log('[membership/checkout] Created checkout:', {
+      orderRef: order_ref,
+      sumupCheckoutId: checkout.id,
+      idempotencyKey: idem || null,
+      plan,
+      userId: ident.id,
+      amount,
+      currency
+    })
     await c.env.DB.prepare(`
       INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
                                 checkout_id, amount, currency, payment_status, idempotency_key, consent_at)

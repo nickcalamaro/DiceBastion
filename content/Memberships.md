@@ -697,6 +697,34 @@ For those able to give a bit more, or for those of you who can't afford a member
 
   let membershipModal = null;
   let pendingPlan = null;
+  /** One idempotency key per modal open — prevents duplicate SumUp checkouts on double-click Continue */
+  let modalIdempotencyKey = null;
+  let checkoutInProgress = false;
+  /** Set after checkout API succeeds; reused if Continue is clicked again before paying */
+  let activeCheckout = null;
+
+  function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
+
+  function resetCheckoutSession() {
+    modalIdempotencyKey = newIdempotencyKey();
+    checkoutInProgress = false;
+    activeCheckout = null;
+  }
+
+  /** After a failed/cancelled card attempt, SumUp checkout is dead — need a fresh session */
+  function regenerateCheckoutSession() {
+    modalIdempotencyKey = newIdempotencyKey();
+    checkoutInProgress = false;
+    activeCheckout = null;
+  }
+
+  function setContinueButtonsDisabled(disabled) {
+    if (!membershipModal) return;
+    membershipModal.querySelectorAll('#modal-continue, #modal-continue-logged').forEach(btn => {
+      btn.disabled = disabled;
+      btn.setAttribute('aria-busy', disabled ? 'true' : 'false');
+    });
+  }
 
   function formatDateOnly(iso){ try { const d=new Date(iso); return d.toLocaleDateString(); } catch { return iso; } }
   
@@ -732,9 +760,11 @@ For those able to give a bit more, or for those of you who can't afford a member
       membershipModal.close();
       membershipModal = null;
     }
+    resetCheckoutSession();
   }
   
   function openModal(){
+    resetCheckoutSession();
     const user = getLoggedInUser();
     const isLoggedIn = user && user.email;
     
@@ -929,12 +959,14 @@ For those able to give a bit more, or for those of you who can't afford a member
   async function mountSumUpWidget(checkoutId, ref){
     try {
       clearError();
+      console.log('[mountSumUpWidget] orderRef (checkout_reference):', ref, 'sumupCheckoutId:', checkoutId);
       const emailStepEl = membershipModal ? membershipModal.querySelector('#sumup-email-step') : null;
       const loggedStepEl = membershipModal ? membershipModal.querySelector('#sumup-logged-step') : null;
       const sumupCardEl = membershipModal ? membershipModal.querySelector('#sumup-card') : null;
       if (emailStepEl) emailStepEl.style.display = 'none';
       if (loggedStepEl) loggedStepEl.style.display = 'none';
       if (sumupCardEl) { sumupCardEl.style.display = 'block'; sumupCardEl.innerHTML = ''; }
+      setContinueButtonsDisabled(true);
       await window.utils.loadSumUpSdk();
       await SumUpCard.mount({
         id:'sumup-card',
@@ -947,26 +979,45 @@ For those able to give a bit more, or for those of you who can't afford a member
           if (t === 'success') {
             await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
           } else if (t === 'error' || t === 'fail') {
+            regenerateCheckoutSession();
+            setContinueButtonsDisabled(false);
             showError('Payment failed. Please try again.');
           } else if (t === 'cancel') {
+            regenerateCheckoutSession();
+            setContinueButtonsDisabled(false);
             showError('Payment cancelled.');
           }
         }
       });
-    } catch (e) { showError('Could not load payment widget.'); }
+    } catch (e) {
+      regenerateCheckoutSession();
+      setContinueButtonsDisabled(false);
+      showError('Could not load payment widget.');
+    }
   }
 
-  function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
-
   async function startCheckout(plan, email, name, privacyConsent, autoRenew, isLoggedIn = false){ 
+    if (checkoutInProgress) {
+      console.log('[startCheckout] Ignored — checkout already in progress');
+      return;
+    }
+    if (activeCheckout) {
+      console.log('[startCheckout] Reusing checkout in this modal session:', activeCheckout);
+      await mountSumUpWidget(activeCheckout.checkoutId, activeCheckout.orderRef);
+      return;
+    }
+    checkoutInProgress = true;
+    setContinueButtonsDisabled(true);
     try { 
       clearError(); 
       const token = await getTurnstileToken(isLoggedIn); 
+      if (!modalIdempotencyKey) modalIdempotencyKey = newIdempotencyKey();
+      console.log('[startCheckout] plan:', plan, 'idempotencyKey:', modalIdempotencyKey);
       const resp = await fetch(`${API_BASE}/membership/checkout`, { 
         method:'POST', 
         headers:{ 
           'Content-Type':'application/json', 
-          'Idempotency-Key': newIdempotencyKey() 
+          'Idempotency-Key': modalIdempotencyKey
         }, 
         body: JSON.stringify({ email, name, plan, privacyConsent, autoRenew, turnstileToken: token }) 
       }); 
@@ -977,16 +1028,23 @@ For those able to give a bit more, or for those of you who can't afford a member
         return; 
       } 
       if(data.checkoutId){ 
+        activeCheckout = { checkoutId: data.checkoutId, orderRef: data.orderRef };
+        if (data.reused) console.log('[startCheckout] Server returned existing checkout (idempotent)');
+        console.log('[startCheckout] orderRef:', data.orderRef, 'sumupCheckoutId:', data.checkoutId);
         await mountSumUpWidget(data.checkoutId, data.orderRef); 
         return; 
       } 
       showError('Failed to create in-page checkout.'); 
     } catch(e){ 
       showError('Checkout error.'); 
-    } 
+    } finally {
+      checkoutInProgress = false;
+      if (!activeCheckout) setContinueButtonsDisabled(false);
+    }
   }
 
   async function handleContinue(){
+    if (checkoutInProgress) return;
     const modalNameEl = membershipModal ? membershipModal.querySelector('#modal-name') : null;
     const modalEmailEl = membershipModal ? membershipModal.querySelector('#modal-email') : null;
     const privacyEl = membershipModal ? membershipModal.querySelector('#modal-privacy') : null;
@@ -1008,6 +1066,7 @@ For those able to give a bit more, or for those of you who can't afford a member
   }
   
   async function handleContinueLogged(){
+    if (checkoutInProgress) return;
     const user = getLoggedInUser();
     if (!user || !user.email) {
       showError('Session expired. Please refresh and try again.');
