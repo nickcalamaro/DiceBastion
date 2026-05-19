@@ -3688,15 +3688,11 @@ function buildScheduleBookingItems(bookings) {
     .filter(isUpcomingBooking)
     .map(b => {
       const when = adminParseDateTime(b.booking_date, b.start_time);
-      const status = String(b.status || 'pending').toLowerCase();
       const meta = adminEscapeHtml(b.start_time) + ' – ' + adminEscapeHtml(b.end_time) +
         (b.table_type ? '<br>Table: ' + adminEscapeHtml(b.table_type) : '') +
         '<br>' + adminEscapeHtml(b.user_email || '');
       const title = adminEscapeHtml(b.user_name || 'Guest');
-      const actions = status !== 'cancelled'
-        ? '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="background:#dc2626;color:white;border:none;">Cancel</button>'
-        : '';
-      return { when, html: adminScheduleRow({ type: 'booking', when, title, meta, actionsHtml: actions }) };
+      return { when, html: adminScheduleRow({ type: 'booking', when, title, meta }) };
     });
 }
 
