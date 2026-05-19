@@ -64,19 +64,54 @@ showDate: false
 .dark .admin-jump-links { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
 .admin-jump-links a { color: rgb(var(--color-primary-600)); text-decoration: none; }
 .admin-jump-links a:hover { text-decoration: underline; }
-.admin-upcoming-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
-.admin-upcoming-col h4 { margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: rgb(var(--color-neutral-500)); }
-.admin-mini-item { padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid rgb(var(--color-neutral-200)); background: rgb(var(--color-neutral-50)); margin-bottom: 0.5rem; }
-.dark .admin-mini-item { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
-.admin-mini-item:last-child { margin-bottom: 0; }
-.admin-mini-item-title { font-weight: 600; font-size: 0.9375rem; margin-bottom: 0.2rem; color: rgb(var(--color-neutral-900)); }
-.dark .admin-mini-item-title { color: rgb(var(--color-neutral-100)); }
-.admin-mini-item-meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); line-height: 1.4; }
-.dark .admin-mini-item-meta { color: rgb(var(--color-neutral-400)); }
-.admin-mini-item-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.35rem; vertical-align: middle; }
-.admin-mini-item-badge--event { background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-800)); }
-.admin-mini-item-badge--booking { background: #dbeafe; color: #1e40af; }
-.admin-mini-item-badge--block { background: #fee2e2; color: #991b1b; }
+.admin-schedule-group { margin-bottom: 1.5rem; }
+.admin-schedule-group:last-child { margin-bottom: 0; }
+.admin-schedule-group-title { margin: 0 0 0.65rem 0; font-size: 0.8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(var(--color-neutral-500)); }
+.admin-schedule-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.admin-schedule-row {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 1rem;
+  align-items: start;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 10px;
+  background: rgb(var(--color-neutral-50));
+}
+.dark .admin-schedule-row { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.admin-schedule-row--block { border-left: 4px solid #dc2626; }
+.admin-schedule-row--event { border-left: 4px solid rgb(var(--color-primary-600)); }
+.admin-schedule-row--booking { border-left: 4px solid #2563eb; }
+.admin-schedule-date-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 76px;
+  padding: 0.4rem 0.35rem;
+  border-radius: 8px;
+  background: rgb(var(--color-neutral));
+  border: 1px solid rgb(var(--color-neutral-200));
+  line-height: 1.15;
+}
+.dark .admin-schedule-date-box { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); }
+.admin-schedule-date-dow { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; color: rgb(var(--color-neutral-500)); margin-bottom: 0.15rem; }
+.admin-schedule-date-day { font-size: 1.625rem; font-weight: 700; color: rgb(var(--color-primary-700)); }
+.dark .admin-schedule-date-day { color: rgb(var(--color-primary-300)); }
+.admin-schedule-date-month { font-size: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-600)); margin-top: 0.1rem; }
+.admin-schedule-body-title { font-weight: 600; font-size: 1rem; margin: 0 0 0.25rem 0; color: rgb(var(--color-neutral-900)); }
+.dark .admin-schedule-body-title { color: rgb(var(--color-neutral-100)); }
+.admin-schedule-body-meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); line-height: 1.45; margin: 0; }
+.dark .admin-schedule-body-meta { color: rgb(var(--color-neutral-400)); }
+.admin-schedule-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; padding: 0.15rem 0.45rem; border-radius: 4px; margin-right: 0.35rem; vertical-align: middle; }
+.admin-schedule-badge--event { background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-800)); }
+.admin-schedule-badge--booking { background: #dbeafe; color: #1e40af; }
+.admin-schedule-badge--block { background: #fee2e2; color: #991b1b; }
+.admin-schedule-actions { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; }
+@media (max-width: 640px) {
+  .admin-schedule-row { grid-template-columns: 64px 1fr; }
+  .admin-schedule-actions { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; }
+}
 
 /* Info/category containers */
 .admin-info-box { background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
@@ -780,26 +815,16 @@ Loading memberships...
 <span style="color: rgb(var(--color-neutral-500));">Jump to:</span>
 <a href="#bookings-upcoming">Upcoming</a>
 <a href="#bookings-calendar">Week view</a>
-<a href="#bookings-blocks">Time blocks</a>
 </nav>
 
 <section id="admin-section-bookings-upcoming" class="card card-compact admin-mb-2">
-<h3 class="admin-section-heading admin-mt-0">📋 Upcoming <a href="#bookings-upcoming" class="admin-permalink" aria-label="Link to upcoming section">#</a></h3>
-<p class="admin-text-small admin-mb-1">Events and table bookings from today onward (next 12 of each).</p>
-<div class="admin-upcoming-grid">
-<div class="admin-upcoming-col">
-<h4>Events</h4>
-<div id="upcoming-events-list">
-<div class="admin-text-small" style="padding: 1rem; text-align: center;">Loading events…</div>
+<span id="admin-section-bookings-blocks" class="admin-permalink" style="position:absolute;visibility:hidden;" aria-hidden="true"></span>
+<h3 class="admin-section-heading admin-mt-0">📋 Upcoming schedule <a href="#bookings-upcoming" class="admin-permalink" aria-label="Link to upcoming schedule">#</a></h3>
+<p class="admin-text-small admin-mb-1">Events, table bookings, and blocked time from now onward.</p>
+<div id="bookings-schedule-content">
+<p class="admin-text-small" style="text-align: center; padding: 1.5rem;">Loading schedule…</p>
 </div>
-</div>
-<div class="admin-upcoming-col">
-<h4>Table bookings</h4>
-<div id="upcoming-bookings-list">
-<div class="admin-text-small" style="padding: 1rem; text-align: center;">Loading bookings…</div>
-</div>
-</div>
-</div>
+
 </section>
 
 <!-- Calendar Week View -->
@@ -819,15 +844,7 @@ Next →
 </div>
 </section>
 
-<section id="admin-section-bookings-blocks" class="card card-compact">
-<h3 class="admin-section-heading admin-mt-0">⛔ Upcoming time blocks <a href="#bookings-blocks" class="admin-permalink" aria-label="Link to time blocks">#</a></h3>
-<p class="admin-text-small admin-mb-1">Blocked slots from now onward. Past blocks are hidden.</p>
-<div id="blocks-list" style="display: grid; gap: 0.75rem;">
-<div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">
-Loading time blocks…
-</div>
-</div>
-</section>
+
 </div>
 
 <!-- Cron Jobs Tab -->
@@ -3535,63 +3552,145 @@ function adminFormatBookingDate(dateStr) {
   } catch { return dateStr; }
 }
 
-function renderUpcomingEvents(events) {
-  if (!events.length) return '<p class="admin-text-small" style="margin:0;">No upcoming events.</p>';
-  return events.map(e => {
-    const dt = e.event_datetime ? new Date(e.event_datetime) : null;
-    const dateLine = dt ? dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'Date TBC';
-    const loc = e.location ? ' · ' + adminEscapeHtml(e.location) : '';
-    return '<div class="admin-mini-item"><div class="admin-mini-item-title">' + adminEscapeHtml(e.title) + '</div><div class="admin-mini-item-meta">' + dateLine + loc + '</div></div>';
-  }).join('');
+function adminScheduleDateBox(dt) {
+  const d = dt instanceof Date ? dt : new Date(dt);
+  if (Number.isNaN(d.getTime())) {
+    return '<div class="admin-schedule-date-box"><div class="admin-schedule-date-day">—</div></div>';
+  }
+  const day = d.getDate();
+  const month = d.toLocaleDateString('en-GB', { month: 'short' });
+  const dow = d.toLocaleDateString('en-GB', { weekday: 'short' });
+  return '<div class="admin-schedule-date-box">' +
+    '<div class="admin-schedule-date-dow">' + dow + '</div>' +
+    '<div class="admin-schedule-date-day">' + day + '</div>' +
+    '<div class="admin-schedule-date-month">' + month + '</div>' +
+    '</div>';
 }
 
-function renderUpcomingBookings(bookings) {
-  if (!bookings.length) return '<p class="admin-text-small" style="margin:0;">No upcoming table bookings.</p>';
-  return bookings.map(b => {
-    const status = String(b.status || 'pending').toLowerCase();
-    let html = '<div class="admin-mini-item"><div class="admin-mini-item-title">' + adminEscapeHtml(b.user_name || 'Guest') + '<span class="admin-mini-item-badge admin-mini-item-badge--booking">' + adminEscapeHtml(status) + '</span></div>';
-    html += '<div class="admin-mini-item-meta">' + adminFormatBookingDate(b.booking_date) + ' · ' + adminEscapeHtml(b.start_time) + '–' + adminEscapeHtml(b.end_time);
-    if (b.table_type) html += ' · ' + adminEscapeHtml(b.table_type);
-    html += '</div><div class="admin-mini-item-meta">' + adminEscapeHtml(b.user_email || '') + '</div>';
-    if (status !== 'cancelled') html += '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="margin-top:0.5rem;background:#ef4444;color:white;border:none;">Cancel</button>';
-    return html + '</div>';
-  }).join('');
+function adminScheduleRow(opts) {
+  const type = opts.type;
+  const rowClass = 'admin-schedule-row admin-schedule-row--' + type;
+  const badgeClass = 'admin-schedule-badge admin-schedule-badge--' + type;
+  const badgeLabel = type === 'event' ? 'Event' : type === 'booking' ? 'Booking' : 'Blocked';
+  let actions = opts.actionsHtml || '';
+  return '<article class="' + rowClass + '">' +
+    adminScheduleDateBox(opts.when) +
+    '<div class="admin-schedule-body">' +
+    '<h4 class="admin-schedule-body-title"><span class="' + badgeClass + '">' + badgeLabel + '</span> ' + opts.title + '</h4>' +
+    (opts.meta ? '<p class="admin-schedule-body-meta">' + opts.meta + '</p>' : '') +
+    '</div>' +
+    (actions ? '<div class="admin-schedule-actions">' + actions + '</div>' : '') +
+    '</article>';
 }
 
-async function loadUpcomingOverview() {
-  const eventsEl = document.getElementById('upcoming-events-list');
-  const bookingsEl = document.getElementById('upcoming-bookings-list');
-  if (!eventsEl || !bookingsEl) return;
-  eventsEl.innerHTML = '<p class="admin-text-small">Loading…</p>';
-  bookingsEl.innerHTML = '<p class="admin-text-small">Loading…</p>';
+function renderScheduleGroup(title, rowsHtml, emptyText) {
+  if (!rowsHtml) {
+    return '<section class="admin-schedule-group"><h4 class="admin-schedule-group-title">' + title + '</h4><p class="admin-text-small" style="margin:0;">' + emptyText + '</p></section>';
+  }
+  return '<section class="admin-schedule-group"><h4 class="admin-schedule-group-title">' + title + '</h4><div class="admin-schedule-list">' + rowsHtml + '</div></section>';
+}
+
+function normalizeEventsList(events) {
+  if (Array.isArray(events)) return events;
+  if (events && Array.isArray(events.events)) return events.events;
+  if (events && Array.isArray(events.results)) return events.results;
+  return [];
+}
+
+function buildUpcomingEventRows(events, now) {
+  return normalizeEventsList(events)
+    .filter(e => e && e.event_datetime && new Date(e.event_datetime) >= now)
+    .sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime))
+    .slice(0, 20)
+    .map(e => {
+      const when = new Date(e.event_datetime);
+      const timeStr = when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const endStr = e.end_time ? String(e.end_time).slice(0, 5) : '';
+      const timeLine = endStr ? timeStr + ' – ' + adminEscapeHtml(endStr) : timeStr;
+      const loc = e.location ? adminEscapeHtml(e.location) : '';
+      const meta = timeLine + (loc ? '<br>' + loc : '');
+      const title = adminEscapeHtml(e.title || e.event_name || 'Event');
+      return adminScheduleRow({ type: 'event', when, title, meta });
+    })
+    .join('');
+}
+
+function buildUpcomingBookingRows(bookings) {
+  return bookings
+    .filter(isUpcomingBooking)
+    .sort((a, b) => adminParseDateTime(a.booking_date, a.start_time) - adminParseDateTime(b.booking_date, b.start_time))
+    .slice(0, 20)
+    .map(b => {
+      const when = adminParseDateTime(b.booking_date, b.start_time);
+      const status = String(b.status || 'pending').toLowerCase();
+      const meta = adminEscapeHtml(b.start_time) + ' – ' + adminEscapeHtml(b.end_time) +
+        (b.table_type ? '<br>Table: ' + adminEscapeHtml(b.table_type) : '') +
+        '<br>' + adminEscapeHtml(b.user_email || '');
+      const title = adminEscapeHtml(b.user_name || 'Guest');
+      const actions = status !== 'cancelled'
+        ? '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="background:#ef4444;color:white;border:none;">Cancel</button>'
+        : '';
+      return adminScheduleRow({ type: 'booking', when, title, meta, actionsHtml: actions });
+    })
+    .join('');
+}
+
+function buildUpcomingBlockRows(blocks) {
+  return (blocks || [])
+    .filter(isUpcomingTimeBlock)
+    .sort((a, b) => adminParseDateTime(a.block_date, a.start_time) - adminParseDateTime(b.block_date, b.start_time))
+    .slice(0, 20)
+    .map(block => {
+      const when = adminParseDateTime(block.block_date, block.start_time);
+      const title = adminEscapeHtml(block.reason || 'Time blocked');
+      const meta = adminEscapeHtml(block.start_time) + ' – ' + adminEscapeHtml(block.end_time);
+      const actions = '<button type="button" onclick="deleteTimeBlock(' + block.id + ')" class="btn btn-secondary btn-sm" style="background:rgb(var(--color-danger-600));color:white;border:none;">Delete</button>';
+      return adminScheduleRow({ type: 'block', when, title, meta, actionsHtml: actions });
+    })
+    .join('');
+}
+
+async function loadBookingsSchedule() {
+  const container = document.getElementById('bookings-schedule-content');
+  if (!container) return;
+  container.innerHTML = '<p class="admin-text-small" style="text-align:center;padding:1.5rem;">Loading schedule…</p>';
   try {
     const headers = sessionToken ? { 'Authorization': 'Bearer ' + sessionToken } : {};
-    const [eventsRes, bookingsRes] = await Promise.all([
+    const [eventsRes, bookingsRes, blocksRes] = await Promise.all([
       fetch(API_BASE + '/events'),
-      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', { headers })
+      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', { headers }),
+      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks')
     ]);
-    const events = eventsRes.ok ? await eventsRes.json() : [];
+    const eventsRaw = eventsRes.ok ? await eventsRes.json() : [];
     const bookingsData = bookingsRes.ok ? await bookingsRes.json() : { bookings: [] };
+    const blocksData = blocksRes.ok ? await blocksRes.json() : { blocks: [] };
     const now = new Date();
-    const upcomingEvents = (Array.isArray(events) ? events : [])
-      .filter(e => e.is_active === 1 && e.event_datetime && new Date(e.event_datetime) >= now)
-      .sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime))
-      .slice(0, 12);
-    const upcomingBookings = (bookingsData.bookings || [])
-      .filter(isUpcomingBooking)
-      .sort((a, b) => adminParseDateTime(a.booking_date, a.start_time) - adminParseDateTime(b.booking_date, b.start_time))
-      .slice(0, 12);
-    eventsEl.innerHTML = renderUpcomingEvents(upcomingEvents);
-    bookingsEl.innerHTML = renderUpcomingBookings(upcomingBookings);
+
+    const eventRows = buildUpcomingEventRows(eventsRaw, now);
+    const bookingRows = buildUpcomingBookingRows(bookingsData.bookings || []);
+    const blockRows = buildUpcomingBlockRows(blocksData.blocks || []);
+
+    if (!eventRows && !bookingRows && !blockRows) {
+      container.innerHTML = '<p class="admin-text-small" style="text-align:center;padding:2rem;margin:0;">Nothing scheduled from now onward.</p>';
+      return;
+    }
+
+    container.innerHTML =
+      renderScheduleGroup('Events', eventRows, 'No upcoming events.') +
+      renderScheduleGroup('Table bookings', bookingRows, 'No upcoming table bookings.') +
+      renderScheduleGroup('Blocked time', blockRows, 'No upcoming time blocks.');
   } catch (err) {
-    console.error('Error loading upcoming overview:', err);
-    eventsEl.innerHTML = '<p class="admin-text-small" style="color:#dc2626;">Failed to load events.</p>';
-    bookingsEl.innerHTML = '<p class="admin-text-small" style="color:#dc2626;">Failed to load bookings.</p>';
+    console.error('Error loading bookings schedule:', err);
+    container.innerHTML = '<p class="admin-text-small" style="color:#dc2626;text-align:center;padding:1.5rem;">Failed to load schedule.</p>';
   }
 }
 
+async function loadUpcomingOverview() {
+  await loadBookingsSchedule();
+}
+
 async function loadBookings() {
-  await loadUpcomingOverview();
+  await loadBookingsSchedule();
 }
 
 async function cancelBookingAdmin(bookingId) {
@@ -3635,34 +3734,7 @@ const diff = currentWeekStart.getDate() - day + (day === 0 ? -6 : 1);
 currentWeekStart.setDate(diff);
 
 async function loadTimeBlocks() {
-  try {
-    const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks');
-    const data = await response.json();
-    
-    const container = document.getElementById('blocks-list');
-    
-    const upcoming = (data.blocks || []).filter(isUpcomingTimeBlock)
-      .sort((a, b) => adminParseDateTime(a.block_date, a.start_time) - adminParseDateTime(b.block_date, b.start_time));
-    if (!upcoming.length) {
-      container.innerHTML = '<p style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500)); margin: 0;">No upcoming time blocks</p>';
-      return;
-    }
-    container.innerHTML = upcoming.map(block => `
-      <div class="card" style="padding: 1rem; display: flex; justify-content: space-between; align-items: center;">
-        <div style="flex: 1;">
-          <div style="font-weight: 600; color: rgb(var(--color-neutral-900)); margin-bottom: 0.25rem;">
-            ${block.block_date} • ${block.start_time} - ${block.end_time}
-          </div>
-          ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">${block.reason}</div>` : ''}
-        </div>
-        <button onclick="deleteTimeBlock(${block.id})" class="btn btn-secondary btn-sm" style="background: rgb(var(--color-danger-600)); color: white;">
-          Delete
-        </button>
-      </div>
-    `).join('');
-  } catch (err) {
-    console.error('Error loading time blocks:', err);
-  }
+  await loadBookingsSchedule();
 }
 
 async function deleteTimeBlock(blockId) {
@@ -3856,8 +3928,7 @@ function changeWeek(direction) {
 }
 
 function loadBookingsAndCalendar() {
-  loadUpcomingOverview();
-  loadTimeBlocks();
+  loadBookingsSchedule();
   loadCalendarWeek();
 }
 
