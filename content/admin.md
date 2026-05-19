@@ -64,9 +64,19 @@ showDate: false
 .dark .admin-jump-links { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
 .admin-jump-links a { color: rgb(var(--color-primary-600)); text-decoration: none; }
 .admin-jump-links a:hover { text-decoration: underline; }
-.admin-schedule-group { margin-bottom: 1.5rem; }
-.admin-schedule-group:last-child { margin-bottom: 0; }
-.admin-schedule-group-title { margin: 0 0 0.65rem 0; font-size: 0.8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(var(--color-neutral-500)); }
+.admin-schedule-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0 0 1rem 0; padding: 0; list-style: none; }
+.admin-schedule-legend li { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-600)); }
+.dark .admin-schedule-legend li { color: rgb(var(--color-neutral-400)); }
+.admin-schedule-legend-swatch { width: 0.65rem; height: 0.65rem; border-radius: 2px; flex-shrink: 0; }
+.admin-schedule-legend-swatch--event { background: rgb(var(--color-success-600)); }
+.admin-schedule-legend-swatch--booking { background: rgb(var(--color-primary-600)); }
+.admin-schedule-legend-swatch--block { background: rgb(var(--color-danger-600)); }
+.admin-schedule-month { display: flex; align-items: center; gap: 0.85rem; margin: 1.35rem 0 0.65rem; }
+.admin-schedule-month:first-child { margin-top: 0; }
+.admin-schedule-month-label { font-size: 0.9375rem; font-weight: 700; color: rgb(var(--color-neutral-800)); white-space: nowrap; letter-spacing: -0.01em; }
+.dark .admin-schedule-month-label { color: rgb(var(--color-neutral-100)); }
+.admin-schedule-month-line { flex: 1; height: 1px; background: rgb(var(--color-neutral-200)); }
+.dark .admin-schedule-month-line { background: rgb(var(--color-neutral-700)); }
 .admin-schedule-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .admin-schedule-row {
   display: grid;
@@ -77,11 +87,15 @@ showDate: false
   border: 1px solid rgb(var(--color-neutral-200));
   border-radius: 10px;
   background: rgb(var(--color-neutral-50));
+  border-left-width: 4px;
 }
 .dark .admin-schedule-row { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
-.admin-schedule-row--block { border-left: 4px solid #dc2626; }
-.admin-schedule-row--event { border-left: 4px solid rgb(var(--color-primary-600)); }
-.admin-schedule-row--booking { border-left: 4px solid #2563eb; }
+.admin-schedule-row--event { border-left-color: rgb(var(--color-success-600)); background: rgb(var(--color-success-50)); }
+.dark .admin-schedule-row--event { background: rgba(var(--color-success-900), 0.12); border-left-color: rgb(var(--color-success-500)); }
+.admin-schedule-row--booking { border-left-color: rgb(var(--color-primary-600)); background: rgb(var(--color-primary-50)); }
+.dark .admin-schedule-row--booking { background: rgba(var(--color-primary-900), 0.15); border-left-color: rgb(var(--color-primary-500)); }
+.admin-schedule-row--block { border-left-color: rgb(var(--color-danger-600)); background: rgb(var(--color-danger-50)); }
+.dark .admin-schedule-row--block { background: rgba(var(--color-danger-900), 0.12); border-left-color: rgb(var(--color-danger-500)); }
 .admin-schedule-date-box {
   display: flex;
   flex-direction: column;
@@ -95,18 +109,33 @@ showDate: false
   line-height: 1.15;
 }
 .dark .admin-schedule-date-box { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); }
+.admin-schedule-row--event .admin-schedule-date-box { border-color: rgb(var(--color-success-200)); background: rgb(var(--color-success-100)); }
+.dark .admin-schedule-row--event .admin-schedule-date-box { border-color: rgba(var(--color-success-500), 0.35); background: rgba(var(--color-success-900), 0.25); }
+.admin-schedule-row--booking .admin-schedule-date-box { border-color: rgb(var(--color-primary-200)); background: rgb(var(--color-primary-100)); }
+.dark .admin-schedule-row--booking .admin-schedule-date-box { border-color: rgba(var(--color-primary-500), 0.35); background: rgba(var(--color-primary-900), 0.25); }
+.admin-schedule-row--block .admin-schedule-date-box { border-color: rgb(var(--color-danger-200)); background: rgb(var(--color-danger-100)); }
+.dark .admin-schedule-row--block .admin-schedule-date-box { border-color: rgba(var(--color-danger-500), 0.35); background: rgba(var(--color-danger-900), 0.25); }
 .admin-schedule-date-dow { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; color: rgb(var(--color-neutral-500)); margin-bottom: 0.15rem; }
-.admin-schedule-date-day { font-size: 1.625rem; font-weight: 700; color: rgb(var(--color-primary-700)); }
-.dark .admin-schedule-date-day { color: rgb(var(--color-primary-300)); }
+.admin-schedule-row--event .admin-schedule-date-day { color: rgb(var(--color-success-700)); }
+.dark .admin-schedule-row--event .admin-schedule-date-day { color: rgb(var(--color-success-300)); }
+.admin-schedule-row--booking .admin-schedule-date-day { color: rgb(var(--color-primary-700)); }
+.dark .admin-schedule-row--booking .admin-schedule-date-day { color: rgb(var(--color-primary-300)); }
+.admin-schedule-row--block .admin-schedule-date-day { color: rgb(var(--color-danger-700)); }
+.dark .admin-schedule-row--block .admin-schedule-date-day { color: rgb(var(--color-danger-300)); }
+.admin-schedule-date-day { font-size: 1.625rem; font-weight: 700; }
 .admin-schedule-date-month { font-size: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-600)); margin-top: 0.1rem; }
+.dark .admin-schedule-date-month { color: rgb(var(--color-neutral-400)); }
 .admin-schedule-body-title { font-weight: 600; font-size: 1rem; margin: 0 0 0.25rem 0; color: rgb(var(--color-neutral-900)); }
 .dark .admin-schedule-body-title { color: rgb(var(--color-neutral-100)); }
 .admin-schedule-body-meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); line-height: 1.45; margin: 0; }
 .dark .admin-schedule-body-meta { color: rgb(var(--color-neutral-400)); }
-.admin-schedule-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; padding: 0.15rem 0.45rem; border-radius: 4px; margin-right: 0.35rem; vertical-align: middle; }
-.admin-schedule-badge--event { background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-800)); }
-.admin-schedule-badge--booking { background: #dbeafe; color: #1e40af; }
-.admin-schedule-badge--block { background: #fee2e2; color: #991b1b; }
+.admin-schedule-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.2rem 0.5rem; border-radius: 4px; margin-right: 0.35rem; vertical-align: middle; }
+.admin-schedule-badge--event { background: rgb(var(--color-success-100)); color: rgb(var(--color-success-800)); }
+.dark .admin-schedule-badge--event { background: rgba(var(--color-success-900), 0.4); color: rgb(var(--color-success-200)); }
+.admin-schedule-badge--booking { background: rgb(var(--color-primary-100)); color: rgb(var(--color-primary-800)); }
+.dark .admin-schedule-badge--booking { background: rgba(var(--color-primary-900), 0.4); color: rgb(var(--color-primary-200)); }
+.admin-schedule-badge--block { background: rgb(var(--color-danger-100)); color: rgb(var(--color-danger-800)); }
+.dark .admin-schedule-badge--block { background: rgba(var(--color-danger-900), 0.4); color: rgb(var(--color-danger-200)); }
 .admin-schedule-actions { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; }
 @media (max-width: 640px) {
   .admin-schedule-row { grid-template-columns: 64px 1fr; }
@@ -820,7 +849,12 @@ Loading memberships...
 <section id="admin-section-bookings-upcoming" class="card card-compact admin-mb-2">
 <span id="admin-section-bookings-blocks" class="admin-permalink" style="position:absolute;visibility:hidden;" aria-hidden="true"></span>
 <h3 class="admin-section-heading admin-mt-0">📋 Upcoming schedule <a href="#bookings-upcoming" class="admin-permalink" aria-label="Link to upcoming schedule">#</a></h3>
-<p class="admin-text-small admin-mb-1">Events, table bookings, and blocked time from now onward.</p>
+<p class="admin-text-small admin-mb-1">Everything from now onward, sorted by date.</p>
+<ul class="admin-schedule-legend" aria-label="Schedule colour key">
+<li><span class="admin-schedule-legend-swatch admin-schedule-legend-swatch--event" aria-hidden="true"></span> Events</li>
+<li><span class="admin-schedule-legend-swatch admin-schedule-legend-swatch--booking" aria-hidden="true"></span> Table bookings</li>
+<li><span class="admin-schedule-legend-swatch admin-schedule-legend-swatch--block" aria-hidden="true"></span> Blocked time</li>
+</ul>
 <div id="bookings-schedule-content">
 <p class="admin-text-small" style="text-align: center; padding: 1.5rem;">Loading schedule…</p>
 </div>
@@ -3583,11 +3617,38 @@ function adminScheduleRow(opts) {
     '</article>';
 }
 
-function renderScheduleGroup(title, rowsHtml, emptyText) {
-  if (!rowsHtml) {
-    return '<section class="admin-schedule-group"><h4 class="admin-schedule-group-title">' + title + '</h4><p class="admin-text-small" style="margin:0;">' + emptyText + '</p></section>';
+function adminScheduleMonthKey(dt) {
+  const d = dt instanceof Date ? dt : new Date(dt);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+function adminScheduleMonthLabel(dt) {
+  const d = dt instanceof Date ? dt : new Date(dt);
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+function renderScheduleMonthDivider(when) {
+  const label = adminScheduleMonthLabel(when);
+  return '<div class="admin-schedule-month" role="separator" aria-label="' + adminEscapeHtml(label) + '">' +
+    '<span class="admin-schedule-month-label">' + adminEscapeHtml(label) + '</span>' +
+    '<span class="admin-schedule-month-line" aria-hidden="true"></span>' +
+    '</div>';
+}
+
+function renderScheduleTimeline(items) {
+  if (!items.length) return '';
+  const sorted = items.slice().sort((a, b) => a.when - b.when).slice(0, 60);
+  let html = '';
+  let currentMonth = '';
+  for (const item of sorted) {
+    const monthKey = adminScheduleMonthKey(item.when);
+    if (monthKey !== currentMonth) {
+      currentMonth = monthKey;
+      html += renderScheduleMonthDivider(item.when);
+    }
+    html += item.html;
   }
-  return '<section class="admin-schedule-group"><h4 class="admin-schedule-group-title">' + title + '</h4><div class="admin-schedule-list">' + rowsHtml + '</div></section>';
+  return '<div class="admin-schedule-list">' + html + '</div>';
 }
 
 function normalizeEventsList(events) {
@@ -3597,11 +3658,9 @@ function normalizeEventsList(events) {
   return [];
 }
 
-function buildUpcomingEventRows(events, now) {
+function buildScheduleEventItems(events, now) {
   return normalizeEventsList(events)
     .filter(e => e && e.event_datetime && new Date(e.event_datetime) >= now)
-    .sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime))
-    .slice(0, 20)
     .map(e => {
       const when = new Date(e.event_datetime);
       const timeStr = when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -3610,16 +3669,13 @@ function buildUpcomingEventRows(events, now) {
       const loc = e.location ? adminEscapeHtml(e.location) : '';
       const meta = timeLine + (loc ? '<br>' + loc : '');
       const title = adminEscapeHtml(e.title || e.event_name || 'Event');
-      return adminScheduleRow({ type: 'event', when, title, meta });
-    })
-    .join('');
+      return { when, html: adminScheduleRow({ type: 'event', when, title, meta }) };
+    });
 }
 
-function buildUpcomingBookingRows(bookings) {
-  return bookings
+function buildScheduleBookingItems(bookings) {
+  return (bookings || [])
     .filter(isUpcomingBooking)
-    .sort((a, b) => adminParseDateTime(a.booking_date, a.start_time) - adminParseDateTime(b.booking_date, b.start_time))
-    .slice(0, 20)
     .map(b => {
       const when = adminParseDateTime(b.booking_date, b.start_time);
       const status = String(b.status || 'pending').toLowerCase();
@@ -3628,26 +3684,22 @@ function buildUpcomingBookingRows(bookings) {
         '<br>' + adminEscapeHtml(b.user_email || '');
       const title = adminEscapeHtml(b.user_name || 'Guest');
       const actions = status !== 'cancelled'
-        ? '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="background:#ef4444;color:white;border:none;">Cancel</button>'
+        ? '<button type="button" onclick="cancelBookingAdmin(' + b.id + ')" class="btn btn-secondary btn-sm" style="background:rgb(var(--color-danger-600));color:white;border:none;">Cancel</button>'
         : '';
-      return adminScheduleRow({ type: 'booking', when, title, meta, actionsHtml: actions });
-    })
-    .join('');
+      return { when, html: adminScheduleRow({ type: 'booking', when, title, meta, actionsHtml: actions }) };
+    });
 }
 
-function buildUpcomingBlockRows(blocks) {
+function buildScheduleBlockItems(blocks) {
   return (blocks || [])
     .filter(isUpcomingTimeBlock)
-    .sort((a, b) => adminParseDateTime(a.block_date, a.start_time) - adminParseDateTime(b.block_date, b.start_time))
-    .slice(0, 20)
     .map(block => {
       const when = adminParseDateTime(block.block_date, block.start_time);
       const title = adminEscapeHtml(block.reason || 'Time blocked');
       const meta = adminEscapeHtml(block.start_time) + ' – ' + adminEscapeHtml(block.end_time);
       const actions = '<button type="button" onclick="deleteTimeBlock(' + block.id + ')" class="btn btn-secondary btn-sm" style="background:rgb(var(--color-danger-600));color:white;border:none;">Delete</button>';
-      return adminScheduleRow({ type: 'block', when, title, meta, actionsHtml: actions });
-    })
-    .join('');
+      return { when, html: adminScheduleRow({ type: 'block', when, title, meta, actionsHtml: actions }) };
+    });
 }
 
 async function loadBookingsSchedule() {
@@ -3666,19 +3718,18 @@ async function loadBookingsSchedule() {
     const blocksData = blocksRes.ok ? await blocksRes.json() : { blocks: [] };
     const now = new Date();
 
-    const eventRows = buildUpcomingEventRows(eventsRaw, now);
-    const bookingRows = buildUpcomingBookingRows(bookingsData.bookings || []);
-    const blockRows = buildUpcomingBlockRows(blocksData.blocks || []);
+    const items = [
+      ...buildScheduleEventItems(eventsRaw, now),
+      ...buildScheduleBookingItems(bookingsData.bookings || []),
+      ...buildScheduleBlockItems(blocksData.blocks || [])
+    ];
 
-    if (!eventRows && !bookingRows && !blockRows) {
+    if (!items.length) {
       container.innerHTML = '<p class="admin-text-small" style="text-align:center;padding:2rem;margin:0;">Nothing scheduled from now onward.</p>';
       return;
     }
 
-    container.innerHTML =
-      renderScheduleGroup('Events', eventRows, 'No upcoming events.') +
-      renderScheduleGroup('Table bookings', bookingRows, 'No upcoming table bookings.') +
-      renderScheduleGroup('Blocked time', blockRows, 'No upcoming time blocks.');
+    container.innerHTML = renderScheduleTimeline(items);
   } catch (err) {
     console.error('Error loading bookings schedule:', err);
     container.innerHTML = '<p class="admin-text-small" style="color:#dc2626;text-align:center;padding:1.5rem;">Failed to load schedule.</p>';
