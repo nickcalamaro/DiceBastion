@@ -858,7 +858,7 @@ Loading memberships...
 
 <section id="admin-section-bookings-upcoming" class="card card-compact admin-mb-2">
 <span id="admin-section-bookings-blocks" class="admin-permalink" style="position:absolute;visibility:hidden;" aria-hidden="true"></span>
-<h3 class="admin-section-heading admin-mt-0">📋 Upcoming schedule <a href="#bookings-upcoming" class="admin-permalink" aria-label="Link to upcoming schedule">#</a></h3>
+<h3 class="admin-section-heading admin-mt-0">Upcoming schedule <a href="#bookings-upcoming" class="admin-permalink" aria-label="Link to upcoming schedule">#</a></h3>
 <p class="admin-text-small admin-mb-1">Everything from now onward, sorted by date.</p>
 <ul class="admin-schedule-legend" aria-label="Schedule colour key">
 <li><span class="admin-schedule-legend-swatch admin-schedule-legend-swatch--event" aria-hidden="true"></span> Events</li>
@@ -3707,8 +3707,7 @@ function buildScheduleBlockItems(blocks) {
       const when = adminParseDateTime(block.block_date, block.start_time);
       const title = adminEscapeHtml(block.reason || 'Time blocked');
       const meta = adminEscapeHtml(block.start_time) + ' – ' + adminEscapeHtml(block.end_time);
-      const actions = '<button type="button" onclick="deleteTimeBlock(' + block.id + ')" class="btn btn-secondary btn-sm" style="background:#dc2626;color:white;border:none;">Delete</button>';
-      return { when, html: adminScheduleRow({ type: 'block', when, title, meta, actionsHtml: actions }) };
+      return { when, html: adminScheduleRow({ type: 'block', when, title, meta }) };
     });
 }
 
