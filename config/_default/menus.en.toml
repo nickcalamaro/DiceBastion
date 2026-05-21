@@ -104,3 +104,18 @@ weight = 10003
 visibility = 0
 [[footer]]
 none = "none"
+
+[[footer]]
+name = "Support"
+pageRef = "support"
+weight = 10
+
+[[footer]]
+name = "Privacy Policy"
+pageRef = "privacy-policy"
+weight = 20
+
+[[footer]]
+name = "Cookie Policy"
+pageRef = "cookie-policy"
+weight = 30

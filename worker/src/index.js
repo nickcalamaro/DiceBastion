@@ -534,7 +534,7 @@ async function hasUsedFreeTrial(db, userId) {
   const row = await db.prepare(`
     SELECT 1 FROM memberships
     WHERE user_id = ? AND is_free_trial = 1
-      AND status IN ('active', 'cancelled', 'expired')
+      AND status IN ('active', 'expired')
     LIMIT 1
   `).bind(userId).first()
   return !!row
@@ -554,9 +554,9 @@ async function abandonPendingFreeTrialAttempts(db, userId) {
   if (!rows.length) return 0
   const now = toIso(new Date())
   for (const row of rows) {
+    // memberships.status CHECK only allows pending/active/expired — delete never-activated rows
     await db.prepare(`
-      UPDATE memberships SET status = 'cancelled', is_free_trial = 0
-      WHERE id = ? AND status = 'pending'
+      DELETE FROM memberships WHERE id = ? AND status = 'pending'
     `).bind(row.membership_id).run()
     await db.prepare(`
       UPDATE transactions SET payment_status = 'abandoned', updated_at = ?
@@ -4269,8 +4269,7 @@ app.get('/membership/free-trial/confirm', async (c) => {
     if ((hasFailed || hasDeclined) && pending.status === 'pending') {
       const now = toIso(new Date())
       await c.env.DB.prepare(`
-        UPDATE memberships SET status = 'cancelled', is_free_trial = 0
-        WHERE id = ? AND status = 'pending'
+        DELETE FROM memberships WHERE id = ? AND status = 'pending'
       `).bind(pending.id).run()
       await c.env.DB.prepare(`
         UPDATE transactions SET payment_status = 'failed', updated_at = ?
@@ -9073,8 +9072,7 @@ async function processAutoRenewals(env) {
     // ========================================================================
     console.log(`[CRON] Step 3c: Cleaning up stale pending free trial memberships...`)
     const staleFreeTrialResult = await env.DB.prepare(`
-      UPDATE memberships
-      SET status = 'cancelled', is_free_trial = 0
+      DELETE FROM memberships
       WHERE status = 'pending'
         AND id IN (
           SELECT reference_id FROM transactions

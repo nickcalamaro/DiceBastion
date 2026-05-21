@@ -301,7 +301,7 @@ DiceBastion also has an R2 public bucket at `https://pub-631ca6f207ca4661ac9cb2b
 |--------|------|-----------|----------|---------|
 | Board Games API | `bgg-bunny/board-games-api.ts` | 61994 | Bunny DB | CRUD + BGG sync for board game library |
 | Bookings API | `bgg-bunny/bookings-edge-script.ts` | 63643 | Bunny DB | Table booking system with payment integration |
-| Email Service | `bgg-bunny/emails-edge-script.ts` | 63650 | None | Stateless email relay via MailerSend API |
+| Email Service | `bgg-bunny/emails-edge-script.ts` | 63650 | None | MailerSend relay + public `/support` form |
 | Legacy BGG | `bgg-bunny/edge-script.js` | (legacy) | None | Serves cached JSON from Bunny Storage |
 
 ### 4.2 Cloudflare Workers (to be migrated)
@@ -386,6 +386,9 @@ EMAIL_API_URL               — URL of the email service edge script
 PAYMENTS_API_URL            — URL of the payments service
 INTERNAL_SECRET             — Shared secret for service-to-service auth
 MAILERSEND_API_KEY          — MailerSend API key (email service only)
+SUPPORT_CONTACT_EMAIL       — Inbox for /support form (e.g. contact@dicebastion.com)
+TURNSTILE_SECRET            — Cloudflare Turnstile secret (required for /support in production)
+ALLOW_TEST_BYPASS           — Set "true" to accept test-bypass Turnstile token on localhost
 ```
 
 ### 6.2 Cloudflare Workers

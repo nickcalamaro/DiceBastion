@@ -55,3 +55,6 @@ SHOP_PAGES_ORIGIN = "https://dicebastion-shop.pages.dev"
 # Cron trigger for membership renewals (daily at 2 AM UTC)
 [triggers]
 crons = ["0 2 * * *"]
+
+[observability]
+enabled = true
