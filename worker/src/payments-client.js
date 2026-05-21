@@ -94,7 +94,7 @@ async function callPaymentsWorker(env, endpoint, options = {}) {
 /**
  * Create SumUp checkout via payments worker
  */
-export async function createCheckout(env, { amount, currency, orderRef, title, description, savePaymentInstrument = false, customerId = null }) {
+export async function createCheckout(env, { amount, currency, orderRef, title, description, savePaymentInstrument = false, customerId = null, isFreeTrialSetup = false }) {
 	return callPaymentsWorker(env, '/internal/checkout', {
 		method: 'POST',
 		body: JSON.stringify({
@@ -103,7 +103,8 @@ export async function createCheckout(env, { amount, currency, orderRef, title, d
 			orderRef,
 			description: description || title,
 			savePaymentInstrument,
-			customerId
+			customerId,
+			isFreeTrialSetup
 		})
 	})
 }

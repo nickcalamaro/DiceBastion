@@ -35,7 +35,7 @@ showPagination: false
 
 <b>Gibraltar Dice Bastion is part of the Gibraltar Warhammer Club, and we’re completely funded by our members!</b>
 
-If you're not sure whether you're ready to support us just yet, we offer a one-month free trial. Your card will be saved but won't be charged until your trial ends. We'll send you a reminder 2 days before.
+If you're not sure whether you're ready to support us just yet, we offer a one-month free trial. We'll verify your card with a temporary **£1 authorisation** (refunded immediately by our payment provider), then save it for when your trial ends. You won't be charged your membership price until after the trial. We'll send you a reminder 2 days before.
 
 <b>Choose the plan you'd like to continue with after your trial:</b>
 
@@ -101,7 +101,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
 <div class="footer-info">
   <span>Secure card verification powered by SumUp</span>
   <span class="footer-divider" aria-hidden="true"></span>
-  <span>No charge during trial · Cancel anytime</span>
+  <span>£1 card verification (refunded) · No plan charge during trial · Cancel anytime</span>
 </div>
 
 <div id="membership-cta-footer" class="text-center" style="margin: 1.5rem auto;">
@@ -175,7 +175,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         </div>
 
         <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"><strong>How the free trial works:</strong> Your card will be verified but <strong>not charged</strong> during the 1-month trial. After the trial, your ${planName} membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+          <p style="margin: 0;"><strong>How the free trial works:</strong> We'll place a temporary <strong>£1 authorisation</strong> on your card to verify it (refunded immediately). You won't be charged your ${planName} membership price during the 1-month trial. After the trial, your membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -195,7 +195,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         </div>
 
         <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"><strong>How the free trial works:</strong> Your card will be verified but <strong>not charged</strong> during the 1-month trial. After the trial, your ${planName} membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+          <p style="margin: 0;"><strong>How the free trial works:</strong> We'll place a temporary <strong>£1 authorisation</strong> on your card to verify it (refunded immediately). You won't be charged your ${planName} membership price during the 1-month trial. After the trial, your membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">

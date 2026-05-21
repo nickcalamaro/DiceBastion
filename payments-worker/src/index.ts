@@ -262,9 +262,10 @@ app.post('/internal/checkout', async (c) => {
 			description: string
 			savePaymentInstrument?: boolean
 			customerId?: string
+			isFreeTrialSetup?: boolean
 		}>()
 		
-		const { amount, currency, orderRef, description, savePaymentInstrument, customerId } = body
+		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup } = body
 
 		const { access_token } = await sumupToken(c.env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
 		
@@ -274,17 +275,19 @@ app.post('/internal/checkout', async (c) => {
 			description
 		}
 
-		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose with the real amount.
+		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose.
 		// Per SumUp docs, the authorization amount is "instantly reimbursed" (auth hold released).
-		// The real charge is made separately after the card is saved.
+		// Standard memberships auth the plan price; free trials always auth £1 regardless of tier.
 		if (savePaymentInstrument && customerId) {
-			checkoutBody.amount = Number(amount) || 1.00
+			const authAmount = isFreeTrialSetup ? 1.00 : (Number(amount) || 1.00)
+			checkoutBody.amount = authAmount
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
 			checkoutBody.customer_id = customerId
 			console.log('[Checkout] Creating tokenization checkout (auth + instant reimburse):', JSON.stringify({
 				...checkoutBody,
 				checkout_reference: orderRef,
+				isFreeTrialSetup: !!isFreeTrialSetup,
 				note: 'checkout_reference is our orderRef; SumUp checkout id returned after create'
 			}))
 		} else {

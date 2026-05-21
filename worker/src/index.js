@@ -530,8 +530,40 @@ async function migrateFreeTrialColumns(db) {
 }
 
 async function hasUsedFreeTrial(db, userId) {
-  const row = await db.prepare('SELECT 1 FROM memberships WHERE user_id = ? AND is_free_trial = 1 LIMIT 1').bind(userId).first()
+  // Only count trials that were actually activated — pending/failed checkout attempts must not block retries.
+  const row = await db.prepare(`
+    SELECT 1 FROM memberships
+    WHERE user_id = ? AND is_free_trial = 1
+      AND status IN ('active', 'cancelled', 'expired')
+    LIMIT 1
+  `).bind(userId).first()
   return !!row
+}
+
+/** Cancel abandoned free-trial checkout attempts so users can retry after card failure. */
+async function abandonPendingFreeTrialAttempts(db, userId) {
+  const pending = await db.prepare(`
+    SELECT m.id AS membership_id, t.id AS transaction_id
+    FROM memberships m
+    JOIN transactions t ON t.reference_id = m.id
+    WHERE m.user_id = ? AND m.status = 'pending'
+      AND t.transaction_type = 'free_trial'
+      AND t.payment_status = 'pending'
+  `).bind(userId).all()
+  const rows = pending.results || []
+  if (!rows.length) return 0
+  const now = toIso(new Date())
+  for (const row of rows) {
+    await db.prepare(`
+      UPDATE memberships SET status = 'cancelled', is_free_trial = 0
+      WHERE id = ? AND status = 'pending'
+    `).bind(row.membership_id).run()
+    await db.prepare(`
+      UPDATE transactions SET payment_status = 'abandoned', updated_at = ?
+      WHERE id = ? AND payment_status = 'pending'
+    `).bind(now, row.transaction_id).run()
+  }
+  return rows.length
 }
 
 let __eventImageVariantColsReady = false
@@ -3839,14 +3871,16 @@ app.post('/membership/free-trial/checkout', async (c) => {
       return c.json({ error: 'already_active', message: 'You already have an active membership.' }, 400)
     }
 
+    await abandonPendingFreeTrialAttempts(c.env.DB, ident.id)
+
     const svc = await getServiceForPlan(c.env.DB, plan)
     if (!svc) return c.json({ error: 'unknown_plan' }, 400)
     const amount = Number(svc.amount)
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'invalid_amount' }, 400)
     const currency = svc.currency || c.env.CURRENCY || 'GBP'
-    // Use a small auth amount for free-trial card setup to reduce false declines.
-    const setupAmount = Number(c.env.FREE_TRIAL_SETUP_AUTH_AMOUNT || 1)
-    const effectiveSetupAmount = Number.isFinite(setupAmount) && setupAmount > 0 ? setupAmount : 1
+    // Free trials always use a £1 card verification hold (instantly reimbursed by SumUp), not the plan price.
+    const setupOverride = Number(c.env.FREE_TRIAL_SETUP_AUTH_AMOUNT)
+    const cardVerifyAmount = Number.isFinite(setupOverride) && setupOverride > 0 ? setupOverride : 1
 
     await migrateToTransactions(c.env.DB)
 
@@ -3863,8 +3897,8 @@ app.post('/membership/free-trial/checkout', async (c) => {
       }
     }
 
-    const cols = ['user_id', 'plan', 'status', 'auto_renew', 'order_ref', 'is_free_trial']
-    const vals = [ident.id, plan, 'pending', 1, order_ref, 1]
+    const cols = ['user_id', 'plan', 'status', 'auto_renew', 'order_ref']
+    const vals = [ident.id, plan, 'pending', 1, order_ref]
     const placeholders = cols.map(() => '?').join(',')
     const mResult = await c.env.DB.prepare(`INSERT INTO memberships (${cols.join(',')}) VALUES (${placeholders}) RETURNING id`).bind(...vals).first()
     const membershipId = mResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
@@ -3874,19 +3908,28 @@ app.post('/membership/free-trial/checkout', async (c) => {
     try {
       customerId = await getOrCreateSumUpCustomer(c.env, ident)
       checkout = await createCheckout(c.env, {
-        amount: effectiveSetupAmount,
+        amount: cardVerifyAmount,
         currency,
         orderRef: order_ref,
         title: `Dice Bastion ${plan} membership free trial`,
         description: `Card setup for ${plan} membership free trial`,
         savePaymentInstrument: true,
-        customerId
+        customerId,
+        isFreeTrialSetup: true
+      })
+      console.log('[free-trial/checkout] Card verification amount:', {
+        plan,
+        planAmount: amount,
+        cardVerifyAmount,
+        orderRef: order_ref
       })
     } catch (err) {
+      await c.env.DB.prepare('DELETE FROM memberships WHERE id = ? AND status = ?').bind(membershipId, 'pending').run()
       console.error('free trial checkout error', err)
       return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
     }
     if (!checkout.id) {
+      await c.env.DB.prepare('DELETE FROM memberships WHERE id = ? AND status = ?').bind(membershipId, 'pending').run()
       console.error('free trial checkout missing id', checkout)
       return c.json({ error: 'sumup_missing_id' }, 502)
     }
@@ -3906,6 +3949,7 @@ app.post('/membership/free-trial/checkout', async (c) => {
       membershipId,
       userId: ident.id,
       amount,
+      cardVerifyAmount,
       currency,
       customerId: customerId || null,
       isFreeTrial: true
@@ -4222,6 +4266,17 @@ app.get('/membership/free-trial/confirm', async (c) => {
     const txStatuses = payment?.transactions?.map(t => t.status) || []
     const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
     const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    if ((hasFailed || hasDeclined) && pending.status === 'pending') {
+      const now = toIso(new Date())
+      await c.env.DB.prepare(`
+        UPDATE memberships SET status = 'cancelled', is_free_trial = 0
+        WHERE id = ? AND status = 'pending'
+      `).bind(pending.id).run()
+      await c.env.DB.prepare(`
+        UPDATE transactions SET payment_status = 'failed', updated_at = ?
+        WHERE id = ? AND payment_status = 'pending'
+      `).bind(now, transaction.id).run()
+    }
     return c.json({
       ok: false,
       status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
@@ -4728,7 +4783,10 @@ app.post('/webhooks/sumup', async (c) => {
   const identityId = pending.user_id
 
   // ==================== FREE TRIAL WEBHOOK PATH ====================
-  if (pending.is_free_trial === 1) {
+  const trialTxForWebhook = await c.env.DB.prepare(`
+    SELECT id FROM transactions WHERE order_ref = ? AND transaction_type = 'free_trial' LIMIT 1
+  `).bind(orderRef).first()
+  if (trialTxForWebhook) {
     console.log('[webhook-free-trial] Processing free trial activation for order:', orderRef)
     const instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
     const trialEnd = addMonths(now, 1)
@@ -9005,6 +9063,33 @@ async function processAutoRenewals(env) {
         UPDATE transactions
         SET payment_status = 'abandoned', updated_at = ?
         WHERE transaction_type = 'sponsorship'
+          AND payment_status = 'pending'
+          AND created_at < ?
+      `).bind(toIso(now), staleCutoff).run()
+    }
+
+    // ========================================================================
+    // STEP 3c: Clean up stale pending free trial checkouts
+    // ========================================================================
+    console.log(`[CRON] Step 3c: Cleaning up stale pending free trial memberships...`)
+    const staleFreeTrialResult = await env.DB.prepare(`
+      UPDATE memberships
+      SET status = 'cancelled', is_free_trial = 0
+      WHERE status = 'pending'
+        AND id IN (
+          SELECT reference_id FROM transactions
+          WHERE transaction_type = 'free_trial'
+            AND payment_status = 'pending'
+            AND created_at < ?
+        )
+    `).bind(staleCutoff).run()
+    const staleFreeTrialCount = staleFreeTrialResult.meta?.changes || 0
+    if (staleFreeTrialCount > 0) {
+      console.log(`[CRON] Cleaned up ${staleFreeTrialCount} stale pending free trial checkout(s)`)
+      await env.DB.prepare(`
+        UPDATE transactions
+        SET payment_status = 'abandoned', updated_at = ?
+        WHERE transaction_type = 'free_trial'
           AND payment_status = 'pending'
           AND created_at < ?
       `).bind(toIso(now), staleCutoff).run()
