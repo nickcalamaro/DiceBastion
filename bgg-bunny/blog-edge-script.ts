@@ -130,10 +130,26 @@ async function checkDatabaseConnection(): Promise<{ ok: boolean; error?: string 
 
 function formatDbError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
-  if (msg.includes("401") || msg.includes("Unauthorized")) {
+  // libSQL auth failures — do not confuse with Bunny Storage 401s (handled separately)
+  if (
+    (msg.includes("401") || msg.includes("Unauthorized") || msg.includes("authentication failed")) &&
+    !msg.includes("Storage upload failed") &&
+    !msg.includes("Storage delete")
+  ) {
     return "Bunny Database auth failed — check BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN on script 75941.";
   }
   return msg;
+}
+
+function formatRequestError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes("Storage upload failed") && msg.includes("401")) {
+    return "Bunny Storage upload rejected (401) — check BUNNY_STORAGE_API_KEY on script 75941 (use the storage zone FTP/API password, not the account API key).";
+  }
+  if (msg.includes("BUNNY_STORAGE_API_KEY")) {
+    return msg;
+  }
+  return formatDbError(error);
 }
 
 async function migrateBlogPosts(): Promise<void> {
@@ -635,8 +651,8 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
     console.error("[Blog] request error:", error);
-    const message = formatDbError(error);
-    const status = message.includes("Bunny Database auth failed") ? 503 : 500;
+    const message = formatRequestError(error);
+    const status = message.includes("auth failed") || message.includes("rejected (401)") ? 503 : 500;
     return jsonResponse({ error: message }, status);
   }
 });
