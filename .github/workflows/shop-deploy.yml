@@ -20,9 +20,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Hugo CLI
-        run: |
-          wget -O ${{ runner.temp }}/hugo.deb https://github.com/gohugoio/hugo/releases/download/v0.147.2/hugo_extended_0.147.2_linux-amd64.deb \
-          && sudo dpkg -i ${{ runner.temp }}/hugo.deb
+        run: wget -O "${{ runner.temp }}/hugo.deb" "https://github.com/gohugoio/hugo/releases/download/v0.147.2/hugo_extended_0.147.2_linux-amd64.deb" && sudo dpkg -i "${{ runner.temp }}/hugo.deb"
 
       - name: Build Shop
         working-directory: ./shop
