@@ -4656,6 +4656,396 @@ function _createClient3(config) {
   }
 }
 
+// blog-cdn.ts
+var SITE_URL = (process.env.SITE_URL || "https://dicebastion.com").replace(/\/+$/, "");
+function blogCdnBaseUrl() {
+  return (process.env.BUNNY_CDN_URL || "https://dicebastion.b-cdn.net").replace(/\/+$/, "");
+}
+function blogStorageZone() {
+  return process.env.BUNNY_STORAGE_ZONE || "dicebastion";
+}
+function blogPublicPath(relativePath) {
+  return `${blogCdnBaseUrl()}/${relativePath.replace(/^\/+/, "")}`;
+}
+function blogSiteUrl() {
+  return SITE_URL;
+}
+async function uploadStorageFile(relativePath, body, contentType) {
+  const key = process.env.BUNNY_STORAGE_API_KEY;
+  const zone = blogStorageZone();
+  if (!key)
+    throw new Error("BUNNY_STORAGE_API_KEY not configured");
+  const path = relativePath.replace(/^\/+/, "");
+  const res = await fetch(`https://storage.bunnycdn.com/${zone}/${path}`, {
+    method: "PUT",
+    headers: {
+      AccessKey: key,
+      "Content-Type": contentType
+    },
+    body
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Storage upload failed (${path}): ${res.status} ${text}`);
+  }
+}
+async function deleteStorageFile(relativePath) {
+  const key = process.env.BUNNY_STORAGE_API_KEY;
+  const zone = blogStorageZone();
+  if (!key)
+    return;
+  const path = relativePath.replace(/^\/+/, "");
+  const res = await fetch(`https://storage.bunnycdn.com/${zone}/${path}`, {
+    method: "DELETE",
+    headers: { AccessKey: key }
+  });
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text();
+    console.warn(`[Blog] Storage delete warning (${path}): ${res.status} ${text}`);
+  }
+}
+async function purgeCdnUrls(urls) {
+  const pullZoneId = process.env.BUNNY_PULL_ZONE_ID;
+  const apiKey = process.env.BUNNY_API_KEY;
+  if (!pullZoneId || !apiKey || urls.length === 0) {
+    console.warn("[Blog] CDN purge skipped \u2014 set BUNNY_PULL_ZONE_ID and BUNNY_API_KEY");
+    return;
+  }
+  const res = await fetch(`https://api.bunny.net/pullzone/${pullZoneId}/purgeCache`, {
+    method: "POST",
+    headers: {
+      AccessKey: apiKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(urls)
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    console.warn("[Blog] CDN purge failed:", res.status, text);
+  }
+}
+async function purgeBlogPaths(relativePaths) {
+  const urls = [...new Set(relativePaths.map((p) => blogPublicPath(p)))];
+  await purgeCdnUrls(urls);
+}
+
+// blog-html.ts
+function escapeHtml(text) {
+  if (text == null)
+    return "";
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+function formatDate(iso) {
+  if (!iso)
+    return "";
+  try {
+    return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+function cardImage(post) {
+  return post.featured_image_card || post.featured_image || "";
+}
+function heroImage(post) {
+  return post.featured_image_hero || post.featured_image || "";
+}
+function authorLine(post, authors) {
+  return (post.authors || []).map((slug) => authors[slug]?.name || slug.replace(/-/g, " ")).filter(Boolean).join(", ");
+}
+var PAGE_CSS = `
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #fafafa;
+  color: #1e293b;
+  line-height: 1.6;
+}
+a { color: #2563eb; }
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+}
+.site-header a.brand {
+  font-weight: 800;
+  font-size: 1.125rem;
+  color: #0f172a;
+  text-decoration: none;
+}
+.site-header nav a {
+  margin-left: 1rem;
+  text-decoration: none;
+  font-weight: 600;
+  color: #475569;
+}
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+.list-card-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+.event-card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.event-card {
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 240px;
+  overflow: hidden;
+}
+.event-card-image {
+  flex: 0 0 400px;
+  width: 400px;
+  position: relative;
+  min-height: 240px;
+  background: #f1f5f9;
+}
+.event-card-image::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--card-bg-image);
+  background-size: cover;
+  background-position: center;
+  filter: blur(60px) brightness(0.9);
+  transform: scale(1.2);
+}
+.event-card-image img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  z-index: 1;
+}
+.event-content { flex: 1; padding: 2rem 1.5rem 0; display: flex; flex-direction: column; }
+.event-title { margin: 0; font-size: 1.75rem; font-weight: 700; color: #0f172a; line-height: 1.2; }
+.event-description { color: #475569; margin: 0.75rem 0 1rem; }
+.event-meta {
+  display: flex;
+  gap: 2rem;
+  padding: 1.25rem 1.5rem;
+  margin: auto -1.5rem 0;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-top: 2px solid #bfdbfe;
+}
+.event-date-label, .event-location-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: #2563eb;
+}
+.event-date-value, .event-location-value {
+  font-weight: 700;
+  color: #1d4ed8;
+  font-size: 1.125rem;
+}
+.blog-hero-image {
+  width: 100%;
+  max-height: 400px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+}
+.blog-article-title {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 0 0 1rem;
+  color: #0f172a;
+}
+.blog-article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #475569;
+}
+.blog-tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; }
+.blog-tag {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.blog-article-body { font-size: 1.05rem; line-height: 1.8; color: #334155; }
+.blog-article-body img { max-width: 100%; height: auto; border-radius: 8px; }
+.blog-article-body h1, .blog-article-body h2, .blog-article-body h3 {
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+  color: #0f172a;
+}
+.no-posts { text-align: center; padding: 3rem; color: #64748b; }
+@media (max-width: 768px) {
+  .event-card { flex-direction: column; }
+  .event-card-image {
+    flex: none;
+    width: 100%;
+    aspect-ratio: 400 / 238;
+    min-height: 0;
+    border-radius: 16px 16px 0 0;
+  }
+}
+`;
+function pageShell(title, description, canonical, siteUrl, bodyHtml, jsonLd, ogImage) {
+  const ogType = jsonLd ? "article" : "website";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} | Dice Bastion</title>
+  <meta name="description" content="${escapeHtml(description)}">
+  <link rel="canonical" href="${escapeHtml(canonical)}">
+  <meta property="og:title" content="${escapeHtml(title)}">
+  <meta property="og:description" content="${escapeHtml(description)}">
+  <meta property="og:url" content="${escapeHtml(canonical)}">
+  <meta property="og:type" content="${ogType}">
+  ${ogImage ? `<meta property="og:image" content="${escapeHtml(ogImage)}">` : ""}
+  ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}<\/script>` : ""}
+  <style>${PAGE_CSS}</style>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="${escapeHtml(siteUrl)}/">Dice Bastion</a>
+    <nav>
+      <a href="${escapeHtml(siteUrl)}/posts/">Blog</a>
+      <a href="${escapeHtml(siteUrl)}/events/">Events</a>
+    </nav>
+  </header>
+  <main>${bodyHtml}</main>
+</body>
+</html>`;
+}
+function renderPostCard(post, siteUrl) {
+  const img = cardImage(post);
+  const summary = post.excerpt || post.seo_description || "";
+  const dateStr = formatDate(post.published_at);
+  const category = (post.categories || [])[0] || "";
+  const postUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
+  return `
+    <a href="${escapeHtml(postUrl)}" class="event-card-link">
+      <div class="event-card">
+        ${img ? `<div class="event-card-image" style="--card-bg-image: url('${escapeHtml(img)}');"><img src="${escapeHtml(img)}" alt="${escapeHtml(post.title)}" loading="lazy" decoding="async"></div>` : ""}
+        <div class="event-content">
+          <h2 class="event-title">${escapeHtml(post.title)}</h2>
+          ${summary ? `<p class="event-description">${escapeHtml(summary)}</p>` : ""}
+          <div class="event-meta">
+            <div>
+              <div class="event-date-label">Published</div>
+              <div class="event-date-value">${escapeHtml(dateStr)}</div>
+            </div>
+            ${category ? `
+              <div>
+                <div class="event-location-label">Category</div>
+                <div class="event-location-value">${escapeHtml(category)}</div>
+              </div>
+            ` : ""}
+          </div>
+        </div>
+      </div>
+    </a>`;
+}
+function renderBlogListPage(posts, siteUrl) {
+  const cards = posts.length ? posts.map((p) => renderPostCard(p, siteUrl)).join("\n") : `<div class="no-posts">No posts yet. Check back soon!</div>`;
+  const body = `
+    <h1>Blog</h1>
+    <p>News, updates, and stories from Dice Bastion.</p>
+    <section class="list-card-grid">${cards}</section>`;
+  return pageShell(
+    "Blog",
+    "News, updates, and stories from Dice Bastion.",
+    `${siteUrl}/posts/`,
+    siteUrl,
+    body
+  );
+}
+function renderBlogPostPage(post, authors, siteUrl) {
+  const hero = heroImage(post);
+  const dateStr = formatDate(post.published_at);
+  const authorsText = authorLine(post, authors);
+  const canonical = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
+  const description = post.seo_description || post.excerpt || post.title;
+  const ogImage = post.seo_image || hero || cardImage(post);
+  const tags = (post.tags || []).map((t) => `<span class="blog-tag">${escapeHtml(t)}</span>`).join("");
+  const body = `
+    ${hero ? `<img class="blog-hero-image" src="${escapeHtml(hero)}" alt="${escapeHtml(post.title)}">` : ""}
+    <h1 class="blog-article-title">${escapeHtml(post.title)}</h1>
+    <div class="blog-article-meta">
+      ${dateStr ? `<div><strong>Published:</strong> ${escapeHtml(dateStr)}</div>` : ""}
+      ${authorsText ? `<div><strong>Author:</strong> ${escapeHtml(authorsText)}</div>` : ""}
+      ${(post.categories || []).length ? `<div><strong>Category:</strong> ${escapeHtml((post.categories || []).join(", "))}</div>` : ""}
+    </div>
+    ${tags ? `<div class="blog-tag-list">${tags}</div>` : ""}
+    <div class="blog-article-body">${post.html || ""}</div>`;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    headline: post.title,
+    description,
+    datePublished: post.published_at || void 0,
+    dateModified: post.updated_at || post.published_at || void 0,
+    image: ogImage || void 0,
+    author: (post.authors || []).map((slug) => ({
+      "@type": "Person",
+      name: authors[slug]?.name || slug
+    })),
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonical }
+  };
+  return pageShell(post.title, description, canonical, siteUrl, body, jsonLd, ogImage || void 0);
+}
+function renderBlogSitemap(posts, siteUrl) {
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const urls = [
+    `  <url>
+    <loc>${siteUrl}/posts/</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>`,
+    ...posts.map((post) => {
+      const lastmod = post.updated_at || post.published_at;
+      const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
+      return `  <url>
+    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>
+    <lastmod>${mod}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>`;
+    })
+  ];
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join("\n")}
+</urlset>`;
+}
+
 // blog-edge-script.ts
 var client = createClient({
   url: process.env.BUNNY_DATABASE_URL,
@@ -4706,15 +5096,6 @@ function cleanBlogBody(html) {
   return String(html).replace(/ data-card="[^"]*"/g, "").replace(/ contenteditable="[^"]*"/g, "").replace(/ class="ql-[^"]*"/g, "").replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, "");
 }
 var migrated = false;
-function dbConfigError() {
-  if (!process.env.BUNNY_DATABASE_URL || !process.env.BUNNY_DATABASE_AUTH_TOKEN) {
-    return jsonResponse({
-      error: "database_not_configured",
-      message: "Set BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN in this script's Env Configuration (copy from the bookings script)."
-    }, 503);
-  }
-  return null;
-}
 function formatDbError(error) {
   const msg = error instanceof Error ? error.message : String(error);
   if (msg.includes("401") || msg.includes("Unauthorized")) {
@@ -4787,34 +5168,70 @@ async function upsertBlogAuthors(authorMeta) {
     });
   }
 }
-async function triggerBlogPublishDeploy() {
-  const token = process.env.GITHUB_DEPLOY_TOKEN;
-  if (!token) {
-    console.warn("[Blog] GITHUB_DEPLOY_TOKEN not configured");
-    return { ok: false, error: "github_token_not_configured" };
+async function fetchAuthorMap() {
+  const result = await client.execute("SELECT slug, name, image, bio FROM blog_authors");
+  const map = {};
+  for (const row of result.rows) {
+    const r = row;
+    map[String(r.slug)] = {
+      slug: String(r.slug),
+      name: String(r.name),
+      image: r.image || null,
+      bio: r.bio || null
+    };
   }
-  const repo = process.env.GITHUB_REPO || "nickcalamaro/DiceBastion";
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "dicebastion-blog-bunny",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ event_type: "blog-published" })
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("[Blog] GitHub dispatch failed:", res.status, text);
-      return { ok: false, error: "dispatch_failed" };
-    }
-    return { ok: true };
-  } catch (error) {
-    console.error("[Blog] GitHub dispatch error:", error);
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  return map;
+}
+async function fetchPublishedPostsForRender() {
+  const result = await client.execute(`
+    SELECT slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
+           tags, categories, series, authors, published_at, seo_description, seo_image, updated_at
+    FROM blog_posts
+    WHERE status = 'published'
+    ORDER BY published_at DESC
+  `);
+  return result.rows.map((row) => {
+    const mapped = mapBlogPostRow(row);
+    mapped.html = cleanBlogBody(row.html);
+    return mapped;
+  });
+}
+async function syncPublishedBlogToCdn(options) {
+  if (!process.env.BUNNY_STORAGE_API_KEY) {
+    console.warn("[Blog] CDN sync skipped \u2014 BUNNY_STORAGE_API_KEY not set");
+    return;
   }
+  const siteUrl = blogSiteUrl();
+  const posts = await fetchPublishedPostsForRender();
+  const authors = await fetchAuthorMap();
+  const purgePaths = ["blog/posts/index.html", "blog/posts/sitemap.xml"];
+  await uploadStorageFile(
+    "blog/posts/index.html",
+    renderBlogListPage(posts, siteUrl),
+    "text/html; charset=utf-8"
+  );
+  await uploadStorageFile(
+    "blog/posts/sitemap.xml",
+    renderBlogSitemap(posts, siteUrl),
+    "application/xml; charset=utf-8"
+  );
+  for (const post of posts) {
+    const path = `blog/posts/${post.slug}/index.html`;
+    await uploadStorageFile(
+      path,
+      renderBlogPostPage(post, authors, siteUrl),
+      "text/html; charset=utf-8"
+    );
+    purgePaths.push(path);
+  }
+  for (const slug of options?.deleteSlugs || []) {
+    if (!slug)
+      continue;
+    const path = `blog/posts/${slug}/index.html`;
+    await deleteStorageFile(path);
+    purgePaths.push(path);
+  }
+  await purgeBlogPaths(purgePaths);
 }
 async function requireAdmin(request) {
   const adminKey = request.headers.get("X-Admin-Key");
@@ -4937,7 +5354,7 @@ async function createPost(request) {
       args: [nowIso(), id]
     });
     await notifyGoogleIndexing(request, slug);
-    triggerBlogPublishDeploy().catch((err) => console.error("[Blog] deploy trigger failed:", err));
+    syncPublishedBlogToCdn().catch((err) => console.error("[Blog] CDN sync failed:", err));
   }
   return jsonResponse({ id, success: true }, 201);
 }
@@ -5069,9 +5486,14 @@ async function updatePost(id, request) {
   await upsertBlogAuthors(body.author_meta);
   const publishStateChanged = wasPublished !== nowPublished;
   const contentChangedWhilePublished = nowPublished && (body.html !== void 0 || body.slug !== void 0 || body.title !== void 0 || body.tags !== void 0 || body.categories !== void 0 || body.series !== void 0 || body.authors !== void 0 || body.featured_image !== void 0 || body.featured_image_card !== void 0 || body.featured_image_hero !== void 0 || body.excerpt !== void 0 || body.seo_description !== void 0 || body.seo_image !== void 0 || body.published_at !== void 0);
+  const oldSlug = String(existing.slug);
+  const slugChanged = body.slug !== void 0 && oldSlug !== slug;
   if (nowPublished && (publishStateChanged || contentChangedWhilePublished)) {
     await notifyGoogleIndexing(request, slug);
-    triggerBlogPublishDeploy().catch((err) => console.error("[Blog] deploy trigger failed:", err));
+    const deleteSlugs = slugChanged ? [oldSlug] : [];
+    syncPublishedBlogToCdn({ deleteSlugs }).catch((err) => console.error("[Blog] CDN sync failed:", err));
+  } else if (wasPublished && !nowPublished) {
+    syncPublishedBlogToCdn({ deleteSlugs: [oldSlug] }).catch((err) => console.error("[Blog] CDN sync failed:", err));
   }
   return jsonResponse({ success: true });
 }
@@ -5117,34 +5539,6 @@ async function taxonomyTerms() {
     authorProfiles: authorProfilesResult.rows
   });
 }
-async function publishedPosts(request) {
-  const secret = request.headers.get("X-Build-Secret");
-  if (!process.env.BLOG_BUILD_SECRET || secret !== process.env.BLOG_BUILD_SECRET) {
-    return jsonResponse({ error: "unauthorized" }, 401);
-  }
-  const dbErr = dbConfigError();
-  if (dbErr)
-    return dbErr;
-  await migrateBlogPosts();
-  const postsResult = await client.execute(`
-    SELECT id, slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
-           tags, categories, series, authors,
-           published_at, seo_description, seo_image
-    FROM blog_posts
-    WHERE status = 'published'
-    ORDER BY published_at DESC
-  `);
-  const authorsResult = await client.execute(
-    "SELECT slug, name, image, bio FROM blog_authors ORDER BY slug"
-  );
-  return jsonResponse({
-    posts: postsResult.rows.map((row) => ({
-      ...mapBlogPostRow(row),
-      html: cleanBlogBody(row.html)
-    })),
-    authors: authorsResult.rows
-  });
-}
 BunnySDK.net.http.serve(async (request) => {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
@@ -5152,9 +5546,6 @@ BunnySDK.net.http.serve(async (request) => {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   try {
-    if (path === "/internal/blog/published" && request.method === "GET") {
-      return await publishedPosts(request);
-    }
     if (path.startsWith("/admin/blog")) {
       const authError = await requireAdmin(request);
       if (authError)

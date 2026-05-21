@@ -1,16 +1,19 @@
 /**
  * Blog API - Bunny Edge Script
  *
- * Admin-managed blog posts stored in Bunny Database; Hugo CI fetches published posts.
+ * Admin-managed blog posts in Bunny Database; publish renders HTML to Storage + CDN purge.
  *
  * Bunny Dashboard → Env Configuration:
  *   - BUNNY_DATABASE_URL
  *   - BUNNY_DATABASE_AUTH_TOKEN
- *   - BLOG_BUILD_SECRET          (CI: GET /internal/blog/published)
- *   - GITHUB_DEPLOY_TOKEN        (repository_dispatch on publish)
- *   - GITHUB_REPO                (optional, default nickcalamaro/DiceBastion)
- *   - WORKER_API_URL             (admin session verify + Google indexing proxy)
- *   - ADMIN_KEY                  (optional legacy admin key fallback)
+ *   - BUNNY_STORAGE_ZONE          (default dicebastion)
+ *   - BUNNY_STORAGE_API_KEY
+ *   - BUNNY_CDN_URL               (e.g. https://dicebastion.b-cdn.net)
+ *   - BUNNY_PULL_ZONE_ID
+ *   - BUNNY_API_KEY               (account API key for CDN purge)
+ *   - SITE_URL                    (default https://dicebastion.com)
+ *   - WORKER_API_URL              (admin session verify + Google indexing proxy)
+ *   - ADMIN_KEY                   (optional legacy admin key fallback)
  *
  * Endpoints:
  *   GET    /admin/blog/posts
@@ -19,13 +22,25 @@
  *   PUT    /admin/blog/posts/:id
  *   DELETE /admin/blog/posts/:id
  *   GET    /admin/blog/taxonomy-terms
- *   GET    /internal/blog/published
  */
 
 /// <reference types="@bunny.net/edgescript-sdk" />
 
 import * as BunnySDK from "@bunny.net/edgescript-sdk";
 import { createClient } from "@libsql/client/web";
+import {
+  blogSiteUrl,
+  deleteStorageFile,
+  purgeBlogPaths,
+  uploadStorageFile,
+} from "./blog-cdn";
+import {
+  renderBlogListPage,
+  renderBlogPostPage,
+  renderBlogSitemap,
+  type BlogAuthorProfile,
+  type BlogPostRow,
+} from "./blog-html";
 
 const client = createClient({
   url: process.env.BUNNY_DATABASE_URL,
@@ -170,34 +185,76 @@ async function upsertBlogAuthors(authorMeta: Record<string, { name?: string; ima
   }
 }
 
-async function triggerBlogPublishDeploy(): Promise<{ ok: boolean; error?: string }> {
-  const token = process.env.GITHUB_DEPLOY_TOKEN;
-  if (!token) {
-    console.warn("[Blog] GITHUB_DEPLOY_TOKEN not configured");
-    return { ok: false, error: "github_token_not_configured" };
+async function fetchAuthorMap(): Promise<Record<string, BlogAuthorProfile>> {
+  const result = await client.execute("SELECT slug, name, image, bio FROM blog_authors");
+  const map: Record<string, BlogAuthorProfile> = {};
+  for (const row of result.rows) {
+    const r = row as Record<string, unknown>;
+    map[String(r.slug)] = {
+      slug: String(r.slug),
+      name: String(r.name),
+      image: (r.image as string) || null,
+      bio: (r.bio as string) || null,
+    };
   }
-  const repo = process.env.GITHUB_REPO || "nickcalamaro/DiceBastion";
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "dicebastion-blog-bunny",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ event_type: "blog-published" }),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("[Blog] GitHub dispatch failed:", res.status, text);
-      return { ok: false, error: "dispatch_failed" };
-    }
-    return { ok: true };
-  } catch (error) {
-    console.error("[Blog] GitHub dispatch error:", error);
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  return map;
+}
+
+async function fetchPublishedPostsForRender(): Promise<BlogPostRow[]> {
+  const result = await client.execute(`
+    SELECT slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
+           tags, categories, series, authors, published_at, seo_description, seo_image, updated_at
+    FROM blog_posts
+    WHERE status = 'published'
+    ORDER BY published_at DESC
+  `);
+  return result.rows.map((row) => {
+    const mapped = mapBlogPostRow(row as Record<string, unknown>) as BlogPostRow;
+    mapped.html = cleanBlogBody((row as Record<string, unknown>).html);
+    return mapped;
+  });
+}
+
+async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Promise<void> {
+  if (!process.env.BUNNY_STORAGE_API_KEY) {
+    console.warn("[Blog] CDN sync skipped — BUNNY_STORAGE_API_KEY not set");
+    return;
   }
+
+  const siteUrl = blogSiteUrl();
+  const posts = await fetchPublishedPostsForRender();
+  const authors = await fetchAuthorMap();
+  const purgePaths = ["blog/posts/index.html", "blog/posts/sitemap.xml"];
+
+  await uploadStorageFile(
+    "blog/posts/index.html",
+    renderBlogListPage(posts, siteUrl),
+    "text/html; charset=utf-8"
+  );
+  await uploadStorageFile(
+    "blog/posts/sitemap.xml",
+    renderBlogSitemap(posts, siteUrl),
+    "application/xml; charset=utf-8"
+  );
+
+  for (const post of posts) {
+    const path = `blog/posts/${post.slug}/index.html`;
+    await uploadStorageFile(
+      path,
+      renderBlogPostPage(post, authors, siteUrl),
+      "text/html; charset=utf-8"
+    );
+    purgePaths.push(path);
+  }
+
+  for (const slug of options?.deleteSlugs || []) {
+    if (!slug) continue;
+    const path = `blog/posts/${slug}/index.html`;
+    await deleteStorageFile(path);
+    purgePaths.push(path);
+  }
+
+  await purgeBlogPaths(purgePaths);
 }
 
 async function requireAdmin(request: Request): Promise<Response | null> {
@@ -327,7 +384,7 @@ async function createPost(request: Request): Promise<Response> {
       args: [nowIso(), id],
     });
     await notifyGoogleIndexing(request, slug);
-    triggerBlogPublishDeploy().catch((err) => console.error("[Blog] deploy trigger failed:", err));
+    syncPublishedBlogToCdn().catch((err) => console.error("[Blog] CDN sync failed:", err));
   }
 
   return jsonResponse({ id, success: true }, 201);
@@ -437,9 +494,15 @@ async function updatePost(id: string, request: Request): Promise<Response> {
     body.published_at !== undefined
   );
 
+  const oldSlug = String(existing.slug);
+  const slugChanged = body.slug !== undefined && oldSlug !== slug;
+
   if (nowPublished && (publishStateChanged || contentChangedWhilePublished)) {
     await notifyGoogleIndexing(request, slug);
-    triggerBlogPublishDeploy().catch((err) => console.error("[Blog] deploy trigger failed:", err));
+    const deleteSlugs = slugChanged ? [oldSlug] : [];
+    syncPublishedBlogToCdn({ deleteSlugs }).catch((err) => console.error("[Blog] CDN sync failed:", err));
+  } else if (wasPublished && !nowPublished) {
+    syncPublishedBlogToCdn({ deleteSlugs: [oldSlug] }).catch((err) => console.error("[Blog] CDN sync failed:", err));
   }
 
   return jsonResponse({ success: true });
@@ -487,37 +550,6 @@ async function taxonomyTerms(): Promise<Response> {
   });
 }
 
-async function publishedPosts(request: Request): Promise<Response> {
-  const secret = request.headers.get("X-Build-Secret");
-  if (!process.env.BLOG_BUILD_SECRET || secret !== process.env.BLOG_BUILD_SECRET) {
-    return jsonResponse({ error: "unauthorized" }, 401);
-  }
-
-  const dbErr = dbConfigError();
-  if (dbErr) return dbErr;
-
-  await migrateBlogPosts();
-  const postsResult = await client.execute(`
-    SELECT id, slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
-           tags, categories, series, authors,
-           published_at, seo_description, seo_image
-    FROM blog_posts
-    WHERE status = 'published'
-    ORDER BY published_at DESC
-  `);
-  const authorsResult = await client.execute(
-    "SELECT slug, name, image, bio FROM blog_authors ORDER BY slug"
-  );
-
-  return jsonResponse({
-    posts: postsResult.rows.map((row) => ({
-      ...mapBlogPostRow(row as Record<string, unknown>),
-      html: cleanBlogBody((row as Record<string, unknown>).html),
-    })),
-    authors: authorsResult.rows,
-  });
-}
-
 BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
@@ -527,10 +559,6 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
   }
 
   try {
-    if (path === "/internal/blog/published" && request.method === "GET") {
-      return await publishedPosts(request);
-    }
-
     if (path.startsWith("/admin/blog")) {
       const authError = await requireAdmin(request);
       if (authError) return authError;

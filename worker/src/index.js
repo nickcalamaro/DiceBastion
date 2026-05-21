@@ -10744,6 +10744,7 @@ export default {
    * from normal API requests (workers.dev domain).
    *
    * dicebastion.com/events/*         → Event SEO pages / origin pass-through
+   * dicebastion.com/posts/*          → Blog HTML proxied from Bunny CDN
    * shop.dicebastion.com/products/*  → Product SEO pages / origin pass-through
    *
    * Calling fetch(request) OUTSIDE Hono guarantees Cloudflare sends to origin,
@@ -10854,6 +10855,44 @@ export default {
         })
       } catch (e) {
         return fetch(request)
+      }
+    }
+
+    // ====== BLOG: dicebastion.com/posts/* → Bunny CDN pre-rendered HTML ======
+    if (host.includes('dicebastion.com') && !host.includes('shop.') && url.pathname.startsWith('/posts')) {
+      const cdnBase = String(env.BUNNY_CDN_URL || 'https://dicebastion.b-cdn.net').replace(/\/+$/, '')
+      const trimmed = url.pathname.replace(/\/+$/, '') || '/'
+      const parts = trimmed.split('/')
+
+      async function proxyBlogCdn(storagePath) {
+        const target = `${cdnBase}/${storagePath.replace(/^\/+/, '')}`
+        try {
+          const res = await fetch(target, {
+            headers: { Accept: request.headers.get('Accept') || '*/*' }
+          })
+          if (!res.ok) {
+            return new Response('Not found', { status: res.status === 404 ? 404 : 502 })
+          }
+          const headers = new Headers(res.headers)
+          headers.set('Cache-Control', 'public, max-age=300, s-maxage=600')
+          return new Response(res.body, { status: res.status, headers })
+        } catch (e) {
+          console.error('[posts proxy]', e)
+          return new Response('Blog unavailable', { status: 502 })
+        }
+      }
+
+      if (url.pathname === '/posts/sitemap.xml') {
+        return proxyBlogCdn('blog/posts/sitemap.xml')
+      }
+
+      const slug = parts.length === 3 ? parts[2] : null
+      if (slug && !slug.includes('.')) {
+        return proxyBlogCdn(`blog/posts/${encodeURIComponent(slug)}/index.html`)
+      }
+
+      if (trimmed === '/posts' || trimmed === '/posts/index.html') {
+        return proxyBlogCdn('blog/posts/index.html')
       }
     }
 

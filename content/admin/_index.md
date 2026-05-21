@@ -5419,7 +5419,7 @@ async function blogSaveDraft() {
 async function blogPublish() {
   const confirmed = await Modal.confirm({
     title: 'Publish post?',
-    message: 'This will publish the post and trigger a site rebuild (usually 2–4 minutes).',
+    message: 'This will publish the post to /posts/ immediately (no site rebuild).',
   });
   if (!confirmed) return;
 
@@ -5457,7 +5457,7 @@ async function blogPublish() {
     blogUpdateStatusUi('published');
     await loadBlogTaxonomyTerms();
     await loadBlogPosts();
-    blogSetActionResult('Published. Site rebuild triggered — check /posts/ in a few minutes.', false);
+    blogSetActionResult('Published. Live at /posts/ now.', false);
   } catch (err) {
     blogSetActionResult(err.message || 'Publish failed', true);
   } finally {
@@ -5471,7 +5471,7 @@ async function blogUnpublish() {
   if (!id) return;
   const confirmed = await Modal.confirm({
     title: 'Unpublish post?',
-    message: 'The post will be removed from the public site on the next rebuild.',
+    message: 'The post will be removed from the public site immediately.',
   });
   if (!confirmed) return;
   try {
@@ -5487,7 +5487,7 @@ async function blogUnpublish() {
     if (!res.ok) throw new Error(data.error || 'Unpublish failed');
     blogUpdateStatusUi('draft');
     await loadBlogPosts();
-    blogSetActionResult('Post unpublished. Site rebuild triggered.', false);
+    blogSetActionResult('Post unpublished.', false);
   } catch (err) {
     blogSetActionResult(err.message || 'Unpublish failed', true);
   }

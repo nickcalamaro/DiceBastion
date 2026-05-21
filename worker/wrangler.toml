@@ -11,6 +11,8 @@ workers_dev = true
 routes = [
   { pattern = "dicebastion.com/events/*", zone_name = "dicebastion.com" },
   { pattern = "www.dicebastion.com/events/*", zone_name = "dicebastion.com" },
+  { pattern = "dicebastion.com/posts/*", zone_name = "dicebastion.com" },
+  { pattern = "www.dicebastion.com/posts/*", zone_name = "dicebastion.com" },
   # Hugo emits pages-sitemap.xml on Pages; this path is NOT under /products/* so it needs its own route.
   { pattern = "shop.dicebastion.com/pages-sitemap.xml", zone_name = "dicebastion.com" },
   { pattern = "shop.dicebastion.com/products/*", zone_name = "dicebastion.com" }
@@ -42,6 +44,7 @@ FREE_TRIAL_SETUP_AUTH_AMOUNT = "1"
 SUPPORT_CONTACT_EMAIL = "contact@dicebastion.com"
 ALLOW_TEST_BYPASS = "true"
 R2_PUBLIC_URL = "https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev"
+BUNNY_CDN_URL = "https://dicebastion.b-cdn.net"
 # Fetch Hugo-built shop XML from Pages host (avoids Worker→same-URL fetch loops on custom domain).
 SHOP_PAGES_ORIGIN = "https://dicebastion-shop.pages.dev"
 

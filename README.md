@@ -44,20 +44,20 @@ Drafts are also cached in `localStorage` as crash recovery. Server-side drafts s
 
 The **Blog** tab (`/admin#blog`) manages posts stored in **Bunny Database** via the blog edge script (`bgg-bunny/blog-edge-script.ts`, script ID `75941`).
 
-1. **Create** — Title, slug, excerpt, featured image (R2 upload via worker), SEO fields, publish date.
+1. **Create** — Title, slug, excerpt, featured image (crop + multi-size upload via worker R2), SEO fields, publish date.
 2. **Taxonomies** — Tags, categories, series, and authors as chip inputs with autocomplete from existing posts.
-3. **Authors** — First use of an author slug prompts for display name, avatar URL, and bio (stored in `blog_authors`, generated as `data/authors/*.yaml` at build time).
+3. **Authors** — First use of an author slug prompts for display name, avatar URL, and bio (stored in `blog_authors`).
 4. **Save draft** — `POST/PUT` to the Bunny blog API with `status: draft`.
-5. **Publish** — Sets `status: published`, notifies Google Indexing API (via worker proxy), and triggers a GitHub Actions rebuild via `repository_dispatch` (`blog-published`).
-6. **Unpublish** — Reverts to draft and triggers another rebuild to remove the post from the site.
+5. **Publish** — Sets `status: published`, renders HTML to Bunny Storage, purges CDN, and notifies Google Indexing API (via worker proxy). No Hugo rebuild.
+6. **Unpublish** — Reverts to draft; CDN files are updated on the next sync.
 
-Published posts appear at `/posts/{slug}/` with native Blowfish taxonomy pages at `/tags/`, `/categories/`, `/series/`, and `/authors/`.
+Published posts appear at `/posts/` (list) and `/posts/{slug}/` (article). The Cloudflare Worker proxies those paths to pre-rendered HTML on Bunny CDN (`dicebastion.b-cdn.net/blog/posts/...`).
 
-**Bunny blog routes:** `GET/POST /admin/blog/posts`, `GET/PUT/DELETE /admin/blog/posts/:id`, `GET /admin/blog/taxonomy-terms`, `GET /internal/blog/published`.
+**Bunny blog routes:** `GET/POST /admin/blog/posts`, `GET/PUT/DELETE /admin/blog/posts/:id`, `GET /admin/blog/taxonomy-terms`.
 
 ### Other admin areas
 
-Events, shop products, memberships, bookings, and cron jobs are also managed from `/admin`. Events and shop products use worker-rendered SEO pages; blog posts use Hugo static generation instead.
+Events, shop products, memberships, bookings, and cron jobs are also managed from `/admin`. Events and shop products use worker-rendered SEO pages; blog posts are pre-rendered on Bunny CDN at publish time.
 
 ## Content model
 
@@ -67,17 +67,17 @@ Events, shop products, memberships, bookings, and cron jobs are also managed fro
 | Events | D1 `events` | Worker HTML at `/events/{slug}` |
 | Shop products | D1 + Hugo shop | Worker + shop subdomain |
 | Newsletters | D1 `newsletter_drafts` | Email (not on site) |
-| Blog posts | Bunny Database `blog_posts` | Hugo markdown generated in CI |
+| Blog posts | Bunny Database `blog_posts` | Pre-rendered HTML on Bunny CDN; Worker proxies `/posts/*` |
 
 D1 schema: [Database_Schema.md](Database_Schema.md).
 
 ## Deploy
 
-**Hugo site (GitHub Pages)** — `.github/workflows/hugo.yml` runs on push to `master`, daily schedule, manual dispatch, and `repository_dispatch` type `blog-published`. Before `hugo`, CI runs `node scripts/generate-blog-content.js`, which fetches published posts from the **Bunny blog edge script** and writes `content/posts/*.md` plus `data/authors/*.yaml`.
+**Hugo site (GitHub Pages)** — `.github/workflows/hugo.yml` runs on push to `master`, daily schedule, and manual dispatch. Blog content is not generated at build time.
 
-**Bunny edge scripts** — `.github/workflows/release-on-bunny.yml` builds and deploys scripts including the blog API (script ID `75941`).
+**Bunny edge scripts** — `.github/workflows/release-on-bunny.yml` builds and deploys scripts including the blog API (script ID `75941`). On publish, the blog script renders HTML to Storage and purges the CDN.
 
-**Worker** — `cd worker && wrangler deploy` (memberships, events, shop, newsletters, image uploads — not blog)
+**Worker** — `cd worker && wrangler deploy` (memberships, events, shop, newsletters, image uploads, thin `/posts/*` CDN proxy)
 
 ## Secrets checklist
 
@@ -86,9 +86,8 @@ D1 schema: [Database_Schema.md](Database_Schema.md).
 | Secret | Purpose |
 |--------|---------|
 | `DEPLOY_KEY` | Bunny edge script deploy key (Script → Deployments → Settings). Used by `release-on-bunny.yml` for all scripts including blog (`75941`). Alternatively, link the repo via Bunny GitHub App integration and omit this. |
-| `BLOG_BUILD_SECRET` | Shared with Bunny blog script; CI sends it as `X-Build-Secret` to `GET /internal/blog/published` |
 
-Set **`BLOG_API_URL`** in GitHub repo variables only if you need to override the default (`https://dicebastionblogger-yvfyf.bunny.run`). The admin panel uses the same URL via `static/js/utils.js`.
+The admin panel uses `https://dicebastionblogger-yvfyf.bunny.run` via `static/js/utils.js` (`__BLOG_API_BASE`).
 
 ### Bunny edge script env (script ID `75941` → Env Configuration)
 
@@ -96,13 +95,22 @@ Set **`BLOG_API_URL`** in GitHub repo variables only if you need to override the
 |----------|---------|
 | `BUNNY_DATABASE_URL` | libSQL URL (same Bunny Database as bookings, or a dedicated DB) |
 | `BUNNY_DATABASE_AUTH_TOKEN` | libSQL auth token |
-| `BLOG_BUILD_SECRET` | Must match GitHub `BLOG_BUILD_SECRET`; protects `/internal/blog/published` |
-| `GITHUB_DEPLOY_TOKEN` | PAT with `repo` + `actions` scope; triggers Hugo rebuild on publish |
-| `GITHUB_REPO` | Optional; default `nickcalamaro/DiceBastion` |
+| `BUNNY_STORAGE_ZONE` | Storage zone name (default `dicebastion`) |
+| `BUNNY_STORAGE_API_KEY` | Storage zone password (AccessKey for uploads) |
+| `BUNNY_CDN_URL` | Pull zone URL (e.g. `https://dicebastion.b-cdn.net`) |
+| `BUNNY_PULL_ZONE_ID` | Pull zone ID for cache purge on publish |
+| `BUNNY_API_KEY` | Bunny account API key for purge API |
+| `SITE_URL` | Public site URL (default `https://dicebastion.com`) |
 | `WORKER_API_URL` | Cloudflare worker URL; used to verify admin sessions and proxy Google indexing |
 | `ADMIN_KEY` | Optional; legacy `X-Admin-Key` fallback (same value as worker `ADMIN_KEY` if used) |
 
-### Cloudflare Worker secrets (unchanged for blog)
+### Cloudflare Worker vars
+
+| Variable | Purpose |
+|----------|---------|
+| `BUNNY_CDN_URL` | Bunny pull zone URL; Worker proxies `/posts/*` to `{BUNNY_CDN_URL}/blog/posts/...` |
+
+### Cloudflare Worker secrets
 
 | Secret | Purpose |
 |--------|---------|
