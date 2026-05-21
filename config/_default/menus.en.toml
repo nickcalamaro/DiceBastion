@@ -10,13 +10,6 @@ weight = 9997
 [main.params]
 visibility = 3
 
-[[main]]
-name = "Memberships"
-pageRef = "Memberships"
-identifier = "MU5KHCnt3z"
-weight = 9998
-[main.params]
-visibility = 3
 
 [[main]]
 name = "About Us"
@@ -27,12 +20,38 @@ weight = 9999
 visibility = 3
 
 [[main]]
-name = "Book a Table"
-pageRef = "Bookings"
-identifier = "qwkjjnq"
-weight = 133
+name = "Services"
+identifier = "GJSJUISJ"
+weight = 9998
 [main.params]
 visibility = 3
+
+[[main]]
+name = "Memberships"
+pageRef = "Memberships"
+parent = "GJSJUISJ"
+weight = 1
+[main.params]
+visibility = 3
+
+
+[[main]]
+name = "Book a Table"
+pageRef = "Bookings"
+parent = "GJSJUISJ"
+weight = 2
+[main.params]
+visibility = 3
+
+[[main]]
+name = "Board Game Library"
+pageRef = "board-game-library"
+parent = "GJSJUISJ"
+weight = 3
+[main.params]
+visibility = 3
+
+
 
 
 [[main]]
@@ -48,14 +67,6 @@ name = "Team"
 pageRef = "team"
 parent = "MU5KHCnt3y"
 weight = 2
-[main.params]
-visibility = 3
-
-[[main]]
-name = "Board Game Library"
-pageRef = "board-game-library"
-parent = "MU5KHCnt3y"
-weight = 3
 [main.params]
 visibility = 3
 

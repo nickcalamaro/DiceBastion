@@ -5,4 +5,13 @@
 
 /* Form styles now consolidated in components.css */
 
-/* Additional custom styles can go here */
+/* Nested header dropdowns (Services, About Us, etc.) */
+.menuhide > div {
+  min-width: 13rem;
+  width: max-content;
+}
+
+.menuhide a p,
+.menuhide a.menu-item {
+  white-space: nowrap;
+}

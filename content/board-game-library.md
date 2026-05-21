@@ -4,7 +4,7 @@ description: "Browse our collection of board games available at Dice Bastion. Fr
 summary: "Explore Dice Bastion's collection of board games available to play in Gibraltar's tabletop gaming hub."
 layout: "board-game-library"
 images:
-  - /img/clubfull.png
+  - /img/boardgamelibrary.jpg
 keywords:
   - board game library
   - board games Gibraltar
