@@ -60,6 +60,8 @@ Rendered by `bgg-bunny/blog-html.ts` and uploaded to Bunny Storage on publish.
 - Meta band (date, category): `.blog-article-meta` with `.blog-meta-label` / `.blog-meta-value`
 - Tags: `.blog-tag-list` > `.blog-tag` (same visual weight as `.team-tag-primary`)
 - Body: `.blog-article-body` — Quill HTML; strip Hugo `.author` blocks on render
+- Default social preview image: `https://dicebastion.com/img/DB_Logo_2025.png` (override per post via admin `seo_image`)
+- Blog sitemap: `https://dicebastion.com/posts/sitemap.xml` (listed in `layouts/robots.txt`)
 
 ## Copy guidelines
 

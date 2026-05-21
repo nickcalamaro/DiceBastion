@@ -48,6 +48,78 @@ const SITE_NAV = [
   { label: "Shop", href: "https://shop.dicebastion.com", external: true },
 ];
 
+const SITE_NAME = "Gibraltar Dice Bastion";
+const BLOG_SEO_DESCRIPTION =
+  "Board game reviews, event recaps, and club news from Gibraltar Dice Bastion — Gibraltar's home for tabletop gaming.";
+const BLOG_SEO_INTRO =
+  "Our little spot of the internet for all things tabletop happening in Gibraltar. " +
+  "Check back regularly for board game reviews, event recaps, and a behind-the-scenes look at your favourite gaming club.";
+
+function defaultOgImage(siteUrl: string): string {
+  return `${siteUrl}/img/DB_Logo_2025.png`;
+}
+
+function resolvePostOgImage(post: BlogPostRow, siteUrl: string): string {
+  return post.seo_image?.trim() || defaultOgImage(siteUrl);
+}
+
+function latestIsoDate(posts: BlogPostRow[]): string {
+  let latest = "";
+  for (const post of posts) {
+    const candidate = post.updated_at || post.published_at || "";
+    if (candidate > latest) latest = candidate;
+  }
+  return latest ? new Date(latest).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+}
+
+function jsonLdScript(data: object | object[]): string {
+  const payload = Array.isArray(data)
+    ? { "@context": "https://schema.org", "@graph": data }
+    : data;
+  return `<script type="application/ld+json">${JSON.stringify(payload)}</script>`;
+}
+
+function publisherJsonLd(siteUrl: string): object {
+  return {
+    "@type": "Organization",
+    name: SITE_NAME,
+    url: siteUrl,
+    logo: { "@type": "ImageObject", url: defaultOgImage(siteUrl) },
+  };
+}
+
+function buildBlogIndexJsonLd(posts: BlogPostRow[], siteUrl: string): object {
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        name: SITE_NAME,
+        url: siteUrl,
+        publisher: publisherJsonLd(siteUrl),
+      },
+      {
+        "@type": "Blog",
+        name: "Dice Bastion Blog",
+        description: BLOG_SEO_DESCRIPTION,
+        url: `${siteUrl}/posts/`,
+        inLanguage: "en-GB",
+        publisher: publisherJsonLd(siteUrl),
+      },
+      {
+        "@type": "ItemList",
+        name: "Latest blog posts",
+        itemListElement: posts.slice(0, 20).map((post, index) => ({
+          "@type": "ListItem",
+          position: index + 1,
+          url: `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`,
+          name: post.title,
+        })),
+      },
+    ],
+  };
+}
+
 /** Match admin blogSlugify for consistent tag URLs. */
 export function slugifyTaxonomy(value: string): string {
   return String(value || "")
@@ -339,6 +411,14 @@ main.page-container {
   color: rgb(var(--color-neutral-500));
   font-size: 1.05rem;
 }
+.blog-seo-intro {
+  max-width: 760px;
+  margin-bottom: 1.5rem;
+  color: rgb(var(--color-neutral-600));
+  font-size: 1.02rem;
+  line-height: 1.75;
+}
+.blog-seo-intro p { margin: 0; }
 .blog-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 240px;
@@ -646,30 +726,49 @@ function renderSiteHeader(siteUrl: string): string {
     </header>`;
 }
 
+interface PageShellOptions {
+  jsonLd?: object;
+  ogImage?: string;
+  ogType?: "website" | "article";
+}
+
 function pageShell(
   title: string,
   description: string,
   canonical: string,
   siteUrl: string,
   bodyHtml: string,
-  jsonLd?: object,
-  ogImage?: string
+  options: PageShellOptions = {}
 ): string {
-  const ogType = jsonLd ? "article" : "website";
+  const ogImage = options.ogImage || defaultOgImage(siteUrl);
+  const ogType = options.ogType || "website";
+  const fullTitle = `${title} | Dice Bastion`;
+  const jsonLd = options.jsonLd ? jsonLdScript(options.jsonLd) : "";
+
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)} | Dice Bastion</title>
+  <title>${escapeHtml(fullTitle)}</title>
   <meta name="description" content="${escapeHtml(description)}">
+  <meta name="robots" content="index, follow">
   <link rel="canonical" href="${escapeHtml(canonical)}">
+  <link rel="sitemap" type="application/xml" title="Blog Sitemap" href="${escapeHtml(siteUrl)}/posts/sitemap.xml">
+  <meta property="og:site_name" content="${escapeHtml(SITE_NAME)}">
+  <meta property="og:locale" content="en_GB">
   <meta property="og:title" content="${escapeHtml(title)}">
   <meta property="og:description" content="${escapeHtml(description)}">
   <meta property="og:url" content="${escapeHtml(canonical)}">
   <meta property="og:type" content="${ogType}">
-  ${ogImage ? `<meta property="og:image" content="${escapeHtml(ogImage)}">` : ""}
-  ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ""}
+  <meta property="og:image" content="${escapeHtml(ogImage)}">
+  <meta property="og:image:alt" content="${escapeHtml(SITE_NAME)} logo">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${escapeHtml(fullTitle)}">
+  <meta name="twitter:description" content="${escapeHtml(description)}">
+  <meta name="twitter:image" content="${escapeHtml(ogImage)}">
+  <meta name="twitter:image:alt" content="${escapeHtml(SITE_NAME)} logo">
+  ${jsonLd}
   <style>${PAGE_CSS}</style>
 </head>
 <body>
@@ -713,10 +812,12 @@ function renderPostCard(post: BlogPostRow, siteUrl: string): string {
 interface ListPageOptions {
   title: string;
   subtitle?: string;
+  seoIntro?: string;
   canonical: string;
   metaDescription: string;
   activeTag?: string;
   activeAuthor?: string;
+  jsonLd?: object;
 }
 
 function renderBlogListLayout(
@@ -736,6 +837,7 @@ function renderBlogListLayout(
       <h1>${escapeHtml(options.title)}</h1>
       ${options.subtitle ? `<p class="blog-list-subtitle">${escapeHtml(options.subtitle)}</p>` : ""}
     </header>
+    ${options.seoIntro ? `<div class="blog-seo-intro"><p>${escapeHtml(options.seoIntro)}</p></div>` : ""}
     <div class="blog-layout">
       <div class="blog-main">
         <section class="list-card-grid">${cards}</section>
@@ -743,7 +845,11 @@ function renderBlogListLayout(
       ${renderTaxonomySidebar(taxonomy, siteUrl, { tag: options.activeTag, author: options.activeAuthor })}
     </div>`;
 
-  return pageShell(options.title, options.metaDescription, options.canonical, siteUrl, body);
+  return pageShell(options.title, options.metaDescription, options.canonical, siteUrl, body, {
+    ogImage: defaultOgImage(siteUrl),
+    ogType: "website",
+    jsonLd: options.jsonLd,
+  });
 }
 
 export function renderBlogListPage(
@@ -753,9 +859,11 @@ export function renderBlogListPage(
 ): string {
   return renderBlogListLayout(posts, posts, authors, siteUrl, {
     title: "Blog",
-    subtitle: "News and updates from Dice Bastion.",
+    subtitle: "News and updates from Gibraltar Dice Bastion.",
+    seoIntro: BLOG_SEO_INTRO,
     canonical: `${siteUrl}/posts/`,
-    metaDescription: "News and updates from Dice Bastion.",
+    metaDescription: BLOG_SEO_DESCRIPTION,
+    jsonLd: buildBlogIndexJsonLd(posts, siteUrl),
   });
 }
 
@@ -771,8 +879,17 @@ export function renderBlogTagPage(
     title: label,
     subtitle: `Posts tagged “${label}”.`,
     canonical: `${siteUrl}/posts/tag/${encodeURIComponent(tagSlug)}/`,
-    metaDescription: `Blog posts tagged ${label} on Dice Bastion.`,
+    metaDescription: `Board game blog posts tagged “${label}” from Gibraltar Dice Bastion.`,
     activeTag: tagSlug,
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      name: `Posts tagged “${label}”`,
+      description: `Blog posts tagged “${label}” on Dice Bastion.`,
+      url: `${siteUrl}/posts/tag/${encodeURIComponent(tagSlug)}/`,
+      isPartOf: { "@type": "Blog", name: "Dice Bastion Blog", url: `${siteUrl}/posts/` },
+      publisher: publisherJsonLd(siteUrl),
+    },
   });
 }
 
@@ -788,8 +905,22 @@ export function renderBlogAuthorPage(
     title: name,
     subtitle: `Posts by ${name}.`,
     canonical: `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`,
-    metaDescription: `Blog posts by ${name} on Dice Bastion.`,
+    metaDescription: `Blog posts by ${name} on Gibraltar Dice Bastion.`,
     activeAuthor: authorSlug,
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@type": "ProfilePage",
+      name: `Posts by ${name}`,
+      description: `Articles written by ${name} on the Dice Bastion blog.`,
+      url: `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`,
+      mainEntity: {
+        "@type": "Person",
+        name,
+        url: `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`,
+      },
+      isPartOf: { "@type": "Blog", name: "Dice Bastion Blog", url: `${siteUrl}/posts/` },
+      publisher: publisherJsonLd(siteUrl),
+    },
   });
 }
 
@@ -803,7 +934,7 @@ export function renderBlogPostPage(
   const authorProfiles = resolvePostAuthors(post, authors);
   const canonical = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
   const description = post.seo_description || post.excerpt || post.title;
-  const ogImage = post.seo_image || hero || cardImage(post);
+  const ogImage = resolvePostOgImage(post, siteUrl);
   const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
   const sanitizedBody = stripEmbeddedAuthorBlocks(post.html || "");
@@ -838,15 +969,22 @@ export function renderBlogPostPage(
     description,
     datePublished: post.published_at || undefined,
     dateModified: post.updated_at || post.published_at || undefined,
-    image: ogImage || undefined,
+    image: ogImage,
     author: authorProfiles.map((profile) => ({
       "@type": "Person",
       name: profile.name,
+      url: `${siteUrl}/posts/author/${encodeURIComponent(profile.slug)}/`,
     })),
+    publisher: publisherJsonLd(siteUrl),
     mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
+    isPartOf: { "@type": "Blog", name: "Dice Bastion Blog", url: `${siteUrl}/posts/` },
   };
 
-  return pageShell(post.title, description, canonical, siteUrl, body, jsonLd, ogImage || undefined);
+  return pageShell(post.title, description, canonical, siteUrl, body, {
+    jsonLd,
+    ogImage,
+    ogType: "article",
+  });
 }
 
 export function renderBlogSitemap(
@@ -855,28 +993,29 @@ export function renderBlogSitemap(
   siteUrl: string
 ): string {
   const today = new Date().toISOString().split("T")[0];
+  const indexLastmod = latestIsoDate(posts);
   const taxonomy = buildTaxonomyIndex(posts, authors);
   const urls: string[] = [
-    `  <url>\n    <loc>${siteUrl}/posts/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>`,
+    `  <url>\n    <loc>${siteUrl}/posts/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>`,
   ];
 
   for (const post of posts) {
     const lastmod = post.updated_at || post.published_at;
     const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
     urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`
+      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>`
     );
   }
 
   for (const tag of taxonomy.tags) {
     urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/tag/${encodeURIComponent(tag.slug)}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.5</priority>\n  </url>`
+      `  <url>\n    <loc>${siteUrl}/posts/tag/${encodeURIComponent(tag.slug)}/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>\n  </url>`
     );
   }
 
   for (const author of taxonomy.authors) {
     urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/author/${encodeURIComponent(author.slug)}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.5</priority>\n  </url>`
+      `  <url>\n    <loc>${siteUrl}/posts/author/${encodeURIComponent(author.slug)}/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>\n  </url>`
     );
   }
 
