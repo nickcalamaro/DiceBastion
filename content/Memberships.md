@@ -279,7 +279,7 @@ For those able to give a bit more, or for those of you who can't afford a member
   document.getElementById('sponsor-cta-btn').addEventListener('click', openSponsorInfoModal);
 
   function openSponsorInfoModal() {
-    sponsorModal = new Modal({
+    const infoModal = new Modal({
       title: 'Sponsor a Membership',
       size: 'md',
       closeOnBackdrop: true,
@@ -294,12 +294,14 @@ For those able to give a bit more, or for those of you who can't afford a member
           Continue to Checkout
         </button>
       `,
-      onClose: () => { sponsorModal = null; }
+      onClose: () => {
+        if (sponsorModal === infoModal) sponsorModal = null;
+      }
     });
-    sponsorModal.open();
-    sponsorModal.querySelector('#sponsor-info-proceed').addEventListener('click', () => {
-      sponsorModal.close();
-      sponsorModal = null;
+    sponsorModal = infoModal;
+    infoModal.open();
+    infoModal.querySelector('#sponsor-info-proceed').addEventListener('click', () => {
+      infoModal.close();
       openSponsorCheckoutModal();
     });
   }
@@ -352,7 +354,7 @@ For those able to give a bit more, or for those of you who can't afford a member
       </div>
     `;
 
-    sponsorModal = new Modal({
+    const checkoutModal = new Modal({
       title: 'Sponsor a Membership – Checkout',
       size: 'md',
       closeOnBackdrop: false,
@@ -362,9 +364,12 @@ For those able to give a bit more, or for those of you who can't afford a member
         <div id="sp-sumup-card" class="modal-widget-container"></div>
         <div id="sp-error" class="modal-error"></div>
       `,
-      onClose: () => { sponsorModal = null; }
+      onClose: () => {
+        if (sponsorModal === checkoutModal) sponsorModal = null;
+      }
     });
-    sponsorModal.open();
+    sponsorModal = checkoutModal;
+    checkoutModal.open();
 
     // Render Turnstile
     if (isLoggedIn) {
@@ -374,16 +379,16 @@ For those able to give a bit more, or for those of you who can't afford a member
     }
 
     // Wire up buttons
-    const guestContinue  = sponsorModal.querySelector('#sp-continue');
-    const loggedContinue = sponsorModal.querySelector('#sp-continue-logged');
-    const useDiff        = sponsorModal.querySelector('#sp-use-different');
+    const guestContinue  = checkoutModal.querySelector('#sp-continue');
+    const loggedContinue = checkoutModal.querySelector('#sp-continue-logged');
+    const useDiff        = checkoutModal.querySelector('#sp-use-different');
 
     if (guestContinue)  guestContinue.addEventListener('click',  handleSponsorGuestContinue);
     if (loggedContinue) loggedContinue.addEventListener('click', handleSponsorLoggedContinue);
     if (useDiff) {
       useDiff.addEventListener('click', () => {
-        sponsorModal.querySelector('#sp-guest-step').style.display  = 'block';
-        sponsorModal.querySelector('#sp-logged-step').style.display = 'none';
+        checkoutModal.querySelector('#sp-guest-step').style.display  = 'block';
+        checkoutModal.querySelector('#sp-logged-step').style.display = 'none';
         setTimeout(() => window.utils.renderTurnstile('sp-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
       });
     }
@@ -399,6 +404,10 @@ For those able to give a bit more, or for those of you who can't afford a member
   }
 
   async function handleSponsorGuestContinue() {
+    if (!sponsorModal) {
+      showSponsorAlert('Checkout session expired. Please start again.', 'error');
+      return;
+    }
     const email   = (sponsorModal.querySelector('#sp-email')?.value || '').trim();
     const name    = (sponsorModal.querySelector('#sp-name')?.value  || '').trim();
     const consent = sponsorModal.querySelector('#sp-privacy')?.checked;
@@ -417,6 +426,10 @@ For those able to give a bit more, or for those of you who can't afford a member
   }
 
   async function doSponsorCheckout(email, name, privacyConsent, turnstileToken) {
+    if (!sponsorModal) {
+      showSponsorAlert('Checkout session expired. Please start again.', 'error');
+      return;
+    }
     try {
       clearSponsorError();
       const resp = await fetch(`${API_BASE}/membership/sponsor/checkout`, {
@@ -505,7 +518,7 @@ For those able to give a bit more, or for those of you who can't afford a member
   });
 
   function openClaimDisclaimerModal() {
-    claimModal = new Modal({
+    const disclaimerModal = new Modal({
       title: 'Sponsored Membership',
       size: 'md',
       closeOnBackdrop: true,
@@ -520,12 +533,14 @@ For those able to give a bit more, or for those of you who can't afford a member
           I understand – Claim my Membership
         </button>
       `,
-      onClose: () => { claimModal = null; }
+      onClose: () => {
+        if (claimModal === disclaimerModal) claimModal = null;
+      }
     });
-    claimModal.open();
-    claimModal.querySelector('#claim-info-proceed').addEventListener('click', () => {
-      claimModal.close();
-      claimModal = null;
+    claimModal = disclaimerModal;
+    disclaimerModal.open();
+    disclaimerModal.querySelector('#claim-info-proceed').addEventListener('click', () => {
+      disclaimerModal.close();
       openClaimFormModal();
     });
   }
@@ -578,7 +593,7 @@ For those able to give a bit more, or for those of you who can't afford a member
       </div>
     `;
 
-    claimModal = new Modal({
+    const formModal = new Modal({
       title: 'Claim your Sponsored Membership',
       size: 'md',
       closeOnBackdrop: false,
@@ -587,9 +602,12 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedForm}
         <div id="cl-error" class="modal-error"></div>
       `,
-      onClose: () => { claimModal = null; }
+      onClose: () => {
+        if (claimModal === formModal) claimModal = null;
+      }
     });
-    claimModal.open();
+    claimModal = formModal;
+    formModal.open();
 
     // Render Turnstile
     if (isLoggedIn) {
@@ -598,16 +616,16 @@ For those able to give a bit more, or for those of you who can't afford a member
       setTimeout(() => window.utils.renderTurnstile('cl-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
     }
 
-    const guestContinue  = claimModal.querySelector('#cl-continue');
-    const loggedContinue = claimModal.querySelector('#cl-continue-logged');
-    const useDiff        = claimModal.querySelector('#cl-use-different');
+    const guestContinue  = formModal.querySelector('#cl-continue');
+    const loggedContinue = formModal.querySelector('#cl-continue-logged');
+    const useDiff        = formModal.querySelector('#cl-use-different');
 
     if (guestContinue)  guestContinue.addEventListener('click',  handleClaimGuest);
     if (loggedContinue) loggedContinue.addEventListener('click', handleClaimLogged);
     if (useDiff) {
       useDiff.addEventListener('click', () => {
-        claimModal.querySelector('#cl-guest-step').style.display  = 'block';
-        claimModal.querySelector('#cl-logged-step').style.display = 'none';
+        formModal.querySelector('#cl-guest-step').style.display  = 'block';
+        formModal.querySelector('#cl-logged-step').style.display = 'none';
         setTimeout(() => window.utils.renderTurnstile('cl-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
       });
     }
