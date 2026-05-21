@@ -1,0 +1,5 @@
+{{ with .Params.images }}
+  {{ with index . 0 }}
+  <meta property="og:image:alt" content="{{ $.Title }} at Dice Bastion Gibraltar" />
+  {{ end }}
+{{ end }}
