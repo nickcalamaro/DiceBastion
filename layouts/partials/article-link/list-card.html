@@ -1,0 +1,43 @@
+{{ $cardImage := .Params.cardImage | default .Params.featureimage | default .Params.featuredImage }}
+{{ $summary := .Description | default .Summary }}
+{{ $authorsData := .Site.Data.authors }}
+<a href="{{ .RelPermalink }}" class="event-card-link">
+  <div class="event-card">
+    {{ if $cardImage }}
+      <div class="event-card-image" style="--card-bg-image: url('{{ $cardImage | safeURL }}');">
+        <img src="{{ $cardImage | safeURL }}" alt="{{ .Title }}" loading="lazy" decoding="async">
+      </div>
+    {{ end }}
+    <div class="event-content">
+      <h3 class="event-title">{{ .Title }}</h3>
+      {{ with $summary }}
+        <p class="event-description">{{ . | plainify | truncate 280 }}</p>
+      {{ end }}
+      <div class="event-meta">
+        <div class="event-datetime">
+          <span class="event-date-label">Published</span>
+          <span class="event-date-value">{{ .Date.Format "2 Jan 2006" }}</span>
+        </div>
+        {{ with .Params.categories }}
+          {{ with index . 0 }}
+            <div class="event-location">
+              <span class="event-location-label">Category</span>
+              <span class="event-location-value">{{ . }}</span>
+            </div>
+          {{ end }}
+        {{ end }}
+        {{ with .Params.authors }}
+          {{ with index . 0 }}
+            {{ $authorData := index $authorsData . }}
+            {{ if $authorData }}
+              <div class="event-time">
+                <span class="event-time-label">Author</span>
+                <span class="event-time-value">{{ $authorData.name }}</span>
+              </div>
+            {{ end }}
+          {{ end }}
+        {{ end }}
+      </div>
+    </div>
+  </div>
+</a>

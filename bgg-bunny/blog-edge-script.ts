@@ -140,6 +140,13 @@ async function migrateBlogPosts(): Promise<void> {
   `);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_blog_posts_status ON blog_posts(status)`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at ON blog_posts(published_at)`);
+  for (const column of ["featured_image_card TEXT", "featured_image_hero TEXT"]) {
+    try {
+      await client.execute(`ALTER TABLE blog_posts ADD COLUMN ${column}`);
+    } catch {
+      /* column already exists */
+    }
+  }
   migrated = true;
 }
 
@@ -243,7 +250,8 @@ async function listPosts(url: URL): Promise<Response> {
 
   let countSql = "SELECT COUNT(*) as total FROM blog_posts";
   let listSql = `
-    SELECT id, slug, title, excerpt, featured_image, tags, categories, series, authors,
+    SELECT id, slug, title, excerpt, featured_image, featured_image_card, featured_image_hero,
+           tags, categories, series, authors,
            status, published_at, seo_description, seo_image, created_at, updated_at
     FROM blog_posts
   `;
@@ -277,9 +285,10 @@ async function createPost(request: Request): Promise<Response> {
     await client.execute({
       sql: `
         INSERT INTO blog_posts (
-          slug, title, html, excerpt, featured_image, tags, categories, series, authors,
+          slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
+          tags, categories, series, authors,
           status, published_at, seo_description, seo_image
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         slug,
@@ -287,6 +296,8 @@ async function createPost(request: Request): Promise<Response> {
         body.html ?? "",
         body.excerpt || null,
         body.featured_image || null,
+        body.featured_image_card || null,
+        body.featured_image_hero || null,
         serializeJsonArray(body.tags),
         serializeJsonArray(body.categories),
         serializeJsonArray(body.series),
@@ -368,6 +379,8 @@ async function updatePost(id: string, request: Request): Promise<Response> {
   if (body.html !== undefined) { setClauses.push("html = ?"); args.push(body.html); }
   if (body.excerpt !== undefined) { setClauses.push("excerpt = ?"); args.push(body.excerpt || null); }
   if (body.featured_image !== undefined) { setClauses.push("featured_image = ?"); args.push(body.featured_image || null); }
+  if (body.featured_image_card !== undefined) { setClauses.push("featured_image_card = ?"); args.push(body.featured_image_card || null); }
+  if (body.featured_image_hero !== undefined) { setClauses.push("featured_image_hero = ?"); args.push(body.featured_image_hero || null); }
   if (body.tags !== undefined) { setClauses.push("tags = ?"); args.push(serializeJsonArray(body.tags)); }
   if (body.categories !== undefined) { setClauses.push("categories = ?"); args.push(serializeJsonArray(body.categories)); }
   if (body.series !== undefined) { setClauses.push("series = ?"); args.push(serializeJsonArray(body.series)); }
@@ -416,6 +429,8 @@ async function updatePost(id: string, request: Request): Promise<Response> {
     body.series !== undefined ||
     body.authors !== undefined ||
     body.featured_image !== undefined ||
+    body.featured_image_card !== undefined ||
+    body.featured_image_hero !== undefined ||
     body.excerpt !== undefined ||
     body.seo_description !== undefined ||
     body.seo_image !== undefined ||
@@ -483,7 +498,8 @@ async function publishedPosts(request: Request): Promise<Response> {
 
   await migrateBlogPosts();
   const postsResult = await client.execute(`
-    SELECT id, slug, title, html, excerpt, featured_image, tags, categories, series, authors,
+    SELECT id, slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
+           tags, categories, series, authors,
            published_at, seo_description, seo_image
     FROM blog_posts
     WHERE status = 'published'

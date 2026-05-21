@@ -1122,7 +1122,9 @@ Loading cron job logs...
 </div>
 <div>
 <label class="form-label">Featured Image</label>
-<input type="url" id="blog-featured-image" class="form-input" placeholder="https://...">
+<input type="hidden" id="blog-featured-image-card" value="">
+<input type="hidden" id="blog-featured-image-hero" value="">
+<input type="url" id="blog-featured-image" class="form-input" placeholder="Main image URL (auto-filled on upload)">
 <input type="file" id="blog-featured-upload" accept="image/*" class="form-input" style="margin-top:0.5rem;">
 <div id="blog-featured-preview" style="margin-top:0.5rem;"></div>
 </div>
@@ -1373,6 +1375,7 @@ let currentUser = null;
 let uploadedProductImage = null;
 /** After crop upload: { image_url, image_url_card, image_url_hero } or null */
 let uploadedEventBundle = null;
+let uploadedBlogBundle = null;
 let editingShopPromoId = null;
 
 function adminJsonHeaders() {
@@ -1895,7 +1898,7 @@ document.getElementById('event-location')?.addEventListener('input', (e) => {
 let cropper = null;
 let currentCropCallback = null;
 let currentAspectRatio = 336 / 220;
-/** 'event' = multi-size event pack; 'product' = single product image */
+/** 'event' | 'blog' = multi-size pack; 'product' = single product image */
 let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
@@ -1911,6 +1914,17 @@ const EVENT_IMAGE_EXPORT_SPECS = [
   /** Hero stays contain so the full crop stays visible on the wide frame. */
   { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'contain' }
 ];
+
+const BLOG_IMAGE_EXPORT_SPECS = [
+  { key: 'featured_image', w: 800, h: 379, filename: 'blog-main.jpg', fit: 'fillHeight' },
+  { key: 'featured_image_card', w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contain' },
+  { key: 'featured_image_hero', w: 885, h: 300, filename: 'blog-hero.jpg', fit: 'contain' }
+];
+
+const MULTI_SIZE_CROP_SPECS = {
+  event: EVENT_IMAGE_EXPORT_SPECS,
+  blog: BLOG_IMAGE_EXPORT_SPECS,
+};
 
 /** Tight axis-aligned bbox of sufficiently opaque pixels, or null if none. */
 function getOpaqueBoundingBox(canvas, alphaThreshold = 24) {
@@ -2258,7 +2272,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
   };
 
   try {
-    if (currentCropKind === 'event') {
+    if (currentCropKind === 'event' || currentCropKind === 'blog') {
+      const exportSpecs = MULTI_SIZE_CROP_SPECS[currentCropKind];
       const masterCropped = cropper.getCroppedCanvas({
         width: EVENT_IMAGE_MASTER_W,
         height: EVENT_IMAGE_MASTER_H,
@@ -2273,7 +2288,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       const fitRect = getExportFitSourceRect(masterCropped);
       const batchId = Date.now();
       const bundle = {};
-      for (const spec of EVENT_IMAGE_EXPORT_SPECS) {
+      for (const spec of exportSpecs) {
         const sized =
           spec.fit === 'contain'
             ? containCenterOnCanvasRegion(
@@ -2308,7 +2323,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
         });
         const uploadData = await uploadRes.json();
         if (!uploadData.success) {
-          Modal.alert({ title: 'Upload Failed', message: uploadData.error || 'Failed to upload an event image variant.' });
+          Modal.alert({ title: 'Upload Failed', message: uploadData.error || 'Failed to upload an image variant.' });
           console.error('Upload error:', uploadData);
           return;
         }
@@ -5182,13 +5197,36 @@ function blogCollectAuthorMeta() {
   return meta;
 }
 
+function blogRenderFeaturedPreview(bundle) {
+  if (!bundle?.featured_image) {
+    document.getElementById('blog-featured-preview').innerHTML = '';
+    return;
+  }
+  document.getElementById('blog-featured-preview').innerHTML =
+    `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.featured_image}" alt="Main"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.featured_image_card || bundle.featured_image}" alt="Card"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.featured_image_hero || bundle.featured_image}" alt="Hero"></div></div>
+    </div>`;
+}
+
+function blogApplyFeaturedBundle(bundle) {
+  uploadedBlogBundle = bundle;
+  document.getElementById('blog-featured-image').value = bundle.featured_image || '';
+  document.getElementById('blog-featured-image-card').value = bundle.featured_image_card || '';
+  document.getElementById('blog-featured-image-hero').value = bundle.featured_image_hero || '';
+  blogRenderFeaturedPreview(bundle);
+}
+
 function blogCollectPayload(status) {
   const publishedAtRaw = document.getElementById('blog-published-at').value;
   return {
     title: document.getElementById('blog-title').value.trim(),
     slug: document.getElementById('blog-slug').value.trim(),
     excerpt: document.getElementById('blog-excerpt').value.trim() || null,
-    featured_image: document.getElementById('blog-featured-image').value.trim() || null,
+    featured_image: uploadedBlogBundle?.featured_image ?? (document.getElementById('blog-featured-image').value.trim() || null),
+    featured_image_card: uploadedBlogBundle?.featured_image_card ?? (document.getElementById('blog-featured-image-card').value.trim() || null),
+    featured_image_hero: uploadedBlogBundle?.featured_image_hero ?? (document.getElementById('blog-featured-image-hero').value.trim() || null),
     seo_description: document.getElementById('blog-seo-description').value.trim() || null,
     seo_image: document.getElementById('blog-seo-image').value.trim() || null,
     html: blogQuill ? blogQuill.root.innerHTML.trim() : '',
@@ -5273,9 +5311,12 @@ function blogResetForm() {
   document.getElementById('blog-excerpt').value = '';
   document.getElementById('blog-published-at').value = '';
   document.getElementById('blog-featured-image').value = '';
+  document.getElementById('blog-featured-image-card').value = '';
+  document.getElementById('blog-featured-image-hero').value = '';
   document.getElementById('blog-seo-description').value = '';
   document.getElementById('blog-seo-image').value = '';
   document.getElementById('blog-featured-preview').innerHTML = '';
+  uploadedBlogBundle = null;
   document.getElementById('blog-author-meta-panel').style.display = 'none';
   document.getElementById('blog-save-status').textContent = '';
   blogPendingAuthorSlug = null;
@@ -5312,11 +5353,17 @@ async function blogEditPost(id) {
     document.getElementById('blog-excerpt').value = post.excerpt || '';
     document.getElementById('blog-published-at').value = blogIsoToLocalInput(post.published_at);
     document.getElementById('blog-featured-image').value = post.featured_image || '';
+    document.getElementById('blog-featured-image-card').value = post.featured_image_card || '';
+    document.getElementById('blog-featured-image-hero').value = post.featured_image_hero || '';
     document.getElementById('blog-seo-description').value = post.seo_description || '';
     document.getElementById('blog-seo-image').value = post.seo_image || '';
+    uploadedBlogBundle = null;
     if (post.featured_image) {
-      document.getElementById('blog-featured-preview').innerHTML =
-        `<img src="${post.featured_image}" alt="" style="max-width:240px;border-radius:8px;">`;
+      blogRenderFeaturedPreview({
+        featured_image: post.featured_image,
+        featured_image_card: post.featured_image_card,
+        featured_image_hero: post.featured_image_hero,
+      });
     }
     blogChipState.tags = [...(post.tags || [])];
     blogChipState.categories = [...(post.categories || [])];
@@ -5533,39 +5580,13 @@ document.getElementById('blog-slug')?.addEventListener('input', () => {
   });
 });
 
-document.getElementById('blog-featured-upload')?.addEventListener('change', async (e) => {
+document.getElementById('blog-featured-upload')?.addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  try {
-    const reader = new FileReader();
-    const dataUrl = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    const uploadRes = await fetch(`${API_BASE}/admin/images`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-Token': sessionToken,
-      },
-      body: JSON.stringify({
-        image: dataUrl,
-        filename: file.name || 'blog-featured.jpg',
-      }),
-    });
-    const uploadData = await uploadRes.json();
-    if (!uploadData.success || !uploadData.url) {
-      throw new Error(uploadData.error || 'Upload failed');
-    }
-    document.getElementById('blog-featured-image').value = uploadData.url;
-    document.getElementById('blog-featured-preview').innerHTML =
-      `<img src="${uploadData.url}" alt="" style="max-width:240px;border-radius:8px;">`;
-  } catch (err) {
-    Modal.alert({ title: 'Upload failed', message: err.message || 'Could not upload image.' });
-  } finally {
-    e.target.value = '';
-  }
+  showCropModal(file, (bundle) => {
+    blogApplyFeaturedBundle(bundle);
+  }, 800 / 379, 'blog');
+  e.target.value = '';
 });
 
 // Initialize

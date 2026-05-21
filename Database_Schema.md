@@ -292,6 +292,8 @@ CREATE TABLE blog_posts (
   html             TEXT    NOT NULL DEFAULT '',
   excerpt          TEXT,
   featured_image   TEXT,
+  featured_image_card TEXT,
+  featured_image_hero TEXT,
   tags             TEXT    NOT NULL DEFAULT '[]',
   categories       TEXT    NOT NULL DEFAULT '[]',
   series           TEXT    NOT NULL DEFAULT '[]',

@@ -42,6 +42,17 @@ function buildFrontMatter(post) {
   lines.push(`series: ${arrayToYaml(post.series)}`);
   lines.push(`authors: ${arrayToYaml(post.authors)}`);
 
+  if (post.featured_image_card) {
+    lines.push(`cardImage: ${yamlEscape(post.featured_image_card)}`);
+  } else if (post.featured_image) {
+    lines.push(`cardImage: ${yamlEscape(post.featured_image)}`);
+  }
+  if (post.featured_image_hero) {
+    lines.push(`featureimage: ${yamlEscape(post.featured_image_hero)}`);
+    lines.push(`heroImage: ${yamlEscape(post.featured_image_hero)}`);
+  } else if (post.featured_image) {
+    lines.push(`featureimage: ${yamlEscape(post.featured_image)}`);
+  }
   if (post.featured_image) {
     lines.push(`featuredImage: ${yamlEscape(post.featured_image)}`);
   }

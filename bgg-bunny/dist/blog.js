@@ -4706,6 +4706,22 @@ function cleanBlogBody(html) {
   return String(html).replace(/ data-card="[^"]*"/g, "").replace(/ contenteditable="[^"]*"/g, "").replace(/ class="ql-[^"]*"/g, "").replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, "");
 }
 var migrated = false;
+function dbConfigError() {
+  if (!process.env.BUNNY_DATABASE_URL || !process.env.BUNNY_DATABASE_AUTH_TOKEN) {
+    return jsonResponse({
+      error: "database_not_configured",
+      message: "Set BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN in this script's Env Configuration (copy from the bookings script)."
+    }, 503);
+  }
+  return null;
+}
+function formatDbError(error) {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes("401") || msg.includes("Unauthorized")) {
+    return "Bunny Database auth failed \u2014 check BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN on script 75941.";
+  }
+  return msg;
+}
 async function migrateBlogPosts() {
   if (migrated)
     return;
@@ -4742,6 +4758,12 @@ async function migrateBlogPosts() {
   `);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_blog_posts_status ON blog_posts(status)`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_blog_posts_published_at ON blog_posts(published_at)`);
+  for (const column of ["featured_image_card TEXT", "featured_image_hero TEXT"]) {
+    try {
+      await client.execute(`ALTER TABLE blog_posts ADD COLUMN ${column}`);
+    } catch {
+    }
+  }
   migrated = true;
 }
 async function upsertBlogAuthors(authorMeta) {
@@ -4843,7 +4865,8 @@ async function listPosts(url) {
   const offset = (page - 1) * limit;
   let countSql = "SELECT COUNT(*) as total FROM blog_posts";
   let listSql = `
-    SELECT id, slug, title, excerpt, featured_image, tags, categories, series, authors,
+    SELECT id, slug, title, excerpt, featured_image, featured_image_card, featured_image_hero,
+           tags, categories, series, authors,
            status, published_at, seo_description, seo_image, created_at, updated_at
     FROM blog_posts
   `;
@@ -4874,9 +4897,10 @@ async function createPost(request) {
     await client.execute({
       sql: `
         INSERT INTO blog_posts (
-          slug, title, html, excerpt, featured_image, tags, categories, series, authors,
+          slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
+          tags, categories, series, authors,
           status, published_at, seo_description, seo_image
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         slug,
@@ -4884,6 +4908,8 @@ async function createPost(request) {
         body.html ?? "",
         body.excerpt || null,
         body.featured_image || null,
+        body.featured_image_card || null,
+        body.featured_image_hero || null,
         serializeJsonArray(body.tags),
         serializeJsonArray(body.categories),
         serializeJsonArray(body.series),
@@ -4976,6 +5002,14 @@ async function updatePost(id, request) {
     setClauses.push("featured_image = ?");
     args.push(body.featured_image || null);
   }
+  if (body.featured_image_card !== void 0) {
+    setClauses.push("featured_image_card = ?");
+    args.push(body.featured_image_card || null);
+  }
+  if (body.featured_image_hero !== void 0) {
+    setClauses.push("featured_image_hero = ?");
+    args.push(body.featured_image_hero || null);
+  }
   if (body.tags !== void 0) {
     setClauses.push("tags = ?");
     args.push(serializeJsonArray(body.tags));
@@ -5034,7 +5068,7 @@ async function updatePost(id, request) {
   }
   await upsertBlogAuthors(body.author_meta);
   const publishStateChanged = wasPublished !== nowPublished;
-  const contentChangedWhilePublished = nowPublished && (body.html !== void 0 || body.slug !== void 0 || body.title !== void 0 || body.tags !== void 0 || body.categories !== void 0 || body.series !== void 0 || body.authors !== void 0 || body.featured_image !== void 0 || body.excerpt !== void 0 || body.seo_description !== void 0 || body.seo_image !== void 0 || body.published_at !== void 0);
+  const contentChangedWhilePublished = nowPublished && (body.html !== void 0 || body.slug !== void 0 || body.title !== void 0 || body.tags !== void 0 || body.categories !== void 0 || body.series !== void 0 || body.authors !== void 0 || body.featured_image !== void 0 || body.featured_image_card !== void 0 || body.featured_image_hero !== void 0 || body.excerpt !== void 0 || body.seo_description !== void 0 || body.seo_image !== void 0 || body.published_at !== void 0);
   if (nowPublished && (publishStateChanged || contentChangedWhilePublished)) {
     await notifyGoogleIndexing(request, slug);
     triggerBlogPublishDeploy().catch((err) => console.error("[Blog] deploy trigger failed:", err));
@@ -5088,9 +5122,13 @@ async function publishedPosts(request) {
   if (!process.env.BLOG_BUILD_SECRET || secret !== process.env.BLOG_BUILD_SECRET) {
     return jsonResponse({ error: "unauthorized" }, 401);
   }
+  const dbErr = dbConfigError();
+  if (dbErr)
+    return dbErr;
   await migrateBlogPosts();
   const postsResult = await client.execute(`
-    SELECT id, slug, title, html, excerpt, featured_image, tags, categories, series, authors,
+    SELECT id, slug, title, html, excerpt, featured_image, featured_image_card, featured_image_hero,
+           tags, categories, series, authors,
            published_at, seo_description, seo_image
     FROM blog_posts
     WHERE status = 'published'
@@ -5144,8 +5182,8 @@ BunnySDK.net.http.serve(async (request) => {
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
     console.error("[Blog] request error:", error);
-    return jsonResponse({
-      error: error instanceof Error ? error.message : "Internal server error"
-    }, 500);
+    const message = formatDbError(error);
+    const status = message.includes("Bunny Database auth failed") ? 503 : 500;
+    return jsonResponse({ error: message }, status);
   }
 });
