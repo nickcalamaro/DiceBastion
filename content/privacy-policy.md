@@ -13,6 +13,27 @@ herostyle: "background"
   .policy-wrap ul { margin: .5rem 0 1rem 1.2rem; }
   .policy-wrap li { margin: .25rem 0; }
   .policy-wrap a { color: rgb(var(--color-primary-600)); text-decoration: underline; }
+  .mid-bullet-list {
+    list-style: none;
+    margin: .5rem 0 1rem 0;
+    padding: 0;
+  }
+  .mid-bullet-list li {
+    display: flex;
+    align-items: center;
+    gap: 1.15rem;
+    margin: .25rem 0;
+  }
+  .mid-bullet-list .bullet {
+    flex-shrink: 0;
+    width: .45em;
+    height: .45em;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .mid-bullet-list .text {
+    line-height: 1.7;
+  }
 </style>
 
 <div class="policy-updated">Last updated: 2025-10-27</div>
@@ -96,12 +117,26 @@ We use SumUp to process payments. Card details are collected and processed by Su
 Learn more: https://www.sumup.com/en-gb/privacy/
 
 ## Children
-Our services are intended for adults. If you believe a child has provided us personal data, contact us to remove it.
+Our services are intended for users over 14 years of age. If you believe a child has provided us personal data, contact us to remove it.
 
 ## Contact
-Dice Bastion Gibraltar
+<strong>Mailing:</strong>
 
-Email: contact@dicebastion.com
+
+<ul class="mid-bullet-list">
+  <li>
+    <span class="bullet"></span>
+    <span class="text">Dice Bastion,<br>
+Suite 3, Unit 1, 28 John Mackintosh Square,<br>
+Gibraltar<br>
+GX11 1AA</span>
+  </li>
+</ul>
+
+
+<strong>Online: </strong>
+
+- <a href="/support/">Contact Dice Bastion Online</a>
 
 ## Changes to this policy
 We may update this policy from time to time. The "Last updated" date will reflect the latest version.

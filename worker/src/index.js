@@ -231,6 +231,7 @@ const checkoutRateLimits = new Map()
 const membershipCheckoutRateLimits = new Map()
 const eventCheckoutRateLimits = new Map()
 const donationCheckoutRateLimits = new Map()
+const supportContactRateLimits = new Map()
 
 // Rate limiting helper function
 function checkRateLimit(ip, rateLimitMap, limit, windowMinutes) {
@@ -8217,6 +8218,117 @@ app.get('/unsubscribe', handleUnsubscribe)
 app.get('/unsubscribe/', handleUnsubscribe)
 
 // ============================================================================
+// PUBLIC: Support contact form
+// ============================================================================
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+app.post('/support/contact', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, supportContactRateLimits, 3, 1)) {
+      return c.json({
+        error: 'rate_limit_exceeded',
+        message: 'Too many messages sent. Please wait a minute and try again.'
+      }, 429)
+    }
+
+    const body = await c.req.json()
+    if (body.website) return c.json({ ok: true })
+
+    const trimmedName = clampStr(body.name, 200)
+    const trimmedEmail = clampStr(body.email, 320).toLowerCase()
+    const trimmedMessage = clampStr(body.message, 5000)
+    const trimmedCategory = clampStr(body.category || 'general', 50)
+    const turnstileToken = body.turnstileToken
+
+    if (!trimmedName) return c.json({ error: 'name_required', message: 'Please enter your name.' }, 400)
+    if (!trimmedEmail || !EMAIL_RE.test(trimmedEmail)) {
+      return c.json({ error: 'invalid_email', message: 'Please enter a valid email address.' }, 400)
+    }
+    if (trimmedMessage.length < 10) {
+      return c.json({ error: 'message_too_short', message: 'Please enter a message of at least 10 characters.' }, 400)
+    }
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
+    if (!tsOk) {
+      return c.json({ error: 'turnstile_failed', message: 'Security check failed. Please refresh and try again.' }, 403)
+    }
+
+    const supportTo = c.env.SUPPORT_CONTACT_EMAIL || 'contact@dicebastion.com'
+    const categoryLabels = {
+      general: 'General enquiry',
+      membership: 'Membership',
+      events: 'Events',
+      bookings: 'Table bookings',
+      website: 'Website / technical issue',
+      other: 'Other'
+    }
+    const categoryLabel = categoryLabels[trimmedCategory] || categoryLabels.general
+    const submittedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Gibraltar' })
+    const subject = `[Dice Bastion Support] ${categoryLabel} — ${trimmedName}`
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"></head>
+      <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+        <div style="background:linear-gradient(135deg,#b2c6df 0%,#5374a5 100%);color:white;padding:24px 20px;text-align:center;border-radius:8px 8px 0 0;">
+          <h1 style="margin:0;font-size:1.4rem;">New support message</h1>
+        </div>
+        <div style="background:#ffffff;padding:24px;border:1px solid #e5e7eb;border-top:none;">
+          <p>You received a new message from the Dice Bastion support form.</p>
+          <div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:15px;margin:16px 0;">
+            <p style="margin:0 0 8px;"><strong>From:</strong> ${escapeHtml(trimmedName)} &lt;${escapeHtml(trimmedEmail)}&gt;</p>
+            <p style="margin:0 0 8px;"><strong>Category:</strong> ${escapeHtml(categoryLabel)}</p>
+            <p style="margin:0;"><strong>Submitted:</strong> ${escapeHtml(submittedAt)} (Gibraltar time)</p>
+          </div>
+          <p><strong>Message:</strong></p>
+          <p style="white-space:pre-wrap;">${escapeHtml(trimmedMessage)}</p>
+          <p style="color:#666;font-size:0.9rem;">Reply directly to this email to respond to the sender.</p>
+        </div>
+      </body>
+      </html>
+    `.trim()
+    const text = [
+      'New support message from dicebastion.com/support',
+      '',
+      `From: ${trimmedName} <${trimmedEmail}>`,
+      `Category: ${categoryLabel}`,
+      `Submitted: ${submittedAt} (Gibraltar time)`,
+      '',
+      'Message:',
+      trimmedMessage
+    ].join('\n')
+
+    const sent = await sendEmail(c.env, {
+      to: supportTo,
+      subject,
+      html,
+      text,
+      replyTo: { email: trimmedEmail, name: trimmedName },
+      emailType: 'support_contact',
+      metadata: { category: trimmedCategory, senderEmail: trimmedEmail }
+    })
+    if (!sent?.success) {
+      return c.json({
+        error: 'send_failed',
+        message: 'Could not send your message. Please try again later.'
+      }, 502)
+    }
+
+    return c.json({ ok: true })
+  } catch (e) {
+    console.error('[support/contact] error:', e)
+    return c.json({ error: 'internal_error', message: 'Something went wrong. Please try again.' }, 500)
+  }
+})
+
 // PUBLIC: Newsletter subscribe
 // ============================================================================
 

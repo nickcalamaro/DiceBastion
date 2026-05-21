@@ -71,7 +71,7 @@ showPagination: false
 
 <script>
 (function () {
-const SUPPORT_API = 'https://dicebastionemails.bunny.run/support'; // Bunny Edge Script (63650)
+const SUPPORT_API = `${window.utils.getApiBase(true)}/support/contact`;
 const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 const IS_LOCALHOST = ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);
 
