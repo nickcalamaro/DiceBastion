@@ -88,7 +88,7 @@ D1 schema: [Database_Schema.md](Database_Schema.md).
 | `DEPLOY_KEY` | Bunny edge script deploy key (Script → Deployments → Settings). Used by `release-on-bunny.yml` for all scripts including blog (`75941`). Alternatively, link the repo via Bunny GitHub App integration and omit this. |
 | `BLOG_BUILD_SECRET` | Shared with Bunny blog script; CI sends it as `X-Build-Secret` to `GET /internal/blog/published` |
 
-Also set `BLOG_API_URL` in `.github/workflows/hugo.yml` to your script’s `.bunny.run` URL once deployed (or add it as a repo variable).
+Set **`BLOG_API_URL`** in GitHub repo variables only if you need to override the default (`https://dicebastionblogger-yvfyf.bunny.run`). The admin panel uses the same URL via `static/js/utils.js`.
 
 ### Bunny edge script env (script ID `75941` → Env Configuration)
 

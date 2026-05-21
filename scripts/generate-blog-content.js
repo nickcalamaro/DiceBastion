@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const API_URL = process.env.BLOG_API_URL || 'https://dicebastionblog.bunny.run';
+const API_URL = (process.env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '');
 const BUILD_SECRET = process.env.BLOG_BUILD_SECRET;
 const POSTS_DIR = path.join(__dirname, '../content/posts');
 const AUTHORS_DIR = path.join(__dirname, '../data/authors');
@@ -90,11 +90,21 @@ function writeAuthorYaml(author) {
 }
 
 async function fetchPublishedPosts() {
-  const res = await fetch(`${API_URL}/internal/blog/published`, {
-    headers: { 'X-Build-Secret': BUILD_SECRET || '' },
-  });
+  const url = `${API_URL}/internal/blog/published`;
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { 'X-Build-Secret': BUILD_SECRET || '' },
+    });
+  } catch (error) {
+    const cause = error?.cause?.code || error?.cause?.reason || error?.message || String(error);
+    const hint = cause.includes('CERT') || cause.includes('TLS') || cause.includes('altnames')
+      ? ' Check BLOG_API_URL — use the exact Edge Script URL from Bunny (e.g. https://dicebastionblog-xxxxx.bunny.run), not a made-up hostname.'
+      : '';
+    throw new Error(`Failed to reach blog API at ${url}: ${cause}.${hint}`);
+  }
   if (!res.ok) {
-    throw new Error(`Failed to fetch published posts: ${res.status} ${await res.text()}`);
+    throw new Error(`Failed to fetch published posts from ${url}: ${res.status} ${await res.text()}`);
   }
   return res.json();
 }
@@ -102,6 +112,10 @@ async function fetchPublishedPosts() {
 async function main() {
   if (!BUILD_SECRET) {
     console.warn('BLOG_BUILD_SECRET not set — skipping blog content generation');
+    return;
+  }
+  if (!API_URL) {
+    console.warn('BLOG_API_URL not set — skipping blog content generation (set GitHub repo variable BLOG_API_URL to your Bunny script URL)');
     return;
   }
 

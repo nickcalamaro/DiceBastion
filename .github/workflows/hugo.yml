@@ -59,7 +59,7 @@ jobs:
       - name: Generate blog content
         env:
           BLOG_BUILD_SECRET: ${{ secrets.BLOG_BUILD_SECRET }}
-          BLOG_API_URL: https://dicebastionblog.bunny.run
+          BLOG_API_URL: https://dicebastionblogger-yvfyf.bunny.run
         run: node scripts/generate-blog-content.js
       - name: Build with Hugo
         env:
