@@ -5482,9 +5482,19 @@ function blogPreview() {
   }
   const featured = document.getElementById('blog-featured-image').value.trim();
   const hero = featured
-    ? `<div style="margin:-32px -32px 24px -32px;"><img src="${featured}" alt="" style="width:100%;max-height:320px;object-fit:cover;display:block;"></div>`
+    ? '<div style="margin:-32px -32px 24px -32px;"><img src="' + featured + '" alt="" style="width:100%;max-height:320px;object-fit:cover;display:block;"></div>'
     : '';
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title><style>body{font-family:Georgia,serif;line-height:1.7;color:#111;margin:0;padding:24px;background:#fafafa;} .wrap{max-width:720px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;} .content{padding:32px;} h1,h2,h3{color:#111827;} a{color:#4f46e5;}</style></head><body><div class="wrap">${hero}<div class="content"><h1>${title}</h1>${bodyHtml}</div></div></body></html>`;
+  // Hugo goldmark chokes on literal <style> inside page content — split the tag.
+  const stO = '<sty' + 'le>';
+  const stC = '</sty' + 'le>';
+  const styles = stO
+    + 'body{font-family:Georgia,serif;line-height:1.7;color:#111;margin:0;padding:24px;background:#fafafa;}'
+    + '.wrap{max-width:720px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;}'
+    + '.content{padding:32px;}'
+    + 'h1,h2,h3{color:#111827;}'
+    + 'a{color:#4f46e5;}'
+    + stC;
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' + styles + '</head><body><div class="wrap">' + hero + '<div class="content"><h1>' + title + '</h1>' + bodyHtml + '</div></div></body></html>';
   document.getElementById('blog-preview-frame').srcdoc = html;
   document.getElementById('blog-preview-modal').style.display = 'flex';
 }
