@@ -43,8 +43,8 @@ import {
 } from "./blog-html";
 
 const client = createClient({
-  url: process.env.BUNNY_DATABASE_URL,
-  authToken: process.env.BUNNY_DATABASE_AUTH_TOKEN,
+  url: String(process.env.BUNNY_DATABASE_URL || "").trim(),
+  authToken: String(process.env.BUNNY_DATABASE_AUTH_TOKEN || "").trim(),
 });
 
 const CORS_HEADERS = {
@@ -103,13 +103,29 @@ function cleanBlogBody(html: unknown): string {
 let migrated = false;
 
 function dbConfigError(): Response | null {
-  if (!process.env.BUNNY_DATABASE_URL || !process.env.BUNNY_DATABASE_AUTH_TOKEN) {
+  const url = String(process.env.BUNNY_DATABASE_URL || "").trim();
+  const token = String(process.env.BUNNY_DATABASE_AUTH_TOKEN || "").trim();
+  if (!url || !token) {
     return jsonResponse({
       error: "database_not_configured",
-      message: "Set BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN in this script's Env Configuration (copy from the bookings script).",
+      message: "Set BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN on blog script 75941 (copy exact values from bookings script 63643 → Env Configuration).",
     }, 503);
   }
   return null;
+}
+
+async function checkDatabaseConnection(): Promise<{ ok: boolean; error?: string }> {
+  const configError = dbConfigError();
+  if (configError) {
+    const body = await configError.json() as { message?: string };
+    return { ok: false, error: body.message || "database_not_configured" };
+  }
+  try {
+    await client.execute("SELECT 1 AS ok");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: formatDbError(error) };
+  }
 }
 
 function formatDbError(error: unknown): string {
@@ -220,6 +236,7 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
     throw new Error("BUNNY_STORAGE_API_KEY is not set on the blog script — blog pages cannot be uploaded to CDN");
   }
 
+  await migrateBlogPosts();
   const siteUrl = blogSiteUrl();
   const posts = await fetchPublishedPostsForRender();
   const authors = await fetchAuthorMap();
@@ -577,6 +594,20 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
     if (path.startsWith("/admin/blog")) {
       const authError = await requireAdmin(request);
       if (authError) return authError;
+
+      const dbError = dbConfigError();
+      if (dbError && path !== "/admin/blog/health") return dbError;
+
+      if (path === "/admin/blog/health" && request.method === "GET") {
+        const db = await checkDatabaseConnection();
+        return jsonResponse({
+          database: db,
+          storage: Boolean(String(process.env.BUNNY_STORAGE_API_KEY || "").trim()),
+          cdnUrl: Boolean(String(process.env.BUNNY_CDN_URL || "").trim()),
+          pullZoneId: Boolean(String(process.env.BUNNY_PULL_ZONE_ID || "").trim()),
+          bunnyApiKey: Boolean(String(process.env.BUNNY_API_KEY || "").trim()),
+        });
+      }
 
       if (path === "/admin/blog/posts" && request.method === "GET") {
         return await listPosts(url);

@@ -5258,8 +5258,8 @@ ${urls.join("\n")}
 
 // blog-edge-script.ts
 var client = createClient({
-  url: process.env.BUNNY_DATABASE_URL,
-  authToken: process.env.BUNNY_DATABASE_AUTH_TOKEN
+  url: String(process.env.BUNNY_DATABASE_URL || "").trim(),
+  authToken: String(process.env.BUNNY_DATABASE_AUTH_TOKEN || "").trim()
 });
 var CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -5306,6 +5306,30 @@ function cleanBlogBody(html) {
   return String(html).replace(/ data-card="[^"]*"/g, "").replace(/ contenteditable="[^"]*"/g, "").replace(/ class="ql-[^"]*"/g, "").replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, "");
 }
 var migrated = false;
+function dbConfigError() {
+  const url = String(process.env.BUNNY_DATABASE_URL || "").trim();
+  const token = String(process.env.BUNNY_DATABASE_AUTH_TOKEN || "").trim();
+  if (!url || !token) {
+    return jsonResponse({
+      error: "database_not_configured",
+      message: "Set BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN on blog script 75941 (copy exact values from bookings script 63643 \u2192 Env Configuration)."
+    }, 503);
+  }
+  return null;
+}
+async function checkDatabaseConnection() {
+  const configError = dbConfigError();
+  if (configError) {
+    const body = await configError.json();
+    return { ok: false, error: body.message || "database_not_configured" };
+  }
+  try {
+    await client.execute("SELECT 1 AS ok");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: formatDbError(error) };
+  }
+}
 function formatDbError(error) {
   const msg = error instanceof Error ? error.message : String(error);
   if (msg.includes("401") || msg.includes("Unauthorized")) {
@@ -5410,6 +5434,7 @@ async function syncPublishedBlogToCdn(options) {
   if (!process.env.BUNNY_STORAGE_API_KEY) {
     throw new Error("BUNNY_STORAGE_API_KEY is not set on the blog script \u2014 blog pages cannot be uploaded to CDN");
   }
+  await migrateBlogPosts();
   const siteUrl = blogSiteUrl();
   const posts = await fetchPublishedPostsForRender();
   const authors = await fetchAuthorMap();
@@ -5775,6 +5800,19 @@ BunnySDK.net.http.serve(async (request) => {
       const authError = await requireAdmin(request);
       if (authError)
         return authError;
+      const dbError = dbConfigError();
+      if (dbError && path !== "/admin/blog/health")
+        return dbError;
+      if (path === "/admin/blog/health" && request.method === "GET") {
+        const db = await checkDatabaseConnection();
+        return jsonResponse({
+          database: db,
+          storage: Boolean(String(process.env.BUNNY_STORAGE_API_KEY || "").trim()),
+          cdnUrl: Boolean(String(process.env.BUNNY_CDN_URL || "").trim()),
+          pullZoneId: Boolean(String(process.env.BUNNY_PULL_ZONE_ID || "").trim()),
+          bunnyApiKey: Boolean(String(process.env.BUNNY_API_KEY || "").trim())
+        });
+      }
       if (path === "/admin/blog/posts" && request.method === "GET") {
         return await listPosts(url);
       }

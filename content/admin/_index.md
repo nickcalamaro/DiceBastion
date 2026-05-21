@@ -1081,6 +1081,7 @@ Loading cron job logs...
 
 <!-- Blog Tab -->
 <div id="blog-tab" class="tab-content" style="display: none;">
+<div id="blog-health-banner" style="display:none;margin-bottom:1rem;padding:0.875rem 1rem;border-radius:8px;border:1px solid rgb(var(--color-neutral-300));background:rgb(var(--color-neutral-50));color:rgb(var(--color-neutral-800));font-size:0.95rem;"></div>
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-blog" class="admin-section-heading admin-m-0">Blog <a href="#blog" class="admin-permalink" aria-label="Link to blog">#</a></h2>
 <div style="display:flex;gap:0.75rem;align-items:center;">
@@ -5061,8 +5062,40 @@ const blogChipConfig = {
 
 function blogInitTab() {
   blogInitEditor();
+  blogCheckHealth();
   loadBlogTaxonomyTerms();
   loadBlogPosts();
+}
+
+async function blogCheckHealth() {
+  const banner = document.getElementById('blog-health-banner');
+  if (!banner) return;
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/health`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || 'Health check failed');
+    const issues = [];
+    if (!data.database?.ok) {
+      issues.push(`Database: ${data.database?.error || 'not connected'} — copy BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN from bookings script 63643 into blog script 75941.`);
+    }
+    if (!data.storage) issues.push('BUNNY_STORAGE_API_KEY is not set on script 75941.');
+    if (!data.cdnUrl) issues.push('BUNNY_CDN_URL is not set on script 75941.');
+    if (issues.length) {
+      banner.style.display = 'block';
+      banner.style.borderColor = 'rgb(var(--color-primary-300))';
+      banner.style.background = 'rgb(var(--color-primary-50))';
+      banner.textContent = issues.join(' ');
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch (err) {
+    banner.style.display = 'block';
+    banner.style.borderColor = 'rgb(var(--color-primary-300))';
+    banner.style.background = 'rgb(var(--color-primary-50))';
+    banner.textContent = err.message || 'Blog API health check failed.';
+  }
 }
 
 function blogInitEditor() {
