@@ -215,10 +215,9 @@ async function fetchPublishedPostsForRender(): Promise<BlogPostRow[]> {
   });
 }
 
-async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Promise<void> {
+async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Promise<{ posts: number }> {
   if (!process.env.BUNNY_STORAGE_API_KEY) {
-    console.warn("[Blog] CDN sync skipped — BUNNY_STORAGE_API_KEY not set");
-    return;
+    throw new Error("BUNNY_STORAGE_API_KEY is not set on the blog script — blog pages cannot be uploaded to CDN");
   }
 
   const siteUrl = blogSiteUrl();
@@ -255,6 +254,7 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
   }
 
   await purgeBlogPaths(purgePaths);
+  return { posts: posts.length };
 }
 
 async function requireAdmin(request: Request): Promise<Response | null> {
@@ -384,7 +384,12 @@ async function createPost(request: Request): Promise<Response> {
       args: [nowIso(), id],
     });
     await notifyGoogleIndexing(request, slug);
-    syncPublishedBlogToCdn().catch((err) => console.error("[Blog] CDN sync failed:", err));
+    try {
+      await syncPublishedBlogToCdn();
+    } catch (err) {
+      console.error("[Blog] CDN sync failed:", err);
+      return jsonResponse({ error: String(err instanceof Error ? err.message : err) }, 502);
+    }
   }
 
   return jsonResponse({ id, success: true }, 201);
@@ -500,9 +505,19 @@ async function updatePost(id: string, request: Request): Promise<Response> {
   if (nowPublished && (publishStateChanged || contentChangedWhilePublished)) {
     await notifyGoogleIndexing(request, slug);
     const deleteSlugs = slugChanged ? [oldSlug] : [];
-    syncPublishedBlogToCdn({ deleteSlugs }).catch((err) => console.error("[Blog] CDN sync failed:", err));
+    try {
+      await syncPublishedBlogToCdn({ deleteSlugs });
+    } catch (err) {
+      console.error("[Blog] CDN sync failed:", err);
+      return jsonResponse({ error: String(err instanceof Error ? err.message : err) }, 502);
+    }
   } else if (wasPublished && !nowPublished) {
-    syncPublishedBlogToCdn({ deleteSlugs: [oldSlug] }).catch((err) => console.error("[Blog] CDN sync failed:", err));
+    try {
+      await syncPublishedBlogToCdn({ deleteSlugs: [oldSlug] });
+    } catch (err) {
+      console.error("[Blog] CDN sync failed:", err);
+      return jsonResponse({ error: String(err instanceof Error ? err.message : err) }, 502);
+    }
   }
 
   return jsonResponse({ success: true });
@@ -571,6 +586,10 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
       }
       if (path === "/admin/blog/taxonomy-terms" && request.method === "GET") {
         return await taxonomyTerms();
+      }
+      if (path === "/admin/blog/sync-cdn" && request.method === "POST") {
+        const result = await syncPublishedBlogToCdn();
+        return jsonResponse({ success: true, ...result });
       }
 
       const postMatch = path.match(/^\/admin\/blog\/posts\/(\d+)$/);

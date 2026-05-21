@@ -1,0 +1,84 @@
+# Dice Bastion UI Style Guide
+
+Reference this document when generating HTML, CSS, or UI copy for Dice Bastion (Hugo site, admin panel, Bunny CDN pages, Workers).
+
+## Design tokens
+
+Color variables live in `assets/css/schemes/blowfish.css`. Always prefer these over hardcoded hex values:
+
+```css
+rgb(var(--color-neutral-900))   /* headings, strong text */
+rgb(var(--color-neutral-600))   /* body / secondary text */
+rgb(var(--color-primary-600))   /* links, accents */
+rgb(var(--color-primary-700))   /* link hover, emphasis */
+rgba(var(--color-primary-50), 0.5)  /* tinted backgrounds */
+```
+
+Primary palette is blue (`--color-primary-*`). Secondary cyan exists but is used sparingly.
+
+## Component library
+
+**Canonical source:** `assets/css/forms.css`
+
+Reuse existing classes before inventing new ones:
+
+| Pattern | Classes |
+|---------|---------|
+| Page width | `.page-container` (max-width 1100px) |
+| Hero / page intro | `.hero-cta-banner`, `.hero-cta-title`, `.hero-cta-subtitle` |
+| Cards | `.card`, `.card-compact`, `.card-featured`, `.card-header`, `.card-badge-*` |
+| Buttons | `.btn`, `.btn-primary`, `.btn-secondary` |
+| Form fields | `.form-input`, `.form-textarea`, `.form-label` |
+| Tags / pills | `.team-tag`, `.team-tag-primary`, `.team-tag-neutral` |
+| Grids | `.feature-cards-grid` |
+
+## List cards (events + blog)
+
+**Canonical source:** `layouts/partials/list-card-styles.html`
+
+Shared horizontal card layout:
+
+- Grid: `.list-card-grid` inside `.list-card-scope`
+- Card link: `.event-card-link` > `.event-card`
+- Image: `.event-card-image` with `--card-bg-image` CSS variable for blurred backdrop
+- Content: `.event-content`, `.event-title`, `.event-description`
+- Footer band: `.event-meta` with `.event-date-label` / `.event-date-value` and `.event-location-label` / `.event-location-value`
+
+Blog CDN pages (`bgg-bunny/blog-html.ts`) mirror these class names and tokens.
+
+## Blog article pages (CDN)
+
+Rendered by `bgg-bunny/blog-html.ts` and uploaded to Bunny Storage on publish.
+
+- **One author surface only:** `.blog-author-byline` with `.blog-author-item` — never duplicate in meta bar or article body
+- Meta band (date, category): `.blog-article-meta` with `.blog-meta-label` / `.blog-meta-value`
+- Tags: `.blog-tag-list` > `.blog-tag` (same visual weight as `.team-tag-primary`)
+- Body: `.blog-article-body` — Quill HTML; strip Hugo `.author` blocks on render
+
+## Copy guidelines
+
+From `.github/instructions/instructions.md.instructions.md`:
+
+- No emojis in headings, buttons, labels, or body text
+- No arrow characters in button labels or links
+- No decorative Unicode pseudo-icons
+- Use CSS (border accents, colour, spacing) for visual differentiation
+- Section headings: plain, descriptive text
+
+## Hugo theme notes
+
+- Site uses Blowfish layouts vendored at repo root (theme line commented out in `config/_default/hugo.toml`)
+- Compiled Tailwind CSS is committed at `assets/css/compiled/main.css` — do not add Sass/Dart to CI
+- Vendor JS is committed under `assets/lib/` — no `npm ci` needed for Hugo deploy
+- Site author in config (`Gibraltar Dice Bastion`) is the organisation — do not repeat alongside post authors on blog pages
+
+## File map
+
+| Area | Files |
+|------|-------|
+| Tokens | `assets/css/schemes/blowfish.css` |
+| Components | `assets/css/forms.css` |
+| Header tweaks | `assets/css/custom.css` |
+| List cards | `layouts/partials/list-card-styles.html` |
+| Blog CDN HTML | `bgg-bunny/blog-html.ts` |
+| Admin UI | `content/admin/_index.md` (inline styles use forms.css classes) |

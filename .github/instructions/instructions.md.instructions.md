@@ -7,6 +7,8 @@ When working with external scripts and APIs such as those we have on bunny.net, 
 
 When generating CSS please make sure to first reference forms.css and try to either use the styling already in there or to generate subcomponents of the classes contained there.
 
+For visual design tokens, list cards, blog pages, and copy rules, read docs/ui-style-guide.md (also linked from AGENTS.md).
+
 When writing any UI copy, HTML content, or section headers, avoid AI front-end tropes that look unprofessional:
 - No emojis anywhere in headings, buttons, labels, or body text.
 - No arrow characters (→, ↗, etc.) in button labels or links — use plain text only.

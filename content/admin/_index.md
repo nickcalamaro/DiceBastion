@@ -1216,6 +1216,7 @@ Loading cron job logs...
 <button type="button" onclick="blogPreview()" class="btn btn-secondary">Preview</button>
 <button type="button" onclick="blogSaveDraft()" class="btn btn-secondary" id="blog-save-btn">Save Draft</button>
 <button type="button" onclick="blogPublish()" class="btn btn-primary" id="blog-publish-btn">Publish</button>
+<button type="button" onclick="blogSyncCdn()" class="btn btn-secondary" id="blog-sync-cdn-btn">Rebuild CDN</button>
 <button type="button" onclick="blogUnpublish()" class="btn btn-secondary" id="blog-unpublish-btn" style="display:none;">Unpublish</button>
 <button type="button" onclick="blogDeletePost()" class="btn btn-secondary" id="blog-delete-btn" style="display:none;">Delete</button>
 </div>
@@ -5413,6 +5414,32 @@ async function blogSaveDraft() {
     blogSetActionResult(err.message || 'Save failed', true);
   } finally {
     saveBtn.disabled = false;
+  }
+}
+
+async function blogSyncCdn() {
+  const confirmed = await Modal.confirm({
+    title: 'Rebuild blog CDN?',
+    message: 'Uploads all published posts to Bunny Storage. Use this if /posts/ is empty or stale.',
+  });
+  if (!confirmed) return;
+
+  const btn = document.getElementById('blog-sync-cdn-btn');
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/sync-cdn`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'CDN rebuild failed');
+    blogSetActionResult(`CDN rebuilt (${data.posts ?? 0} published posts). /posts/ should be live within a minute.`, false);
+  } catch (err) {
+    blogSetActionResult(err.message || 'CDN rebuild failed', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Rebuild CDN';
   }
 }
 
