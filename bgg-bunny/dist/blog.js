@@ -4744,8 +4744,15 @@ var SITE_NAV = [
   { label: "Shop", href: "https://shop.dicebastion.com", external: true }
 ];
 var SITE_NAME = "Gibraltar Dice Bastion";
-var BLOG_SEO_DESCRIPTION = "Board game reviews, event recaps, and club news from Gibraltar Dice Bastion \u2014 Gibraltar's home for tabletop gaming.";
-var BLOG_SEO_INTRO = "Our little spot of the internet for all things tabletop happening in Gibraltar. Check back regularly for board game reviews, event recaps, and a behind-the-scenes look at your favourite gaming club.";
+var BLOG_SEO_DESCRIPTION = "Nicky and Jen's little corner of the internet for tabletop gaming in Gibraltar \u2014 board game reviews, event recaps, and club news from Dice Bastion.";
+function renderBlogIndexIntro(siteUrl) {
+  const newsletterUrl = `${siteUrl}/newsletter/`;
+  return `
+    <div class="blog-seo-intro">
+      <p>Nicky and Jen's little corner of the internet, for all things tabletop happening in Gibraltar. Check back regularly for board game reviews, event recaps and for a behind-the-scenes look at your favourite gaming club!</p>
+      <p>Want to get the latest updates? Sign up for <a href="${escapeHtml(newsletterUrl)}">our newsletter</a> and hear about all of our events and activies right in your inbox!</p>
+    </div>`;
+}
 function defaultOgImage(siteUrl) {
   return `${siteUrl}/img/DB_Logo_2025.png`;
 }
@@ -5053,6 +5060,8 @@ main.page-container {
   line-height: 1.75;
 }
 .blog-seo-intro p { margin: 0; }
+.blog-seo-intro p + p { margin-top: 0.75rem; }
+.blog-seo-intro a { text-decoration: underline; text-underline-offset: 2px; }
 .blog-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 240px;
@@ -5431,7 +5440,7 @@ function renderBlogListLayout(allPosts, displayedPosts, authors, siteUrl, option
       <h1>${escapeHtml(options.title)}</h1>
       ${options.subtitle ? `<p class="blog-list-subtitle">${escapeHtml(options.subtitle)}</p>` : ""}
     </header>
-    ${options.seoIntro ? `<div class="blog-seo-intro"><p>${escapeHtml(options.seoIntro)}</p></div>` : ""}
+    ${options.seoIntroHtml || ""}
     <div class="blog-layout">
       <div class="blog-main">
         <section class="list-card-grid">${cards}</section>
@@ -5447,8 +5456,7 @@ function renderBlogListLayout(allPosts, displayedPosts, authors, siteUrl, option
 function renderBlogListPage(posts, authors, siteUrl) {
   return renderBlogListLayout(posts, posts, authors, siteUrl, {
     title: "Blog",
-    subtitle: "News and updates from Gibraltar Dice Bastion.",
-    seoIntro: BLOG_SEO_INTRO,
+    seoIntroHtml: renderBlogIndexIntro(siteUrl),
     canonical: `${siteUrl}/posts/`,
     metaDescription: BLOG_SEO_DESCRIPTION,
     jsonLd: buildBlogIndexJsonLd(posts, siteUrl)
