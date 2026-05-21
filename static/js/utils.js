@@ -5,6 +5,8 @@
 
 // API Configuration
 window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+// Blog API — update after first Bunny deploy (Edge Scripting → script 75941 → URL)
+window.__BLOG_API_BASE = window.__BLOG_API_BASE || 'https://dicebastionblog.bunny.run';
 
 window.utils = {
   /**
@@ -25,6 +27,11 @@ window.utils = {
    */
   getApiBase: (removeTrailingSlash = false) => {
     const base = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+    return removeTrailingSlash ? base.replace(/\/+$/, '') : base;
+  },
+
+  getBlogApiBase: (removeTrailingSlash = false) => {
+    const base = window.__BLOG_API_BASE || 'https://dicebastionblog.bunny.run';
     return removeTrailingSlash ? base.replace(/\/+$/, '') : base;
   },
 
