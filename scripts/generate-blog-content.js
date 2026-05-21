@@ -104,7 +104,15 @@ async function fetchPublishedPosts() {
     throw new Error(`Failed to reach blog API at ${url}: ${cause}.${hint}`);
   }
   if (!res.ok) {
-    throw new Error(`Failed to fetch published posts from ${url}: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    let hint = '';
+    try {
+      const parsed = JSON.parse(body);
+      if (String(parsed.error || '').includes('401') || parsed.error === 'database_not_configured') {
+        hint = ' Configure BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN on Bunny script 75941 (same values as the bookings script).';
+      }
+    } catch { /* ignore */ }
+    throw new Error(`Failed to fetch published posts from ${url}: ${res.status} ${body}.${hint}`);
   }
   return res.json();
 }

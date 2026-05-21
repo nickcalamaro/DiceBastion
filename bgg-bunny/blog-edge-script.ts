@@ -87,6 +87,24 @@ function cleanBlogBody(html: unknown): string {
 
 let migrated = false;
 
+function dbConfigError(): Response | null {
+  if (!process.env.BUNNY_DATABASE_URL || !process.env.BUNNY_DATABASE_AUTH_TOKEN) {
+    return jsonResponse({
+      error: "database_not_configured",
+      message: "Set BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN in this script's Env Configuration (copy from the bookings script).",
+    }, 503);
+  }
+  return null;
+}
+
+function formatDbError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes("401") || msg.includes("Unauthorized")) {
+    return "Bunny Database auth failed — check BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN on script 75941.";
+  }
+  return msg;
+}
+
 async function migrateBlogPosts(): Promise<void> {
   if (migrated) return;
   await client.execute(`
@@ -460,6 +478,9 @@ async function publishedPosts(request: Request): Promise<Response> {
     return jsonResponse({ error: "unauthorized" }, 401);
   }
 
+  const dbErr = dbConfigError();
+  if (dbErr) return dbErr;
+
   await migrateBlogPosts();
   const postsResult = await client.execute(`
     SELECT id, slug, title, html, excerpt, featured_image, tags, categories, series, authors,
@@ -520,8 +541,8 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
     console.error("[Blog] request error:", error);
-    return jsonResponse({
-      error: error instanceof Error ? error.message : "Internal server error",
-    }, 500);
+    const message = formatDbError(error);
+    const status = message.includes("Bunny Database auth failed") ? 503 : 500;
+    return jsonResponse({ error: message }, status);
   }
 });
