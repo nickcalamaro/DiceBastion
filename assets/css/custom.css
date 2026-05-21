@@ -15,3 +15,32 @@
 .menuhide a.menu-item {
   white-space: nowrap;
 }
+
+/* Header logo on non-home pages */
+.header-logo {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+}
+
+.header-logo a {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.header-logo img,
+.header-logo .logo {
+  display: block;
+  max-height: 4.5rem;
+  max-width: 18rem;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.header-logo .logo svg {
+  height: 4.5rem;
+  width: auto;
+  max-width: 18rem;
+}
