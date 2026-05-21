@@ -2,13 +2,6 @@
 none = "none"
 
 # Visibilty options: 0 = admin only, 1 = members only, 2 = logged-in users, 3 = everyone, 5 = logged-out users only
-[[main]]
-name = "Blog"
-url = "/posts/"
-identifier = "blog"
-weight = 9996
-[main.params]
-visibility = 3
 
 
 [[main]]

@@ -3,4 +3,4 @@ title: Blog
 description: News, updates, and stories from Dice Bastion.
 ---
 
-Welcome to the Dice Bastion blog — announcements, event recaps, and community highlights.
+Our little spot of the internet for all things tabletop happening in Gibraltar. Check back regularly for board game reviews, event recaps and for a behind-the-scenes look at your favourite gaming club!

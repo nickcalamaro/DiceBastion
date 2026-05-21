@@ -1367,7 +1367,7 @@ Loading cron job logs...
 
 <script>
 const API_BASE = utils.getApiBase();
-const BLOG_API_BASE = utils.getBlogApiBase();
+const BLOG_API_BASE = (window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '');
 let sessionToken = null;
 let currentUser = null;
 let uploadedProductImage = null;
