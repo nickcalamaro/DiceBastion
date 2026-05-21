@@ -28,11 +28,34 @@ export interface BlogAuthorProfile {
   bio?: string | null;
 }
 
-/** Site/org bylines — hide when a named person author is also present. */
+export interface BlogTaxonomyIndex {
+  tags: { slug: string; label: string; count: number }[];
+  authors: { slug: string; name: string; count: number }[];
+}
+
 const ORG_AUTHOR_NAMES = new Set([
   "dice bastion",
   "gibraltar dice bastion",
 ]);
+
+const SITE_NAV = [
+  { label: "Events", href: "/events/" },
+  { label: "About", href: "/about/" },
+  { label: "Memberships", href: "/memberships/" },
+  { label: "Book a Table", href: "/bookings/" },
+  { label: "Games Library", href: "/board-game-library/" },
+  { label: "Blog", href: "/posts/" },
+  { label: "Shop", href: "https://shop.dicebastion.com", external: true },
+];
+
+/** Match admin blogSlugify for consistent tag URLs. */
+export function slugifyTaxonomy(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 function escapeHtml(text: unknown): string {
   if (text == null) return "";
@@ -65,7 +88,6 @@ function isOrgAuthorName(name: string): boolean {
   return ORG_AUTHOR_NAMES.has(name.trim().toLowerCase());
 }
 
-/** Deduplicate by slug and display name; prefer person authors over org bylines. */
 function resolvePostAuthors(
   post: BlogPostRow,
   authors: Record<string, BlogAuthorProfile>
@@ -95,22 +117,78 @@ function authorInitials(name: string): string {
     .join("");
 }
 
-/** Remove Hugo-style author blocks and duplicate bylines pasted into Quill HTML. */
 function stripEmbeddedAuthorBlocks(html: string): string {
   if (!html) return "";
   let out = html;
-  // Hugo author-extra / site author partials (flex author wrappers)
   out = out.replace(/<div class="flex author author-extra[^"]*"[\s\S]*?<\/div>\s*<\/div>/gi, "");
   out = out.replace(/<div class="flex author"[\s\S]*?<\/div>\s*<\/div>/gi, "");
-  // Plain "Author:" paragraphs
   out = out.replace(/<p[^>]*>\s*(?:<(?:strong|b)>)?\s*Author:?\s*(?:<\/(?:strong|b)>)?\s*[^<]*<\/p>/gi, "");
   return out.trim();
 }
 
-function renderAuthorByline(profiles: BlogAuthorProfile[]): string {
+export function buildTaxonomyIndex(
+  posts: BlogPostRow[],
+  authors: Record<string, BlogAuthorProfile>
+): BlogTaxonomyIndex {
+  const tagMap = new Map<string, { label: string; count: number }>();
+  const authorMap = new Map<string, { name: string; count: number }>();
+
+  for (const post of posts) {
+    for (const tag of post.tags || []) {
+      const slug = slugifyTaxonomy(tag);
+      if (!slug) continue;
+      const existing = tagMap.get(slug);
+      if (existing) existing.count += 1;
+      else tagMap.set(slug, { label: tag, count: 1 });
+    }
+    for (const authorSlug of post.authors || []) {
+      if (!authorSlug) continue;
+      const name = authors[authorSlug]?.name || authorSlug.replace(/-/g, " ");
+      if (isOrgAuthorName(name)) continue;
+      const existing = authorMap.get(authorSlug);
+      if (existing) existing.count += 1;
+      else authorMap.set(authorSlug, { name, count: 1 });
+    }
+  }
+
+  return {
+    tags: [...tagMap.entries()]
+      .map(([slug, value]) => ({ slug, label: value.label, count: value.count }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    authors: [...authorMap.entries()]
+      .map(([slug, value]) => ({ slug, name: value.name, count: value.count }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+function postHasTag(post: BlogPostRow, tagSlug: string): boolean {
+  return (post.tags || []).some((tag) => slugifyTaxonomy(tag) === tagSlug);
+}
+
+function tagLabelFromSlug(posts: BlogPostRow[], tagSlug: string): string {
+  for (const post of posts) {
+    for (const tag of post.tags || []) {
+      if (slugifyTaxonomy(tag) === tagSlug) return tag;
+    }
+  }
+  return tagSlug.replace(/-/g, " ");
+}
+
+function renderTagLinks(tags: string[], siteUrl: string): string {
+  return (tags || [])
+    .map((tag) => {
+      const slug = slugifyTaxonomy(tag);
+      const href = `${siteUrl}/posts/tag/${encodeURIComponent(slug)}/`;
+      return `<a class="blog-tag" href="${escapeHtml(href)}">${escapeHtml(tag)}</a>`;
+    })
+    .join("");
+}
+
+function renderAuthorByline(profiles: BlogAuthorProfile[], siteUrl: string): string {
   if (!profiles.length) return "";
   const items = profiles
     .map((profile) => {
+      const authorUrl = `${siteUrl}/posts/author/${encodeURIComponent(profile.slug)}/`;
       const avatar = profile.image
         ? `<img class="blog-author-avatar" src="${escapeHtml(profile.image)}" alt="" width="48" height="48" loading="lazy">`
         : `<div class="blog-author-avatar blog-author-avatar--placeholder" aria-hidden="true">${escapeHtml(authorInitials(profile.name))}</div>`;
@@ -122,7 +200,7 @@ function renderAuthorByline(profiles: BlogAuthorProfile[]): string {
           ${avatar}
           <div class="blog-author-text">
             <div class="blog-author-label">Author</div>
-            <div class="blog-author-name">${escapeHtml(profile.name)}</div>
+            <a class="blog-author-name" href="${escapeHtml(authorUrl)}">${escapeHtml(profile.name)}</a>
             ${bio}
           </div>
         </div>`;
@@ -130,6 +208,44 @@ function renderAuthorByline(profiles: BlogAuthorProfile[]): string {
     .join("");
 
   return `<aside class="blog-author-byline" aria-label="Article author">${items}</aside>`;
+}
+
+function renderTaxonomySidebar(
+  taxonomy: BlogTaxonomyIndex,
+  siteUrl: string,
+  active?: { tag?: string; author?: string }
+): string {
+  const tagItems = taxonomy.tags
+    .map(({ slug, label, count }) => {
+      const activeClass = active?.tag === slug ? " is-active" : "";
+      const href = `${siteUrl}/posts/tag/${encodeURIComponent(slug)}/`;
+      return `<li><a class="sidebar-link${activeClass}" href="${escapeHtml(href)}">${escapeHtml(label)} <span class="sidebar-count">${count}</span></a></li>`;
+    })
+    .join("");
+
+  const authorItems = taxonomy.authors
+    .map(({ slug, name, count }) => {
+      const activeClass = active?.author === slug ? " is-active" : "";
+      const href = `${siteUrl}/posts/author/${encodeURIComponent(slug)}/`;
+      return `<li><a class="sidebar-link${activeClass}" href="${escapeHtml(href)}">${escapeHtml(name)} <span class="sidebar-count">${count}</span></a></li>`;
+    })
+    .join("");
+
+  return `
+    <aside class="blog-sidebar" aria-label="Blog topics">
+      ${taxonomy.tags.length ? `
+        <div class="sidebar-block">
+          <h2 class="sidebar-heading">Tags</h2>
+          <ul class="sidebar-list">${tagItems}</ul>
+        </div>
+      ` : ""}
+      ${taxonomy.authors.length ? `
+        <div class="sidebar-block">
+          <h2 class="sidebar-heading">Authors</h2>
+          <ul class="sidebar-list">${authorItems}</ul>
+        </div>
+      ` : ""}
+    </aside>`;
 }
 
 const PAGE_CSS = `
@@ -156,66 +272,84 @@ const PAGE_CSS = `
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  background: rgb(var(--color-neutral-50));
+  background: rgb(var(--color-neutral));
   color: rgb(var(--color-neutral-800));
   line-height: 1.6;
 }
 a { color: rgb(var(--color-primary-600)); text-decoration: none; }
-a:hover { color: rgb(var(--color-primary-700)); text-decoration: underline; }
+a:hover { color: rgb(var(--color-primary-700)); }
 .site-header {
+  border-bottom: 1px solid rgb(var(--color-neutral-200));
+  background: rgb(var(--color-neutral));
+}
+.site-header-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0.5rem 1rem 0.75rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.75rem 1.5rem;
-  background: rgb(var(--color-neutral));
-  border-bottom: 1px solid rgb(var(--color-neutral-200));
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  flex-wrap: wrap;
 }
-.site-header a.brand {
-  font-weight: 800;
-  font-size: 1.05rem;
-  color: rgb(var(--color-neutral-900));
-  text-decoration: none;
-  letter-spacing: -0.02em;
+.site-logo {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
-.site-header nav { display: flex; gap: 1.25rem; }
-.site-header nav a {
-  text-decoration: none;
-  font-weight: 600;
+.site-logo img {
+  display: block;
+  max-height: 4.5rem;
+  max-width: 18rem;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem 1.25rem;
+}
+.site-nav a {
   font-size: 0.95rem;
+  font-weight: 500;
   color: rgb(var(--color-neutral-600));
+  text-decoration: none;
+  padding: 0.35rem 0;
 }
-.site-header nav a:hover { color: rgb(var(--color-primary-600)); text-decoration: none; }
+.site-nav a:hover { color: rgb(var(--color-primary-600)); }
+.site-nav a.is-active { color: rgb(var(--color-primary-700)); font-weight: 600; }
 main.page-container {
-  max-width: 1100px;
-  margin: 1rem auto 3rem;
-  padding: 0 1rem;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
 }
-.page-intro {
-  background: linear-gradient(135deg, #4f46e5 0%, rgb(var(--color-primary-600)) 50%, #0ea5e9 100%);
-  border-radius: 12px;
-  padding: 1.75rem 2rem;
-  margin-bottom: 1.5rem;
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
-  color: white;
-}
-.page-intro h1 {
+.blog-list-header { margin-bottom: 1.5rem; max-width: 760px; }
+.blog-list-header h1 {
   margin: 0 0 0.35rem;
-  font-size: clamp(1.5rem, 4vw, 2rem);
-  font-weight: 700;
+  font-size: 2.25rem;
+  font-weight: 800;
   letter-spacing: -0.03em;
+  color: rgb(var(--color-neutral-900));
 }
-.page-intro p {
+.blog-list-subtitle {
   margin: 0;
-  color: rgba(255, 255, 255, 0.95);
+  color: rgb(var(--color-neutral-500));
   font-size: 1.05rem;
 }
+.blog-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 2rem;
+  align-items: start;
+}
+.blog-main { min-width: 0; }
 .list-card-grid {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  margin: 2rem 0;
+  gap: 1.25rem;
 }
 .event-card-link {
   text-decoration: none;
@@ -226,24 +360,23 @@ main.page-container {
   border: 1px solid rgb(var(--color-neutral-300));
   border-radius: 16px;
   background: rgb(var(--color-neutral));
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  min-height: 240px;
+  min-height: 220px;
   overflow: hidden;
-  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .event-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
-  border-color: rgba(var(--color-primary-400), 0.5);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  border-color: rgb(var(--color-neutral-400));
 }
 .event-card-image {
-  flex: 0 0 400px;
-  width: 400px;
+  flex: 0 0 340px;
+  width: 340px;
   position: relative;
-  min-height: 240px;
+  min-height: 220px;
   background: rgb(var(--color-neutral-100));
 }
 .event-card-image::before {
@@ -253,8 +386,8 @@ main.page-container {
   background-image: var(--card-bg-image);
   background-size: cover;
   background-position: center;
-  filter: blur(60px) brightness(0.9);
-  transform: scale(1.2);
+  filter: blur(60px) brightness(0.92);
+  transform: scale(1.15);
 }
 .event-card-image img {
   position: absolute;
@@ -265,108 +398,158 @@ main.page-container {
   object-position: center;
   z-index: 1;
 }
-.event-content { flex: 1; padding: 2rem 1.5rem 0; display: flex; flex-direction: column; }
+.event-content { flex: 1; padding: 1.5rem 1.25rem 0; display: flex; flex-direction: column; }
 .event-title {
   margin: 0;
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: rgb(var(--color-neutral-900));
-  letter-spacing: -0.03em;
-  line-height: 1.2;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 .event-description {
   color: rgb(var(--color-neutral-600));
-  margin: 0.75rem 0 1rem;
-  line-height: 1.7;
+  margin: 0.6rem 0 0.75rem;
+  line-height: 1.65;
+  font-size: 0.98rem;
 }
 .event-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.5rem 2rem;
-  padding: 1.25rem 1.5rem;
-  margin: auto -1.5rem 0;
-  background: linear-gradient(135deg, rgba(var(--color-primary-50), 0.5) 0%, rgba(var(--color-primary-100), 0.3) 100%);
-  border-top: 2px solid rgba(var(--color-primary-200), 0.5);
+  gap: 1.25rem 1.75rem;
+  padding: 0.875rem 1.25rem;
+  margin: auto -1.25rem 0;
+  background: rgb(var(--color-neutral-50));
+  border-top: 1px solid rgb(var(--color-neutral-200));
 }
 .event-date-label, .event-location-label {
   font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   font-weight: 700;
-  color: rgba(var(--color-primary-600), 0.85);
+  color: rgb(var(--color-neutral-500));
 }
 .event-date-value, .event-location-value {
+  font-weight: 600;
+  color: rgb(var(--color-neutral-800));
+  font-size: 0.98rem;
+}
+.blog-sidebar {
+  position: sticky;
+  top: 1rem;
+  padding: 1rem;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 12px;
+  background: rgb(var(--color-neutral-50));
+}
+.sidebar-block + .sidebar-block { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid rgb(var(--color-neutral-200)); }
+.sidebar-heading {
+  margin: 0 0 0.65rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   font-weight: 700;
+  color: rgb(var(--color-neutral-500));
+}
+.sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.sidebar-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: rgb(var(--color-neutral-700));
+  text-decoration: none;
+  padding: 0.2rem 0;
+}
+.sidebar-link:hover { color: rgb(var(--color-primary-600)); }
+.sidebar-link.is-active {
   color: rgb(var(--color-primary-700));
-  font-size: 1.125rem;
+  font-weight: 600;
 }
-.blog-article {
-  max-width: 760px;
-  margin: 0 auto;
+.sidebar-count {
+  font-size: 0.75rem;
+  color: rgb(var(--color-neutral-400));
+  font-weight: 500;
 }
+.blog-article { max-width: 760px; }
 .blog-hero-image {
   width: 100%;
-  max-height: 420px;
+  max-height: 400px;
   object-fit: cover;
   border-radius: 12px;
-  margin-bottom: 1.5rem;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  margin-bottom: 1.25rem;
 }
 .blog-article-title {
-  font-size: clamp(1.75rem, 5vw, 2.35rem);
+  font-size: clamp(1.75rem, 5vw, 2.2rem);
   font-weight: 800;
   line-height: 1.15;
-  margin: 0 0 1rem;
+  margin: 0 0 0.875rem;
   color: rgb(var(--color-neutral-900));
   letter-spacing: -0.03em;
 }
 .blog-article-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.5rem 2rem;
-  margin-bottom: 1.25rem;
-  padding: 1rem 1.25rem;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(var(--color-primary-50), 0.5) 0%, rgba(var(--color-primary-100), 0.3) 100%);
-  border: 1px solid rgba(var(--color-primary-200), 0.5);
+  gap: 1.25rem 1.75rem;
+  margin-bottom: 1rem;
+  padding: 0.875rem 1rem;
+  border-radius: 8px;
+  background: rgb(var(--color-neutral-50));
+  border: 1px solid rgb(var(--color-neutral-200));
 }
-.blog-meta-block { display: flex; flex-direction: column; gap: 0.2rem; }
+.blog-meta-block { display: flex; flex-direction: column; gap: 0.15rem; }
 .blog-meta-label {
   font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   font-weight: 700;
-  color: rgba(var(--color-primary-600), 0.85);
+  color: rgb(var(--color-neutral-500));
 }
 .blog-meta-value {
-  font-weight: 700;
-  color: rgb(var(--color-primary-700));
-  font-size: 1.05rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-800));
+  font-size: 0.98rem;
 }
-.blog-tag-list { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1.25rem; }
+.blog-tag-list { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1rem; }
 .blog-tag {
   display: inline-block;
   padding: 0.15rem 0.6rem;
   border-radius: 999px;
-  background: rgb(var(--color-primary-100));
-  color: rgb(var(--color-primary-700));
+  background: rgb(var(--color-neutral-100));
+  border: 1px solid rgb(var(--color-neutral-200));
+  color: rgb(var(--color-neutral-700));
   font-size: 0.8rem;
   font-weight: 600;
+  text-decoration: none;
+}
+.blog-tag:hover {
+  background: rgb(var(--color-primary-50));
+  border-color: rgb(var(--color-primary-200));
+  color: rgb(var(--color-primary-700));
+  text-decoration: none;
 }
 .blog-author-byline {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  margin-bottom: 1.75rem;
-  padding: 1rem 1.25rem;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding: 0.875rem 1rem;
   border: 1px solid rgb(var(--color-neutral-200));
-  border-radius: 12px;
-  background: rgb(var(--color-neutral));
+  border-radius: 8px;
+  background: rgb(var(--color-neutral-50));
 }
-.blog-author-item { display: flex; align-items: center; gap: 1rem; }
+.blog-author-item { display: flex; align-items: center; gap: 0.875rem; }
 .blog-author-avatar {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   object-fit: cover;
   flex-shrink: 0;
@@ -375,28 +558,30 @@ main.page-container {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(var(--color-primary-100));
-  color: rgb(var(--color-primary-700));
+  background: rgb(var(--color-neutral-200));
+  color: rgb(var(--color-neutral-700));
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
 }
 .blog-author-label {
   font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   font-weight: 700;
   color: rgb(var(--color-neutral-500));
 }
 .blog-author-name {
-  font-weight: 700;
+  font-weight: 600;
   color: rgb(var(--color-neutral-900));
-  font-size: 1.05rem;
+  font-size: 1rem;
+  text-decoration: none;
 }
+.blog-author-name:hover { color: rgb(var(--color-primary-700)); }
 .blog-author-bio {
-  margin: 0.25rem 0 0;
-  font-size: 0.9rem;
+  margin: 0.2rem 0 0;
+  font-size: 0.88rem;
   color: rgb(var(--color-neutral-600));
-  line-height: 1.5;
+  line-height: 1.45;
 }
 .blog-article-body {
   font-size: 1.05rem;
@@ -415,28 +600,51 @@ main.page-container {
 .blog-article-body blockquote {
   margin: 1.25rem 0;
   padding: 0.75rem 1rem;
-  border-left: 4px solid rgb(var(--color-primary-400));
-  background: rgb(var(--color-neutral-100));
-  border-radius: 0 8px 8px 0;
+  border-left: 3px solid rgb(var(--color-neutral-300));
+  background: rgb(var(--color-neutral-50));
+  border-radius: 0 6px 6px 0;
   color: rgb(var(--color-neutral-700));
 }
 .no-posts {
-  text-align: center;
-  padding: 3rem;
-  color: rgb(var(--color-neutral-600));
-  font-size: 1.125rem;
+  padding: 2rem 1rem;
+  color: rgb(var(--color-neutral-500));
+  font-size: 1rem;
+}
+@media (max-width: 900px) {
+  .blog-layout { grid-template-columns: 1fr; }
+  .blog-sidebar { position: static; }
 }
 @media (max-width: 768px) {
   .event-card { flex-direction: column; }
   .event-card-image {
     flex: none;
     width: 100%;
-    aspect-ratio: 400 / 238;
+    aspect-ratio: 16 / 10;
     min-height: 0;
-    border-radius: 16px 16px 0 0;
   }
+  .site-nav { justify-content: flex-start; }
 }
 `;
+
+function renderSiteHeader(siteUrl: string): string {
+  const logoUrl = `${siteUrl}/img/DB_Logo_2025.png`;
+  const nav = SITE_NAV.map((item) => {
+    const href = item.external ? item.href : `${siteUrl}${item.href}`;
+    const cls = item.href === "/posts/" ? ' class="is-active"' : "";
+    const external = item.external ? ' target="_blank" rel="noopener noreferrer"' : "";
+    return `<a href="${escapeHtml(href)}"${cls}${external}>${escapeHtml(item.label)}</a>`;
+  }).join("\n");
+
+  return `
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-logo" href="${escapeHtml(siteUrl)}/">
+          <img src="${escapeHtml(logoUrl)}" alt="Gibraltar Dice Bastion" width="288" height="72">
+        </a>
+        <nav class="site-nav" aria-label="Main">${nav}</nav>
+      </div>
+    </header>`;
+}
 
 function pageShell(
   title: string,
@@ -465,13 +673,7 @@ function pageShell(
   <style>${PAGE_CSS}</style>
 </head>
 <body>
-  <header class="site-header">
-    <a class="brand" href="${escapeHtml(siteUrl)}/">Dice Bastion</a>
-    <nav>
-      <a href="${escapeHtml(siteUrl)}/posts/">Blog</a>
-      <a href="${escapeHtml(siteUrl)}/events/">Events</a>
-    </nav>
-  </header>
+  ${renderSiteHeader(siteUrl)}
   <main class="page-container">${bodyHtml}</main>
 </body>
 </html>`;
@@ -508,25 +710,87 @@ function renderPostCard(post: BlogPostRow, siteUrl: string): string {
     </a>`;
 }
 
-export function renderBlogListPage(posts: BlogPostRow[], siteUrl: string): string {
-  const cards = posts.length
-    ? posts.map((p) => renderPostCard(p, siteUrl)).join("\n")
-    : `<div class="no-posts">No posts yet. Check back soon!</div>`;
+interface ListPageOptions {
+  title: string;
+  subtitle?: string;
+  canonical: string;
+  metaDescription: string;
+  activeTag?: string;
+  activeAuthor?: string;
+}
+
+function renderBlogListLayout(
+  allPosts: BlogPostRow[],
+  displayedPosts: BlogPostRow[],
+  authors: Record<string, BlogAuthorProfile>,
+  siteUrl: string,
+  options: ListPageOptions
+): string {
+  const taxonomy = buildTaxonomyIndex(allPosts, authors);
+  const cards = displayedPosts.length
+    ? displayedPosts.map((p) => renderPostCard(p, siteUrl)).join("\n")
+    : `<div class="no-posts">No posts in this section yet.</div>`;
 
   const body = `
-    <div class="page-intro">
-      <h1>Blog</h1>
-      <p>News, updates, and stories from Dice Bastion.</p>
-    </div>
-    <section class="list-card-grid">${cards}</section>`;
+    <header class="blog-list-header">
+      <h1>${escapeHtml(options.title)}</h1>
+      ${options.subtitle ? `<p class="blog-list-subtitle">${escapeHtml(options.subtitle)}</p>` : ""}
+    </header>
+    <div class="blog-layout">
+      <div class="blog-main">
+        <section class="list-card-grid">${cards}</section>
+      </div>
+      ${renderTaxonomySidebar(taxonomy, siteUrl, { tag: options.activeTag, author: options.activeAuthor })}
+    </div>`;
 
-  return pageShell(
-    "Blog",
-    "News, updates, and stories from Dice Bastion.",
-    `${siteUrl}/posts/`,
-    siteUrl,
-    body
-  );
+  return pageShell(options.title, options.metaDescription, options.canonical, siteUrl, body);
+}
+
+export function renderBlogListPage(
+  posts: BlogPostRow[],
+  authors: Record<string, BlogAuthorProfile>,
+  siteUrl: string
+): string {
+  return renderBlogListLayout(posts, posts, authors, siteUrl, {
+    title: "Blog",
+    subtitle: "News and updates from Dice Bastion.",
+    canonical: `${siteUrl}/posts/`,
+    metaDescription: "News and updates from Dice Bastion.",
+  });
+}
+
+export function renderBlogTagPage(
+  tagSlug: string,
+  posts: BlogPostRow[],
+  authors: Record<string, BlogAuthorProfile>,
+  siteUrl: string
+): string {
+  const label = tagLabelFromSlug(posts, tagSlug);
+  const filtered = posts.filter((post) => postHasTag(post, tagSlug));
+  return renderBlogListLayout(posts, filtered, authors, siteUrl, {
+    title: label,
+    subtitle: `Posts tagged “${label}”.`,
+    canonical: `${siteUrl}/posts/tag/${encodeURIComponent(tagSlug)}/`,
+    metaDescription: `Blog posts tagged ${label} on Dice Bastion.`,
+    activeTag: tagSlug,
+  });
+}
+
+export function renderBlogAuthorPage(
+  authorSlug: string,
+  posts: BlogPostRow[],
+  authors: Record<string, BlogAuthorProfile>,
+  siteUrl: string
+): string {
+  const name = authors[authorSlug]?.name || authorSlug.replace(/-/g, " ");
+  const filtered = posts.filter((post) => (post.authors || []).includes(authorSlug));
+  return renderBlogListLayout(posts, filtered, authors, siteUrl, {
+    title: name,
+    subtitle: `Posts by ${name}.`,
+    canonical: `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`,
+    metaDescription: `Blog posts by ${name} on Dice Bastion.`,
+    activeAuthor: authorSlug,
+  });
 }
 
 export function renderBlogPostPage(
@@ -540,9 +804,7 @@ export function renderBlogPostPage(
   const canonical = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
   const description = post.seo_description || post.excerpt || post.title;
   const ogImage = post.seo_image || hero || cardImage(post);
-  const tags = (post.tags || [])
-    .map((t) => `<span class="blog-tag">${escapeHtml(t)}</span>`)
-    .join("");
+  const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
   const sanitizedBody = stripEmbeddedAuthorBlocks(post.html || "");
 
@@ -565,7 +827,7 @@ export function renderBlogPostPage(
         ` : ""}
       </div>
       ${tags ? `<div class="blog-tag-list">${tags}</div>` : ""}
-      ${renderAuthorByline(authorProfiles)}
+      ${renderAuthorByline(authorProfiles, siteUrl)}
       <div class="blog-article-body">${sanitizedBody}</div>
     </article>`;
 
@@ -587,15 +849,36 @@ export function renderBlogPostPage(
   return pageShell(post.title, description, canonical, siteUrl, body, jsonLd, ogImage || undefined);
 }
 
-export function renderBlogSitemap(posts: BlogPostRow[], siteUrl: string): string {
+export function renderBlogSitemap(
+  posts: BlogPostRow[],
+  authors: Record<string, BlogAuthorProfile>,
+  siteUrl: string
+): string {
   const today = new Date().toISOString().split("T")[0];
-  const urls = [
+  const taxonomy = buildTaxonomyIndex(posts, authors);
+  const urls: string[] = [
     `  <url>\n    <loc>${siteUrl}/posts/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>`,
-    ...posts.map((post) => {
-      const lastmod = post.updated_at || post.published_at;
-      const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
-      return `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`;
-    }),
   ];
+
+  for (const post of posts) {
+    const lastmod = post.updated_at || post.published_at;
+    const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
+    urls.push(
+      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`
+    );
+  }
+
+  for (const tag of taxonomy.tags) {
+    urls.push(
+      `  <url>\n    <loc>${siteUrl}/posts/tag/${encodeURIComponent(tag.slug)}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.5</priority>\n  </url>`
+    );
+  }
+
+  for (const author of taxonomy.authors) {
+    urls.push(
+      `  <url>\n    <loc>${siteUrl}/posts/author/${encodeURIComponent(author.slug)}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.5</priority>\n  </url>`
+    );
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
 }

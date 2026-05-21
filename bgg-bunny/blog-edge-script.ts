@@ -35,9 +35,12 @@ import {
   uploadStorageFile,
 } from "./blog-cdn";
 import {
+  buildTaxonomyIndex,
+  renderBlogAuthorPage,
   renderBlogListPage,
   renderBlogPostPage,
   renderBlogSitemap,
+  renderBlogTagPage,
   type BlogAuthorProfile,
   type BlogPostRow,
 } from "./blog-html";
@@ -256,16 +259,17 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
   const siteUrl = blogSiteUrl();
   const posts = await fetchPublishedPostsForRender();
   const authors = await fetchAuthorMap();
+  const taxonomy = buildTaxonomyIndex(posts, authors);
   const purgePaths = ["blog/posts/index.html", "blog/posts/sitemap.xml"];
 
   await uploadStorageFile(
     "blog/posts/index.html",
-    renderBlogListPage(posts, siteUrl),
+    renderBlogListPage(posts, authors, siteUrl),
     "text/html; charset=utf-8"
   );
   await uploadStorageFile(
     "blog/posts/sitemap.xml",
-    renderBlogSitemap(posts, siteUrl),
+    renderBlogSitemap(posts, authors, siteUrl),
     "application/xml; charset=utf-8"
   );
 
@@ -274,6 +278,26 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
     await uploadStorageFile(
       path,
       renderBlogPostPage(post, authors, siteUrl),
+      "text/html; charset=utf-8"
+    );
+    purgePaths.push(path);
+  }
+
+  for (const tag of taxonomy.tags) {
+    const path = `blog/posts/tag/${tag.slug}/index.html`;
+    await uploadStorageFile(
+      path,
+      renderBlogTagPage(tag.slug, posts, authors, siteUrl),
+      "text/html; charset=utf-8"
+    );
+    purgePaths.push(path);
+  }
+
+  for (const author of taxonomy.authors) {
+    const path = `blog/posts/author/${author.slug}/index.html`;
+    await uploadStorageFile(
+      path,
+      renderBlogAuthorPage(author.slug, posts, authors, siteUrl),
       "text/html; charset=utf-8"
     );
     purgePaths.push(path);

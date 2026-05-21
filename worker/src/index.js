@@ -10886,6 +10886,14 @@ export default {
         return proxyBlogCdn('blog/posts/sitemap.xml')
       }
 
+      if (parts.length >= 4 && parts[2] === 'tag' && parts[3]) {
+        return proxyBlogCdn(`blog/posts/tag/${encodeURIComponent(parts[3])}/index.html`)
+      }
+
+      if (parts.length >= 4 && parts[2] === 'author' && parts[3]) {
+        return proxyBlogCdn(`blog/posts/author/${encodeURIComponent(parts[3])}/index.html`)
+      }
+
       const slug = parts.length === 3 ? parts[2] : null
       if (slug && !slug.includes('.')) {
         return proxyBlogCdn(`blog/posts/${encodeURIComponent(slug)}/index.html`)

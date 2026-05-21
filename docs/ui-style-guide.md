@@ -44,7 +44,13 @@ Shared horizontal card layout:
 - Content: `.event-content`, `.event-title`, `.event-description`
 - Footer band: `.event-meta` with `.event-date-label` / `.event-date-value` and `.event-location-label` / `.event-location-value`
 
-Blog CDN pages (`bgg-bunny/blog-html.ts`) mirror these class names and tokens.
+Blog CDN pages (`bgg-bunny/blog-html.ts`) mirror list-card patterns with subdued styling (no hero gradient banners).
+
+Taxonomy URLs (pre-rendered on CDN sync):
+
+- Tag archive: `/posts/tag/{slug}/` (slug from tag name, e.g. `board-games`)
+- Author archive: `/posts/author/{slug}/` (author slug from admin)
+- Main list sidebar shows all tags and authors with post counts
 
 ## Blog article pages (CDN)
 
