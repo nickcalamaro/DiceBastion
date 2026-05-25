@@ -595,6 +595,47 @@ main.page-container {
   line-height: 1.65;
   font-size: 0.98rem;
 }
+.event-card-authors {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+.event-card-author-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.event-card-author-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.event-card-author-avatar--placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(var(--color-neutral-200));
+  color: rgb(var(--color-neutral-700));
+  font-weight: 700;
+  font-size: 0.65rem;
+}
+.event-card-author-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-700));
+  line-height: 1.2;
+}
+.event-card-author-sep {
+  font-size: 0.8rem;
+  color: rgb(var(--color-neutral-400));
+  font-weight: 500;
+}
 .event-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1049,12 +1090,40 @@ function pageShell(
 </html>`;
 }
 
-function renderPostCard(post: BlogPostRow, siteUrl: string): string {
+function renderPostCardAuthors(profiles: BlogAuthorProfile[]): string {
+  if (!profiles.length) return "";
+  const items = profiles
+    .map((profile, index) => {
+      const avatar = profile.image
+        ? `<img class="event-card-author-avatar" src="${escapeHtml(profile.image)}" alt="" width="28" height="28" loading="lazy">`
+        : `<span class="event-card-author-avatar event-card-author-avatar--placeholder" aria-hidden="true">${escapeHtml(authorInitials(profile.name))}</span>`;
+      const sep = index > 0 ? `<span class="event-card-author-sep">&amp;</span>` : "";
+      return `${sep}<span class="event-card-author-item">${avatar}<span class="event-card-author-name">${escapeHtml(profile.name)}</span></span>`;
+    })
+    .join("");
+
+  return `<div class="event-card-authors" aria-label="Author">${items}</div>`;
+}
+
+interface PostCardOptions {
+  showAuthor?: boolean;
+}
+
+function renderPostCard(
+  post: BlogPostRow,
+  siteUrl: string,
+  authors: Record<string, BlogAuthorProfile> = {},
+  options: PostCardOptions = {}
+): string {
   const img = cardImage(post);
   const summary = post.excerpt || post.seo_description || "";
   const dateStr = formatDate(post.published_at);
   const category = (post.categories || [])[0] || "";
   const postUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
+  const showAuthor = options.showAuthor !== false;
+  const authorHtml = showAuthor
+    ? renderPostCardAuthors(resolvePostAuthors(post, authors))
+    : "";
 
   return `
     <a href="${escapeHtml(postUrl)}" class="event-card-link">
@@ -1063,6 +1132,7 @@ function renderPostCard(post: BlogPostRow, siteUrl: string): string {
         <div class="event-content">
           <h2 class="event-title">${escapeHtml(post.title)}</h2>
           ${summary ? `<p class="event-description">${escapeHtml(summary)}</p>` : ""}
+          ${authorHtml}
           <div class="event-meta">
             <div class="blog-meta-block">
               <div class="event-date-label">Published</div>
@@ -1100,7 +1170,7 @@ function renderBlogListLayout(
 ): string {
   const taxonomy = buildTaxonomyIndex(allPosts, authors);
   const cards = displayedPosts.length
-    ? displayedPosts.map((p) => renderPostCard(p, siteUrl)).join("\n")
+    ? displayedPosts.map((p) => renderPostCard(p, siteUrl, authors)).join("\n")
     : `<div class="no-posts">No posts in this section yet.</div>`;
 
   const body = `
@@ -1197,7 +1267,7 @@ export function renderBlogAuthorPage(
     </header>`;
 
   const cards = filtered.length
-    ? filtered.map((p) => renderPostCard(p, siteUrl)).join("\n")
+    ? filtered.map((p) => renderPostCard(p, siteUrl, authors, { showAuthor: false })).join("\n")
     : `<div class="no-posts">No published articles yet.</div>`;
 
   const body = `
