@@ -1122,11 +1122,13 @@ Loading cron job logs...
 <input type="datetime-local" id="blog-published-at" class="form-input">
 </div>
 <div>
-<label class="form-label">Featured Image</label>
+<label class="form-label">Cover image</label>
+<p style="margin:0 0 0.5rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">Shown on list cards and as the wide hero at the top of the post. Upload crops to card (400×238), main (800×379), and hero (885×300) sizes.</p>
 <input type="hidden" id="blog-featured-image-card" value="">
 <input type="hidden" id="blog-featured-image-hero" value="">
-<input type="url" id="blog-featured-image" class="form-input" placeholder="Main image URL (auto-filled on upload)">
-<input type="file" id="blog-featured-upload" accept="image/*" class="form-input" style="margin-top:0.5rem;">
+<button type="button" onclick="document.getElementById('blog-featured-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop cover</button>
+<input type="file" id="blog-featured-upload" accept="image/*" style="display:none;">
+<input type="url" id="blog-featured-image" class="form-input" placeholder="Or paste cover image URL" style="margin-top:0.5rem;">
 <div id="blog-featured-preview" style="margin-top:0.5rem;"></div>
 </div>
 </div>
@@ -1206,7 +1208,8 @@ Loading cron job logs...
 <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
 <span class="ql-formats"><button class="ql-list" value="bullet"></button><button class="ql-list" value="ordered"></button></span>
 <span class="ql-formats"><button class="ql-link"></button></span>
-<span class="ql-formats nl-extra-fmts"><button type="button" onclick="blogInsertImageUrl()" class="nl-tb-btn">Image URL</button></span>
+<span class="ql-formats nl-extra-fmts"><button type="button" onclick="blogInsertImageUpload()" class="nl-tb-btn">Upload image</button><button type="button" onclick="blogInsertImageUrl()" class="nl-tb-btn">Image URL</button></span>
+<input type="file" id="blog-inline-image-upload" accept="image/*" style="display:none;">
 </div>
 <div id="blog-editor"></div>
 </div>
@@ -1900,13 +1903,15 @@ document.getElementById('event-location')?.addEventListener('input', (e) => {
 let cropper = null;
 let currentCropCallback = null;
 let currentAspectRatio = 336 / 220;
-/** 'event' | 'blog' = multi-size pack; 'product' = single product image */
+/** 'event' | 'blog' = multi-size pack; 'blog-inline' = single inline image; 'product' = single product image */
 let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
 
 const EVENT_IMAGE_MASTER_W = 1600;
 const EVENT_IMAGE_MASTER_H = 758;
+const BLOG_IMAGE_MASTER_W = 1770;
+const BLOG_IMAGE_MASTER_H = 600;
 /** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
 const EVENT_IMAGE_EXPORT_SPECS = [
   /** At least fill target height when needed; blur fills any letterbox. */
@@ -2274,11 +2279,43 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
   };
 
   try {
+    if (currentCropKind === 'blog-inline') {
+      const croppedCanvas = cropper.getCroppedCanvas({
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        fillColor: 'transparent'
+      });
+      if (!croppedCanvas) {
+        Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
+        return;
+      }
+      const dataUrl = composeBlurredBackgroundJpeg(
+        croppedCanvas,
+        croppedCanvas.width,
+        croppedCanvas.height,
+        cropBgMode,
+        cropBgPickedCol
+      );
+      try {
+        const url = await blogUploadImageToBunny(dataUrl, `inline-${Date.now()}.jpg`);
+        currentCropCallback(url);
+        closeCropModal();
+      } catch (inlineErr) {
+        Modal.alert({ title: 'Upload Failed', message: inlineErr.message || 'Failed to upload image.' });
+        console.error('Inline upload error:', inlineErr);
+      }
+      return;
+    }
+
     if (currentCropKind === 'event' || currentCropKind === 'blog') {
       const exportSpecs = MULTI_SIZE_CROP_SPECS[currentCropKind];
+      const masterW = currentCropKind === 'blog' ? BLOG_IMAGE_MASTER_W : EVENT_IMAGE_MASTER_W;
+      const masterH = currentCropKind === 'blog' ? BLOG_IMAGE_MASTER_H : EVENT_IMAGE_MASTER_H;
       const masterCropped = cropper.getCroppedCanvas({
-        width: EVENT_IMAGE_MASTER_W,
-        height: EVENT_IMAGE_MASTER_H,
+        width: masterW,
+        height: masterH,
         imageSmoothingEnabled: true,
         imageSmoothingQuality: 'high',
         fillColor: 'transparent'
@@ -2312,24 +2349,16 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
                 spec.h
               );
         const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
-        const uploadRes = await fetch(`${API_BASE}/admin/images`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Session-Token': sessionToken
-          },
-          body: JSON.stringify({
-            image: dataUrl,
-            filename: `${batchId}-${spec.filename}`
-          })
-        });
-        const uploadData = await uploadRes.json();
-        if (!uploadData.success) {
-          Modal.alert({ title: 'Upload Failed', message: uploadData.error || 'Failed to upload an image variant.' });
-          console.error('Upload error:', uploadData);
+        try {
+          const uploadUrl = currentCropKind === 'blog'
+            ? await blogUploadImageToBunny(dataUrl, spec.filename)
+            : await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
+          bundle[spec.key] = uploadUrl;
+        } catch (uploadErr) {
+          Modal.alert({ title: 'Upload Failed', message: uploadErr.message || 'Failed to upload an image variant.' });
+          console.error('Upload error:', uploadErr);
           return;
         }
-        bundle[spec.key] = uploadData.url;
       }
       currentCropCallback(bundle);
       closeCropModal();
@@ -5231,6 +5260,44 @@ function blogCollectAuthorMeta() {
   return meta;
 }
 
+function blogImageSubpath() {
+  const slug = document.getElementById('blog-slug')?.value.trim();
+  return slug ? blogSlugify(slug) : 'draft';
+}
+
+async function blogUploadImageToBunny(dataUrl, filename) {
+  const res = await fetch(`${BLOG_API_BASE}/admin/blog/images`, {
+    method: 'POST',
+    headers: adminJsonHeaders(),
+    body: JSON.stringify({
+      image: dataUrl,
+      filename,
+      subpath: blogImageSubpath(),
+    }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.message || data.error || 'Failed to upload image to Bunny CDN');
+  }
+  return data.url;
+}
+
+async function adminUploadImageToR2(dataUrl, filename) {
+  const uploadRes = await fetch(`${API_BASE}/admin/images`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Session-Token': sessionToken
+    },
+    body: JSON.stringify({ image: dataUrl, filename })
+  });
+  const uploadData = await uploadRes.json();
+  if (!uploadData.success) {
+    throw new Error(uploadData.error || 'Failed to upload image.');
+  }
+  return uploadData.url;
+}
+
 function blogRenderFeaturedPreview(bundle) {
   if (!bundle?.featured_image) {
     document.getElementById('blog-featured-preview').innerHTML = '';
@@ -5238,9 +5305,9 @@ function blogRenderFeaturedPreview(bundle) {
   }
   document.getElementById('blog-featured-preview').innerHTML =
     `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.featured_image}" alt="Main"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero cover 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.featured_image_hero || bundle.featured_image}" alt="Hero"></div></div>
       <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.featured_image_card || bundle.featured_image}" alt="Card"></div></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.featured_image_hero || bundle.featured_image}" alt="Hero"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.featured_image}" alt="Main"></div></div>
     </div>`;
 }
 
@@ -5587,9 +5654,10 @@ function blogPreview() {
     Modal.alert({ title: 'Empty', message: 'Add some content before previewing.' });
     return;
   }
-  const featured = document.getElementById('blog-featured-image').value.trim();
+  const featured = document.getElementById('blog-featured-image-hero').value.trim()
+    || document.getElementById('blog-featured-image').value.trim();
   const hero = featured
-    ? '<div style="margin:-32px -32px 24px -32px;"><img src="' + featured + '" alt="" style="width:100%;max-height:320px;object-fit:cover;display:block;"></div>'
+    ? '<div style="margin:-32px -32px 24px -32px;"><img src="' + featured + '" alt="" style="width:100%;aspect-ratio:885/300;max-height:320px;object-fit:cover;display:block;border-radius:12px;"></div>'
     : '';
   // Hugo goldmark chokes on literal <style> inside page content — split the tag.
   const stO = '<sty' + 'le>';
@@ -5619,6 +5687,14 @@ function blogInsertImageUrl() {
   blogQuill.setSelection(range.index + 1);
 }
 
+function blogInsertImageUpload() {
+  if (!blogQuill) return;
+  const input = document.getElementById('blog-inline-image-upload');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
 document.getElementById('blog-title')?.addEventListener('input', (e) => {
   const slugField = document.getElementById('blog-slug');
   if (!slugField || slugField.dataset.manual === '1') return;
@@ -5645,7 +5721,19 @@ document.getElementById('blog-featured-upload')?.addEventListener('change', (e) 
   if (!file) return;
   showCropModal(file, (bundle) => {
     blogApplyFeaturedBundle(bundle);
-  }, 800 / 379, 'blog');
+  }, 885 / 300, 'blog');
+  e.target.value = '';
+});
+
+document.getElementById('blog-inline-image-upload')?.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showCropModal(file, (url) => {
+    if (!blogQuill) return;
+    const range = blogQuill.getSelection(true);
+    blogQuill.insertEmbed(range.index, 'image', url, 'user');
+    blogQuill.setSelection(range.index + 1);
+  }, NaN, 'blog-inline');
   e.target.value = '';
 });
 

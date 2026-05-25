@@ -4671,6 +4671,9 @@ function blogSiteUrl() {
   return SITE_URL;
 }
 async function uploadStorageFile(relativePath, body, contentType) {
+  await uploadStorageBinary(relativePath, new TextEncoder().encode(body), contentType);
+}
+async function uploadStorageBinary(relativePath, body, contentType) {
   const key = process.env.BUNNY_STORAGE_API_KEY;
   const zone = blogStorageZone();
   if (!key)
@@ -5039,7 +5042,7 @@ main.page-container {
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
 }
-.blog-list-header { margin-bottom: 1.5rem; max-width: 760px; }
+.blog-list-header { margin-bottom: 1.5rem; }
 .blog-list-header h1 {
   margin: 0 0 0.35rem;
   font-size: 2.25rem;
@@ -5053,7 +5056,6 @@ main.page-container {
   font-size: 1.05rem;
 }
 .blog-seo-intro {
-  max-width: 760px;
   margin-bottom: 1.5rem;
   color: rgb(var(--color-neutral-600));
   font-size: 1.02rem;
@@ -5064,8 +5066,8 @@ main.page-container {
 .blog-seo-intro a { text-decoration: underline; text-underline-offset: 2px; }
 .blog-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 2rem;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 2.5rem;
   align-items: start;
 }
 .blog-main { min-width: 0; }
@@ -5202,10 +5204,11 @@ main.page-container {
   color: rgb(var(--color-neutral-400));
   font-weight: 500;
 }
-.blog-article { max-width: 760px; }
+.blog-article { width: 100%; max-width: none; }
 .blog-hero-image {
   width: 100%;
-  max-height: 400px;
+  max-height: 420px;
+  aspect-ratio: 885 / 300;
   object-fit: cover;
   border-radius: 12px;
   margin-bottom: 1.25rem;
@@ -5507,7 +5510,7 @@ function renderBlogAuthorPage(authorSlug, posts, authors, siteUrl) {
     }
   });
 }
-function renderBlogPostPage(post, authors, siteUrl) {
+function renderBlogPostPage(post, authors, siteUrl, allPosts = []) {
   const hero = heroImage(post);
   const dateStr = formatDate(post.published_at);
   const authorProfiles = resolvePostAuthors(post, authors);
@@ -5517,7 +5520,8 @@ function renderBlogPostPage(post, authors, siteUrl) {
   const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
   const sanitizedBody = stripEmbeddedAuthorBlocks(post.html || "");
-  const body = `
+  const taxonomy = buildTaxonomyIndex(allPosts.length ? allPosts : [post], authors);
+  const articleHtml = `
     <article class="blog-article">
       ${hero ? `<img class="blog-hero-image" src="${escapeHtml(hero)}" alt="${escapeHtml(post.title)}">` : ""}
       <h1 class="blog-article-title">${escapeHtml(post.title)}</h1>
@@ -5539,6 +5543,11 @@ function renderBlogPostPage(post, authors, siteUrl) {
       ${renderAuthorByline(authorProfiles, siteUrl)}
       <div class="blog-article-body">${sanitizedBody}</div>
     </article>`;
+  const body = `
+    <div class="blog-layout">
+      <div class="blog-main">${articleHtml}</div>
+      ${renderTaxonomySidebar(taxonomy, siteUrl, {})}
+    </div>`;
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -5820,7 +5829,7 @@ async function syncPublishedBlogToCdn(options) {
     const path = `blog/posts/${post.slug}/index.html`;
     await uploadStorageFile(
       path,
-      renderBlogPostPage(post, authors, siteUrl),
+      renderBlogPostPage(post, authors, siteUrl, posts),
       "text/html; charset=utf-8"
     );
     purgePaths.push(path);
@@ -6174,6 +6183,46 @@ async function taxonomyTerms() {
     authorProfiles: authorProfilesResult.rows
   });
 }
+function sanitizeBlogImageSegment(value, fallback) {
+  const cleaned = String(value || "").trim().toLowerCase().replace(/[^a-z0-9/_-]+/g, "-").replace(/-+/g, "-").replace(/^\/+|\/+$/g, "");
+  return cleaned || fallback;
+}
+function sanitizeBlogImageFilename(value) {
+  const cleaned = String(value || "image.jpg").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!cleaned)
+    return "image.jpg";
+  return cleaned.toLowerCase().endsWith(".jpg") || cleaned.toLowerCase().endsWith(".jpeg") ? cleaned : `${cleaned}.jpg`;
+}
+async function uploadBlogImage(request) {
+  if (!process.env.BUNNY_STORAGE_API_KEY) {
+    return jsonResponse({ error: "storage_not_configured", message: "BUNNY_STORAGE_API_KEY not set" }, 500);
+  }
+  const body = await request.json();
+  const image = String(body.image || "").trim();
+  if (!image)
+    return jsonResponse({ error: "missing_image" }, 400);
+  const subpath = sanitizeBlogImageSegment(body.subpath, "misc");
+  const filename = sanitizeBlogImageFilename(body.filename);
+  const storagePath = `blog/images/${subpath}/${Date.now()}-${filename}`;
+  const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+  let binary;
+  try {
+    binary = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+  } catch {
+    return jsonResponse({ error: "invalid_image_data" }, 400);
+  }
+  if (binary.length === 0)
+    return jsonResponse({ error: "empty_image" }, 400);
+  if (binary.length > 8 * 1024 * 1024)
+    return jsonResponse({ error: "image_too_large" }, 413);
+  await uploadStorageBinary(storagePath, binary, "image/jpeg");
+  await purgeBlogPaths([storagePath]);
+  return jsonResponse({
+    success: true,
+    url: blogPublicPath(storagePath),
+    key: storagePath
+  });
+}
 BunnySDK.net.http.serve(async (request) => {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
@@ -6210,6 +6259,9 @@ BunnySDK.net.http.serve(async (request) => {
       if (path === "/admin/blog/sync-cdn" && request.method === "POST") {
         const result = await syncPublishedBlogToCdn();
         return jsonResponse({ success: true, ...result });
+      }
+      if (path === "/admin/blog/images" && request.method === "POST") {
+        return await uploadBlogImage(request);
       }
       const postMatch = path.match(/^\/admin\/blog\/posts\/(\d+)$/);
       if (postMatch) {

@@ -404,7 +404,7 @@ main.page-container {
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
 }
-.blog-list-header { margin-bottom: 1.5rem; max-width: 760px; }
+.blog-list-header { margin-bottom: 1.5rem; }
 .blog-list-header h1 {
   margin: 0 0 0.35rem;
   font-size: 2.25rem;
@@ -418,7 +418,6 @@ main.page-container {
   font-size: 1.05rem;
 }
 .blog-seo-intro {
-  max-width: 760px;
   margin-bottom: 1.5rem;
   color: rgb(var(--color-neutral-600));
   font-size: 1.02rem;
@@ -429,8 +428,8 @@ main.page-container {
 .blog-seo-intro a { text-decoration: underline; text-underline-offset: 2px; }
 .blog-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 2rem;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 2.5rem;
   align-items: start;
 }
 .blog-main { min-width: 0; }
@@ -567,10 +566,11 @@ main.page-container {
   color: rgb(var(--color-neutral-400));
   font-weight: 500;
 }
-.blog-article { max-width: 760px; }
+.blog-article { width: 100%; max-width: none; }
 .blog-hero-image {
   width: 100%;
-  max-height: 400px;
+  max-height: 420px;
+  aspect-ratio: 885 / 300;
   object-fit: cover;
   border-radius: 12px;
   margin-bottom: 1.25rem;
@@ -934,7 +934,8 @@ export function renderBlogAuthorPage(
 export function renderBlogPostPage(
   post: BlogPostRow,
   authors: Record<string, BlogAuthorProfile>,
-  siteUrl: string
+  siteUrl: string,
+  allPosts: BlogPostRow[] = []
 ): string {
   const hero = heroImage(post);
   const dateStr = formatDate(post.published_at);
@@ -945,8 +946,9 @@ export function renderBlogPostPage(
   const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
   const sanitizedBody = stripEmbeddedAuthorBlocks(post.html || "");
+  const taxonomy = buildTaxonomyIndex(allPosts.length ? allPosts : [post], authors);
 
-  const body = `
+  const articleHtml = `
     <article class="blog-article">
       ${hero ? `<img class="blog-hero-image" src="${escapeHtml(hero)}" alt="${escapeHtml(post.title)}">` : ""}
       <h1 class="blog-article-title">${escapeHtml(post.title)}</h1>
@@ -968,6 +970,12 @@ export function renderBlogPostPage(
       ${renderAuthorByline(authorProfiles, siteUrl)}
       <div class="blog-article-body">${sanitizedBody}</div>
     </article>`;
+
+  const body = `
+    <div class="blog-layout">
+      <div class="blog-main">${articleHtml}</div>
+      ${renderTaxonomySidebar(taxonomy, siteUrl, {})}
+    </div>`;
 
   const jsonLd = {
     "@context": "https://schema.org",

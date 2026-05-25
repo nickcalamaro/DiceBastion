@@ -21,7 +21,8 @@
  *   GET    /admin/blog/posts/:id
  *   PUT    /admin/blog/posts/:id
  *   DELETE /admin/blog/posts/:id
- *   GET    /admin/blog/taxonomy-terms
+ *   POST   /admin/blog/sync-cdn
+ *   POST   /admin/blog/images
  */
 
 /// <reference types="@bunny.net/edgescript-sdk" />
@@ -29,9 +30,11 @@
 import * as BunnySDK from "@bunny.net/edgescript-sdk";
 import { createClient } from "@libsql/client/web";
 import {
+  blogPublicPath,
   blogSiteUrl,
   deleteStorageFile,
   purgeBlogPaths,
+  uploadStorageBinary,
   uploadStorageFile,
 } from "./blog-cdn";
 import {
@@ -277,7 +280,7 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
     const path = `blog/posts/${post.slug}/index.html`;
     await uploadStorageFile(
       path,
-      renderBlogPostPage(post, authors, siteUrl),
+      renderBlogPostPage(post, authors, siteUrl, posts),
       "text/html; charset=utf-8"
     );
     purgePaths.push(path);
@@ -622,6 +625,61 @@ async function taxonomyTerms(): Promise<Response> {
   });
 }
 
+function sanitizeBlogImageSegment(value: unknown, fallback: string): string {
+  const cleaned = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9/_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\/+|\/+$/g, "");
+  return cleaned || fallback;
+}
+
+function sanitizeBlogImageFilename(value: unknown): string {
+  const cleaned = String(value || "image.jpg")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!cleaned) return "image.jpg";
+  return cleaned.toLowerCase().endsWith(".jpg") || cleaned.toLowerCase().endsWith(".jpeg")
+    ? cleaned
+    : `${cleaned}.jpg`;
+}
+
+async function uploadBlogImage(request: Request): Promise<Response> {
+  if (!process.env.BUNNY_STORAGE_API_KEY) {
+    return jsonResponse({ error: "storage_not_configured", message: "BUNNY_STORAGE_API_KEY not set" }, 500);
+  }
+
+  const body = await request.json() as { image?: string; filename?: string; subpath?: string };
+  const image = String(body.image || "").trim();
+  if (!image) return jsonResponse({ error: "missing_image" }, 400);
+
+  const subpath = sanitizeBlogImageSegment(body.subpath, "misc");
+  const filename = sanitizeBlogImageFilename(body.filename);
+  const storagePath = `blog/images/${subpath}/${Date.now()}-${filename}`;
+
+  const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+  let binary: Uint8Array;
+  try {
+    binary = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+  } catch {
+    return jsonResponse({ error: "invalid_image_data" }, 400);
+  }
+
+  if (binary.length === 0) return jsonResponse({ error: "empty_image" }, 400);
+  if (binary.length > 8 * 1024 * 1024) return jsonResponse({ error: "image_too_large" }, 413);
+
+  await uploadStorageBinary(storagePath, binary, "image/jpeg");
+  await purgeBlogPaths([storagePath]);
+
+  return jsonResponse({
+    success: true,
+    url: blogPublicPath(storagePath),
+    key: storagePath,
+  });
+}
+
 BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
@@ -661,6 +719,9 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
       if (path === "/admin/blog/sync-cdn" && request.method === "POST") {
         const result = await syncPublishedBlogToCdn();
         return jsonResponse({ success: true, ...result });
+      }
+      if (path === "/admin/blog/images" && request.method === "POST") {
+        return await uploadBlogImage(request);
       }
 
       const postMatch = path.match(/^\/admin\/blog\/posts\/(\d+)$/);

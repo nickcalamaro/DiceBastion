@@ -21,6 +21,14 @@ export function blogSiteUrl(): string {
 }
 
 export async function uploadStorageFile(relativePath: string, body: string, contentType: string): Promise<void> {
+  await uploadStorageBinary(relativePath, new TextEncoder().encode(body), contentType);
+}
+
+export async function uploadStorageBinary(
+  relativePath: string,
+  body: Uint8Array,
+  contentType: string
+): Promise<void> {
   const key = process.env.BUNNY_STORAGE_API_KEY;
   const zone = blogStorageZone();
   if (!key) throw new Error("BUNNY_STORAGE_API_KEY not configured");
