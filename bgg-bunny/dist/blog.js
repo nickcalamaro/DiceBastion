@@ -5214,27 +5214,19 @@ main.page-container {
 }
 .event-description {
   color: rgb(var(--color-neutral-600));
-  margin: 0.6rem 0 0.75rem;
+  margin: 0.6rem 0 0;
   line-height: 1.65;
   font-size: 0.98rem;
 }
-.event-card-authors {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.5rem;
-  margin-top: auto;
-  padding-top: 0.5rem;
-}
-.event-card-author-item {
+.event-card-author-inline {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   min-width: 0;
 }
 .event-card-author-avatar {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   object-fit: cover;
   flex-shrink: 0;
@@ -5246,18 +5238,13 @@ main.page-container {
   background: rgb(var(--color-neutral-200));
   color: rgb(var(--color-neutral-700));
   font-weight: 700;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
 }
 .event-card-author-name {
-  font-size: 0.875rem;
   font-weight: 600;
-  color: rgb(var(--color-neutral-700));
+  color: rgb(var(--color-neutral-800));
+  font-size: 0.98rem;
   line-height: 1.2;
-}
-.event-card-author-sep {
-  font-size: 0.8rem;
-  color: rgb(var(--color-neutral-400));
-  font-weight: 500;
 }
 .event-meta {
   display: flex;
@@ -5268,12 +5255,15 @@ main.page-container {
   background: rgb(var(--color-neutral-50));
   border-top: 1px solid rgb(var(--color-neutral-200));
 }
-.event-date-label, .event-location-label {
+.event-date-label, .event-location-label, .event-author-label {
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 700;
   color: rgb(var(--color-neutral-500));
+}
+.event-author-label {
+  text-transform: none;
 }
 .event-date-value, .event-location-value {
   font-weight: 600;
@@ -5686,15 +5676,13 @@ function pageShell(title, description, canonical, siteUrl, bodyHtml, options = {
 </body>
 </html>`;
 }
-function renderPostCardAuthors(profiles) {
+function renderPostCardAuthorValue(profiles) {
   if (!profiles.length)
     return "";
-  const items = profiles.map((profile, index) => {
-    const avatar = profile.image ? `<img class="event-card-author-avatar" src="${escapeHtml(profile.image)}" alt="" width="28" height="28" loading="lazy">` : `<span class="event-card-author-avatar event-card-author-avatar--placeholder" aria-hidden="true">${escapeHtml(authorInitials(profile.name))}</span>`;
-    const sep = index > 0 ? `<span class="event-card-author-sep">&amp;</span>` : "";
-    return `${sep}<span class="event-card-author-item">${avatar}<span class="event-card-author-name">${escapeHtml(profile.name)}</span></span>`;
-  }).join("");
-  return `<div class="event-card-authors" aria-label="Author">${items}</div>`;
+  const names = profiles.map((profile) => profile.name).join(" & ");
+  const first = profiles[0];
+  const avatar = first.image ? `<img class="event-card-author-avatar" src="${escapeHtml(first.image)}" alt="" width="22" height="22" loading="lazy">` : `<span class="event-card-author-avatar event-card-author-avatar--placeholder" aria-hidden="true">${escapeHtml(authorInitials(first.name))}</span>`;
+  return `<div class="event-card-author-inline">${avatar}<span class="event-card-author-name">${escapeHtml(names)}</span></div>`;
 }
 function renderPostCard(post, siteUrl, authors = {}, options = {}) {
   const img = cardImage(post);
@@ -5703,7 +5691,17 @@ function renderPostCard(post, siteUrl, authors = {}, options = {}) {
   const category = (post.categories || [])[0] || "";
   const postUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
   const showAuthor = options.showAuthor !== false;
-  const authorHtml = showAuthor ? renderPostCardAuthors(resolvePostAuthors(post, authors)) : "";
+  const authorValue = showAuthor ? renderPostCardAuthorValue(resolvePostAuthors(post, authors)) : "";
+  const publishedBlock = dateStr ? `
+            <div class="blog-meta-block">
+              <div class="event-date-label">Published</div>
+              <div class="event-date-value">${escapeHtml(dateStr)}</div>
+            </div>` : "";
+  const authorBlock = authorValue ? `
+            <div class="blog-meta-block">
+              <div class="event-author-label">By:</div>
+              ${authorValue}
+            </div>` : "";
   return `
     <a href="${escapeHtml(postUrl)}" class="event-card-link">
       <div class="event-card">
@@ -5711,12 +5709,9 @@ function renderPostCard(post, siteUrl, authors = {}, options = {}) {
         <div class="event-content">
           <h2 class="event-title">${escapeHtml(post.title)}</h2>
           ${summary ? `<p class="event-description">${escapeHtml(summary)}</p>` : ""}
-          ${authorHtml}
           <div class="event-meta">
-            <div class="blog-meta-block">
-              <div class="event-date-label">Published</div>
-              <div class="event-date-value">${escapeHtml(dateStr)}</div>
-            </div>
+            ${publishedBlock}
+            ${authorBlock}
             ${category ? `
               <div class="blog-meta-block">
                 <div class="event-location-label">Category</div>
