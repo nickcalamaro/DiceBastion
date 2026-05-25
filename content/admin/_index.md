@@ -1211,7 +1211,11 @@ Loading cron job logs...
 <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
 <span class="ql-formats"><button class="ql-list" value="bullet"></button><button class="ql-list" value="ordered"></button></span>
 <span class="ql-formats"><button class="ql-link"></button></span>
-<span class="ql-formats nl-extra-fmts"><button type="button" onclick="blogInsertImageUpload()" class="nl-tb-btn">Upload image</button><button type="button" onclick="blogInsertImageUrl()" class="nl-tb-btn">Image URL</button></span>
+</div>
+<div class="blog-media-bar">
+<span class="blog-media-bar-label">Body images</span>
+<button type="button" onclick="blogInsertImageUpload()" class="btn btn-secondary btn-sm">Upload image</button>
+<button type="button" onclick="blogInsertImageUrl()" class="btn btn-secondary btn-sm">Paste URL</button>
 <input type="file" id="blog-inline-image-upload" accept="image/*" style="display:none;">
 </div>
 <div id="blog-editor"></div>
@@ -1368,6 +1372,32 @@ Loading cron job logs...
 .dark #nl-quill-wrap, .dark #blog-quill-wrap { border-color: rgb(var(--color-neutral-600)); }
 #nl-quill-wrap .ql-toolbar.ql-snow, #blog-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-50)); border: none; border-bottom: 1px solid rgb(var(--color-neutral-200)); flex-wrap: wrap; padding: 6px 8px; }
 .dark #nl-quill-wrap .ql-toolbar.ql-snow, .dark #blog-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-900)); border-bottom-color: rgb(var(--color-neutral-700)); }
+.blog-media-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.625rem 0.875rem;
+  background: rgb(var(--color-neutral-50));
+  border-bottom: 1px solid rgb(var(--color-neutral-200));
+}
+.dark .blog-media-bar {
+  background: rgb(var(--color-neutral-900));
+  border-bottom-color: rgb(var(--color-neutral-700));
+}
+.blog-media-bar-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--color-neutral-500));
+  margin-right: 0.125rem;
+  white-space: nowrap;
+}
+.blog-media-bar .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 #nl-quill-wrap .ql-container.ql-snow, #blog-quill-wrap .ql-container.ql-snow { border: none; font-family: inherit; }
 #nl-quill-wrap .ql-editor, #blog-quill-wrap .ql-editor { min-height: 300px; font-size: 1rem; line-height: 1.7; padding: 1rem; color: rgb(var(--color-neutral-900)); }
 #blog-quill-wrap .ql-editor img {

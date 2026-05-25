@@ -580,7 +580,7 @@ main.page-container {
   object-position: center;
   z-index: 1;
 }
-.event-content { flex: 1; padding: 1.5rem 1.25rem 0; display: flex; flex-direction: column; }
+.event-content { flex: 1; padding: 1.5rem 1.25rem 0; display: flex; flex-direction: column; gap: 1.25rem; }
 .event-title {
   margin: 0;
   font-size: 1.5rem;
@@ -591,7 +591,7 @@ main.page-container {
 }
 .event-description {
   color: rgb(var(--color-neutral-600));
-  margin: 0.6rem 0 0;
+  margin: 0;
   line-height: 1.65;
   font-size: 0.98rem;
 }
@@ -623,6 +623,12 @@ main.page-container {
   font-size: 0.98rem;
   line-height: 1.2;
 }
+.event-meta-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1.25rem 1.75rem;
+}
 .event-meta {
   display: flex;
   flex-wrap: wrap;
@@ -632,20 +638,23 @@ main.page-container {
   background: rgb(var(--color-neutral-50));
   border-top: 1px solid rgb(var(--color-neutral-200));
 }
-.event-date-label, .event-location-label, .event-author-label {
+.event-date-label, .event-location-label {
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 700;
   color: rgb(var(--color-neutral-500));
 }
-.event-author-label {
-  text-transform: none;
-}
 .event-date-value, .event-location-value {
   font-weight: 600;
   color: rgb(var(--color-neutral-800));
   font-size: 0.98rem;
+}
+.event-date-value.event-author-value {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
 .blog-sidebar {
   position: sticky;
@@ -1088,7 +1097,33 @@ function renderPostCardAuthorValue(profiles: BlogAuthorProfile[]): string {
     ? `<img class="event-card-author-avatar" src="${escapeHtml(first.image)}" alt="" width="22" height="22" loading="lazy">`
     : `<span class="event-card-author-avatar event-card-author-avatar--placeholder" aria-hidden="true">${escapeHtml(authorInitials(first.name))}</span>`;
 
-  return `<div class="event-card-author-inline">${avatar}<span class="event-card-author-name">${escapeHtml(names)}</span></div>`;
+  return `<span class="event-card-author-inline">${avatar}<span class="event-card-author-name">${escapeHtml(names)}</span></span>`;
+}
+
+function renderPostCardMetaPrimary(dateStr: string, authorValue: string): string {
+  const publishedBlock = dateStr
+    ? `
+              <div class="blog-meta-block">
+                <div class="event-date-label">Published</div>
+                <div class="event-date-value">${escapeHtml(dateStr)}</div>
+              </div>`
+    : "";
+
+  const authorBlock = authorValue
+    ? `
+              <div class="blog-meta-block">
+                <div class="event-date-label">By</div>
+                <div class="event-date-value event-author-value">${authorValue}</div>
+              </div>`
+    : "";
+
+  if (!publishedBlock && !authorBlock) return "";
+
+  return `
+            <div class="event-meta-group">
+              ${publishedBlock}
+              ${authorBlock}
+            </div>`;
 }
 
 interface PostCardOptions {
@@ -1110,22 +1145,7 @@ function renderPostCard(
   const authorValue = showAuthor
     ? renderPostCardAuthorValue(resolvePostAuthors(post, authors))
     : "";
-
-  const publishedBlock = dateStr
-    ? `
-            <div class="blog-meta-block">
-              <div class="event-date-label">Published</div>
-              <div class="event-date-value">${escapeHtml(dateStr)}</div>
-            </div>`
-    : "";
-
-  const authorBlock = authorValue
-    ? `
-            <div class="blog-meta-block">
-              <div class="event-author-label">By:</div>
-              ${authorValue}
-            </div>`
-    : "";
+  const metaPrimary = renderPostCardMetaPrimary(dateStr, authorValue);
 
   return `
     <a href="${escapeHtml(postUrl)}" class="event-card-link">
@@ -1135,8 +1155,7 @@ function renderPostCard(
           <h2 class="event-title">${escapeHtml(post.title)}</h2>
           ${summary ? `<p class="event-description">${escapeHtml(summary)}</p>` : ""}
           <div class="event-meta">
-            ${publishedBlock}
-            ${authorBlock}
+            ${metaPrimary}
             ${category ? `
               <div class="blog-meta-block">
                 <div class="event-location-label">Category</div>
