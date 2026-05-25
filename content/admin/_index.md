@@ -319,6 +319,7 @@ Logout
 <a href="#cron">Cron</a>
 <a href="#newsletter">Newsletter</a>
 <a href="#blog">Blog</a>
+<a href="#blog-authors">Authors</a>
 </nav>
 
 <!-- Products Tab -->
@@ -1194,19 +1195,10 @@ Loading cron job logs...
 </div>
 <datalist id="blog-authors-suggestions"></datalist>
 <div id="blog-author-meta-panel" style="display:none;margin-top:1rem;padding:1rem;border:1px solid rgb(var(--color-neutral-200));border-radius:8px;">
-  <div class="admin-grid-2 admin-mb-1">
-    <div>
-      <label class="form-label">Author display name</label>
-      <input type="text" id="blog-author-name" class="form-input">
-    </div>
-    <div>
-      <label class="form-label">Author avatar URL</label>
-      <input type="url" id="blog-author-image" class="form-input" placeholder="https://...">
-    </div>
-  </div>
+  <p style="margin:0 0 0.75rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">New author — add their display name here, then set photo and bio in the <strong>Authors</strong> section below.</p>
   <div>
-    <label class="form-label">Author bio</label>
-    <textarea id="blog-author-bio" rows="2" class="form-textarea"></textarea>
+    <label class="form-label">Display name</label>
+    <input type="text" id="blog-author-name" class="form-input">
   </div>
 </div>
 </div>
@@ -1236,6 +1228,53 @@ Loading cron job logs...
 <button type="button" onclick="blogDeletePost()" class="btn btn-secondary" id="blog-delete-btn" style="display:none;">Delete</button>
 </div>
 <div id="blog-action-result" style="display:none;margin-top:1rem;"></div>
+</div>
+</div>
+
+<div class="card card-compact admin-mb-2" style="margin-top:1.5rem;">
+<h3 id="admin-section-blog-authors" class="admin-m-0 admin-mb-1">Authors <a href="#blog-authors" class="admin-permalink" aria-label="Link to authors">#</a></h3>
+<p style="margin:0 0 1rem;font-size:0.9rem;color:rgb(var(--color-neutral-500));">Profile photos and bios appear on article bylines and each author&apos;s page at <code>/posts/author/slug/</code>.</p>
+
+<div class="admin-grid-2" style="gap:1.5rem;align-items:start;">
+<div>
+<div class="admin-flex-between admin-mb-1">
+<strong style="font-size:0.95rem;">All authors</strong>
+<button type="button" onclick="blogNewAuthor()" class="btn btn-secondary btn-sm">Add author</button>
+</div>
+<div id="blog-authors-admin-list">
+  <div style="text-align:center;padding:1rem;color:rgb(var(--color-neutral-500));">Loading...</div>
+</div>
+</div>
+
+<div id="blog-author-admin-form" class="card card-compact" style="display:none;background:rgb(var(--color-neutral-50));">
+<input type="hidden" id="blog-author-admin-editing" value="0">
+<div class="admin-mb-1">
+<label class="form-label">Slug *</label>
+<input type="text" id="blog-author-admin-slug" class="form-input" placeholder="e.g. nick" style="font-family:monospace;">
+<small class="admin-text-small">Used in URLs: /posts/author/<em>slug</em>/</small>
+</div>
+<div class="admin-mb-1">
+<label class="form-label">Display name *</label>
+<input type="text" id="blog-author-admin-name" class="form-input" placeholder="Nick Calamaro">
+</div>
+<div class="admin-mb-1">
+<label class="form-label">Profile photo</label>
+<button type="button" onclick="document.getElementById('blog-author-avatar-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop photo</button>
+<input type="file" id="blog-author-avatar-upload" accept="image/*" style="display:none;">
+<input type="url" id="blog-author-admin-image" class="form-input" placeholder="Or paste image URL" style="margin-top:0.5rem;">
+<div id="blog-author-admin-preview" style="margin-top:0.5rem;"></div>
+</div>
+<div class="admin-mb-1">
+<label class="form-label">Short bio</label>
+<textarea id="blog-author-admin-bio" rows="4" class="form-textarea" placeholder="A few sentences about this author…"></textarea>
+</div>
+<div class="admin-flex" style="gap:0.75rem;flex-wrap:wrap;">
+<button type="button" onclick="blogSaveAuthor()" class="btn btn-primary" id="blog-author-save-btn">Save author</button>
+<button type="button" onclick="blogCancelAuthorEdit()" class="btn btn-secondary">Cancel</button>
+<button type="button" onclick="blogDeleteAuthor()" class="btn btn-secondary" id="blog-author-delete-btn" style="display:none;">Delete</button>
+</div>
+<div id="blog-author-admin-result" style="display:none;margin-top:0.75rem;font-size:0.9rem;"></div>
+</div>
 </div>
 </div>
 
@@ -1922,7 +1961,7 @@ document.getElementById('event-location')?.addEventListener('input', (e) => {
 let cropper = null;
 let currentCropCallback = null;
 let currentAspectRatio = 336 / 220;
-/** 'event' = multi-size pack; 'blog-card' | 'blog-cover' | 'blog-inline' = single blog image; 'product' = single product image */
+/** 'event' = multi-size pack; 'blog-card' | 'blog-cover' | 'blog-inline' | 'blog-author' = single blog image; 'product' = single product image */
 let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
@@ -1943,6 +1982,7 @@ const BLOG_CARD_SPEC = { w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contai
 const BLOG_COVER_SPEC = { w: 885, h: 300, filename: 'blog-cover.jpg', fit: 'contain' };
 /** 16:9 landscape — full text column width at 1× (960px), common blog embed ratio */
 const BLOG_INLINE_SPEC = { w: 960, h: 540, filename: 'blog-inline.jpg' };
+const BLOG_AUTHOR_SPEC = { w: 400, h: 400, filename: 'author-avatar.jpg' };
 
 const MULTI_SIZE_CROP_SPECS = {
   event: EVENT_IMAGE_EXPORT_SPECS,
@@ -2294,14 +2334,14 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
   };
 
   try {
-    if (currentCropKind === 'blog-inline') {
-      const spec = BLOG_INLINE_SPEC;
+    if (currentCropKind === 'blog-inline' || currentCropKind === 'blog-author') {
+      const spec = currentCropKind === 'blog-author' ? BLOG_AUTHOR_SPEC : BLOG_INLINE_SPEC;
       const croppedCanvas = cropper.getCroppedCanvas({
         width: spec.w,
         height: spec.h,
         imageSmoothingEnabled: true,
         imageSmoothingQuality: 'high',
-        fillColor: '#ffffff'
+        fillColor: currentCropKind === 'blog-author' ? '#ffffff' : '#ffffff'
       });
       if (!croppedCanvas) {
         Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
@@ -2309,7 +2349,14 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       }
       const dataUrl = croppedCanvas.toDataURL('image/jpeg', 0.88);
       try {
-        const url = await blogUploadImageToBunny(dataUrl, `inline-${Date.now()}.jpg`);
+        const uploadName = currentCropKind === 'blog-author'
+          ? `avatar-${Date.now()}.jpg`
+          : `inline-${Date.now()}.jpg`;
+        const url = await blogUploadImageToBunny(
+          dataUrl,
+          uploadName,
+          currentCropKind === 'blog-author' ? blogAuthorImageSubpath() : null
+        );
         currentCropCallback(url);
         closeCropModal();
       } catch (inlineErr) {
@@ -5135,6 +5182,7 @@ function blogInitTab() {
   blogCheckHealth();
   loadBlogTaxonomyTerms();
   loadBlogPosts();
+  loadBlogAuthorsAdmin();
 }
 
 async function blogCheckHealth() {
@@ -5260,15 +5308,11 @@ function blogAddChip(field) {
     if (profile) {
       blogAuthorMeta[raw] = {
         name: profile.name,
-        image: profile.image || '',
-        bio: profile.bio || '',
       };
     } else if (!blogAuthorMeta[raw]?.name) {
       blogPendingAuthorSlug = raw;
       document.getElementById('blog-author-meta-panel').style.display = 'block';
       document.getElementById('blog-author-name').value = raw.replace(/-/g, ' ');
-      document.getElementById('blog-author-image').value = '';
-      document.getElementById('blog-author-bio').value = '';
     }
   }
 }
@@ -5287,8 +5331,6 @@ function blogCollectAuthorMeta() {
     if (name) {
       blogAuthorMeta[blogPendingAuthorSlug] = {
         name,
-        image: document.getElementById('blog-author-image').value.trim() || null,
-        bio: document.getElementById('blog-author-bio').value.trim() || null,
       };
     }
   }
@@ -5306,14 +5348,19 @@ function blogImageSubpath() {
   return slug ? blogSlugify(slug) : 'draft';
 }
 
-async function blogUploadImageToBunny(dataUrl, filename) {
+function blogAuthorImageSubpath() {
+  const slug = document.getElementById('blog-author-admin-slug')?.value.trim();
+  return slug ? `authors/${blogSlugify(slug)}` : 'authors/draft';
+}
+
+async function blogUploadImageToBunny(dataUrl, filename, subpathOverride) {
   const res = await fetch(`${BLOG_API_BASE}/admin/blog/images`, {
     method: 'POST',
     headers: adminJsonHeaders(),
     body: JSON.stringify({
       image: dataUrl,
       filename,
-      subpath: blogImageSubpath(),
+      subpath: subpathOverride || blogImageSubpath(),
     }),
   });
   const data = await res.json();
@@ -5365,6 +5412,184 @@ function blogApplyCoverImage(url) {
   document.getElementById('blog-featured-image').value = url || '';
   blogRenderCoverPreview(url);
 }
+
+function blogRenderAuthorAdminPreview(url) {
+  const el = document.getElementById('blog-author-admin-preview');
+  if (!el) return;
+  el.innerHTML = url
+    ? `<div style="display:flex;align-items:center;gap:0.75rem;"><img src="${url}" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid rgb(var(--color-neutral-200));"><span style="font-size:0.8rem;color:rgb(var(--color-neutral-500));">Profile preview</span></div>`
+    : '';
+}
+
+function blogAuthorAdminResult(message, isError) {
+  const el = document.getElementById('blog-author-admin-result');
+  if (!el) return;
+  if (!message) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  el.style.display = 'block';
+  el.style.color = isError ? '#b91c1c' : '#059669';
+  el.textContent = message;
+}
+
+async function loadBlogAuthorsAdmin() {
+  const list = document.getElementById('blog-authors-admin-list');
+  if (!list) return;
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    if (!res.ok) throw new Error('Failed to load authors');
+    const data = await res.json();
+    blogAuthorsAdmin = data.authors || [];
+    blogRenderAuthorsAdminList();
+  } catch (err) {
+    console.error('Load authors error:', err);
+    list.innerHTML = '<p style="color:#c00;">Failed to load authors</p>';
+  }
+}
+
+function blogRenderAuthorsAdminList() {
+  const list = document.getElementById('blog-authors-admin-list');
+  if (!list) return;
+  if (!blogAuthorsAdmin.length) {
+    list.innerHTML = '<p style="color:rgb(var(--color-neutral-500));font-size:0.9rem;">No authors yet. Add one to set profile photos and bios.</p>';
+    return;
+  }
+  list.innerHTML = blogAuthorsAdmin.map((author) => {
+    const avatar = author.image
+      ? `<img src="${author.image}" alt="" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">`
+      : `<div style="width:40px;height:40px;border-radius:50%;background:rgb(var(--color-primary-100));color:rgb(var(--color-primary-700));display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">${(author.name || author.slug).charAt(0).toUpperCase()}</div>`;
+    const bioPreview = author.bio
+      ? `<div style="font-size:0.8rem;color:rgb(var(--color-neutral-500));margin-top:0.25rem;line-height:1.4;">${escapeHtmlPromo(author.bio.slice(0, 100))}${author.bio.length > 100 ? '…' : ''}</div>`
+      : '';
+    return `
+      <div class="item-card" style="margin-bottom:0.75rem;">
+        <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;">
+          <div style="display:flex;gap:0.75rem;align-items:flex-start;min-width:0;">
+            ${avatar}
+            <div style="min-width:0;">
+              <strong>${escapeHtmlPromo(author.name)}</strong>
+              <div style="font-size:0.8rem;color:rgb(var(--color-neutral-500));font-family:monospace;">/${author.slug}/</div>
+              ${bioPreview}
+            </div>
+          </div>
+          <button type="button" class="btn-edit btn-sm" onclick="blogEditAuthor('${author.slug.replace(/'/g, "\\'")}')">Edit</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function blogNewAuthor() {
+  document.getElementById('blog-author-admin-editing').value = '0';
+  document.getElementById('blog-author-admin-slug').value = '';
+  document.getElementById('blog-author-admin-slug').readOnly = false;
+  document.getElementById('blog-author-admin-name').value = '';
+  document.getElementById('blog-author-admin-image').value = '';
+  document.getElementById('blog-author-admin-bio').value = '';
+  blogRenderAuthorAdminPreview('');
+  document.getElementById('blog-author-delete-btn').style.display = 'none';
+  document.getElementById('blog-author-admin-form').style.display = 'block';
+  blogAuthorAdminResult('', false);
+  document.getElementById('blog-author-admin-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function blogEditAuthor(slug) {
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    if (!res.ok) throw new Error('Failed to load author');
+    const author = await res.json();
+    document.getElementById('blog-author-admin-editing').value = '1';
+    document.getElementById('blog-author-admin-slug').value = author.slug || '';
+    document.getElementById('blog-author-admin-slug').readOnly = true;
+    document.getElementById('blog-author-admin-name').value = author.name || '';
+    document.getElementById('blog-author-admin-image').value = author.image || '';
+    document.getElementById('blog-author-admin-bio').value = author.bio || '';
+    blogRenderAuthorAdminPreview(author.image || '');
+    document.getElementById('blog-author-delete-btn').style.display = 'inline-flex';
+    document.getElementById('blog-author-admin-form').style.display = 'block';
+    blogAuthorAdminResult('', false);
+    document.getElementById('blog-author-admin-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    Modal.alert({ title: 'Error', message: err.message || 'Could not load author.' });
+  }
+}
+
+function blogCancelAuthorEdit() {
+  document.getElementById('blog-author-admin-form').style.display = 'none';
+  blogAuthorAdminResult('', false);
+}
+
+async function blogSaveAuthor() {
+  const slugRaw = document.getElementById('blog-author-admin-slug').value.trim();
+  const slug = blogSlugify(slugRaw);
+  const name = document.getElementById('blog-author-admin-name').value.trim();
+  const image = document.getElementById('blog-author-admin-image').value.trim() || null;
+  const bio = document.getElementById('blog-author-admin-bio').value.trim() || null;
+
+  if (!slug || !name) {
+    Modal.alert({ title: 'Missing fields', message: 'Slug and display name are required.' });
+    return;
+  }
+
+  const btn = document.getElementById('blog-author-save-btn');
+  btn.disabled = true;
+  blogAuthorAdminResult('Saving…', false);
+
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
+      method: 'PUT',
+      headers: adminJsonHeaders(),
+      body: JSON.stringify({ name, image, bio }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || 'Save failed');
+
+    blogAuthorAdminResult('Author saved and CDN updated.', false);
+    document.getElementById('blog-author-admin-editing').value = '1';
+    document.getElementById('blog-author-admin-slug').value = slug;
+    document.getElementById('blog-author-admin-slug').readOnly = true;
+    document.getElementById('blog-author-delete-btn').style.display = 'inline-flex';
+    await loadBlogAuthorsAdmin();
+    await loadBlogTaxonomyTerms();
+  } catch (err) {
+    blogAuthorAdminResult(err.message || 'Save failed', true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function blogDeleteAuthor() {
+  const slug = document.getElementById('blog-author-admin-slug').value.trim();
+  if (!slug) return;
+  const ok = await Modal.confirm({
+    title: 'Delete author?',
+    message: `Remove "${slug}" from the authors list? Posts that reference this slug will keep it, but the profile page and photo will be gone.`,
+    confirmText: 'Delete',
+    confirmStyle: 'danger',
+  });
+  if (!ok) return;
+
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Delete failed');
+    blogCancelAuthorEdit();
+    await loadBlogAuthorsAdmin();
+    await loadBlogTaxonomyTerms();
+  } catch (err) {
+    Modal.alert({ title: 'Error', message: err.message || 'Could not delete author.' });
+  }
+}
+
+let blogAuthorsAdmin = [];
 
 function blogCollectPayload(status) {
   const publishedAtRaw = document.getElementById('blog-published-at').value;
@@ -5517,7 +5742,7 @@ async function blogEditPost(id) {
     for (const slug of blogChipState.authors) {
       const profile = (blogTaxonomyTerms.authorProfiles || []).find((item) => item.slug === slug);
       if (profile) {
-        blogAuthorMeta[slug] = { name: profile.name, image: profile.image || '', bio: profile.bio || '' };
+        blogAuthorMeta[slug] = { name: profile.name };
       }
     }
     if (blogQuill) {
@@ -5775,6 +6000,27 @@ document.getElementById('blog-cover-upload')?.addEventListener('change', (e) => 
     blogApplyCoverImage(url);
   }, 885 / 300, 'blog-cover');
   e.target.value = '';
+});
+
+document.getElementById('blog-author-avatar-upload')?.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showCropModal(file, (url) => {
+    document.getElementById('blog-author-admin-image').value = url;
+    blogRenderAuthorAdminPreview(url);
+  }, 1, 'blog-author');
+  e.target.value = '';
+});
+
+document.getElementById('blog-author-admin-name')?.addEventListener('input', (e) => {
+  const slugField = document.getElementById('blog-author-admin-slug');
+  if (!slugField || slugField.readOnly || slugField.dataset.manual === '1') return;
+  slugField.value = blogSlugify(e.target.value);
+});
+
+document.getElementById('blog-author-admin-slug')?.addEventListener('input', () => {
+  const slugField = document.getElementById('blog-author-admin-slug');
+  if (slugField && !slugField.readOnly) slugField.dataset.manual = '1';
 });
 
 document.getElementById('blog-inline-image-upload')?.addEventListener('change', (e) => {

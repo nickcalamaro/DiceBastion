@@ -22,7 +22,10 @@
  *   PUT    /admin/blog/posts/:id
  *   DELETE /admin/blog/posts/:id
  *   POST   /admin/blog/sync-cdn
- *   POST   /admin/blog/images
+ *   GET    /admin/blog/authors
+ *   GET    /admin/blog/authors/:slug
+ *   PUT    /admin/blog/authors/:slug
+ *   DELETE /admin/blog/authors/:slug
  */
 
 /// <reference types="@bunny.net/edgescript-sdk" />
@@ -646,6 +649,95 @@ function sanitizeBlogImageFilename(value: unknown): string {
     : `${cleaned}.jpg`;
 }
 
+async function listAuthorsAdmin(): Promise<Response> {
+  await migrateBlogPosts();
+  const result = await client.execute(
+    "SELECT slug, name, image, bio, created_at, updated_at FROM blog_authors ORDER BY name"
+  );
+  return jsonResponse({
+    authors: result.rows.map((row) => {
+      const r = row as Record<string, unknown>;
+      return {
+        slug: String(r.slug),
+        name: String(r.name),
+        image: (r.image as string) || null,
+        bio: (r.bio as string) || null,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      };
+    }),
+  });
+}
+
+async function getAuthorAdmin(slug: string): Promise<Response> {
+  await migrateBlogPosts();
+  const result = await client.execute({
+    sql: "SELECT slug, name, image, bio, created_at, updated_at FROM blog_authors WHERE slug = ?",
+    args: [slug],
+  });
+  if (result.rows.length === 0) return jsonResponse({ error: "Not found" }, 404);
+  const r = result.rows[0] as Record<string, unknown>;
+  return jsonResponse({
+    slug: String(r.slug),
+    name: String(r.name),
+    image: (r.image as string) || null,
+    bio: (r.bio as string) || null,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  });
+}
+
+async function saveAuthorAdmin(slug: string, request: Request): Promise<Response> {
+  await migrateBlogPosts();
+  const key = String(slug || "").trim();
+  if (!key) return jsonResponse({ error: "slug_required" }, 400);
+
+  const body = await request.json() as { name?: string; image?: string | null; bio?: string | null };
+  const name = String(body.name || "").trim();
+  if (!name) return jsonResponse({ error: "name_required" }, 400);
+
+  await client.execute({
+    sql: `
+      INSERT INTO blog_authors (slug, name, image, bio)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(slug) DO UPDATE SET
+        name = excluded.name,
+        image = excluded.image,
+        bio = excluded.bio,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    `,
+    args: [key, name, body.image ?? null, body.bio ?? null],
+  });
+
+  try {
+    await syncPublishedBlogToCdn();
+  } catch (err) {
+    console.error("[Blog] CDN sync after author save failed:", err);
+    return jsonResponse({ error: String(err instanceof Error ? err.message : err) }, 502);
+  }
+
+  return jsonResponse({ success: true, slug: key });
+}
+
+async function deleteAuthorAdmin(slug: string): Promise<Response> {
+  await migrateBlogPosts();
+  const key = String(slug || "").trim();
+  if (!key) return jsonResponse({ error: "slug_required" }, 400);
+
+  await client.execute({
+    sql: "DELETE FROM blog_authors WHERE slug = ?",
+    args: [key],
+  });
+
+  try {
+    await syncPublishedBlogToCdn();
+  } catch (err) {
+    console.error("[Blog] CDN sync after author delete failed:", err);
+  }
+
+  return jsonResponse({ success: true });
+}
+
 async function uploadBlogImage(request: Request): Promise<Response> {
   if (!process.env.BUNNY_STORAGE_API_KEY) {
     return jsonResponse({ error: "storage_not_configured", message: "BUNNY_STORAGE_API_KEY not set" }, 500);
@@ -722,6 +814,18 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
       }
       if (path === "/admin/blog/images" && request.method === "POST") {
         return await uploadBlogImage(request);
+      }
+
+      if (path === "/admin/blog/authors" && request.method === "GET") {
+        return await listAuthorsAdmin();
+      }
+
+      const authorMatch = path.match(/^\/admin\/blog\/authors\/([^/]+)$/);
+      if (authorMatch) {
+        const authorSlug = decodeURIComponent(authorMatch[1]);
+        if (request.method === "GET") return await getAuthorAdmin(authorSlug);
+        if (request.method === "PUT") return await saveAuthorAdmin(authorSlug, request);
+        if (request.method === "DELETE") return await deleteAuthorAdmin(authorSlug);
       }
 
       const postMatch = path.match(/^\/admin\/blog\/posts\/(\d+)$/);

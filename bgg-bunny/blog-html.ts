@@ -671,6 +671,80 @@ main.page-container {
   color: rgb(var(--color-neutral-600));
   line-height: 1.45;
 }
+.blog-author-profile {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  padding: 1.75rem;
+  margin-bottom: 2rem;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgb(var(--color-neutral-50)), rgb(var(--color-neutral)));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.blog-author-profile-avatar {
+  flex-shrink: 0;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgb(var(--color-neutral));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+.blog-author-profile-avatar--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(var(--color-primary-100));
+  color: rgb(var(--color-primary-700));
+  font-size: 2rem;
+  font-weight: 800;
+}
+.blog-author-profile-body { min-width: 0; flex: 1; }
+.blog-author-profile-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: rgb(var(--color-neutral-500));
+}
+.blog-author-profile-name {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  color: rgb(var(--color-neutral-900));
+}
+.blog-author-profile-bio {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  line-height: 1.7;
+  color: rgb(var(--color-neutral-600));
+  max-width: 52rem;
+}
+.blog-author-profile-count {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-500));
+}
+.blog-author-posts-heading {
+  margin: 0 0 1.25rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: rgb(var(--color-neutral-800));
+  letter-spacing: -0.02em;
+}
+@media (max-width: 640px) {
+  .blog-author-profile {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .blog-author-profile-bio { margin-left: auto; margin-right: auto; }
+}
 .blog-article-body {
   font-size: 1.05rem;
   line-height: 1.8;
@@ -751,7 +825,7 @@ function renderSiteHeader(siteUrl: string): string {
 interface PageShellOptions {
   jsonLd?: object;
   ogImage?: string;
-  ogType?: "website" | "article";
+  ogType?: "website" | "article" | "profile";
 }
 
 function pageShell(
@@ -920,28 +994,68 @@ export function renderBlogAuthorPage(
   authors: Record<string, BlogAuthorProfile>,
   siteUrl: string
 ): string {
-  const name = authors[authorSlug]?.name || authorSlug.replace(/-/g, " ");
+  const profile = authors[authorSlug];
+  const name = profile?.name || authorSlug.replace(/-/g, " ");
+  const bio = profile?.bio || "";
+  const image = profile?.image || "";
   const filtered = posts.filter((post) => (post.authors || []).includes(authorSlug));
-  return renderBlogListLayout(posts, filtered, authors, siteUrl, {
-    title: name,
-    subtitle: `Posts by ${name}.`,
-    canonical: `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`,
-    metaDescription: `Blog posts by ${name} on Gibraltar Dice Bastion.`,
-    activeAuthor: authorSlug,
-    jsonLd: {
-      "@context": "https://schema.org",
-      "@type": "ProfilePage",
-      name: `Posts by ${name}`,
-      description: `Articles written by ${name} on the Dice Bastion blog.`,
-      url: `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`,
-      mainEntity: {
-        "@type": "Person",
-        name,
-        url: `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`,
-      },
-      isPartOf: { "@type": "Blog", name: "Dice Bastion Blog", url: `${siteUrl}/posts/` },
-      publisher: publisherJsonLd(siteUrl),
+  const postCount = filtered.length;
+  const canonical = `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`;
+  const metaDescription = bio
+    ? `${bio.slice(0, 155)}${bio.length > 155 ? "…" : ""}`
+    : `Articles by ${name} on the Dice Bastion blog.`;
+  const taxonomy = buildTaxonomyIndex(posts, authors);
+
+  const avatar = image
+    ? `<img class="blog-author-profile-avatar" src="${escapeHtml(image)}" alt="" width="120" height="120" loading="eager">`
+    : `<div class="blog-author-profile-avatar blog-author-profile-avatar--placeholder" aria-hidden="true">${escapeHtml(authorInitials(name))}</div>`;
+
+  const profileHeader = `
+    <header class="blog-author-profile">
+      ${avatar}
+      <div class="blog-author-profile-body">
+        <p class="blog-author-profile-label">Author</p>
+        <h1 class="blog-author-profile-name">${escapeHtml(name)}</h1>
+        ${bio ? `<p class="blog-author-profile-bio">${escapeHtml(bio)}</p>` : ""}
+        <p class="blog-author-profile-count">${postCount} ${postCount === 1 ? "article" : "articles"}</p>
+      </div>
+    </header>`;
+
+  const cards = filtered.length
+    ? filtered.map((p) => renderPostCard(p, siteUrl)).join("\n")
+    : `<div class="no-posts">No published articles yet.</div>`;
+
+  const body = `
+    <div class="blog-layout">
+      <div class="blog-main">
+        ${profileHeader}
+        <h2 class="blog-author-posts-heading">Articles by ${escapeHtml(name)}</h2>
+        <section class="list-card-grid">${cards}</section>
+      </div>
+      ${renderTaxonomySidebar(taxonomy, siteUrl, { author: authorSlug })}
+    </div>`;
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ProfilePage",
+    name: `${name} — Dice Bastion Blog`,
+    description: metaDescription,
+    url: canonical,
+    mainEntity: {
+      "@type": "Person",
+      name,
+      description: bio || undefined,
+      image: image || undefined,
+      url: canonical,
     },
+    isPartOf: { "@type": "Blog", name: "Dice Bastion Blog", url: `${siteUrl}/posts/` },
+    publisher: publisherJsonLd(siteUrl),
+  };
+
+  return pageShell(name, metaDescription, canonical, siteUrl, body, {
+    ogImage: image || defaultOgImage(siteUrl),
+    ogType: "profile",
+    jsonLd,
   });
 }
 
