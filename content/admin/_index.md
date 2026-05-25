@@ -1331,6 +1331,15 @@ Loading cron job logs...
 .dark #nl-quill-wrap .ql-toolbar.ql-snow, .dark #blog-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-900)); border-bottom-color: rgb(var(--color-neutral-700)); }
 #nl-quill-wrap .ql-container.ql-snow, #blog-quill-wrap .ql-container.ql-snow { border: none; font-family: inherit; }
 #nl-quill-wrap .ql-editor, #blog-quill-wrap .ql-editor { min-height: 300px; font-size: 1rem; line-height: 1.7; padding: 1rem; color: rgb(var(--color-neutral-900)); }
+#blog-quill-wrap .ql-editor img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 1.75rem 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
 .dark #nl-quill-wrap .ql-editor, .dark #blog-quill-wrap .ql-editor { color: rgb(var(--color-neutral-100)); background: rgb(var(--color-neutral-800)); }
 .dark #nl-quill-wrap .ql-stroke, .dark #blog-quill-wrap .ql-stroke { stroke: rgb(var(--color-neutral-400)) !important; }
 .dark #nl-quill-wrap .ql-fill, .dark #blog-quill-wrap .ql-fill { fill: rgb(var(--color-neutral-400)) !important; }
@@ -1932,6 +1941,8 @@ const EVENT_IMAGE_EXPORT_SPECS = [
 
 const BLOG_CARD_SPEC = { w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contain' };
 const BLOG_COVER_SPEC = { w: 885, h: 300, filename: 'blog-cover.jpg', fit: 'contain' };
+/** 16:9 landscape — full text column width at 1× (960px), common blog embed ratio */
+const BLOG_INLINE_SPEC = { w: 960, h: 540, filename: 'blog-inline.jpg' };
 
 const MULTI_SIZE_CROP_SPECS = {
   event: EVENT_IMAGE_EXPORT_SPECS,
@@ -2284,24 +2295,19 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 
   try {
     if (currentCropKind === 'blog-inline') {
+      const spec = BLOG_INLINE_SPEC;
       const croppedCanvas = cropper.getCroppedCanvas({
-        maxWidth: 1200,
-        maxHeight: 1200,
+        width: spec.w,
+        height: spec.h,
         imageSmoothingEnabled: true,
         imageSmoothingQuality: 'high',
-        fillColor: 'transparent'
+        fillColor: '#ffffff'
       });
       if (!croppedCanvas) {
         Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
         return;
       }
-      const dataUrl = composeBlurredBackgroundJpeg(
-        croppedCanvas,
-        croppedCanvas.width,
-        croppedCanvas.height,
-        cropBgMode,
-        cropBgPickedCol
-      );
+      const dataUrl = croppedCanvas.toDataURL('image/jpeg', 0.88);
       try {
         const url = await blogUploadImageToBunny(dataUrl, `inline-${Date.now()}.jpg`);
         currentCropCallback(url);
@@ -5779,7 +5785,7 @@ document.getElementById('blog-inline-image-upload')?.addEventListener('change', 
     const range = blogQuill.getSelection(true);
     blogQuill.insertEmbed(range.index, 'image', url, 'user');
     blogQuill.setSelection(range.index + 1);
-  }, NaN, 'blog-inline');
+  }, 960 / 540, 'blog-inline');
   e.target.value = '';
 });
 

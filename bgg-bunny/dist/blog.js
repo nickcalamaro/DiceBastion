@@ -5314,7 +5314,21 @@ main.page-container {
   line-height: 1.8;
   color: rgb(var(--color-neutral-700));
 }
-.blog-article-body img { max-width: 100%; height: auto; border-radius: 8px; }
+.blog-article-body img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 2rem 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+.blog-article-body p:has(> img:only-child) {
+  margin: 2rem 0;
+}
+.blog-article-body p:has(> img:only-child) img {
+  margin: 0;
+}
 .blog-article-body h1, .blog-article-body h2, .blog-article-body h3 {
   margin-top: 1.75rem;
   margin-bottom: 0.75rem;
