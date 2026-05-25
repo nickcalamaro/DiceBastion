@@ -4739,12 +4739,25 @@ var ORG_AUTHOR_NAMES = /* @__PURE__ */ new Set([
 ]);
 var SITE_NAV = [
   { label: "Events", href: "/events/" },
-  { label: "About", href: "/about/" },
-  { label: "Memberships", href: "/memberships/" },
-  { label: "Book a Table", href: "/bookings/" },
-  { label: "Games Library", href: "/board-game-library/" },
-  { label: "Blog", href: "/posts/" },
-  { label: "Shop", href: "https://shop.dicebastion.com", external: true }
+  { label: "Donate", href: "/donations/" },
+  {
+    label: "About Us",
+    href: "/about/",
+    children: [
+      { label: "FAQs", href: "/faqs/" },
+      { label: "Team", href: "/team/" },
+      { label: "Dice Bastion Blog", href: "/posts/", blogActive: true }
+    ]
+  },
+  {
+    label: "Services",
+    children: [
+      { label: "Book a Table", href: "/bookings/" },
+      { label: "Board Game Library", href: "/board-game-library/" }
+    ]
+  },
+  { label: "Shop", href: "https://shop.dicebastion.com", external: true },
+  { label: "Admin", href: "/admin/", visibility: 0 }
 ];
 var SITE_NAME = "Gibraltar Dice Bastion";
 var BLOG_SEO_DESCRIPTION = "Nicky and Jen's little corner of the internet for tabletop gaming in Gibraltar \u2014 board game reviews, event recaps, and club news from Dice Bastion.";
@@ -4866,6 +4879,28 @@ function stripEmbeddedAuthorBlocks(html) {
   out = out.replace(/<div class="flex author"[\s\S]*?<\/div>\s*<\/div>/gi, "");
   out = out.replace(/<p[^>]*>\s*(?:<(?:strong|b)>)?\s*Author:?\s*(?:<\/(?:strong|b)>)?\s*[^<]*<\/p>/gi, "");
   return out.trim();
+}
+function enhanceBlogBodyImages(html) {
+  if (!html || !html.includes("<img"))
+    return html;
+  const figures = [];
+  let work = html.replace(
+    /<figure\b[^>]*class="[^"]*blog-inline-figure[^"]*"[^>]*>[\s\S]*?<\/figure>/gi,
+    (block) => {
+      figures.push(block);
+      return `\0BLOGFIG${figures.length - 1}\0`;
+    }
+  );
+  work = work.replace(/<img\b([^>]*?)>/gi, (_match, attrs) => {
+    const altMatch = attrs.match(/\balt=(["'])([\s\S]*?)\1/i);
+    const alt = altMatch ? altMatch[2] : "";
+    const imgTag = `<img${attrs}>`;
+    if (!alt.trim()) {
+      return `<figure class="blog-inline-figure">${imgTag}</figure>`;
+    }
+    return `<figure class="blog-inline-figure">${imgTag}<figcaption>${escapeHtml(alt)}</figcaption></figure>`;
+  });
+  return work.replace(/\x00BLOGFIG(\d+)\x00/g, (_m, index) => figures[Number(index)] || "");
 }
 function buildTaxonomyIndex(posts, authors) {
   const tagMap = /* @__PURE__ */ new Map();
@@ -5021,6 +5056,7 @@ a:hover { color: rgb(var(--color-primary-700)); }
   height: auto;
   object-fit: contain;
 }
+.hidden { display: none !important; }
 .site-nav {
   display: flex;
   flex-wrap: wrap;
@@ -5028,15 +5064,59 @@ a:hover { color: rgb(var(--color-primary-700)); }
   justify-content: flex-end;
   gap: 0.25rem 1.25rem;
 }
-.site-nav a {
+.site-nav a,
+.site-nav-parent {
   font-size: 0.95rem;
   font-weight: 500;
   color: rgb(var(--color-neutral-600));
   text-decoration: none;
   padding: 0.35rem 0;
 }
-.site-nav a:hover { color: rgb(var(--color-primary-600)); }
-.site-nav a.is-active { color: rgb(var(--color-primary-700)); font-weight: 600; }
+.site-nav a:hover,
+.site-nav-parent:hover { color: rgb(var(--color-primary-600)); }
+.site-nav a.is-active,
+.site-nav-parent.is-active { color: rgb(var(--color-primary-700)); font-weight: 600; }
+.site-nav-dropdown {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.site-nav-chevron {
+  font-size: 0.65rem;
+  color: rgb(var(--color-neutral-500));
+  line-height: 1;
+  pointer-events: none;
+}
+.site-nav-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 13rem;
+  padding: 0.75rem 1rem;
+  background: rgb(var(--color-neutral));
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.site-nav-dropdown:hover .site-nav-dropdown-menu,
+.site-nav-dropdown:focus-within .site-nav-dropdown-menu {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+.site-nav-dropdown-link {
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
 main.page-container {
   max-width: 1280px;
   margin: 0 auto;
@@ -5397,10 +5477,31 @@ main.page-container {
   margin: 2rem 0;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
+.blog-article-body .blog-inline-figure {
+  margin: 2rem 0;
+  padding: 0;
+}
+.blog-article-body .blog-inline-figure img {
+  margin: 0;
+}
+.blog-article-body .blog-inline-figure figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  font-style: italic;
+  color: rgb(var(--color-neutral-500));
+  text-align: center;
+  line-height: 1.5;
+}
 .blog-article-body p:has(> img:only-child) {
   margin: 2rem 0;
 }
 .blog-article-body p:has(> img:only-child) img {
+  margin: 0;
+}
+.blog-article-body p:has(> .blog-inline-figure:only-child) {
+  margin: 2rem 0;
+}
+.blog-article-body p:has(> .blog-inline-figure:only-child) .blog-inline-figure {
   margin: 0;
 }
 .blog-article-body h1, .blog-article-body h2, .blog-article-body h3 {
@@ -5437,16 +5538,64 @@ main.page-container {
     min-height: 0;
   }
   .site-nav { justify-content: flex-start; }
+  .site-nav-dropdown { width: 100%; flex-wrap: wrap; }
+  .site-nav-dropdown-menu {
+    position: static;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    box-shadow: none;
+    border: 0;
+    padding: 0 0 0 1rem;
+    margin-top: 0.15rem;
+    min-width: 0;
+  }
 }
 `;
+function resolveNavHref(item, siteUrl) {
+  if (!item.href)
+    return "";
+  return item.external ? item.href : `${siteUrl}${item.href}`;
+}
+function navVisibilityAttr(visibility) {
+  if (visibility === void 0 || visibility === 3)
+    return "";
+  return ` data-visibility="${visibility}"`;
+}
+function isBlogNavActive(item) {
+  return Boolean(item.blogActive);
+}
+function renderSiteNavLink(item, siteUrl) {
+  const href = resolveNavHref(item, siteUrl);
+  const active = isBlogNavActive(item) ? " is-active" : "";
+  const external = item.external ? ' target="_blank" rel="noopener noreferrer"' : "";
+  const visibility = navVisibilityAttr(item.visibility);
+  return `<a href="${escapeHtml(href)}" class="site-nav-link${active}"${external}${visibility}>${escapeHtml(item.label)}</a>`;
+}
+function renderSiteNavItem(item, siteUrl) {
+  if (!item.children?.length) {
+    return renderSiteNavLink(item, siteUrl);
+  }
+  const childActive = item.children.some(isBlogNavActive);
+  const parentActive = childActive ? " is-active" : "";
+  const parentHref = item.href ? resolveNavHref(item, siteUrl) : "";
+  const parentInner = parentHref ? `<a href="${escapeHtml(parentHref)}" class="site-nav-parent${parentActive}">${escapeHtml(item.label)}</a>` : `<span class="site-nav-parent${parentActive}">${escapeHtml(item.label)}</span>`;
+  const children = item.children.map((child) => {
+    const href = resolveNavHref(child, siteUrl);
+    const active = isBlogNavActive(child) ? " is-active" : "";
+    const external = child.external ? ' target="_blank" rel="noopener noreferrer"' : "";
+    return `<a href="${escapeHtml(href)}" class="site-nav-dropdown-link${active}"${external}>${escapeHtml(child.label)}</a>`;
+  }).join("\n");
+  return `
+    <div class="site-nav-dropdown"${navVisibilityAttr(item.visibility)}>
+      ${parentInner}
+      <span class="site-nav-chevron" aria-hidden="true">\u25BE</span>
+      <div class="site-nav-dropdown-menu">${children}</div>
+    </div>`;
+}
 function renderSiteHeader(siteUrl) {
   const logoUrl = `${siteUrl}/img/DB_Logo_2025.png`;
-  const nav = SITE_NAV.map((item) => {
-    const href = item.external ? item.href : `${siteUrl}${item.href}`;
-    const cls = item.href === "/posts/" ? ' class="is-active"' : "";
-    const external = item.external ? ' target="_blank" rel="noopener noreferrer"' : "";
-    return `<a href="${escapeHtml(href)}"${cls}${external}>${escapeHtml(item.label)}</a>`;
-  }).join("\n");
+  const nav = SITE_NAV.map((item) => renderSiteNavItem(item, siteUrl)).join("\n");
   return `
     <header class="site-header">
       <div class="site-header-inner">
@@ -5491,6 +5640,8 @@ function pageShell(title, description, canonical, siteUrl, bodyHtml, options = {
 <body>
   ${renderSiteHeader(siteUrl)}
   <main class="page-container">${bodyHtml}</main>
+  <script src="${escapeHtml(siteUrl)}/js/utils.js?v=2"><\/script>
+  <script src="${escapeHtml(siteUrl)}/js/loginStatus.js"><\/script>
 </body>
 </html>`;
 }
@@ -5635,7 +5786,7 @@ function renderBlogPostPage(post, authors, siteUrl, allPosts = []) {
   const ogImage = resolvePostOgImage(post, siteUrl);
   const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
-  const sanitizedBody = stripEmbeddedAuthorBlocks(post.html || "");
+  const sanitizedBody = enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(post.html || ""));
   const taxonomy = buildTaxonomyIndex(allPosts.length ? allPosts : [post], authors);
   const articleHtml = `
     <article class="blog-article">
