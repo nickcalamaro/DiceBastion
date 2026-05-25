@@ -1121,15 +1121,26 @@ Loading cron job logs...
 <label class="form-label">Publish Date</label>
 <input type="datetime-local" id="blog-published-at" class="form-input">
 </div>
+<div></div>
+</div>
+
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label">Card image</label>
+<p style="margin:0 0 0.5rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">Shown on blog list cards. Crop to 400×238.</p>
+<button type="button" onclick="document.getElementById('blog-card-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop card</button>
+<input type="file" id="blog-card-upload" accept="image/*" style="display:none;">
+<input type="url" id="blog-featured-image-card" class="form-input" placeholder="Or paste card image URL" style="margin-top:0.5rem;">
+<div id="blog-card-preview" style="margin-top:0.5rem;"></div>
+</div>
 <div>
 <label class="form-label">Cover image</label>
-<p style="margin:0 0 0.5rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">Shown on list cards and as the wide hero at the top of the post. Upload crops to card (400×238), main (800×379), and hero (885×300) sizes.</p>
-<input type="hidden" id="blog-featured-image-card" value="">
-<input type="hidden" id="blog-featured-image-hero" value="">
-<button type="button" onclick="document.getElementById('blog-featured-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop cover</button>
-<input type="file" id="blog-featured-upload" accept="image/*" style="display:none;">
-<input type="url" id="blog-featured-image" class="form-input" placeholder="Or paste cover image URL" style="margin-top:0.5rem;">
-<div id="blog-featured-preview" style="margin-top:0.5rem;"></div>
+<p style="margin:0 0 0.5rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">Wide hero at the top of the post. Crop to 885×300.</p>
+<button type="button" onclick="document.getElementById('blog-cover-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop cover</button>
+<input type="file" id="blog-cover-upload" accept="image/*" style="display:none;">
+<input type="hidden" id="blog-featured-image" value="">
+<input type="url" id="blog-featured-image-hero" class="form-input" placeholder="Or paste cover image URL" style="margin-top:0.5rem;">
+<div id="blog-cover-preview" style="margin-top:0.5rem;"></div>
 </div>
 </div>
 
@@ -1380,7 +1391,6 @@ let currentUser = null;
 let uploadedProductImage = null;
 /** After crop upload: { image_url, image_url_card, image_url_hero } or null */
 let uploadedEventBundle = null;
-let uploadedBlogBundle = null;
 let editingShopPromoId = null;
 
 function adminJsonHeaders() {
@@ -1903,15 +1913,13 @@ document.getElementById('event-location')?.addEventListener('input', (e) => {
 let cropper = null;
 let currentCropCallback = null;
 let currentAspectRatio = 336 / 220;
-/** 'event' | 'blog' = multi-size pack; 'blog-inline' = single inline image; 'product' = single product image */
+/** 'event' = multi-size pack; 'blog-card' | 'blog-cover' | 'blog-inline' = single blog image; 'product' = single product image */
 let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
 
 const EVENT_IMAGE_MASTER_W = 1600;
 const EVENT_IMAGE_MASTER_H = 758;
-const BLOG_IMAGE_MASTER_W = 1770;
-const BLOG_IMAGE_MASTER_H = 600;
 /** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
 const EVENT_IMAGE_EXPORT_SPECS = [
   /** At least fill target height when needed; blur fills any letterbox. */
@@ -1922,15 +1930,11 @@ const EVENT_IMAGE_EXPORT_SPECS = [
   { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'contain' }
 ];
 
-const BLOG_IMAGE_EXPORT_SPECS = [
-  { key: 'featured_image', w: 800, h: 379, filename: 'blog-main.jpg', fit: 'fillHeight' },
-  { key: 'featured_image_card', w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contain' },
-  { key: 'featured_image_hero', w: 885, h: 300, filename: 'blog-hero.jpg', fit: 'contain' }
-];
+const BLOG_CARD_SPEC = { w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contain' };
+const BLOG_COVER_SPEC = { w: 885, h: 300, filename: 'blog-cover.jpg', fit: 'contain' };
 
 const MULTI_SIZE_CROP_SPECS = {
   event: EVENT_IMAGE_EXPORT_SPECS,
-  blog: BLOG_IMAGE_EXPORT_SPECS,
 };
 
 /** Tight axis-aligned bbox of sufficiently opaque pixels, or null if none. */
@@ -2309,13 +2313,46 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       return;
     }
 
-    if (currentCropKind === 'event' || currentCropKind === 'blog') {
-      const exportSpecs = MULTI_SIZE_CROP_SPECS[currentCropKind];
-      const masterW = currentCropKind === 'blog' ? BLOG_IMAGE_MASTER_W : EVENT_IMAGE_MASTER_W;
-      const masterH = currentCropKind === 'blog' ? BLOG_IMAGE_MASTER_H : EVENT_IMAGE_MASTER_H;
+    if (currentCropKind === 'blog-card' || currentCropKind === 'blog-cover') {
+      const spec = currentCropKind === 'blog-card' ? BLOG_CARD_SPEC : BLOG_COVER_SPEC;
       const masterCropped = cropper.getCroppedCanvas({
-        width: masterW,
-        height: masterH,
+        width: spec.w * 2,
+        height: spec.h * 2,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        fillColor: 'transparent'
+      });
+      if (!masterCropped) {
+        Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
+        return;
+      }
+      const fitRect = getExportFitSourceRect(masterCropped);
+      const sized = containCenterOnCanvasRegion(
+        masterCropped,
+        fitRect.sx,
+        fitRect.sy,
+        fitRect.sw,
+        fitRect.sh,
+        spec.w,
+        spec.h
+      );
+      const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+      try {
+        const url = await blogUploadImageToBunny(dataUrl, spec.filename);
+        currentCropCallback(url);
+        closeCropModal();
+      } catch (uploadErr) {
+        Modal.alert({ title: 'Upload Failed', message: uploadErr.message || 'Failed to upload image.' });
+        console.error('Upload error:', uploadErr);
+      }
+      return;
+    }
+
+    if (currentCropKind === 'event') {
+      const exportSpecs = MULTI_SIZE_CROP_SPECS.event;
+      const masterCropped = cropper.getCroppedCanvas({
+        width: EVENT_IMAGE_MASTER_W,
+        height: EVENT_IMAGE_MASTER_H,
         imageSmoothingEnabled: true,
         imageSmoothingQuality: 'high',
         fillColor: 'transparent'
@@ -2350,9 +2387,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
               );
         const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
         try {
-          const uploadUrl = currentCropKind === 'blog'
-            ? await blogUploadImageToBunny(dataUrl, spec.filename)
-            : await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
+          const uploadUrl = await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
           bundle[spec.key] = uploadUrl;
         } catch (uploadErr) {
           Modal.alert({ title: 'Upload Failed', message: uploadErr.message || 'Failed to upload an image variant.' });
@@ -5298,25 +5333,31 @@ async function adminUploadImageToR2(dataUrl, filename) {
   return uploadData.url;
 }
 
-function blogRenderFeaturedPreview(bundle) {
-  if (!bundle?.featured_image) {
-    document.getElementById('blog-featured-preview').innerHTML = '';
-    return;
-  }
-  document.getElementById('blog-featured-preview').innerHTML =
-    `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero cover 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.featured_image_hero || bundle.featured_image}" alt="Hero"></div></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.featured_image_card || bundle.featured_image}" alt="Card"></div></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.featured_image}" alt="Main"></div></div>
-    </div>`;
+function blogRenderCardPreview(url) {
+  const el = document.getElementById('blog-card-preview');
+  if (!el) return;
+  el.innerHTML = url
+    ? `<div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${url}" alt="Card"></div></div>`
+    : '';
 }
 
-function blogApplyFeaturedBundle(bundle) {
-  uploadedBlogBundle = bundle;
-  document.getElementById('blog-featured-image').value = bundle.featured_image || '';
-  document.getElementById('blog-featured-image-card').value = bundle.featured_image_card || '';
-  document.getElementById('blog-featured-image-hero').value = bundle.featured_image_hero || '';
-  blogRenderFeaturedPreview(bundle);
+function blogRenderCoverPreview(url) {
+  const el = document.getElementById('blog-cover-preview');
+  if (!el) return;
+  el.innerHTML = url
+    ? `<div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Cover 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${url}" alt="Cover"></div></div>`
+    : '';
+}
+
+function blogApplyCardImage(url) {
+  document.getElementById('blog-featured-image-card').value = url || '';
+  blogRenderCardPreview(url);
+}
+
+function blogApplyCoverImage(url) {
+  document.getElementById('blog-featured-image-hero').value = url || '';
+  document.getElementById('blog-featured-image').value = url || '';
+  blogRenderCoverPreview(url);
 }
 
 function blogCollectPayload(status) {
@@ -5325,9 +5366,11 @@ function blogCollectPayload(status) {
     title: document.getElementById('blog-title').value.trim(),
     slug: document.getElementById('blog-slug').value.trim(),
     excerpt: document.getElementById('blog-excerpt').value.trim() || null,
-    featured_image: uploadedBlogBundle?.featured_image ?? (document.getElementById('blog-featured-image').value.trim() || null),
-    featured_image_card: uploadedBlogBundle?.featured_image_card ?? (document.getElementById('blog-featured-image-card').value.trim() || null),
-    featured_image_hero: uploadedBlogBundle?.featured_image_hero ?? (document.getElementById('blog-featured-image-hero').value.trim() || null),
+    featured_image: document.getElementById('blog-featured-image-hero').value.trim()
+      || document.getElementById('blog-featured-image').value.trim()
+      || null,
+    featured_image_card: document.getElementById('blog-featured-image-card').value.trim() || null,
+    featured_image_hero: document.getElementById('blog-featured-image-hero').value.trim() || null,
     seo_description: document.getElementById('blog-seo-description').value.trim() || null,
     seo_image: document.getElementById('blog-seo-image').value.trim() || null,
     html: blogQuill ? blogQuill.root.innerHTML.trim() : '',
@@ -5416,8 +5459,8 @@ function blogResetForm() {
   document.getElementById('blog-featured-image-hero').value = '';
   document.getElementById('blog-seo-description').value = '';
   document.getElementById('blog-seo-image').value = '';
-  document.getElementById('blog-featured-preview').innerHTML = '';
-  uploadedBlogBundle = null;
+  blogRenderCardPreview('');
+  blogRenderCoverPreview('');
   document.getElementById('blog-author-meta-panel').style.display = 'none';
   document.getElementById('blog-save-status').textContent = '';
   blogPendingAuthorSlug = null;
@@ -5453,19 +5496,13 @@ async function blogEditPost(id) {
     document.getElementById('blog-slug').value = post.slug || '';
     document.getElementById('blog-excerpt').value = post.excerpt || '';
     document.getElementById('blog-published-at').value = blogIsoToLocalInput(post.published_at);
-    document.getElementById('blog-featured-image').value = post.featured_image || '';
+    document.getElementById('blog-featured-image').value = post.featured_image || post.featured_image_hero || '';
     document.getElementById('blog-featured-image-card').value = post.featured_image_card || '';
     document.getElementById('blog-featured-image-hero').value = post.featured_image_hero || '';
     document.getElementById('blog-seo-description').value = post.seo_description || '';
     document.getElementById('blog-seo-image').value = post.seo_image || '';
-    uploadedBlogBundle = null;
-    if (post.featured_image) {
-      blogRenderFeaturedPreview({
-        featured_image: post.featured_image,
-        featured_image_card: post.featured_image_card,
-        featured_image_hero: post.featured_image_hero,
-      });
-    }
+    blogRenderCardPreview(post.featured_image_card || '');
+    blogRenderCoverPreview(post.featured_image_hero || post.featured_image || '');
     blogChipState.tags = [...(post.tags || [])];
     blogChipState.categories = [...(post.categories || [])];
     blogChipState.series = [...(post.series || [])];
@@ -5716,12 +5753,21 @@ document.getElementById('blog-slug')?.addEventListener('input', () => {
   });
 });
 
-document.getElementById('blog-featured-upload')?.addEventListener('change', (e) => {
+document.getElementById('blog-card-upload')?.addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  showCropModal(file, (bundle) => {
-    blogApplyFeaturedBundle(bundle);
-  }, 885 / 300, 'blog');
+  showCropModal(file, (url) => {
+    blogApplyCardImage(url);
+  }, 400 / 238, 'blog-card');
+  e.target.value = '';
+});
+
+document.getElementById('blog-cover-upload')?.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showCropModal(file, (url) => {
+    blogApplyCoverImage(url);
+  }, 885 / 300, 'blog-cover');
   e.target.value = '';
 });
 
