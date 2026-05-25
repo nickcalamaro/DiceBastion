@@ -376,6 +376,19 @@ function renderTaxonomySidebar(
     </aside>`;
 }
 
+function renderBlogPageFooter(siteUrl: string, showBackLink = false): string {
+  const blogUrl = `${siteUrl}/posts/`;
+  const adminUrl = `${siteUrl}/admin/#blog`;
+  const backLink = showBackLink
+    ? `<a class="blog-back-link" href="${escapeHtml(blogUrl)}">← Back to the main blog</a>`
+    : "";
+  return `
+    <nav class="blog-subpage-footer" aria-label="Blog navigation">
+      ${backLink}
+      <a class="blog-admin-edit-link" href="${escapeHtml(adminUrl)}" data-visibility="0">Edit blog posts</a>
+    </nav>`;
+}
+
 const PAGE_CSS = `
 :root {
   --color-neutral: 255, 255, 255;
@@ -511,6 +524,37 @@ main.page-container {
   margin: 0;
   color: rgb(var(--color-neutral-500));
   font-size: 1.05rem;
+}
+.blog-subpage-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgb(var(--color-neutral-200));
+}
+.blog-back-link {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgb(var(--color-primary-600));
+  text-decoration: none;
+}
+.blog-back-link:hover {
+  color: rgb(var(--color-primary-700));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.blog-admin-edit-link {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgb(var(--color-neutral-600));
+  text-decoration: none;
+}
+.blog-admin-edit-link:hover {
+  color: rgb(var(--color-primary-600));
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .blog-seo-intro {
   margin-bottom: 1.5rem;
@@ -1176,6 +1220,7 @@ interface ListPageOptions {
   metaDescription: string;
   activeTag?: string;
   activeAuthor?: string;
+  showSubpageFooter?: boolean;
   jsonLd?: object;
 }
 
@@ -1200,6 +1245,7 @@ function renderBlogListLayout(
     <div class="blog-layout">
       <div class="blog-main">
         <section class="list-card-grid">${cards}</section>
+        ${renderBlogPageFooter(siteUrl, !!options.showSubpageFooter)}
       </div>
       ${renderTaxonomySidebar(taxonomy, siteUrl, { tag: options.activeTag, author: options.activeAuthor })}
     </div>`;
@@ -1239,6 +1285,7 @@ export function renderBlogTagPage(
     canonical: `${siteUrl}/posts/tag/${encodeURIComponent(tagSlug)}/`,
     metaDescription: `Board game blog posts tagged “${label}” from Gibraltar Dice Bastion.`,
     activeTag: tagSlug,
+    showSubpageFooter: true,
     jsonLd: {
       "@context": "https://schema.org",
       "@type": "CollectionPage",
@@ -1294,6 +1341,7 @@ export function renderBlogAuthorPage(
         ${profileHeader}
         <h2 class="blog-author-posts-heading">Articles by ${escapeHtml(name)}</h2>
         <section class="list-card-grid">${cards}</section>
+        ${renderBlogPageFooter(siteUrl, true)}
       </div>
       ${renderTaxonomySidebar(taxonomy, siteUrl, { author: authorSlug })}
     </div>`;
