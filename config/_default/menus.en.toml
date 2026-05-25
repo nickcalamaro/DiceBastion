@@ -14,7 +14,7 @@ visibility = 3
 
 [[main]]
 name = "Donate"
-pageRef = "donations"
+pageRef = "Donate"
 identifier = "iwuegwh"
 weight = 9996
 [main.params]
