@@ -629,6 +629,117 @@ html.dark .blog-appearance-icon--sun { display: block; }
   white-space: nowrap;
   font-size: 0.9rem;
 }
+.site-nav--desktop { display: flex; }
+.site-header-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.blog-menu-root { position: relative; }
+.blog-menu-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 8px;
+  background: rgb(var(--color-neutral-50));
+  color: rgb(var(--color-neutral-600));
+  cursor: pointer;
+}
+.blog-menu-toggle:hover { color: rgb(var(--color-primary-600)); }
+.blog-menu-toggle svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+.blog-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  visibility: hidden;
+  opacity: 0;
+  overflow: auto;
+  background: rgba(241, 245, 249, 0.95);
+  backdrop-filter: blur(6px);
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+html.dark .blog-menu-overlay {
+  background: rgba(15, 23, 42, 0.95);
+}
+.blog-mobile-nav {
+  list-style: none;
+  margin: 0;
+  padding: 1.25rem 1rem 2rem;
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+.blog-mobile-nav-close {
+  margin-bottom: 0.5rem;
+}
+.blog-mobile-nav-close button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--color-neutral-600));
+  cursor: pointer;
+}
+.blog-mobile-nav-close button:hover { color: rgb(var(--color-primary-600)); }
+.blog-mobile-nav-close svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+.blog-mobile-nav-item { width: 100%; text-align: right; }
+.blog-mobile-nav-label {
+  display: block;
+  padding: 0.5rem 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--color-neutral-500));
+}
+.blog-mobile-nav-link {
+  display: inline-block;
+  padding: 0.45rem 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: rgb(var(--color-neutral-700));
+  text-decoration: none;
+}
+.blog-mobile-nav-link:hover { color: rgb(var(--color-primary-600)); }
+.blog-mobile-nav-link.is-active {
+  color: rgb(var(--color-primary-700));
+  font-weight: 600;
+}
+.blog-mobile-nav-item--child .blog-mobile-nav-link {
+  font-size: 0.92rem;
+  color: rgb(var(--color-neutral-600));
+}
+.blog-mobile-nav-spacer {
+  height: 0.5rem;
+  list-style: none;
+}
 main.page-container {
   max-width: 1280px;
   margin: 0 auto;
@@ -1109,30 +1220,63 @@ main.page-container {
   font-size: 1rem;
 }
 @media (max-width: 900px) {
-  .blog-layout { grid-template-columns: 1fr; }
+  .blog-layout { grid-template-columns: 1fr; gap: 1.5rem; }
   .blog-sidebar { position: static; }
 }
 @media (max-width: 768px) {
-  .event-card { flex-direction: column; }
+  .site-nav--desktop { display: none !important; }
+  .blog-menu-toggle { display: inline-flex; }
+  .site-header-inner { padding: 0.4rem 0.75rem 0.5rem; }
+  .site-logo img { max-height: 3rem; max-width: 11rem; }
+  main.page-container { padding: 1rem 0.75rem 2rem; }
+  .blog-list-header { margin-bottom: 1rem; }
+  .blog-list-header h1 { font-size: 1.65rem; }
+  .blog-list-subtitle { font-size: 0.95rem; }
+  .blog-seo-intro { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.65; }
+  .list-card-grid { gap: 0.875rem; }
+  .event-card {
+    flex-direction: column;
+    min-height: 0;
+    border-radius: 12px;
+  }
   .event-card-image {
     flex: none;
     width: 100%;
-    aspect-ratio: 16 / 10;
     min-height: 0;
+    aspect-ratio: 16 / 9;
+    max-height: 200px;
   }
-  .site-nav { justify-content: flex-start; }
-  .site-nav-dropdown { width: 100%; flex-wrap: wrap; }
-  .site-nav-dropdown-menu {
-    position: static;
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-    box-shadow: none;
-    border: 0;
-    padding: 0 0 0 1rem;
-    margin-top: 0.15rem;
-    min-width: 0;
+  .event-content { padding: 0.875rem 0.875rem 0; gap: 0.75rem; }
+  .event-title { font-size: 1.15rem; line-height: 1.3; }
+  .event-description { font-size: 0.9rem; line-height: 1.55; }
+  .event-meta {
+    padding: 0.65rem 0.875rem;
+    margin-left: -0.875rem;
+    margin-right: -0.875rem;
+    gap: 0.875rem 1.25rem;
   }
+  .event-meta-group { gap: 0.875rem 1.25rem; }
+  .event-date-value, .event-location-value, .event-card-author-name { font-size: 0.9rem; }
+  .blog-subpage-footer { margin-top: 1.5rem; padding-top: 1rem; }
+  .blog-author-profile {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+    border-radius: 12px;
+  }
+  .blog-author-profile-avatar { width: 88px; height: 88px; }
+  .blog-author-profile-name { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .blog-author-posts-heading { font-size: 1.15rem; margin-bottom: 0.75rem; }
+  .blog-author-byline { padding: 0.75rem; margin-bottom: 1rem; }
+  .blog-sidebar { padding: 0.75rem; border-radius: 10px; }
+  .blog-hero-image { max-height: 200px; border-radius: 10px; margin-bottom: 1rem; }
+  .blog-article-title { font-size: 1.55rem; margin-bottom: 0.75rem; }
+  .blog-article-meta { gap: 0.75rem 1rem; margin-bottom: 0.75rem; }
+  .blog-article-body { font-size: 1rem; line-height: 1.75; }
+  .blog-article-body img,
+  .blog-article-body .blog-inline-figure { margin: 1.25rem 0; }
 }
 `;
 
@@ -1186,6 +1330,48 @@ function renderSiteNavItem(item: SiteNavItem, siteUrl: string): string {
     </div>`;
 }
 
+function renderSiteNavMobileItem(item: SiteNavItem, siteUrl: string): string {
+  const vis = navVisibilityAttr(item.visibility);
+  if (!item.children?.length) {
+    const href = resolveNavHref(item, siteUrl);
+    const external = item.external ? ' target="_blank" rel="noopener noreferrer"' : "";
+    const active = isBlogNavActive(item) ? " is-active" : "";
+    return `<li class="blog-mobile-nav-item"${vis}><a href="${escapeHtml(href)}" class="blog-mobile-nav-link${active}"${external}>${escapeHtml(item.label)}</a></li>`;
+  }
+
+  const parentHref = item.href ? resolveNavHref(item, siteUrl) : "";
+  const parentRow = parentHref
+    ? `<li class="blog-mobile-nav-item"${vis}><a href="${escapeHtml(parentHref)}" class="blog-mobile-nav-link">${escapeHtml(item.label)}</a></li>`
+    : `<li class="blog-mobile-nav-label"${vis}>${escapeHtml(item.label)}</li>`;
+  const children = item.children
+    .map((child) => {
+      const href = resolveNavHref(child, siteUrl);
+      const external = child.external ? ' target="_blank" rel="noopener noreferrer"' : "";
+      const active = isBlogNavActive(child) ? " is-active" : "";
+      const childVis = navVisibilityAttr(child.visibility);
+      return `<li class="blog-mobile-nav-item blog-mobile-nav-item--child"${childVis}><a href="${escapeHtml(href)}" class="blog-mobile-nav-link${active}"${external}>${escapeHtml(child.label)}</a></li>`;
+    })
+    .join("\n");
+  return `${parentRow}\n${children}\n<li class="blog-mobile-nav-spacer" aria-hidden="true"></li>`;
+}
+
+function renderMobileMenu(siteUrl: string): string {
+  const items = SITE_NAV.map((item) => renderSiteNavMobileItem(item, siteUrl)).join("\n");
+  return `
+    <div id="blog-menu-button" class="blog-menu-root">
+      <div id="blog-menu-wrapper" class="blog-menu-overlay" aria-hidden="true">
+        <ul class="blog-mobile-nav">
+          <li id="blog-menu-close-button" class="blog-mobile-nav-close">
+            <button type="button" aria-label="Close menu">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+            </button>
+          </li>
+          ${items}
+        </ul>
+      </div>
+    </div>`;
+}
+
 function renderAppearanceSwitcher(): string {
   return `
     <button id="appearance-switcher" type="button" class="blog-appearance-switcher" aria-label="Dark mode switcher" title="Toggle dark mode">
@@ -1210,10 +1396,16 @@ function renderSiteHeader(siteUrl: string): string {
           <img src="${escapeHtml(logoUrl)}" alt="Gibraltar Dice Bastion" width="288" height="72">
         </a>
         <div class="site-header-actions">
-          <nav class="site-nav" aria-label="Main">${nav}</nav>
-          ${renderAppearanceSwitcher()}
+          <nav class="site-nav site-nav--desktop" aria-label="Main">${nav}</nav>
+          <div class="site-header-tools">
+            ${renderAppearanceSwitcher()}
+            <button id="blog-menu-icon" type="button" class="blog-menu-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="blog-menu-wrapper">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+            </button>
+          </div>
         </div>
       </div>
+      ${renderMobileMenu(siteUrl)}
     </header>`;
 }
 
@@ -1269,6 +1461,7 @@ function pageShell(
   <main class="page-container">${bodyHtml}</main>
   <script src="${escapeHtml(siteUrl)}/js/utils.js?v=2"></script>
   <script src="${escapeHtml(siteUrl)}/js/loginStatus.js"></script>
+  <script src="${escapeHtml(siteUrl)}/js/blog-mobilemenu.js"></script>
 </body>
 </html>`;
 }
