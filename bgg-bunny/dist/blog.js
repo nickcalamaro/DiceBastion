@@ -5029,6 +5029,51 @@ var PAGE_CSS = `
   --color-primary-600: 37, 99, 235;
   --color-primary-700: 29, 78, 216;
 }
+html.dark {
+  color-scheme: dark;
+  --color-neutral: 30, 41, 59;
+  --color-neutral-50: 15, 23, 42;
+  --color-neutral-100: 30, 41, 59;
+  --color-neutral-200: 51, 65, 85;
+  --color-neutral-300: 71, 85, 105;
+  --color-neutral-400: 100, 116, 139;
+  --color-neutral-500: 148, 163, 184;
+  --color-neutral-600: 203, 213, 225;
+  --color-neutral-700: 226, 232, 240;
+  --color-neutral-800: 241, 245, 249;
+  --color-neutral-900: 248, 250, 252;
+  --color-primary-50: 23, 37, 84;
+  --color-primary-100: 30, 58, 138;
+  --color-primary-200: 29, 78, 216;
+  --color-primary-400: 96, 165, 250;
+  --color-primary-600: 147, 197, 253;
+  --color-primary-700: 191, 219, 254;
+}
+html.dark .event-card,
+html.dark .blog-author-profile {
+  background: rgb(var(--color-neutral-50));
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+html.dark .event-meta {
+  background: rgb(var(--color-neutral-100));
+}
+html.dark .blog-sidebar,
+html.dark .blog-author-byline {
+  background: rgb(var(--color-neutral-50));
+}
+html.dark .event-card:hover {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+html.dark .site-nav-dropdown-menu {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+html.dark .blog-author-profile-avatar {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+html.dark .blog-article-body img,
+html.dark .blog-inline-figure img {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -5053,6 +5098,46 @@ a:hover { color: rgb(var(--color-primary-700)); }
   gap: 1rem;
   flex-wrap: wrap;
 }
+.site-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem 1rem;
+  flex: 1;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.blog-appearance-switcher {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 8px;
+  background: rgb(var(--color-neutral-50));
+  color: rgb(var(--color-neutral-600));
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.blog-appearance-switcher:hover {
+  color: rgb(var(--color-primary-600));
+  border-color: rgb(var(--color-neutral-300));
+}
+.blog-appearance-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.blog-appearance-icon--sun { display: none; }
+html.dark .blog-appearance-icon--moon { display: none; }
+html.dark .blog-appearance-icon--sun { display: block; }
 .site-logo {
   display: flex;
   align-items: center;
@@ -5674,6 +5759,18 @@ function renderSiteNavItem(item, siteUrl) {
       <div class="site-nav-dropdown-menu">${children}</div>
     </div>`;
 }
+function renderAppearanceSwitcher() {
+  return `
+    <button id="appearance-switcher" type="button" class="blog-appearance-switcher" aria-label="Dark mode switcher" title="Toggle dark mode">
+      <svg class="blog-appearance-icon blog-appearance-icon--moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+      </svg>
+      <svg class="blog-appearance-icon blog-appearance-icon--sun" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+      </svg>
+    </button>`;
+}
 function renderSiteHeader(siteUrl) {
   const logoUrl = `${siteUrl}/img/DB_Logo_2025.png`;
   const nav = SITE_NAV.map((item) => renderSiteNavItem(item, siteUrl)).join("\n");
@@ -5683,7 +5780,10 @@ function renderSiteHeader(siteUrl) {
         <a class="site-logo" href="${escapeHtml(siteUrl)}/">
           <img src="${escapeHtml(logoUrl)}" alt="Gibraltar Dice Bastion" width="288" height="72">
         </a>
-        <nav class="site-nav" aria-label="Main">${nav}</nav>
+        <div class="site-header-actions">
+          <nav class="site-nav" aria-label="Main">${nav}</nav>
+          ${renderAppearanceSwitcher()}
+        </div>
       </div>
     </header>`;
 }
@@ -5693,10 +5793,11 @@ function pageShell(title, description, canonical, siteUrl, bodyHtml, options = {
   const fullTitle = `${title} | Dice Bastion`;
   const jsonLd = options.jsonLd ? jsonLdScript(options.jsonLd) : "";
   return `<!DOCTYPE html>
-<html lang="en-GB">
+<html lang="en-GB" class="scroll-smooth" data-default-appearance="light" data-auto-appearance="true">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
   <title>${escapeHtml(fullTitle)}</title>
   <meta name="description" content="${escapeHtml(description)}">
   <meta name="robots" content="index, follow">
@@ -5716,6 +5817,7 @@ function pageShell(title, description, canonical, siteUrl, bodyHtml, options = {
   <meta name="twitter:image" content="${escapeHtml(ogImage)}">
   <meta name="twitter:image:alt" content="${escapeHtml(SITE_NAME)} logo">
   ${jsonLd}
+  <script src="${escapeHtml(siteUrl)}/js/appearance.js"><\/script>
   <style>${PAGE_CSS}</style>
 </head>
 <body>
