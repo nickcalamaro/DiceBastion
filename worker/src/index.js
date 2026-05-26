@@ -679,6 +679,44 @@ function isCheckoutPaid(payment) {
 }
 
 /**
+ * Charge the real membership amount after a SETUP_RECURRING_PAYMENT tokenization checkout.
+ * Returns { ok: true, paymentId } or { ok: false, status, paymentId }.
+ */
+async function chargeMembershipAfterTokenization(env, db, { identityId, membershipId, membership, instrumentId, transaction }) {
+  // Unique ref per attempt — SumUp rejects duplicate checkout_reference values.
+  const chargeOrderRef = `${transaction.order_ref}-charge-${crypto.randomUUID().slice(0, 8)}`
+  const chargeDesc = `Dice Bastion ${membership.plan} membership payment`
+  const chargeAmount = transaction.amount
+  const chargeCurrency = transaction.currency || 'GBP'
+
+  let chargeResult
+  try {
+    chargeResult = await chargePaymentInstrument(
+      env, identityId, instrumentId, chargeAmount, chargeCurrency, chargeOrderRef, chargeDesc
+    )
+  } catch (chargeError) {
+    console.error('[chargeMembershipAfterTokenization] Charge error:', chargeError)
+    return { ok: false, status: 'FAILED' }
+  }
+
+  if (!chargeResult || !isCheckoutPaid(chargeResult)) {
+    console.error('[chargeMembershipAfterTokenization] Charge not paid:', chargeResult?.status)
+    return { ok: false, status: chargeResult?.status || 'FAILED', paymentId: chargeResult?.id || null }
+  }
+
+  await db.prepare(`
+    INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                              payment_id, amount, currency, payment_status, created_at)
+    VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
+  `).bind(
+    membershipId, identityId, transaction.email, transaction.name,
+    chargeOrderRef, chargeResult.id, chargeAmount, chargeCurrency, toIso(new Date())
+  ).run()
+
+  return { ok: true, paymentId: chargeResult.id }
+}
+
+/**
  * Activate a membership: compute dates, update DB, optionally save payment instrument
  * and charge the real amount (tokenization flow).
  * Returns { endDate, instrumentId, actualPaymentId } on success.
@@ -703,36 +741,15 @@ async function activateMembership(db, env, { membershipId, membership, paymentId
     // The SETUP_RECURRING_PAYMENT checkout authorized and instantly reimbursed the amount —
     // this is the actual charge that collects payment.
     if (instrumentId && transaction) {
-      const chargeAmount = transaction.amount
-      const chargeCurrency = transaction.currency || 'GBP'
-      const chargeOrderRef = `${transaction.order_ref}-charge`
-      const chargeDesc = `Dice Bastion ${membership.plan} membership payment`
-      
-      console.log(`[activateMembership] Charging real amount £${chargeAmount} via instrument ${instrumentId}`)
-      try {
-        const chargeResult = await chargePaymentInstrument(
-          env, identityId, instrumentId, chargeAmount, chargeCurrency, chargeOrderRef, chargeDesc
-        )
-        if (chargeResult && chargeResult.id) {
-          actualPaymentId = chargeResult.id
-          console.log('[activateMembership] Real charge successful:', actualPaymentId)
-          
-          // Record the actual charge as a separate transaction
-          await db.prepare(`
-            INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
-                                      payment_id, amount, currency, payment_status, created_at)
-            VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
-          `).bind(
-            membershipId, identityId, transaction.email, transaction.name,
-            chargeOrderRef, actualPaymentId, chargeAmount, chargeCurrency, toIso(new Date())
-          ).run()
-        } else {
-          console.error('[activateMembership] Charge returned no id — membership still activates but payment may be refunded')
-        }
-      } catch (chargeError) {
-        console.error('[activateMembership] Error charging saved instrument:', chargeError)
-        // Continue with activation — the setup payment was successful even if actual charge failed
+      console.log(`[activateMembership] Charging real amount £${transaction.amount} via instrument ${instrumentId}`)
+      const charge = await chargeMembershipAfterTokenization(env, db, {
+        identityId, membershipId, membership, instrumentId, transaction
+      })
+      if (!charge.ok) {
+        throw new Error(`membership_charge_failed:${charge.status || 'FAILED'}`)
       }
+      actualPaymentId = charge.paymentId
+      console.log('[activateMembership] Real charge successful:', actualPaymentId)
     }
   }
   
@@ -4089,47 +4106,25 @@ app.get('/membership/confirm', async (c) => {
     // We need to make an actual charge using the saved payment instrument
     if (instrumentId && payment.purpose === 'SETUP_RECURRING_PAYMENT') {
       console.log('Setup payment detected - charging saved instrument for actual membership payment')
-      try {
-        const chargeResult = await chargePaymentInstrument(
-          c.env,
-          identityId,
-          instrumentId,
-          transaction.amount,
-          transaction.currency || 'GBP',
-          `${transaction.order_ref}-charge`,
-          `Dice Bastion ${pending.plan} membership payment`
-        )
-        
-        if (chargeResult && chargeResult.id) {
-          actualPaymentId = chargeResult.id
-          console.log('Successfully charged saved instrument:', actualPaymentId)
-          
-          // Card details are already saved by the payments worker in savePaymentInstrument
-          // No need to fetch them again here
-          
-          // Create a transaction record for the actual charge
-          await c.env.DB.prepare(`
-            INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
-                                      payment_id, amount, currency, payment_status, created_at)
-            VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
-          `).bind(
-            pending.id,
-            identityId,
-            transaction.email,
-            transaction.name,
-            `${transaction.order_ref}-charge`,
-            actualPaymentId,
-            transaction.amount,
-            transaction.currency || 'GBP',
-            toIso(new Date())
-          ).run()
-        } else {
-          console.error('Failed to charge saved instrument - membership will still activate but payment may be refunded')
-        }
-      } catch (chargeError) {
-        console.error('Error charging saved instrument:', chargeError)
-        // Continue with activation - the setup payment was successful even if actual charge failed
+      const charge = await chargeMembershipAfterTokenization(c.env, c.env.DB, {
+        identityId,
+        membershipId: pending.id,
+        membership: pending,
+        instrumentId,
+        transaction
+      })
+      if (!charge.ok) {
+        console.error('[membership/confirm] Real charge failed:', charge.status)
+        return c.json({
+          ok: false,
+          status: charge.status === 'DECLINED' ? 'DECLINED' : 'FAILED',
+          message: charge.status === 'DECLINED'
+            ? 'Your card was declined. Please use a different payment method.'
+            : 'Payment failed. Please check your card details and try again.'
+        })
       }
+      actualPaymentId = charge.paymentId
+      console.log('Successfully charged saved instrument:', actualPaymentId)
     }
   }
   
@@ -4845,43 +4840,19 @@ app.post('/webhooks/sumup', async (c) => {
       // If tokenization checkout, charge the real amount with the saved instrument
       if (payment.purpose === 'SETUP_RECURRING_PAYMENT' && transaction) {
         console.log('[webhook] Tokenization detected - charging saved instrument for actual membership payment')
-        try {
-          const chargeResult = await chargePaymentInstrument(
-            c.env,
-            identityId,
-            instrumentId,
-            transaction.amount,
-            transaction.currency || 'GBP',
-            `${orderRef}-charge`,
-            `Dice Bastion ${pending.plan} membership payment`
-          )
-          
-          if (chargeResult && chargeResult.id) {
-            actualPaymentId = chargeResult.id
-            console.log('[webhook] Successfully charged saved instrument:', actualPaymentId)
-            
-            // Create a transaction record for the actual charge
-            await c.env.DB.prepare(`
-              INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
-                                        payment_id, amount, currency, payment_status, created_at)
-              VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
-            `).bind(
-              pending.id,
-              identityId,
-              transaction.email,
-              transaction.name,
-              `${orderRef}-charge`,
-              actualPaymentId,
-              transaction.amount,
-              transaction.currency || 'GBP',
-              toIso(new Date())
-            ).run()
-          } else {
-            console.error('[webhook] Failed to charge saved instrument - tokenization succeeded but real payment failed')
-          }
-        } catch (chargeError) {
-          console.error('[webhook] Error charging saved instrument:', chargeError)
+        const charge = await chargeMembershipAfterTokenization(c.env, c.env.DB, {
+          identityId,
+          membershipId: pending.id,
+          membership: pending,
+          instrumentId,
+          transaction
+        })
+        if (!charge.ok) {
+          console.error('[webhook] Real charge failed — leaving membership pending:', charge.status)
+          return c.json({ ok: true, status: 'charge_failed', chargeStatus: charge.status })
         }
+        actualPaymentId = charge.paymentId
+        console.log('[webhook] Successfully charged saved instrument:', actualPaymentId)
       }
     } else {
       console.warn('[webhook] Failed to save payment instrument, but membership activation will continue')

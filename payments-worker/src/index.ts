@@ -497,6 +497,20 @@ app.post('/internal/payment-instrument', async (c) => {
 })
 
 /**
+ * Check if a SumUp checkout response represents a successful payment.
+ */
+function isCheckoutPaid(payment: any): boolean {
+	if (!payment) return false
+	if (payment.status === 'PAID' || payment.status === 'SUCCESSFUL') return true
+	if (payment.transactions && Array.isArray(payment.transactions)) {
+		return payment.transactions.some(
+			(t: any) => t.status === 'SUCCESSFUL' || t.status === 'PAID'
+		)
+	}
+	return false
+}
+
+/**
  * Charge a saved payment instrument
  * POST /internal/charge
  */
@@ -584,7 +598,24 @@ app.post('/internal/charge', async (c) => {
 			throw new Error(`Payment processing failed: ${txt}`)		}
 
 		const payment: any = await paymentRes.json()
-		console.log('Processed recurring payment:', payment.id, payment.status)
+		console.log('Processed recurring payment:', payment.id, payment.status, {
+			txStatuses: payment.transactions?.map((t: any) => t.status) || []
+		})
+
+		if (!isCheckoutPaid(payment)) {
+			console.error('Recurring charge not paid:', {
+				checkoutId: checkout.id,
+				orderRef,
+				status: payment.status,
+				txStatuses: payment.transactions?.map((t: any) => t.status) || []
+			})
+			return c.json({
+				error: 'Payment not successful',
+				status: payment.status || 'UNKNOWN',
+				payment
+			}, 402)
+		}
+
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Charge payment instrument error:', error)
