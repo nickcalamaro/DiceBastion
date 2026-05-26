@@ -1082,7 +1082,7 @@ Loading cron job logs...
 
 <!-- Blog Tab -->
 <div id="blog-tab" class="tab-content" style="display: none;">
-<div id="blog-health-banner" style="display:none;margin-bottom:1rem;padding:0.875rem 1rem;border-radius:8px;border:1px solid rgb(var(--color-neutral-300));background:rgb(var(--color-neutral-50));color:rgb(var(--color-neutral-800));font-size:0.95rem;"></div>
+<div id="blog-health-banner" class="blog-health-banner" style="display:none;"></div>
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-blog" class="admin-section-heading admin-m-0">Blog <a href="#blog" class="admin-permalink" aria-label="Link to blog">#</a></h2>
 <div style="display:flex;gap:0.75rem;align-items:center;">
@@ -1095,7 +1095,7 @@ Loading cron job logs...
 <div class="card card-compact">
 <h3 class="admin-m-0 admin-mb-1">Posts</h3>
 <div id="blog-posts-list">
-  <div style="text-align:center;padding:1.5rem;color:rgb(var(--color-neutral-500));">Loading...</div>
+  <div class="blog-empty-text" style="text-align:center;padding:1.5rem;">Loading...</div>
 </div>
 </div>
 
@@ -1128,7 +1128,7 @@ Loading cron job logs...
 <div class="admin-grid-2 admin-mb-1">
 <div>
 <label class="form-label">Card image</label>
-<p style="margin:0 0 0.5rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">Shown on blog list cards. Crop to 400×238.</p>
+<p class="blog-help-text">Shown on blog list cards. Crop to 400×238.</p>
 <button type="button" onclick="document.getElementById('blog-card-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop card</button>
 <input type="file" id="blog-card-upload" accept="image/*" style="display:none;">
 <input type="url" id="blog-featured-image-card" class="form-input" placeholder="Or paste card image URL" style="margin-top:0.5rem;">
@@ -1136,7 +1136,7 @@ Loading cron job logs...
 </div>
 <div>
 <label class="form-label">Cover image</label>
-<p style="margin:0 0 0.5rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">Wide hero at the top of the post. Crop to 885×300.</p>
+<p class="blog-help-text">Wide hero at the top of the post. Crop to 885×300.</p>
 <button type="button" onclick="document.getElementById('blog-cover-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop cover</button>
 <input type="file" id="blog-cover-upload" accept="image/*" style="display:none;">
 <input type="hidden" id="blog-featured-image" value="">
@@ -1194,8 +1194,8 @@ Loading cron job logs...
 <button type="button" onclick="blogAddChip('authors')" class="btn btn-primary" style="padding:0.75rem 1.5rem;">Add</button>
 </div>
 <datalist id="blog-authors-suggestions"></datalist>
-<div id="blog-author-meta-panel" style="display:none;margin-top:1rem;padding:1rem;border:1px solid rgb(var(--color-neutral-200));border-radius:8px;">
-  <p style="margin:0 0 0.75rem;font-size:0.85rem;color:rgb(var(--color-neutral-500));">New author — add their display name here, then set photo and bio in the <strong>Authors</strong> section below.</p>
+<div id="blog-author-meta-panel" class="blog-meta-panel" style="display:none;">
+  <p class="blog-help-text">New author — add their display name here, then set photo and bio in the <strong>Authors</strong> section below.</p>
   <div>
     <label class="form-label">Display name</label>
     <input type="text" id="blog-author-name" class="form-input">
@@ -1237,7 +1237,7 @@ Loading cron job logs...
 
 <div class="card card-compact admin-mb-2" style="margin-top:1.5rem;">
 <h3 id="admin-section-blog-authors" class="admin-m-0 admin-mb-1">Authors <a href="#blog-authors" class="admin-permalink" aria-label="Link to authors">#</a></h3>
-<p style="margin:0 0 1rem;font-size:0.9rem;color:rgb(var(--color-neutral-500));">Profile photos and bios appear on article bylines and each author&apos;s page at <code>/posts/author/slug/</code>.</p>
+<p class="blog-help-text blog-help-text--spaced">Profile photos and bios appear on article bylines and each author&apos;s page at <code>/posts/author/slug/</code>.</p>
 
 <div class="admin-grid-2" style="gap:1.5rem;align-items:start;">
 <div>
@@ -1246,11 +1246,11 @@ Loading cron job logs...
 <button type="button" onclick="blogNewAuthor()" class="btn btn-secondary btn-sm">Add author</button>
 </div>
 <div id="blog-authors-admin-list">
-  <div style="text-align:center;padding:1rem;color:rgb(var(--color-neutral-500));">Loading...</div>
+  <div class="blog-empty-text" style="text-align:center;padding:1rem;">Loading...</div>
 </div>
 </div>
 
-<div id="blog-author-admin-form" class="card card-compact" style="display:none;background:rgb(var(--color-neutral-50));">
+<div id="blog-author-admin-form" class="card card-compact blog-author-form" style="display:none;">
 <input type="hidden" id="blog-author-admin-editing" value="0">
 <div class="admin-mb-1">
 <label class="form-label">Slug *</label>
@@ -1412,6 +1412,15 @@ Loading cron job logs...
 #blog-quill-wrap .ql-editor .blog-inline-figure {
   margin: 1.75rem 0;
   padding: 0;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: box-shadow 0.15s ease;
+}
+#blog-quill-wrap .ql-editor .blog-inline-figure:hover {
+  box-shadow: 0 0 0 2px rgb(var(--color-primary-400));
+}
+#blog-quill-wrap .ql-editor .blog-inline-figure img {
+  pointer-events: none;
 }
 #blog-quill-wrap .ql-editor .blog-inline-figure figcaption {
   margin-top: 0.5rem;
@@ -1426,6 +1435,171 @@ Loading cron job logs...
 .dark #nl-quill-wrap .ql-fill, .dark #blog-quill-wrap .ql-fill { fill: rgb(var(--color-neutral-400)) !important; }
 .dark #nl-quill-wrap .ql-picker, .dark #blog-quill-wrap .ql-picker { color: rgb(var(--color-neutral-300)); }
 .dark #nl-quill-wrap .ql-picker-options, .dark #blog-quill-wrap .ql-picker-options { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-200)); }
+
+/* Blog admin tab — dark mode */
+.blog-health-banner {
+  margin-bottom: 1rem;
+  padding: 0.875rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--color-neutral-300));
+  background: rgb(var(--color-neutral-50));
+  color: rgb(var(--color-neutral-800));
+  font-size: 0.95rem;
+}
+.dark .blog-health-banner {
+  background: rgb(var(--color-neutral-800));
+  border-color: rgb(var(--color-neutral-600));
+  color: rgb(var(--color-neutral-200));
+}
+.blog-health-banner--warning {
+  border-color: rgb(var(--color-primary-300));
+  background: rgb(var(--color-primary-50));
+  color: rgb(var(--color-primary-900));
+}
+.dark .blog-health-banner--warning {
+  background: rgba(var(--color-primary-900), 0.25);
+  border-color: rgba(var(--color-primary-500), 0.45);
+  color: rgb(var(--color-primary-200));
+}
+.blog-help-text {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: rgb(var(--color-neutral-500));
+}
+.blog-help-text--spaced {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.dark .blog-help-text {
+  color: rgb(var(--color-neutral-400));
+}
+.dark .blog-help-text strong {
+  color: rgb(var(--color-neutral-100));
+}
+.blog-meta-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 8px;
+}
+.dark .blog-meta-panel {
+  background: rgb(var(--color-neutral-900));
+  border-color: rgb(var(--color-neutral-600));
+}
+.dark .blog-author-form {
+  background: rgb(var(--color-neutral-800)) !important;
+}
+.dark #blog-tab {
+  color: rgb(var(--color-neutral-100));
+}
+.dark #blog-tab h2,
+.dark #blog-tab h3,
+.dark #blog-tab .admin-section-heading {
+  color: rgb(var(--color-neutral-100));
+}
+.dark #blog-tab .item-card strong {
+  color: rgb(var(--color-neutral-100));
+}
+.dark #blog-tab code {
+  color: rgb(var(--color-primary-300));
+  background: rgba(var(--color-neutral-700), 0.6);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.blog-post-slug-meta {
+  font-size: 0.875rem;
+  color: rgb(var(--color-neutral-600));
+  margin-top: 0.25rem;
+}
+.blog-post-date {
+  font-size: 0.8rem;
+  color: rgb(var(--color-neutral-500));
+  margin-top: 0.25rem;
+}
+.dark .blog-post-slug-meta {
+  color: rgb(var(--color-neutral-400));
+}
+.dark .blog-post-date {
+  color: rgb(var(--color-neutral-500));
+}
+.blog-post-status--published {
+  color: #059669;
+  font-weight: 600;
+}
+.blog-post-status--draft {
+  color: #64748b;
+  font-weight: 600;
+}
+.dark .blog-post-status--published {
+  color: #34d399;
+}
+.dark .blog-post-status--draft {
+  color: rgb(var(--color-neutral-400));
+}
+.blog-author-slug {
+  font-size: 0.8rem;
+  color: rgb(var(--color-neutral-500));
+  font-family: monospace;
+}
+.blog-author-bio-preview {
+  font-size: 0.8rem;
+  color: rgb(var(--color-neutral-500));
+  margin-top: 0.25rem;
+  line-height: 1.4;
+}
+.dark .blog-author-slug,
+.dark .blog-author-bio-preview {
+  color: rgb(var(--color-neutral-400));
+}
+.blog-empty-text {
+  color: rgb(var(--color-neutral-500));
+}
+.dark .blog-empty-text {
+  color: rgb(var(--color-neutral-400));
+}
+.blog-admin-result {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+.blog-admin-result--success {
+  color: #059669;
+}
+.blog-admin-result--error {
+  color: #b91c1c;
+}
+.dark .blog-admin-result--success {
+  color: rgb(var(--color-success-400));
+}
+.dark .blog-admin-result--error {
+  color: rgb(var(--color-danger-400));
+}
+.dark .nl-send-result.nl-success {
+  background: rgba(var(--color-success-900), 0.2);
+  border-color: rgba(var(--color-success-700), 0.35);
+  color: rgb(var(--color-success-300));
+}
+.dark .nl-send-result.nl-error {
+  background: rgba(var(--color-danger-900), 0.2);
+  border-color: rgba(var(--color-danger-700), 0.35);
+  color: rgb(var(--color-danger-300));
+}
+.dark .nl-draft-status.saved {
+  color: rgb(var(--color-success-400));
+}
+/* Quill body — override pasted inline dark text in dark mode */
+.dark #blog-quill-wrap .ql-editor :where(p, li, ol, ul, span, div, blockquote, h1, h2, h3, h4, h5, h6, strong, em, b, i, u) {
+  color: rgb(var(--color-neutral-100)) !important;
+}
+.dark #blog-quill-wrap .ql-editor a {
+  color: rgb(var(--color-primary-400)) !important;
+}
+.dark #blog-quill-wrap .ql-editor .blog-inline-figure figcaption {
+  color: rgb(var(--color-neutral-400)) !important;
+}
+.dark #blog-quill-wrap .ql-editor.ql-blank::before {
+  color: rgb(var(--color-neutral-500));
+}
+
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
@@ -5282,16 +5456,15 @@ async function blogCheckHealth() {
     if (!data.cdnUrl) issues.push('BUNNY_CDN_URL is not set on script 75941.');
     if (issues.length) {
       banner.style.display = 'block';
-      banner.style.borderColor = 'rgb(var(--color-primary-300))';
-      banner.style.background = 'rgb(var(--color-primary-50))';
+      banner.classList.add('blog-health-banner--warning');
       banner.textContent = issues.join(' ');
     } else {
       banner.style.display = 'none';
+      banner.classList.remove('blog-health-banner--warning');
     }
   } catch (err) {
     banner.style.display = 'block';
-    banner.style.borderColor = 'rgb(var(--color-primary-300))';
-    banner.style.background = 'rgb(var(--color-primary-50))';
+    banner.classList.add('blog-health-banner--warning');
     banner.textContent = err.message || 'Blog API health check failed.';
   }
 }
@@ -5309,6 +5482,7 @@ function blogCreateEditor() {
     keyboardBindings: quillMarkdownKeyboardBindings,
     blogBlots: true,
   });
+  blogQuill.root.addEventListener('click', blogHandleInlineImageClick);
 }
 
 function blogSlugify(value) {
@@ -5347,7 +5521,7 @@ function blogRenderChipField(field) {
   const chips = blogChipState[field];
   if (!container) return;
   if (!chips.length) {
-    container.innerHTML = '<span style="color: rgb(var(--color-neutral-400)); font-size: 0.875rem;">None selected</span>';
+    container.innerHTML = '<span class="blog-empty-text" style="font-size:0.875rem;">None selected</span>';
     return;
   }
   container.innerHTML = chips.map((chip) => `
@@ -5498,7 +5672,7 @@ function blogRenderAuthorAdminPreview(url) {
   const el = document.getElementById('blog-author-admin-preview');
   if (!el) return;
   el.innerHTML = url
-    ? `<div style="display:flex;align-items:center;gap:0.75rem;"><img src="${url}" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid rgb(var(--color-neutral-200));"><span style="font-size:0.8rem;color:rgb(var(--color-neutral-500));">Profile preview</span></div>`
+    ? `<div style="display:flex;align-items:center;gap:0.75rem;"><img src="${url}" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid rgb(var(--color-neutral-200));"><span class="blog-help-text" style="margin:0;">Profile preview</span></div>`
     : '';
 }
 
@@ -5508,10 +5682,11 @@ function blogAuthorAdminResult(message, isError) {
   if (!message) {
     el.style.display = 'none';
     el.textContent = '';
+    el.className = '';
     return;
   }
   el.style.display = 'block';
-  el.style.color = isError ? '#b91c1c' : '#059669';
+  el.className = isError ? 'blog-admin-result blog-admin-result--error' : 'blog-admin-result blog-admin-result--success';
   el.textContent = message;
 }
 
@@ -5536,7 +5711,7 @@ function blogRenderAuthorsAdminList() {
   const list = document.getElementById('blog-authors-admin-list');
   if (!list) return;
   if (!blogAuthorsAdmin.length) {
-    list.innerHTML = '<p style="color:rgb(var(--color-neutral-500));font-size:0.9rem;">No authors yet. Add one to set profile photos and bios.</p>';
+    list.innerHTML = '<p class="blog-empty-text" style="font-size:0.9rem;">No authors yet. Add one to set profile photos and bios.</p>';
     return;
   }
   list.innerHTML = blogAuthorsAdmin.map((author) => {
@@ -5544,7 +5719,7 @@ function blogRenderAuthorsAdminList() {
       ? `<img src="${author.image}" alt="" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">`
       : `<div style="width:40px;height:40px;border-radius:50%;background:rgb(var(--color-primary-100));color:rgb(var(--color-primary-700));display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">${(author.name || author.slug).charAt(0).toUpperCase()}</div>`;
     const bioPreview = author.bio
-      ? `<div style="font-size:0.8rem;color:rgb(var(--color-neutral-500));margin-top:0.25rem;line-height:1.4;">${escapeHtmlPromo(author.bio.slice(0, 100))}${author.bio.length > 100 ? '…' : ''}</div>`
+      ? `<div class="blog-author-bio-preview">${escapeHtmlPromo(author.bio.slice(0, 100))}${author.bio.length > 100 ? '…' : ''}</div>`
       : '';
     return `
       <div class="item-card" style="margin-bottom:0.75rem;">
@@ -5553,7 +5728,7 @@ function blogRenderAuthorsAdminList() {
             ${avatar}
             <div style="min-width:0;">
               <strong>${escapeHtmlPromo(author.name)}</strong>
-              <div style="font-size:0.8rem;color:rgb(var(--color-neutral-500));font-family:monospace;">/${author.slug}/</div>
+              <div class="blog-author-slug">/${author.slug}/</div>
               ${bioPreview}
             </div>
           </div>
@@ -5731,13 +5906,13 @@ async function loadBlogPosts() {
     const data = await res.json();
     blogPosts = data.posts || [];
     if (!blogPosts.length) {
-      list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No posts yet</p>';
+      list.innerHTML = '<p class="blog-empty-text">No posts yet</p>';
       return;
     }
     list.innerHTML = blogPosts.map((post) => {
       const statusLabel = post.status === 'published'
-        ? '<span style="color:#059669;font-weight:600;">Published</span>'
-        : '<span style="color:#64748b;">Draft</span>';
+        ? '<span class="blog-post-status blog-post-status--published">Published</span>'
+        : '<span class="blog-post-status blog-post-status--draft">Draft</span>';
       const dateLabel = post.published_at
         ? new Date(post.published_at).toLocaleString('en-GB')
         : new Date(post.updated_at || post.created_at).toLocaleString('en-GB');
@@ -5746,8 +5921,8 @@ async function loadBlogPosts() {
           <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;">
             <div>
               <strong>${post.title || 'Untitled'}</strong>
-              <div style="font-size:0.875rem;color:rgb(var(--color-neutral-600));margin-top:0.25rem;">/${post.slug}/ · ${statusLabel}</div>
-              <div style="font-size:0.8rem;color:rgb(var(--color-neutral-500));margin-top:0.25rem;">${dateLabel}</div>
+              <div class="blog-post-slug-meta">/${post.slug}/ · ${statusLabel}</div>
+              <div class="blog-post-date">${dateLabel}</div>
             </div>
             <button type="button" class="btn-edit btn-sm" onclick="blogEditPost(${post.id})">Edit</button>
           </div>
@@ -6038,10 +6213,52 @@ function blogInsertInlineImage(url, alt) {
   blogQuill.setSelection(index + 1);
 }
 
-function blogPromptInlineImageAlt() {
-  const alt = prompt('Alt text / caption (shown below the image):');
+function blogPromptInlineImageAlt(currentAlt = '') {
+  const alt = prompt('Alt text / caption (shown below the image):', currentAlt);
   if (alt === null) return null;
   return alt.trim();
+}
+
+function blogApplyInlineImageAlt(targetNode, alt) {
+  const figure = targetNode?.classList?.contains('blog-inline-figure')
+    ? targetNode
+    : targetNode?.closest?.('.blog-inline-figure');
+  const img = figure
+    ? figure.querySelector('img')
+    : (targetNode?.tagName === 'IMG' ? targetNode : null);
+  if (!img) return;
+
+  img.setAttribute('alt', alt);
+  if (figure) {
+    let caption = figure.querySelector('figcaption');
+    if (alt) {
+      if (!caption) {
+        caption = document.createElement('figcaption');
+        figure.appendChild(caption);
+      }
+      caption.textContent = alt;
+    } else if (caption) {
+      caption.remove();
+    }
+  }
+}
+
+function blogHandleInlineImageClick(event) {
+  if (!blogQuill) return;
+  const figure = event.target.closest('.blog-inline-figure');
+  const img = figure
+    ? figure.querySelector('img')
+    : (event.target.tagName === 'IMG' ? event.target : null);
+  if (!img) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const currentAlt = img.getAttribute('alt') || '';
+  const newAlt = blogPromptInlineImageAlt(currentAlt);
+  if (newAlt === null || newAlt === currentAlt) return;
+
+  blogApplyInlineImageAlt(figure || img, newAlt);
 }
 
 function blogInsertImageUrl() {
