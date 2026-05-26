@@ -4902,6 +4902,22 @@ function enhanceBlogBodyImages(html) {
   });
   return work.replace(/\x00BLOGFIG(\d+)\x00/g, (_m, index) => figures[Number(index)] || "");
 }
+function stripConflictingInlineStyles(html) {
+  if (!html || !html.includes("style="))
+    return html;
+  return html.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, (_match, quote, styles) => {
+    const cleaned = styles.split(";").map((chunk) => chunk.trim()).filter((chunk) => {
+      if (!chunk)
+        return false;
+      const prop = chunk.split(":")[0]?.trim().toLowerCase() || "";
+      return prop !== "color" && prop !== "background" && prop !== "background-color";
+    }).join("; ");
+    return cleaned ? ` style=${quote}${cleaned}${quote}` : "";
+  });
+}
+function prepareBlogBodyHtml(html) {
+  return stripConflictingInlineStyles(enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(html)));
+}
 function buildTaxonomyIndex(posts, authors) {
   const tagMap = /* @__PURE__ */ new Map();
   const authorMap = /* @__PURE__ */ new Map();
@@ -5073,6 +5089,22 @@ html.dark .blog-author-profile-avatar {
 html.dark .blog-article-body img,
 html.dark .blog-inline-figure img {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+html.dark .blog-article-body :where(p, li, span, div, blockquote, td, th, em, strong, b, i, u, ol, ul) {
+  color: rgb(var(--color-neutral-700)) !important;
+}
+html.dark .blog-article-body :where(h1, h2, h3, h4, h5, h6) {
+  color: rgb(var(--color-neutral-900)) !important;
+}
+html.dark .blog-article-body a {
+  color: rgb(var(--color-primary-600)) !important;
+}
+html.dark .blog-article-body .blog-inline-figure figcaption {
+  color: rgb(var(--color-neutral-500)) !important;
+}
+html.dark .blog-article-body blockquote {
+  background: rgb(var(--color-neutral-100));
+  border-left-color: rgb(var(--color-neutral-300));
 }
 * { box-sizing: border-box; }
 body {
@@ -5999,7 +6031,7 @@ function renderBlogPostPage(post, authors, siteUrl, allPosts = []) {
   const ogImage = resolvePostOgImage(post, siteUrl);
   const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
-  const sanitizedBody = enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(post.html || ""));
+  const sanitizedBody = prepareBlogBodyHtml(post.html || "");
   const taxonomy = buildTaxonomyIndex(allPosts.length ? allPosts : [post], authors);
   const articleHtml = `
     <article class="blog-article">
@@ -6148,7 +6180,19 @@ function mapBlogPostRow(row) {
 function cleanBlogBody(html) {
   if (!html)
     return "";
-  return String(html).replace(/ data-card="[^"]*"/g, "").replace(/ contenteditable="[^"]*"/g, "").replace(/ class="ql-[^"]*"/g, "").replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, "");
+  let out = String(html).replace(/ data-card="[^"]*"/g, "").replace(/ contenteditable="[^"]*"/g, "").replace(/ class="ql-[^"]*"/g, "").replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, "");
+  if (out.includes("style=")) {
+    out = out.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, (_match, quote, styles) => {
+      const cleaned = styles.split(";").map((chunk) => chunk.trim()).filter((chunk) => {
+        if (!chunk)
+          return false;
+        const prop = chunk.split(":")[0]?.trim().toLowerCase() || "";
+        return prop !== "color" && prop !== "background" && prop !== "background-color";
+      }).join("; ");
+      return cleaned ? ` style=${quote}${cleaned}${quote}` : "";
+    });
+  }
+  return out;
 }
 var migrated = false;
 function dbConfigError() {

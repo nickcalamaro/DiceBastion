@@ -254,6 +254,27 @@ function enhanceBlogBodyImages(html: string): string {
   return work.replace(/\x00BLOGFIG(\d+)\x00/g, (_m, index: string) => figures[Number(index)] || "");
 }
 
+/** Quill/pasted HTML often sets inline color/background that breaks dark mode. */
+function stripConflictingInlineStyles(html: string): string {
+  if (!html || !html.includes("style=")) return html;
+  return html.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, (_match, quote: string, styles: string) => {
+    const cleaned = styles
+      .split(";")
+      .map((chunk) => chunk.trim())
+      .filter((chunk) => {
+        if (!chunk) return false;
+        const prop = chunk.split(":")[0]?.trim().toLowerCase() || "";
+        return prop !== "color" && prop !== "background" && prop !== "background-color";
+      })
+      .join("; ");
+    return cleaned ? ` style=${quote}${cleaned}${quote}` : "";
+  });
+}
+
+function prepareBlogBodyHtml(html: string): string {
+  return stripConflictingInlineStyles(enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(html)));
+}
+
 export function buildTaxonomyIndex(
   posts: BlogPostRow[],
   authors: Record<string, BlogAuthorProfile>
@@ -453,6 +474,22 @@ html.dark .blog-author-profile-avatar {
 html.dark .blog-article-body img,
 html.dark .blog-inline-figure img {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+html.dark .blog-article-body :where(p, li, span, div, blockquote, td, th, em, strong, b, i, u, ol, ul) {
+  color: rgb(var(--color-neutral-700)) !important;
+}
+html.dark .blog-article-body :where(h1, h2, h3, h4, h5, h6) {
+  color: rgb(var(--color-neutral-900)) !important;
+}
+html.dark .blog-article-body a {
+  color: rgb(var(--color-primary-600)) !important;
+}
+html.dark .blog-article-body .blog-inline-figure figcaption {
+  color: rgb(var(--color-neutral-500)) !important;
+}
+html.dark .blog-article-body blockquote {
+  background: rgb(var(--color-neutral-100));
+  border-left-color: rgb(var(--color-neutral-300));
 }
 * { box-sizing: border-box; }
 body {
@@ -1487,7 +1524,7 @@ export function renderBlogPostPage(
   const ogImage = resolvePostOgImage(post, siteUrl);
   const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
-  const sanitizedBody = enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(post.html || ""));
+  const sanitizedBody = prepareBlogBodyHtml(post.html || "");
   const taxonomy = buildTaxonomyIndex(allPosts.length ? allPosts : [post], authors);
 
   const articleHtml = `

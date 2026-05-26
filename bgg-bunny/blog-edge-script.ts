@@ -102,11 +102,26 @@ function mapBlogPostRow(row: Record<string, unknown>) {
 
 function cleanBlogBody(html: unknown): string {
   if (!html) return "";
-  return String(html)
+  let out = String(html)
     .replace(/ data-card="[^"]*"/g, "")
     .replace(/ contenteditable="[^"]*"/g, "")
     .replace(/ class="ql-[^"]*"/g, "")
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, "");
+  if (out.includes("style=")) {
+    out = out.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, (_match, quote: string, styles: string) => {
+      const cleaned = styles
+        .split(";")
+        .map((chunk) => chunk.trim())
+        .filter((chunk) => {
+          if (!chunk) return false;
+          const prop = chunk.split(":")[0]?.trim().toLowerCase() || "";
+          return prop !== "color" && prop !== "background" && prop !== "background-color";
+        })
+        .join("; ");
+      return cleaned ? ` style=${quote}${cleaned}${quote}` : "";
+    });
+  }
+  return out;
 }
 
 let migrated = false;
