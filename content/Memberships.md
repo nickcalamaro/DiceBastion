@@ -9,7 +9,7 @@ showPagination: false
 
 <!-- Shared Utilities -->
 <script src="/js/utils.js?v=3"></script>
-<script src="/js/modal.js?v=3"></script>
+<script src="/js/modal.js?v=4"></script>
 
 <!-- Component Styles -->
 <link rel="stylesheet" href="/css/forms.css">
@@ -285,7 +285,7 @@ For those able to give a bit more, or for those of you who can't afford a member
       size: 'md',
       closeOnBackdrop: true,
       content: `
-        <div style="margin-bottom: 1.25rem; line-height: 1.7; color: rgb(var(--color-neutral-700));">
+        <div class="modal-prose">
           <p>Dice Bastion and the Gibraltar Warhammer Club are funded primarily by our members, and so we kindly request that all those using the club on a regular basis become paying members. Despite that, we appreciate that not everyone has the same financial means.</p><br>
           <p>Because of that, we're letting those who can afford to give a bit more the option to purchase this 'sponsored membership' which will allow others to use the club at no extra cost.</p><br>
           <p>If you have any other ideas how we can continue to improve our club and make our community as inclusive as possible, please let us know at <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a></p><br>
@@ -338,8 +338,8 @@ For those able to give a bit more, or for those of you who can't afford a member
     const loggedForm = `
       <div id="sp-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
         <div class="modal-info-box">
-          <p style="margin: 0 0 4px 0; color: #666;">Purchasing as:</p>
-          <p style="margin: 0; font-weight: 600;">${isLoggedIn ? user.email : ''}</p>
+          <p class="modal-info-label">Purchasing as:</p>
+          <p class="modal-info-value">${isLoggedIn ? user.email : ''}</p>
         </div>
         <div class="modal-section">
           <div class="modal-help-text">Security check</div>
@@ -347,8 +347,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         </div>
         <button id="sp-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
         <div class="modal-section" style="text-align: center;">
-          <button id="sp-use-different" type="button" class="modal-btn-secondary"
-            style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+          <button id="sp-use-different" type="button" class="modal-btn-secondary modal-text-link-btn">
             Use a different email address
           </button>
         </div>
@@ -506,7 +505,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         size: 'sm',
         closeOnBackdrop: true,
         content: `
-          <div style="line-height: 1.7; color: rgb(var(--color-neutral-700));">
+          <div class="modal-prose" style="margin-bottom: 0;">
             <p>Unfortunately we don't have any sponsored memberships available at the moment.</p>
             <p>If you'd like access to club facilities please contact us at
                <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a></p>
@@ -525,7 +524,7 @@ For those able to give a bit more, or for those of you who can't afford a member
       size: 'md',
       closeOnBackdrop: true,
       content: `
-        <div style="margin-bottom: 1.25rem; line-height: 1.7; color: rgb(var(--color-neutral-700));">
+        <div class="modal-prose">
           <p>Dice Bastion and the Gibraltar Warhammer Club are funded primarily by our members, and so we kindly request that all those using the club on a regular basis become paying members. Despite that, we appreciate that not everyone has the same financial means and these sponsored memberships have been provided by other members to ensure that everyone has a welcoming and inclusive space to play their favourite games.</p><br>
           <p>Your information will solely be shared with the GWC Committee for administrative purposes and this sponsored membership entitles you to all the standard benefits.</p><br>
           <p>If you ever need any support, please feel free to reach out to us confidentially at <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a>.</p><br>
@@ -578,8 +577,8 @@ For those able to give a bit more, or for those of you who can't afford a member
     const loggedForm = `
       <div id="cl-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
         <div class="modal-info-box">
-          <p style="margin: 0 0 4px 0; color: #666;">Claiming as:</p>
-          <p style="margin: 0; font-weight: 600;">${isLoggedIn ? user.email : ''}</p>
+          <p class="modal-info-label">Claiming as:</p>
+          <p class="modal-info-value">${isLoggedIn ? user.email : ''}</p>
         </div>
         <div class="modal-section">
           <div class="modal-help-text">Security check</div>
@@ -587,8 +586,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         </div>
         <button id="cl-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Claim Membership</button>
         <div class="modal-section" style="text-align: center;">
-          <button id="cl-use-different" type="button" class="modal-btn-secondary"
-            style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+          <button id="cl-use-different" type="button" class="modal-btn-secondary modal-text-link-btn">
             Use a different email address
           </button>
         </div>
@@ -810,8 +808,8 @@ For those able to give a bit more, or for those of you who can't afford a member
           </label>
         </div>
 
-        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"> <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+        <div class="modal-info-box modal-info-box-sm">
+          <p><strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -826,12 +824,12 @@ For those able to give a bit more, or for those of you who can't afford a member
     const loggedInForm = `
       <div id="sumup-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
         <div class="modal-info-box">
-          <p style="margin: 0 0 8px 0; color: #666;">Purchasing membership as:</p>
-          <p style="margin: 0; font-weight: 600; font-size: 1.05em;" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
+          <p class="modal-info-label modal-info-label-lg">Purchasing membership as:</p>
+          <p class="modal-info-value modal-info-value-lg" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
         </div>
         
-        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"> <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+        <div class="modal-info-box modal-info-box-sm">
+          <p><strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -842,7 +840,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         <button id="modal-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
         
         <div class="modal-section" style="text-align: center;">
-          <button id="modal-use-different" type="button" class="modal-btn-secondary" style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+          <button id="modal-use-different" type="button" class="modal-btn-secondary modal-text-link-btn">
             Use a different email address
           </button>
         </div>

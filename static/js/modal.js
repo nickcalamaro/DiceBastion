@@ -212,6 +212,114 @@
     .dark .modal-help-text {
       color: rgb(var(--color-neutral-400));
     }
+
+    .modal-prose {
+      margin-bottom: 1.25rem;
+      line-height: 1.7;
+      color: rgb(var(--color-neutral-700));
+    }
+
+    .modal-prose p {
+      margin: 0 0 1em 0;
+    }
+
+    .modal-prose p:last-child {
+      margin-bottom: 0;
+    }
+
+    .dark .modal-prose {
+      color: rgb(var(--color-neutral-200));
+    }
+
+    .dark .modal-prose strong {
+      color: rgb(var(--color-neutral-100));
+    }
+
+    .modal-info-label {
+      margin: 0 0 4px 0;
+      color: rgb(var(--color-neutral-600));
+    }
+
+    .modal-info-label-lg {
+      margin-bottom: 8px;
+    }
+
+    .dark .modal-info-label {
+      color: rgb(var(--color-neutral-400));
+    }
+
+    .modal-info-value {
+      margin: 0;
+      font-weight: 600;
+      color: rgb(var(--color-neutral-900));
+    }
+
+    .modal-info-value-lg {
+      font-size: 1.05em;
+    }
+
+    .dark .modal-info-value {
+      color: rgb(var(--color-neutral-100));
+    }
+
+    .modal-info-box-sm {
+      font-size: 0.9em;
+    }
+
+    .modal-info-box-sm p {
+      margin: 0;
+    }
+
+    .dark .modal-info-box p strong,
+    .dark .modal-info-box-sm p strong {
+      color: rgb(var(--color-neutral-100));
+    }
+
+    .modal-text-link-btn {
+      background: none !important;
+      border: none !important;
+      color: rgb(var(--color-primary-600)) !important;
+      text-decoration: underline;
+      cursor: pointer;
+      font-size: 0.9em;
+      width: auto;
+      padding: 0;
+      font-weight: 500;
+    }
+
+    .modal-text-link-btn:hover {
+      color: rgb(var(--color-primary-700)) !important;
+      background: none !important;
+      transform: none;
+    }
+
+    .dark .modal-text-link-btn {
+      color: rgb(var(--color-primary-400)) !important;
+    }
+
+    .dark .modal-text-link-btn:hover {
+      color: rgb(var(--color-primary-300)) !important;
+    }
+
+    .modal-muted-text {
+      color: rgb(var(--color-neutral-600));
+      font-size: 0.9rem;
+    }
+
+    .dark .modal-muted-text {
+      color: rgb(var(--color-neutral-400));
+    }
+
+    .modal-status-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: rgb(var(--color-neutral-900));
+    }
+
+    .dark .modal-status-title {
+      color: rgb(var(--color-neutral-100));
+    }
     
     .modal-widget-container {
       display: none;
@@ -772,6 +880,10 @@ if (!document.getElementById('db-modal-animations')) {
 
     .dark .db-modal-header {
       color: rgb(var(--color-neutral-100)) !important;
+    }
+
+    .dark .db-modal-body {
+      color: rgb(var(--color-neutral-200));
     }
   `;
   document.head.appendChild(style);
