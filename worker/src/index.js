@@ -226,6 +226,63 @@ function notifyGoogleIndexingAsync(ctx, env, url, type = 'URL_UPDATED') {
   )
 }
 
+/** Canonical sitemap URLs (also listed in layouts/robots.txt and shop/static/robots.txt). */
+const SEO_SITEMAP_URLS = {
+  main: 'https://dicebastion.com/sitemap.xml',
+  events: 'https://dicebastion.com/events/sitemap.xml',
+  blog: 'https://dicebastion.com/posts/sitemap.xml',
+  shopIndex: 'https://shop.dicebastion.com/sitemap.xml',
+  shopProducts: 'https://shop.dicebastion.com/products/sitemap.xml'
+}
+
+/**
+ * Ask Google to recrawl a sitemap (same mechanism as daily seo_freshness cron).
+ * Blog does this implicitly by uploading a fresh sitemap.xml to CDN on every publish.
+ */
+async function pingGoogleSitemap(sitemapUrl) {
+  try {
+    const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`
+    const res = await fetch(pingUrl)
+    console.log(`[SEO] Pinged Google sitemap: ${sitemapUrl} → ${res.status}`)
+    return { ok: res.ok, status: res.status }
+  } catch (err) {
+    console.error(`[SEO] Sitemap ping failed for ${sitemapUrl}:`, err)
+    return { ok: false, status: 0, error: err.message || String(err) }
+  }
+}
+
+/**
+ * Fire-and-forget sitemap ping + optional Indexing API (mirrors blog publish side-effects).
+ */
+function notifyContentSeoAsync(ctx, env, { sitemapUrls = [], indexingUrl = null, indexingType = 'URL_UPDATED' } = {}) {
+  if (!ctx?.waitUntil) return
+  ctx.waitUntil((async () => {
+    for (const sitemapUrl of sitemapUrls) {
+      if (sitemapUrl) await pingGoogleSitemap(sitemapUrl)
+    }
+    if (indexingUrl && env.GOOGLE_SA_KEY) {
+      await notifyGoogleIndexing(env, indexingUrl, indexingType)
+    }
+  })().catch(err => console.error('[SEO] Content SEO notify failed:', err)))
+}
+
+/** Map a public page URL to the sitemap(s) that should be pinged after it changes. */
+function inferSitemapUrlsForPage(pageUrl) {
+  try {
+    const u = new URL(pageUrl)
+    if (u.hostname.includes('shop.dicebastion.com')) {
+      return [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts]
+    }
+    if (u.pathname.startsWith('/posts/')) {
+      return [SEO_SITEMAP_URLS.blog, SEO_SITEMAP_URLS.main]
+    }
+    if (u.pathname.startsWith('/events/')) {
+      return [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main]
+    }
+  } catch { /* ignore invalid URLs */ }
+  return []
+}
+
 // Rate limiting storage (in-memory for this worker instance)
 const checkoutRateLimits = new Map()
 const membershipCheckoutRateLimits = new Map()
@@ -5646,48 +5703,69 @@ app.get('/events/confirm', async c => {
 })
 
 // Dynamic sitemap for event URLs (so Google can discover them)
+function formatEventSitemapLastMod(event, today, thirtyDaysAgo) {
+  let lastmod
+  if (event.updated_at) {
+    lastmod = new Date(event.updated_at).toISOString().split('T')[0]
+  } else if (event.created_at) {
+    lastmod = new Date(event.created_at).toISOString().split('T')[0]
+  } else if (event.event_datetime) {
+    lastmod = new Date(event.event_datetime).toISOString().split('T')[0]
+  } else {
+    lastmod = today
+  }
+  const lastmodDate = new Date(lastmod)
+  if (event.is_recurring || lastmodDate < thirtyDaysAgo) {
+    lastmod = today
+  }
+  return lastmod
+}
+
+function buildEventsSitemapXml(events) {
+  const site = 'https://dicebastion.com'
+  const today = new Date().toISOString().split('T')[0]
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const rows = events || []
+
+  let indexLastmod = today
+  for (const e of rows) {
+    const lm = formatEventSitemapLastMod(e, today, thirtyDaysAgo)
+    if (lm > indexLastmod) indexLastmod = lm
+  }
+
+  const urls = [
+    `  <url>\n    <loc>${site}/events/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>`
+  ]
+
+  for (const e of rows) {
+    const lastmod = formatEventSitemapLastMod(e, today, thirtyDaysAgo)
+    urls.push(
+      `  <url>\n    <loc>${site}/events/${encodeURIComponent(e.slug)}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+    )
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>`
+}
+
 app.get('/events/sitemap.xml', async c => {
   try {
     const { results } = await c.env.DB.prepare(`
       SELECT slug, event_datetime, updated_at, created_at, is_recurring
       FROM events
       WHERE is_active = 1
+        AND slug IS NOT NULL
+        AND TRIM(slug) != ''
         AND (event_datetime >= datetime('now') OR is_recurring = 1)
       ORDER BY event_datetime ASC
     `).all()
 
-    const today = new Date().toISOString().split('T')[0]
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-
-    const urls = (results || []).map(e => {
-      const loc = `https://dicebastion.com/events/${e.slug}`
-      // Pick the best lastmod: updated_at > created_at > event_datetime > today
-      let lastmod
-      if (e.updated_at) {
-        lastmod = new Date(e.updated_at).toISOString().split('T')[0]
-      } else if (e.created_at) {
-        lastmod = new Date(e.created_at).toISOString().split('T')[0]
-      } else if (e.event_datetime) {
-        lastmod = new Date(e.event_datetime).toISOString().split('T')[0]
-      } else {
-        lastmod = today
-      }
-      // For recurring events or any event with a stale lastmod (>30 days old),
-      // use today so Google doesn't deprioritize crawling
-      const lastmodDate = new Date(lastmod)
-      if (e.is_recurring || lastmodDate < thirtyDaysAgo) {
-        lastmod = today
-      }
-      return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
-    }).join('\n')
-
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
+    const xml = buildEventsSitemapXml(results || [])
 
     return new Response(xml, {
       status: 200,
       headers: {
         'Content-Type': 'application/xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
       }
     })
   } catch (err) {
@@ -6232,10 +6310,10 @@ app.post('/admin/events', requireAdmin, async c => {
       end_time || null
     ).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    if (c.env.GOOGLE_SA_KEY && slug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://dicebastion.com/events/${encodeURIComponent(slug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main],
+      indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
+    })
 
     return c.json({ success: true, id: result.meta.last_row_id })
   } catch (e) {
@@ -6263,7 +6341,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     await c.env.DB.prepare(`
       UPDATE events 
-      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, image_url_card = ?, image_url_hero = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?, end_time = ?
+      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, image_url_card = ?, image_url_hero = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?, end_time = ?, updated_at = ?
       WHERE event_id = ?
     `).bind(
       title,
@@ -6288,13 +6366,14 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       recurrence_pattern || null,
       recurrence_end_date || null,
       end_time || null,
+      toIso(new Date()),
       id
     ).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    if (c.env.GOOGLE_SA_KEY && slug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://dicebastion.com/events/${encodeURIComponent(slug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main],
+      indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
+    })
 
     return c.json({ success: true })
   } catch (e) {
@@ -6344,6 +6423,12 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     }
     
     await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
+
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main],
+      indexingUrl: event.slug ? `https://dicebastion.com/events/${encodeURIComponent(event.slug)}` : null,
+      indexingType: 'URL_DELETED'
+    })
 
     return c.json({ success: true })
   } catch (e) {
@@ -7286,7 +7371,7 @@ app.get('/products/sitemap.xml', async c => {
     return new Response(xml, {
       headers: {
         'Content-Type': 'application/xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
       }
     })
   } catch (err) {
@@ -7469,10 +7554,10 @@ app.post('/admin/products', requireAdmin, async (c) => {
       now
     ).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    if (c.env.GOOGLE_SA_KEY && slug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts],
+      indexingUrl: slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}` : null
+    })
     
     return c.json({ success: true, product_id: result.meta.last_row_id })
   } catch (e) {
@@ -7537,12 +7622,11 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
       UPDATE products SET ${updates.join(', ')} WHERE id = ?
     `).bind(...binds).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    // Resolve the slug: use the updated slug if provided, otherwise fetch from DB
     const productSlug = slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
-    if (c.env.GOOGLE_SA_KEY && productSlug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts],
+      indexingUrl: productSlug ? `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}` : null
+    })
     
     return c.json({ success: true })
   } catch (e) {
@@ -7557,7 +7641,7 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
     const id = c.req.param('id')
     
     // Get product to find image
-    const product = await c.env.DB.prepare('SELECT image_url FROM products WHERE id = ?')
+    const product = await c.env.DB.prepare('SELECT image_url, slug FROM products WHERE id = ?')
       .bind(id).first()
     
     // Delete image from R2
@@ -7575,6 +7659,12 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
     await c.env.DB.prepare('UPDATE products SET is_active = 0, updated_at = ? WHERE id = ?')
       .bind(toIso(new Date()), id)
       .run()
+
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts],
+      indexingUrl: product?.slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(product.slug)}` : null,
+      indexingType: 'URL_DELETED'
+    })
     
     return c.json({ success: true })
   } catch (e) {
@@ -7878,13 +7968,21 @@ app.post('/admin/indexing/notify', requireAdmin, async (c) => {
   try {
     const { url, type } = await c.req.json()
     if (!url) return c.json({ error: 'url_required' }, 400)
+
+    const sitemapUrls = inferSitemapUrlsForPage(url)
+    const sitemapPings = await Promise.all(sitemapUrls.map(sm => pingGoogleSitemap(sm)))
+
     if (!c.env.GOOGLE_SA_KEY) {
-      return c.json({ ok: false, error: 'google_sa_key_not_configured' }, 200)
+      return c.json({
+        ok: sitemapPings.some(p => p.ok),
+        error: 'google_sa_key_not_configured',
+        sitemap_pings: sitemapPings
+      }, 200)
     }
 
     const result = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
     // Always 200 so the browser exposes JSON; client checks result.ok (502 hid details in some setups).
-    return c.json(result, 200)
+    return c.json({ ...result, sitemap_pings: sitemapPings }, 200)
   } catch (e) {
     console.error('Admin indexing notify error:', e)
     return c.json(
@@ -7900,8 +7998,15 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
     const { urls, type } = await c.req.json()
     if (!Array.isArray(urls) || urls.length === 0) return c.json({ error: 'urls_array_required' }, 400)
     if (urls.length > 100) return c.json({ error: 'max_100_urls_per_batch' }, 400)
+    const sitemapUrls = [...new Set(urls.flatMap(u => inferSitemapUrlsForPage(u)))]
+    const sitemapPings = await Promise.all(sitemapUrls.map(sm => pingGoogleSitemap(sm)))
+
     if (!c.env.GOOGLE_SA_KEY) {
-      return c.json({ ok: false, error: 'google_sa_key_not_configured' }, 200)
+      return c.json({
+        ok: sitemapPings.some(p => p.ok),
+        error: 'google_sa_key_not_configured',
+        sitemap_pings: sitemapPings
+      }, 200)
     }
 
     const results = await Promise.allSettled(
@@ -7917,7 +8022,8 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
       total: urls.length,
       succeeded: summary.filter(s => s.ok).length,
       failed: summary.filter(s => !s.ok).length,
-      results: summary
+      results: summary,
+      sitemap_pings: sitemapPings
     })
   } catch (e) {
     console.error('Admin batch indexing error:', e)
@@ -8588,21 +8694,15 @@ async function processSeoFreshness(env) {
   let prodFailed = 0
 
   try {
-    // 1. Ping Google sitemap endpoint (lightweight GET)
+    // 1. Ping Google sitemap endpoint (lightweight GET) — same URLs as layouts/robots.txt
     const sitemaps = [
-      'https://dicebastion.com/sitemap.xml',
-      'https://dicebastion.com/events/sitemap.xml',
-      // Shop index lists pages-sitemap.xml + products/sitemap.xml (single ping)
-      'https://shop.dicebastion.com/sitemap.xml'
+      SEO_SITEMAP_URLS.main,
+      SEO_SITEMAP_URLS.events,
+      SEO_SITEMAP_URLS.blog,
+      SEO_SITEMAP_URLS.shopIndex
     ]
     for (const sm of sitemaps) {
-      try {
-        const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sm)}`
-        const res = await fetch(pingUrl)
-        console.log(`[SEO] Pinged Google sitemap: ${sm} → ${res.status}`)
-      } catch (e) {
-        console.error(`[SEO] Sitemap ping failed for ${sm}:`, e)
-      }
+      await pingGoogleSitemap(sm)
     }
 
     // 2. Google Indexing API (optional — requires GOOGLE_SA_KEY)

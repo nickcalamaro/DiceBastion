@@ -461,13 +461,13 @@ async function createPost(request: Request): Promise<Response> {
       sql: `UPDATE blog_posts SET published_at = COALESCE(published_at, ?) WHERE id = ?`,
       args: [nowIso(), id],
     });
-    await notifyGoogleIndexing(request, slug);
     try {
       await syncPublishedBlogToCdn();
     } catch (err) {
       console.error("[Blog] CDN sync failed:", err);
       return jsonResponse({ error: String(err instanceof Error ? err.message : err) }, 502);
     }
+    await notifyGoogleIndexing(request, slug);
   }
 
   return jsonResponse({ id, success: true }, 201);
@@ -581,7 +581,6 @@ async function updatePost(id: string, request: Request): Promise<Response> {
   const slugChanged = body.slug !== undefined && oldSlug !== slug;
 
   if (nowPublished && (publishStateChanged || contentChangedWhilePublished)) {
-    await notifyGoogleIndexing(request, slug);
     const deleteSlugs = slugChanged ? [oldSlug] : [];
     try {
       await syncPublishedBlogToCdn({ deleteSlugs });
@@ -589,6 +588,7 @@ async function updatePost(id: string, request: Request): Promise<Response> {
       console.error("[Blog] CDN sync failed:", err);
       return jsonResponse({ error: String(err instanceof Error ? err.message : err) }, 502);
     }
+    await notifyGoogleIndexing(request, slug);
   } else if (wasPublished && !nowPublished) {
     try {
       await syncPublishedBlogToCdn({ deleteSlugs: [oldSlug] });
