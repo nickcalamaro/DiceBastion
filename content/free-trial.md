@@ -8,8 +8,8 @@ showPagination: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js"></script>
-<script src="/js/modal.js"></script>
+<script src="/js/utils.js?v=3"></script>
+<script src="/js/modal.js?v=3"></script>
 
 <!-- Component Styles -->
 <link rel="stylesheet" href="/css/forms.css">
@@ -115,6 +115,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
 <script>
 (function() {
   const API_BASE = utils.getApiBase();
+  const PAYMENT_SUPPORT_NOTE = '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>';
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   const IS_LOCALHOST = window.location.hostname === 'localhost' ||
                        window.location.hostname === '127.0.0.1' ||
@@ -222,7 +223,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
         <div id="sumup-error" class="modal-error"></div>
-        ${window.utils.paymentSupportNoteHtml()}
+        ${PAYMENT_SUPPORT_NOTE}
       `,
       onClose: closeModal
     });

@@ -5,7 +5,7 @@ showDate: false
 showPagination: false
 ---
 
-<script src="/js/utils.js?v=2"></script>
+<script src="/js/utils.js?v=3"></script>
 <script src="/js/modal.js"></script>
 
 <section class="page-container">
@@ -98,7 +98,7 @@ showPagination: false
       content:
         '<div id="pay-widget" class="modal-widget-container"></div>' +
         '<div id="pay-error" class="modal-error"></div>' +
-        window.utils.paymentSupportNoteHtml(),
+        (window.utils.paymentSupportNoteHtml ? window.utils.paymentSupportNoteHtml() : ''),
       onClose: function () { if (modal) { var w = modal.querySelector('#pay-widget'); if (w) w.innerHTML = ''; modal = null; } }
     });
     modal.open();

@@ -945,3 +945,10 @@ window.Modal.form = function(options = {}) {
 };
 
 console.log('[modal.js] Modal class and helpers fully loaded. window.Modal:', typeof window.Modal);
+
+// Ensure payment support note helper exists (Memberships loads utils.js without cache-bust)
+window.utils = window.utils || {};
+if (typeof window.utils.paymentSupportNoteHtml !== 'function') {
+  window.utils.paymentSupportNoteHtml = () =>
+    '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>';
+}

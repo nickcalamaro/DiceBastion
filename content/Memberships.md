@@ -8,8 +8,8 @@ showPagination: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js"></script>
-<script src="/js/modal.js"></script>
+<script src="/js/utils.js?v=3"></script>
+<script src="/js/modal.js?v=3"></script>
 
 <!-- Component Styles -->
 <link rel="stylesheet" href="/css/forms.css">
@@ -176,6 +176,7 @@ For those able to give a bit more, or for those of you who can't afford a member
 <script>
 (function() {
   const API_BASE = utils.getApiBase();
+  const PAYMENT_SUPPORT_NOTE = '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>';
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   const IS_LOCALHOST = window.location.hostname === 'localhost' ||
                        window.location.hostname === '127.0.0.1' ||
@@ -363,7 +364,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedForm}
         <div id="sp-sumup-card" class="modal-widget-container"></div>
         <div id="sp-error" class="modal-error"></div>
-        ${window.utils.paymentSupportNoteHtml()}
+        ${PAYMENT_SUPPORT_NOTE}
       `,
       onClose: () => {
         if (sponsorModal === checkoutModal) sponsorModal = null;
@@ -703,6 +704,7 @@ For those able to give a bit more, or for those of you who can't afford a member
 <script>
 (function(){
   const API_BASE = utils.getApiBase();
+  const PAYMENT_SUPPORT_NOTE = '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>';
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   
   // Detect if we're running on localhost
@@ -856,7 +858,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
         <div id="sumup-error" class="modal-error"></div>
-        ${window.utils.paymentSupportNoteHtml()}
+        ${PAYMENT_SUPPORT_NOTE}
       `,
       onClose: closeModal
     });
