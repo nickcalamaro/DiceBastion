@@ -4402,6 +4402,85 @@ async function migrateSponsoredMemberships(db) {
 }
 
 /**
+ * Confirm a sponsorship payment and add it to the pool.
+ * Shared by GET /membership/sponsor/confirm and the SumUp webhook.
+ * @returns {{ ok: true, status: string, message: string, alreadyConfirmed?: boolean }}
+ */
+async function confirmSponsorshipPayment(db, env, orderRef, paymentOverride = null) {
+  await migrateSponsoredMemberships(db)
+
+  const transaction = await db.prepare(
+    `SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship'`
+  ).bind(orderRef).first()
+  if (!transaction) {
+    return { ok: false, error: 'order_not_found', status: 404 }
+  }
+
+  const sm = await db.prepare(
+    `SELECT * FROM sponsored_memberships WHERE id = ?`
+  ).bind(transaction.reference_id).first()
+  if (!sm) {
+    return { ok: false, error: 'sponsorship_not_found', status: 404 }
+  }
+
+  if (sm.status === 'available') {
+    return { ok: true, status: 'active', message: 'Sponsorship already active', alreadyConfirmed: true }
+  }
+  if (sm.status !== 'pending') {
+    return { ok: false, error: 'invalid_sponsorship_status', status: 409, sponsorshipStatus: sm.status }
+  }
+
+  // Backfill user_id on legacy rows that were created before identity linking.
+  if (!transaction.user_id && transaction.email) {
+    const ident = await getOrCreateIdentity(db, transaction.email, transaction.name || null)
+    if (ident?.id) {
+      await db.prepare('UPDATE transactions SET user_id = ?, updated_at = ? WHERE id = ?')
+        .bind(ident.id, toIso(new Date()), transaction.id).run()
+      transaction.user_id = ident.id
+    }
+  }
+
+  let payment = paymentOverride
+  if (!payment) {
+    try {
+      payment = await fetchPayment(env, transaction.checkout_id)
+    } catch {
+      return { ok: false, error: 'verify_failed', status: 400 }
+    }
+  }
+
+  if (!isCheckoutPaid(payment)) {
+    const currentStatus = payment?.status || 'PENDING'
+    const txStatuses = payment?.transactions?.map(t => t.status) || []
+    const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+    const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    return {
+      ok: false,
+      error: 'payment_not_paid',
+      status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+      message: hasFailed ? 'Payment failed. Please try again.' :
+               hasDeclined ? 'Your card was declined.' : 'Payment is still processing.'
+    }
+  }
+
+  const paymentId = payment.id || payment.payment_id || null
+  const now = toIso(new Date())
+
+  await db.batch([
+    db.prepare(`UPDATE sponsored_memberships SET status = 'available' WHERE id = ?`).bind(sm.id),
+    db.prepare(`
+      UPDATE transactions SET payment_status = 'PAID', payment_id = ?, updated_at = ? WHERE id = ?
+    `).bind(paymentId, now, transaction.id)
+  ])
+
+  return {
+    ok: true,
+    status: 'active',
+    message: 'Thank you! Your sponsorship has been added to the pool.'
+  }
+}
+
+/**
  * GET /membership/sponsor/pool
  * Returns the number of available sponsored memberships.
  */
@@ -4444,6 +4523,9 @@ app.post('/membership/sponsor/checkout', async (c) => {
 
     await migrateSponsoredMemberships(c.env.DB)
 
+    const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name, 200))
+    if (!ident?.id) return c.json({ error: 'identity_error' }, 500)
+
     // Use the quarterly plan price
     const svc = await getServiceForPlan(c.env.DB, 'quarterly')
     if (!svc) return c.json({ error: 'plan_not_configured' }, 400)
@@ -4452,14 +4534,14 @@ app.post('/membership/sponsor/checkout', async (c) => {
 
     const order_ref = crypto.randomUUID()
 
-    // Idempotency check
+    // Idempotency check (aligned with membership/ticket checkout flows)
     if (idem) {
       const existing = await c.env.DB.prepare(
         `SELECT t.order_ref, t.checkout_id FROM transactions t
          JOIN sponsored_memberships sm ON sm.id = t.reference_id
-         WHERE t.transaction_type = 'sponsorship' AND t.email = ? AND t.idempotency_key = ?
+         WHERE t.transaction_type = 'sponsorship' AND t.user_id = ? AND t.idempotency_key = ?
          ORDER BY t.id DESC LIMIT 1`
-      ).bind(email, idem).first()
+      ).bind(ident.id, idem).first()
       if (existing?.checkout_id) {
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
@@ -4492,8 +4574,8 @@ app.post('/membership/sponsor/checkout', async (c) => {
     await c.env.DB.prepare(
       `INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
                                  checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
-       VALUES ('sponsorship', ?, NULL, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
-    ).bind(smId, email, name || null, order_ref, checkout.id,
+       VALUES ('sponsorship', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+    ).bind(smId, ident.id, email, clampStr(name, 200) || null, order_ref, checkout.id,
            String(amount), currency, idem || null, toIso(new Date())).run()
 
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
@@ -4513,52 +4595,17 @@ app.get('/membership/sponsor/confirm', async (c) => {
   if (!orderRef || !UUID_RE.test(orderRef)) return c.json({ ok: false, error: 'invalid_orderRef' }, 400)
 
   try {
-    await migrateSponsoredMemberships(c.env.DB)
-
-    const transaction = await c.env.DB.prepare(
-      `SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship'`
-    ).bind(orderRef).first()
-    if (!transaction) return c.json({ ok: false, error: 'order_not_found' }, 404)
-
-    const sm = await c.env.DB.prepare(
-      `SELECT * FROM sponsored_memberships WHERE id = ?`
-    ).bind(transaction.reference_id).first()
-    if (!sm) return c.json({ ok: false, error: 'sponsorship_not_found' }, 404)
-
-    // Already confirmed
-    if (sm.status === 'available') {
-      return c.json({ ok: true, status: 'active', message: 'Sponsorship already active' })
-    }
-
-    // Verify payment
-    let payment
-    try { payment = await fetchPayment(c.env, transaction.checkout_id) }
-    catch { return c.json({ ok: false, error: 'verify_failed' }, 400) }
-
-    if (!isCheckoutPaid(payment)) {
-      const currentStatus = payment?.status || 'PENDING'
-      const txStatuses = payment?.transactions?.map(t => t.status) || []
-      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
-      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    const result = await confirmSponsorshipPayment(c.env.DB, c.env, orderRef)
+    if (!result.ok) {
+      const httpStatus = result.status && typeof result.status === 'number' ? result.status : 400
       return c.json({
         ok: false,
-        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
-        message: hasFailed ? 'Payment failed. Please try again.' :
-                 hasDeclined ? 'Your card was declined.' : 'Payment is still processing.'
-      })
+        error: result.error,
+        status: typeof result.status === 'string' ? result.status : undefined,
+        message: result.message
+      }, httpStatus === 404 || httpStatus === 409 ? httpStatus : 400)
     }
-
-    // Mark sponsorship as available (in the pool)
-    await c.env.DB.prepare(
-      `UPDATE sponsored_memberships SET status = 'available' WHERE id = ?`
-    ).bind(sm.id).run()
-
-    // Update transaction status
-    await c.env.DB.prepare(
-      `UPDATE transactions SET payment_status = 'PAID', payment_id = ?, updated_at = ? WHERE id = ?`
-    ).bind(payment.id, toIso(new Date()), transaction.id).run()
-
-    return c.json({ ok: true, status: 'active', message: 'Thank you! Your sponsorship has been added to the pool.' })
+    return c.json({ ok: true, status: result.status, message: result.message })
   } catch (e) {
     console.error('[sponsor/confirm] Error:', e)
     return c.json({ ok: false, error: 'internal_error' }, 500)
@@ -4707,10 +4754,18 @@ app.post('/webhooks/sumup', async (c) => {
   // Detect if this is a bundle purchase (BUNDLE-{eventId}-{uuid})
   const isBundle = orderRef.startsWith('BUNDLE-')
   const isShopOrder = orderRef.startsWith('ORD-')
+  const isDonation = orderRef.startsWith('DON-')
+
+  const sponsorshipTx = !isBundle && !isShopOrder && !isDonation
+    ? await c.env.DB.prepare(
+        `SELECT id FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship' LIMIT 1`
+      ).bind(orderRef).first()
+    : null
+  const isSponsorship = !!sponsorshipTx
 
   // Check for duplicate webhook processing
   const webhookId = `${paymentId}-${orderRef}`
-  const entityType = isBundle ? 'bundle' : isShopOrder ? 'shop_order' : 'membership'
+  const entityType = isBundle ? 'bundle' : isShopOrder ? 'shop_order' : isDonation ? 'donation' : isSponsorship ? 'sponsorship' : 'membership'
   const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, entityType, orderRef)
   if (isDuplicate) {
     console.log(`Duplicate ${entityType} webhook received, skipping processing`)
@@ -4761,6 +4816,25 @@ app.post('/webhooks/sumup', async (c) => {
       console.log('[webhook-shop] Completed shop order', shopOrderRow.id, outcome)
     } catch (err) {
       console.error('[webhook-shop] Failed to complete shop order:', err)
+      return c.json({ ok: false, error: String(err?.message || err) }, 400)
+    }
+    return c.json({ ok: true })
+  }
+
+  // ==================== SPONSORSHIP WEBHOOK ====================
+  if (isSponsorship) {
+    console.log('[webhook-sponsorship] Processing sponsorship order:', orderRef)
+    try {
+      const result = await confirmSponsorshipPayment(c.env.DB, c.env, orderRef, payment)
+      if (!result.ok && result.error !== 'payment_not_paid') {
+        console.error('[webhook-sponsorship] Confirm failed:', result.error, orderRef)
+        return c.json({ ok: false, error: result.error }, result.status === 404 ? 404 : 400)
+      }
+      if (result.ok) {
+        console.log('[webhook-sponsorship] Sponsorship confirmed for order:', orderRef)
+      }
+    } catch (err) {
+      console.error('[webhook-sponsorship] Failed to confirm sponsorship:', err)
       return c.json({ ok: false, error: String(err?.message || err) }, 400)
     }
     return c.json({ ok: true })
@@ -10021,6 +10095,29 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
 /** Minimum card charge after discounts (SumUp GBP). */
 const SHOP_MIN_PAYMENT_PENCE = 100
 
+/** SumUp checkout description length (portal display). */
+const SHOP_CHECKOUT_DESC_MAX = 255
+
+/**
+ * Human-readable SumUp checkout description for shop orders (shown in SumUp portal).
+ * @param {Array<{ product_name?: string, name?: string, quantity?: number }>} items
+ */
+function formatShopCheckoutDescription(items, { deliveryMethod, promoCode } = {}) {
+  const lines = (items || []).map(item => {
+    const qty = Math.max(1, Number(item.quantity) || 1)
+    const name = clampStr(item.product_name || item.name || 'Item', 80).trim() || 'Item'
+    return `${qty}x ${name}`
+  })
+  let desc = lines.length ? `Dice Bastion Shop: ${lines.join(', ')}` : 'Dice Bastion Shop order'
+  if (deliveryMethod === 'delivery') desc += ' · Delivery'
+  else if (deliveryMethod === 'collection') desc += ' · Collection'
+  if (promoCode) desc += ` · Promo: ${clampStr(promoCode, 30)}`
+  if (desc.length > SHOP_CHECKOUT_DESC_MAX) {
+    desc = `${desc.substring(0, SHOP_CHECKOUT_DESC_MAX - 1)}…`
+  }
+  return desc
+}
+
 /**
  * Extendable promo rules JSON (persisted):
  * require_active_membership?: boolean — checkout email must have active Dice Bastion membership
@@ -10437,8 +10534,11 @@ app.post('/shop/checkout', async c => {
       amount: totalPence / 100,
       currency: currencyResolved,
       orderRef: orderNumber,
-      title: `Order ${orderNumber}`,
-      description: `Shop (${orderItemsPayload.length} line(s))`
+      title: `Dice Bastion Shop – ${orderItemsPayload.length} item(s)`,
+      description: formatShopCheckoutDescription(orderItemsPayload, {
+        deliveryMethod,
+        promoCode: promoCodeSnap
+      })
     })
     if (!checkout?.id) return c.json({ error: 'sumup_checkout_failed' }, 502)
 
@@ -10582,9 +10682,14 @@ app.post('/orders/checkout', async c => {
     const orderNumber = `ORD-${crypto.randomUUID()}`
     const orderItems = products.map(p => ({ product_id: p.id, product_name: p.name, quantity: qtyMap[p.id], unit_price: p.price, subtotal: p.price * qtyMap[p.id] }))
     const total = orderItems.reduce((s, r) => s + r.subtotal, 0)
-    const desc = orderItems.map(r => `${r.quantity}x ${r.product_name}`).join(', ')
 
-    const checkout = await createCheckout(c.env, { amount: total / 100, currency, orderRef: orderNumber, description: desc })
+    const checkout = await createCheckout(c.env, {
+      amount: total / 100,
+      currency,
+      orderRef: orderNumber,
+      title: `Dice Bastion Shop – ${orderItems.length} item(s)`,
+      description: formatShopCheckoutDescription(orderItems)
+    })
     if (!checkout?.id) return c.json({ error: 'checkout_failed' }, 502)
 
     // Use defaults for email/name since orders table has NOT NULL constraints
