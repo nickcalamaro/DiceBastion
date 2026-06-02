@@ -253,10 +253,11 @@
 
   <div id="alert-container"></div>
 
-  <div class="alert alert-info" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
+  <div class="alert alert-info" id="booking-advance-notice" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
     <span style="font-size: 1.3rem; flex-shrink: 0;">📅</span>
     <div>
-      <strong>Advance booking required</strong> — Tables must be booked at least the day before.
+      <strong>Advance booking required</strong> — Non-members must book at least the day before.
+      <span id="member-same-day-note" style="display: none;"> Active members can also book same-day slots from 2 hours before start time.</span>
     </div>
   </div>
 
@@ -406,6 +407,8 @@ async function checkMembershipStatus() {
   if (!userSession || !userSession.email) {
     membershipStatus = null;
     utils.session.setMembershipStatus(null);
+    updateBookingAdvanceNotice();
+    refreshDatePickerMinDate();
     return;
   }
 
@@ -425,6 +428,65 @@ async function checkMembershipStatus() {
     console.error('Error checking membership:', error);
     membershipStatus = null;
     utils.session.setMembershipStatus(null);
+  }
+
+  updateBookingAdvanceNotice();
+  refreshDatePickerMinDate();
+}
+
+function updateBookingAdvanceNotice() {
+  const memberNote = document.getElementById('member-same-day-note');
+  if (memberNote) {
+    memberNote.style.display = membershipStatus?.active ? 'inline' : 'none';
+  }
+}
+
+function getBookingMinDate() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (membershipStatus?.active) {
+    return today;
+  }
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  return tomorrow;
+}
+
+function refreshDatePickerMinDate() {
+  if (!picker) return;
+  picker.set('minDate', getBookingMinDate());
+  if (picker.selectedDates.length) {
+    const selected = picker.formatDate(picker.selectedDates[0], 'Y-m-d');
+    const minDateStr = picker.formatDate(getBookingMinDate(), 'Y-m-d');
+    if (selected < minDateStr) {
+      picker.clear();
+      currentDate = null;
+      selectedSlot = null;
+    }
+  }
+}
+
+function configureDatePicker(type) {
+  const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
+  const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
+  const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
+  const enableRule = function(date) {
+    return enabledDays.includes(date.getDay());
+  };
+
+  if (!picker) {
+    picker = flatpickr('#booking-date', {
+      minDate: getBookingMinDate(),
+      dateFormat: 'Y-m-d',
+      enable: [enableRule],
+      onChange: (selectedDates, dateStr) => {
+        handleDateChange(dateStr);
+      }
+    });
+  } else {
+    picker.set('minDate', getBookingMinDate());
+    picker.set('enable', [enableRule]);
+    picker.clear();
   }
 }
 
@@ -470,7 +532,7 @@ async function loadTableTypes() {
   memberMessage.classList.add('menu-item');
   memberMessage.innerHTML = `
     <div class="alert alert-success" style="margin-bottom: 1.5rem;">
-      ✓ You're getting free bookings as a GWC Member. Thank you for your support!
+      ✓ You're getting free bookings as a GWC Member — including same-day slots from 2 hours before start time. Thank you for your support!
     </div>
   `;
   
@@ -564,40 +626,7 @@ function selectTableType(type, cardElement) {
   }, 100);
   
   // Initialize Flatpickr if not already done
-  if (!picker) {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    
-    // Parse available days (day names like "Monday", "Tuesday", etc.)
-    const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
-    const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
-    const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
-    
-    picker = flatpickr('#booking-date', {
-      minDate: tomorrow,
-      dateFormat: 'Y-m-d',
-      enable: [
-        function(date) {
-          return enabledDays.includes(date.getDay());
-        }
-      ],
-      onChange: (selectedDates, dateStr) => {
-        handleDateChange(dateStr);
-      }
-    });
-  } else {
-    // Update enable function for new table type
-    const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
-    const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
-    const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
-    
-    picker.set('enable', [
-      function(date) {
-        return enabledDays.includes(date.getDay());
-      }
-    ]);
-  }
+  configureDatePicker(type);
 }
 
 async function handleDateChange(date) {
@@ -636,7 +665,11 @@ async function loadAvailableSlots(date) {
   
   try {
     // Fetch available slots from API (excludes fully booked slots)
-    const response = await fetch(`${BOOKINGS_API}/api/bookings/available-slots?date=${date}&table_type_id=${selectedTableType.id}`);
+    let slotsUrl = `${BOOKINGS_API}/api/bookings/available-slots?date=${encodeURIComponent(date)}&table_type_id=${selectedTableType.id}`;
+    if (userSession?.email) {
+      slotsUrl += `&email=${encodeURIComponent(userSession.email)}`;
+    }
+    const response = await fetch(slotsUrl);
     const data = await response.json();
     
     if (!response.ok) {
@@ -646,7 +679,8 @@ async function loadAvailableSlots(date) {
     const slots = data.slots || [];
     
     if (slots.length === 0) {
-      container.innerHTML = '<div class="alert alert-info">📭 No available slots for this date. All tables are fully booked.</div>';
+      const emptyMessage = data.message || '📭 No available slots for this date. All tables are fully booked.';
+      container.innerHTML = `<div class="alert alert-info">${emptyMessage}</div>`;
       return;
     }
     
@@ -773,7 +807,7 @@ async function handleBookingSubmit(e) {
     
     if (!bookingResponse.ok) {
       console.error('Booking creation failed:', bookingResponse.status, bookingData);
-      throw new Error(bookingData.error || bookingData.details || 'Booking creation failed');
+      throw new Error(bookingData.message || bookingData.error || bookingData.details || 'Booking creation failed');
     }
     
     // If free booking, it's already confirmed

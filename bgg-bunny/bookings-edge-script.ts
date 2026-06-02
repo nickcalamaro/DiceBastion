@@ -8,6 +8,7 @@
  *   - BUNNY_DATABASE_URL: Database connection URL
  *   - BUNNY_DATABASE_AUTH_TOKEN: Database access token
  *   - EMAIL_API_URL: URL of the DiceBastionEmails edge script (e.g., https://dicebastionemails-xxxxx.bunny.run/send)
+ *   - WORKER_API_URL: Cloudflare worker base URL for membership verification
  * 
  * API Endpoints:
  *   GET    /api/bookings/table-types    - Get available table types
@@ -32,6 +33,78 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
+
+const BOOKING_TZ = "Europe/Gibraltar";
+const MEMBER_SAME_DAY_MIN_HOURS = 2;
+
+function getGibraltarNow(): { dateStr: string; minutesSinceMidnight: number } {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-CA", { timeZone: BOOKING_TZ });
+  const timeStr = now.toLocaleTimeString("en-GB", {
+    timeZone: BOOKING_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const [hours, minutes] = timeStr.split(":").map((part) => parseInt(part, 10));
+  return { dateStr, minutesSinceMidnight: hours * 60 + (minutes || 0) };
+}
+
+function parseTimeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map((part) => parseInt(part, 10));
+  return hours * 60 + (minutes || 0);
+}
+
+async function checkActiveMembership(email: string): Promise<boolean> {
+  const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
+  try {
+    const res = await fetch(`${workerUrl}/membership/status?email=${encodeURIComponent(email)}`);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { active?: boolean };
+    return !!data.active;
+  } catch (error) {
+    console.error("Membership check failed:", error);
+    return false;
+  }
+}
+
+function validateBookingAdvance(params: {
+  bookingDate: string;
+  startTime: string;
+  isMember: boolean;
+}): { ok: true } | { ok: false; error: string; message: string } {
+  const { dateStr: todayStr, minutesSinceMidnight: nowMinutes } = getGibraltarNow();
+
+  if (params.bookingDate < todayStr) {
+    return {
+      ok: false,
+      error: "past_date",
+      message: "Cannot book dates in the past.",
+    };
+  }
+
+  if (params.bookingDate === todayStr) {
+    if (!params.isMember) {
+      return {
+        ok: false,
+        error: "Same-day bookings are not accepted",
+        message: "Tables must be booked at least the day before. Please contact us if you need a last-minute table.",
+      };
+    }
+
+    const slotStartMinutes = parseTimeToMinutes(params.startTime);
+    const earliestMinutes = nowMinutes + MEMBER_SAME_DAY_MIN_HOURS * 60;
+    if (slotStartMinutes < earliestMinutes) {
+      return {
+        ok: false,
+        error: "member_same_day_too_soon",
+        message: `Members can book same-day tables from ${MEMBER_SAME_DAY_MIN_HOURS} hours before the slot start time.`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
 
 /**
  * Helper function to create JSON responses
@@ -276,10 +349,11 @@ BunnySDK.net.http.serve(async (request: Request) => {
     if (path === "/api/bookings/available-slots" && request.method === "GET") {
       const date = url.searchParams.get('date');
       const tableTypeId = url.searchParams.get('table_type_id');
+      const email = url.searchParams.get('email');
       if (!date || !tableTypeId) {
         return jsonResponse({ error: "Missing date or table_type_id parameter" }, 400);
       }
-      return await getAvailableSlots(date, parseInt(tableTypeId));
+      return await getAvailableSlots(date, parseInt(tableTypeId), email);
     }
 
     // POST /api/bookings - Create new booking
@@ -386,11 +460,24 @@ async function getTableTypes() {
  * Get available time slots for a specific date and table type
  * Returns slots with availability based on max_bookings config
  */
-async function getAvailableSlots(date: string, tableTypeId: number) {
+async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: string | null) {
   try {
     // Validate date format
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) {
       return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
+    }
+
+    const { dateStr: todayStr, minutesSinceMidnight: nowMinutes } = getGibraltarNow();
+    if (date < todayStr) {
+      return jsonResponse({ error: "past_date", message: "Cannot book dates in the past." }, 400);
+    }
+
+    const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
+    if (date === todayStr && !isMember) {
+      return jsonResponse({
+        slots: [],
+        message: "Same-day booking is available to active members only.",
+      });
     }
 
     // Get config from booking_config table
@@ -461,12 +548,21 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
         
         const count = Number(bookingCount.rows[0]?.count || 0);
         const spotsLeft = maxBookings - count;
+
+        let available = spotsLeft > 0;
+        if (available && date === todayStr && isMember) {
+          const slotStartMinutes = parseTimeToMinutes(slot.start);
+          const earliestMinutes = nowMinutes + MEMBER_SAME_DAY_MIN_HOURS * 60;
+          if (slotStartMinutes < earliestMinutes) {
+            available = false;
+          }
+        }
         
         return {
           start_time: slot.start,
           end_time: slot.end,
           spots_left: spotsLeft,
-          available: spotsLeft > 0,
+          available,
           blocked: false
         };
       })
@@ -540,14 +636,24 @@ async function createBooking(request: Request) {
       }, 409);
     }
 
-    // Reject same-day bookings — must be booked at least the day before
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD in UTC
-    if (booking_date <= todayStr) {
+    const isMember = await checkActiveMembership(user_email);
+    const advanceCheck = validateBookingAdvance({
+      bookingDate: booking_date,
+      startTime: start_time,
+      isMember,
+    });
+    if (!advanceCheck.ok) {
       return jsonResponse({
-        error: "Same-day bookings are not accepted",
-        message: "Tables must be booked at least the day before. Please contact us if you need a last-minute table."
+        error: advanceCheck.error,
+        message: advanceCheck.message,
       }, 422);
+    }
+
+    if (is_member_booking && !isMember) {
+      return jsonResponse({
+        error: "membership_required",
+        message: "Active membership is required for member pricing and same-day bookings.",
+      }, 403);
     }
 
     // Check max_bookings limit across ALL table types for this time slot
@@ -592,7 +698,7 @@ async function createBooking(request: Request) {
         table_type_id,
         order_ref,
         amount_paid || 0,
-        is_member_booking ? 1 : 0,
+        isMember ? 1 : 0,
         amount_paid > 0 ? 'pending' : 'confirmed', // Track payment status separately
         notes || null,
         now,
@@ -612,7 +718,7 @@ async function createBooking(request: Request) {
         tableTypeId: table_type_id,
         amountPaid: amount_paid || 0,
         orderRef: order_ref,
-        isMemberBooking: !!is_member_booking,
+        isMemberBooking: isMember,
         notes: notes || undefined,
       });
     } catch (e) {
