@@ -850,6 +850,7 @@ async function showPaymentModal(checkoutId, orderRef, amount) {
       </div>
       <div id="sumup-card-container"></div>
       <div id="payment-error" class="alert alert-error" style="display: none; margin-top: 1rem;"></div>
+      ${utils.paymentSupportNoteHtml()}
     `,
     onClose: () => { paymentModal = null; }
   });

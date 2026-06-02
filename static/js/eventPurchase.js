@@ -113,6 +113,7 @@ function generateModal(eventId, isFree) {
         </div>
         
         ${!isFree ? `<div id="evt-card-${eventId}" class="evt-card mt-2" style="display:none;"></div>` : ''}
+        ${window.utils.paymentSupportNoteHtml()}
         <div class="evt-error mt-2.5 text-sm font-semibold" style="display:none; color:#b00020;"></div>
         <div class="evt-success mt-4 py-3 px-4 rounded-lg font-semibold" style="display:none; background:#e9fbe9; border:1px solid #b9e8b9; color:#1a5d1a;">${isFree ? 'Registration confirmed! See you there.' : 'Ticket confirmed! See you there.'}</div>
       </div>

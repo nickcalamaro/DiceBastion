@@ -97,7 +97,8 @@ showPagination: false
       closeOnBackdrop: false,
       content:
         '<div id="pay-widget" class="modal-widget-container"></div>' +
-        '<div id="pay-error" class="modal-error"></div>',
+        '<div id="pay-error" class="modal-error"></div>' +
+        window.utils.paymentSupportNoteHtml(),
       onClose: function () { if (modal) { var w = modal.querySelector('#pay-widget'); if (w) w.innerHTML = ''; modal = null; } }
     });
     modal.open();

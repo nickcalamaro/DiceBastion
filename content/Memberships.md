@@ -363,6 +363,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedForm}
         <div id="sp-sumup-card" class="modal-widget-container"></div>
         <div id="sp-error" class="modal-error"></div>
+        ${window.utils.paymentSupportNoteHtml()}
       `,
       onClose: () => {
         if (sponsorModal === checkoutModal) sponsorModal = null;
@@ -855,6 +856,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
         <div id="sumup-error" class="modal-error"></div>
+        ${window.utils.paymentSupportNoteHtml()}
       `,
       onClose: closeModal
     });

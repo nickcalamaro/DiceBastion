@@ -222,6 +222,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
         <div id="sumup-error" class="modal-error"></div>
+        ${window.utils.paymentSupportNoteHtml()}
       `,
       onClose: closeModal
     });

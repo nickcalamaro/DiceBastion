@@ -77,6 +77,12 @@ window.utils = {
   },
 
   /**
+   * Support note for payment and registration modals.
+   */
+  paymentSupportNoteHtml: () =>
+    '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>',
+
+  /**
    * Generate a unique idempotency key
    */
   generateIdempotencyKey: () => {
