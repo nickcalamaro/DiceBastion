@@ -230,9 +230,109 @@ function notifyGoogleIndexingAsync(ctx, env, url, type = 'URL_UPDATED') {
 const SEO_SITEMAP_URLS = {
   main: 'https://dicebastion.com/sitemap.xml',
   events: 'https://dicebastion.com/events/sitemap.xml',
+  eventImages: 'https://dicebastion.com/events/sitemap-images.xml',
   blog: 'https://dicebastion.com/posts/sitemap.xml',
+  blogImages: 'https://dicebastion.com/posts/sitemap-images.xml',
   shopIndex: 'https://shop.dicebastion.com/sitemap.xml',
-  shopProducts: 'https://shop.dicebastion.com/products/sitemap.xml'
+  shopProducts: 'https://shop.dicebastion.com/products/sitemap.xml',
+  shopProductImages: 'https://shop.dicebastion.com/products/sitemap-images.xml'
+}
+
+/** Prefer HTTPS and absolute URLs for crawlers (Google Images, Open Graph). */
+function ensureAbsoluteImageUrl(url, baseUrl) {
+  const trimmed = String(url || '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('//')) return `https:${trimmed}`
+  if (/^http:\/\//i.test(trimmed)) return trimmed.replace(/^http:\/\//i, 'https://')
+  if (/^https:\/\//i.test(trimmed)) return trimmed
+  if (trimmed.startsWith('/')) return `${String(baseUrl).replace(/\/$/, '')}${trimmed}`
+  return trimmed
+}
+
+function escapeXmlSitemapText(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function isGenericSeoFallbackImage(url) {
+  return /\/img\/(DB_Logo|default-event|og-image)\./i.test(url)
+}
+
+function extractImgUrlsFromHtml(html) {
+  if (!html || !html.includes('<img')) return []
+  const urls = []
+  const re = /<img\b[^>]*\bsrc=(["'])([^"']+)\1/gi
+  let match
+  while ((match = re.exec(html))) {
+    urls.push(match[2])
+  }
+  return urls
+}
+
+function collectEventImageUrls(event, siteUrl) {
+  const seen = new Set()
+  const out = []
+  const add = (raw) => {
+    const abs = ensureAbsoluteImageUrl(raw, siteUrl)
+    if (!abs || seen.has(abs) || isGenericSeoFallbackImage(abs)) return
+    seen.add(abs)
+    out.push(abs)
+  }
+  add(event.seo_image)
+  add(event.image_url_hero)
+  add(event.image_url)
+  add(event.image_url_card)
+  return out
+}
+
+function resolveEventPrimaryImage(event, siteUrl) {
+  const images = collectEventImageUrls(event, siteUrl)
+  if (images.length) return images[0]
+  return `${siteUrl}/img/default-event.jpg`
+}
+
+function collectProductImageUrls(product, shopUrl) {
+  const seen = new Set()
+  const out = []
+  const add = (raw) => {
+    const abs = ensureAbsoluteImageUrl(raw, shopUrl)
+    if (!abs || seen.has(abs) || isGenericSeoFallbackImage(abs)) return
+    seen.add(abs)
+    out.push(abs)
+  }
+  add(product.image_url)
+  for (const src of extractImgUrlsFromHtml(product.full_description)) add(src)
+  for (const src of extractImgUrlsFromHtml(product.summary)) add(src)
+  for (const src of extractImgUrlsFromHtml(product.description)) add(src)
+  return out
+}
+
+function resolveProductPrimaryImage(product, shopUrl) {
+  const images = collectProductImageUrls(product, shopUrl)
+  if (images.length) return images[0]
+  return `${shopUrl}/img/og-image.png`
+}
+
+function buildImageSitemapXml(entries) {
+  const urls = []
+  for (const entry of entries) {
+    if (!entry.images?.length) continue
+    const imageEntries = entry.images
+      .map(
+        (loc) =>
+          `    <image:image>\n      <image:loc>${escapeXmlSitemapText(loc)}</image:loc>\n      <image:title>${escapeXmlSitemapText(entry.title)}</image:title>\n    </image:image>`
+      )
+      .join('\n')
+    urls.push(`  <url>\n    <loc>${escapeXmlSitemapText(entry.pageUrl)}</loc>\n${imageEntries}\n  </url>`)
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${urls.join('\n')}
+</urlset>`
 }
 
 /**
@@ -271,13 +371,13 @@ function inferSitemapUrlsForPage(pageUrl) {
   try {
     const u = new URL(pageUrl)
     if (u.hostname.includes('shop.dicebastion.com')) {
-      return [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts]
+      return [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages]
     }
     if (u.pathname.startsWith('/posts/')) {
-      return [SEO_SITEMAP_URLS.blog, SEO_SITEMAP_URLS.main]
+      return [SEO_SITEMAP_URLS.blog, SEO_SITEMAP_URLS.blogImages, SEO_SITEMAP_URLS.main]
     }
     if (u.pathname.startsWith('/events/')) {
-      return [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main]
+      return [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main]
     }
   } catch { /* ignore invalid URLs */ }
   return []
@@ -5238,7 +5338,8 @@ function generateEventSeoPage(event) {
   const dt = event.event_datetime || '';
   const endTime = event.end_time || '';  // HH:MM format
   const loc = e(event.location || 'Gibraltar Warhammer Club');
-  const img = event.seo_image || event.image_url || `${site}/img/default-event.jpg`;
+  const eventImages = collectEventImageUrls(event, site);
+  const img = resolveEventPrimaryImage(event, site);
   const raw = event.seo_description || event.description || '';
   const desc = e(raw.length > 160 ? raw.substring(0, 157) + '...' : raw);
   const fullDesc = e(raw);
@@ -5315,7 +5416,7 @@ function generateEventSeoPage(event) {
         'addressCountry': 'GI'
       }
     },
-    'image': [img],
+    'image': eventImages.length ? eventImages : [img],
     'url': url,
     'offers': {
       '@type': 'Offer',
@@ -5352,12 +5453,15 @@ function generateEventSeoPage(event) {
 <meta name="description" content="${desc}">
 <meta property="og:type" content="event"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${title}"><meta property="og:description" content="${desc}">
-<meta property="og:image" content="${img}"><meta property="og:site_name" content="Dice Bastion">
+<meta property="og:image" content="${img}"><meta property="og:image:alt" content="${title}">
+<meta property="og:site_name" content="Dice Bastion">
 <meta property="event:start_time" content="${dt}"><meta property="event:location" content="${loc}">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}">
 <meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
+<meta name="twitter:image:alt" content="${title}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <link rel="canonical" href="${url}">
+<link rel="sitemap" type="application/xml" title="Event Image Sitemap" href="${site}/events/sitemap-images.xml">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
@@ -5383,7 +5487,7 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 </head><body>
 <div class="header"><a href="${site}">Dice Bastion</a></div>
 <div class="card">
-${img ? `<img src="${img}" alt="${title}">` : ''}
+${img ? `<img src="${img}" alt="${title}" width="885" height="300" loading="eager" decoding="async" fetchpriority="high">` : ''}
 <div class="card-body">
 <h1>${title}</h1>
 ${fullDesc ? `<p class="desc">${fullDesc}</p>` : ''}
@@ -5842,6 +5946,44 @@ app.get('/events/sitemap.xml', async c => {
     return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
       status: 200,
       headers: { 'Content-Type': 'application/xml' }
+    })
+  }
+})
+
+app.get('/events/sitemap-images.xml', async c => {
+  try {
+    await ensureEventImageVariantColumns(c.env.DB)
+    const site = 'https://dicebastion.com'
+    const { results } = await c.env.DB.prepare(`
+      SELECT slug, event_name, seo_image, image_url, image_url_card, image_url_hero
+      FROM events
+      WHERE is_active = 1
+        AND slug IS NOT NULL
+        AND TRIM(slug) != ''
+        AND (event_datetime >= datetime('now') OR is_recurring = 1)
+      ORDER BY event_datetime ASC
+    `).all()
+
+    const entries = (results || []).map((event) => ({
+      pageUrl: `${site}/events/${encodeURIComponent(event.slug)}`,
+      title: event.event_name || event.slug,
+      images: collectEventImageUrls(event, site)
+    }))
+
+    const xml = buildImageSitemapXml(entries)
+
+    return new Response(xml, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
+      }
+    })
+  } catch (err) {
+    console.error('Event image sitemap error:', err)
+    return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"></urlset>', {
+      status: 200,
+      headers: { 'Content-Type': 'application/xml; charset=utf-8' }
     })
   }
 })
@@ -6380,7 +6522,7 @@ app.post('/admin/events', requireAdmin, async c => {
     ).run()
 
     notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main],
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
       indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
     })
 
@@ -6440,7 +6582,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     ).run()
 
     notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main],
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
       indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
     })
 
@@ -6494,7 +6636,7 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
 
     notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.main],
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
       indexingUrl: event.slug ? `https://dicebastion.com/events/${encodeURIComponent(event.slug)}` : null,
       indexingType: 'URL_DELETED'
     })
@@ -7146,7 +7288,8 @@ function generateProductSeoPage(product, allCategories) {
   const shop = 'https://shop.dicebastion.com';
   const name = e(product.name || 'Product');
   const slug = product.slug || '';
-  const img = product.image_url || `${shop}/img/og-image.png`;
+  const productImages = collectProductImageUrls(product, shop);
+  const img = resolveProductPrimaryImage(product, shop);
   const rawDesc = product.full_description || product.summary || product.description || '';
   const plainDesc = stripHtml(rawDesc);
   const fallbackBlurb =
@@ -7169,7 +7312,7 @@ function generateProductSeoPage(product, allCategories) {
     '@type': 'Product',
     'name': product.name || 'Product',
     'description': plainForMeta,
-    'image': img,
+    'image': productImages.length ? (productImages.length === 1 ? productImages[0] : productImages) : img,
     'url': url,
     'sku': slug,
     'brand': { '@type': 'Brand', 'name': 'Dice Bastion' },
@@ -7242,14 +7385,17 @@ function generateProductSeoPage(product, allCategories) {
 <meta name="description" content="${desc}">
 <meta property="og:type" content="product"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${name}"><meta property="og:description" content="${desc}">
-<meta property="og:image" content="${img}"><meta property="og:site_name" content="Dice Bastion Shop">
+<meta property="og:image" content="${img}"><meta property="og:image:alt" content="${name}">
+<meta property="og:site_name" content="Dice Bastion Shop">
 <meta property="product:price:amount" content="${priceDisplay}"><meta property="product:price:currency" content="${product.currency || 'GBP'}">
 <meta property="product:availability" content="${inStock ? 'in stock' : 'out of stock'}">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${name}">
 <meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
+<meta name="twitter:image:alt" content="${name}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
 <link rel="canonical" href="${url}">
+<link rel="sitemap" type="application/xml" title="Product Image Sitemap" href="${shop}/products/sitemap-images.xml">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
@@ -7287,7 +7433,7 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 <a href="${shop}">Shop</a>${categories[0] ? ` › <a href="${shop}/products/category/${encodeURIComponent(categories[0])}">${e(categories[0])}</a>` : ''} › ${name}
 </div>
 <div class="card">
-${img ? `<img src="${img}" alt="${name}">` : ''}
+${img ? `<img src="${img}" alt="${name}" loading="eager" decoding="async" fetchpriority="high">` : ''}
 <div class="card-body">
 <h1>${name}</h1>
 ${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${shop}/products/category/${encodeURIComponent(c)}">${e(c)}</a>`).join('')}</div>` : ''}
@@ -7342,8 +7488,9 @@ function generateCategorySeoPage(categoryName, products) {
 
   const productCards = products.map(p => {
     const price = ((Number(p.price) || 0) / 100).toFixed(2);
+    const cardImg = p.image_url ? ensureAbsoluteImageUrl(p.image_url, shop) : '';
     return `<a href="${shop}/products/${p.slug}" class="cat-product-card">
-${p.image_url ? `<img src="${p.image_url}" alt="${e(p.name)}">` : '<div class="cat-product-img-placeholder"></div>'}
+${cardImg ? `<img src="${cardImg}" alt="${e(p.name)}" loading="lazy" decoding="async">` : '<div class="cat-product-img-placeholder"></div>'}
 <div class="cat-product-info"><span class="cat-product-name">${e(p.name)}</span><span class="cat-product-price">£${price}</span></div></a>`;
   }).join('\n');
 
@@ -7447,6 +7594,38 @@ app.get('/products/sitemap.xml', async c => {
     console.error('Product sitemap error:', err)
     return new Response('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
       headers: { 'Content-Type': 'application/xml' }
+    })
+  }
+})
+
+app.get('/products/sitemap-images.xml', async c => {
+  try {
+    const shop = 'https://shop.dicebastion.com'
+    const { results } = await c.env.DB.prepare(`
+      SELECT slug, name, image_url, summary, description, full_description
+      FROM products
+      WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+      ORDER BY updated_at DESC
+    `).all()
+
+    const entries = (results || []).map((product) => ({
+      pageUrl: `${shop}/products/${encodeURIComponent(product.slug)}`,
+      title: product.name || product.slug,
+      images: collectProductImageUrls(product, shop)
+    }))
+
+    const xml = buildImageSitemapXml(entries)
+
+    return new Response(xml, {
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
+      }
+    })
+  } catch (err) {
+    console.error('Product image sitemap error:', err)
+    return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"></urlset>', {
+      headers: { 'Content-Type': 'application/xml; charset=utf-8' }
     })
   }
 })
@@ -7624,7 +7803,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
     ).run()
 
     notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts],
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
       indexingUrl: slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}` : null
     })
     
@@ -7693,7 +7872,7 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
 
     const productSlug = slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
     notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts],
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
       indexingUrl: productSlug ? `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}` : null
     })
     
@@ -7730,7 +7909,7 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
       .run()
 
     notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts],
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
       indexingUrl: product?.slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(product.slug)}` : null,
       indexingType: 'URL_DELETED'
     })
@@ -8768,7 +8947,12 @@ async function processSeoFreshness(env) {
       SEO_SITEMAP_URLS.main,
       SEO_SITEMAP_URLS.events,
       SEO_SITEMAP_URLS.blog,
-      SEO_SITEMAP_URLS.shopIndex
+      SEO_SITEMAP_URLS.blogImages,
+      SEO_SITEMAP_URLS.events,
+      SEO_SITEMAP_URLS.eventImages,
+      SEO_SITEMAP_URLS.shopIndex,
+      SEO_SITEMAP_URLS.shopProducts,
+      SEO_SITEMAP_URLS.shopProductImages
     ]
     for (const sm of sitemaps) {
       await pingGoogleSitemap(sm)
@@ -11035,7 +11219,7 @@ export default {
       const parts = trimmed.split('/')  // ['', 'products', ...]
 
       // /products/sitemap.xml → Hono serves dynamic sitemap
-      if (url.pathname === '/products/sitemap.xml') {
+      if (url.pathname === '/products/sitemap.xml' || url.pathname === '/products/sitemap-images.xml') {
         return app.fetch(request, env, ctx)
       }
 
@@ -11131,6 +11315,10 @@ export default {
         return proxyBlogCdn('blog/posts/sitemap.xml')
       }
 
+      if (url.pathname === '/posts/sitemap-images.xml') {
+        return proxyBlogCdn('blog/posts/sitemap-images.xml')
+      }
+
       if (parts.length >= 4 && parts[2] === 'tag' && parts[3]) {
         return proxyBlogCdn(`blog/posts/tag/${encodeURIComponent(parts[3])}/index.html`)
       }
@@ -11158,7 +11346,7 @@ export default {
       const slug = parts.length === 3 ? parts[2] : null  // 'foo' or null
 
       // sitemap.xml → let Hono serve the dynamic sitemap
-      if (url.pathname === '/events/sitemap.xml') {
+      if (url.pathname === '/events/sitemap.xml' || url.pathname === '/events/sitemap-images.xml') {
         return app.fetch(request, env, ctx)
       }
 

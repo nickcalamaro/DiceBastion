@@ -45,6 +45,7 @@ import {
   renderBlogAuthorPage,
   renderBlogListPage,
   renderBlogPostPage,
+  renderBlogImageSitemap,
   renderBlogSitemap,
   renderBlogTagPage,
   type BlogAuthorProfile,
@@ -281,7 +282,7 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
   const posts = await fetchPublishedPostsForRender();
   const authors = await fetchAuthorMap();
   const taxonomy = buildTaxonomyIndex(posts, authors);
-  const purgePaths = ["blog/posts/index.html", "blog/posts/sitemap.xml"];
+  const purgePaths = ["blog/posts/index.html", "blog/posts/sitemap.xml", "blog/posts/sitemap-images.xml"];
 
   await uploadStorageFile(
     "blog/posts/index.html",
@@ -291,6 +292,11 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
   await uploadStorageFile(
     "blog/posts/sitemap.xml",
     renderBlogSitemap(posts, authors, siteUrl),
+    "application/xml; charset=utf-8"
+  );
+  await uploadStorageFile(
+    "blog/posts/sitemap-images.xml",
+    renderBlogImageSitemap(posts, siteUrl),
     "application/xml; charset=utf-8"
   );
 

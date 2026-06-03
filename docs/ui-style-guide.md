@@ -60,8 +60,10 @@ Rendered by `bgg-bunny/blog-html.ts` and uploaded to Bunny Storage on publish.
 - Meta band (date, category): `.blog-article-meta` with `.blog-meta-label` / `.blog-meta-value`
 - Tags: `.blog-tag-list` > `.blog-tag` (same visual weight as `.team-tag-primary`)
 - Body: `.blog-article-body` — Quill HTML; strip Hugo `.author` blocks on render
-- Default social preview image: `https://dicebastion.com/img/DB_Logo_2025.png` (override per post via admin `seo_image`)
-- Blog sitemap: `https://dicebastion.com/posts/sitemap.xml` (listed in `layouts/robots.txt`)
+- Social / JSON-LD images: cover hero, then inline photos; optional admin `seo_image` overrides. Logo only if the post has no images.
+- Blog sitemaps: `https://dicebastion.com/posts/sitemap.xml` and `https://dicebastion.com/posts/sitemap-images.xml` (listed in `layouts/robots.txt`)
+- Event SEO pages (`/events/:slug/`): hero/card/main images in Open Graph, JSON-LD, and `https://dicebastion.com/events/sitemap-images.xml`
+- Product SEO pages (`shop.dicebastion.com/products/:slug/`): product image + description images in Open Graph, Product schema, and `https://shop.dicebastion.com/products/sitemap-images.xml`
 
 ## Copy guidelines
 

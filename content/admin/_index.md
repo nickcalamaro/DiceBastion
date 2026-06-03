@@ -387,6 +387,7 @@ Logout
 <div class="admin-mb-1">
 <label class="form-label">Image URL</label>
 <input type="url" id="product-image" placeholder="https://..." class="form-input">
+<p class="blog-help-text" style="margin-top:0.35rem;">Product image is used on the SEO page, Open Graph previews, and the product image sitemap for Google Images.</p>
 <small class="admin-text-small">Or upload an image below</small>
 </div>
 
@@ -579,8 +580,8 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <span class="seo-tooltip"><strong>Google Image Guidelines:</strong><br>• Minimum width: 720px (1920px recommended)<br>• Minimum 50K total pixels (w×h)<br>• Provide 16:9, 4:3 and/or 1:1 ratios<br>• Must be crawlable (not blocked by robots.txt)<br>• Use .jpg, .png or .webp format<br><br>The event's uploaded image is used by default. Only set this if you want a different image for Google.</span>
 </span>
 </div>
-<input type="url" id="event-seo-image" class="form-input" placeholder="Leave empty to use event image">
-<small class="admin-text-small">Optional override. Uses the event's main image by default.</small>
+<input type="url" id="event-seo-image" class="form-input" placeholder="Leave empty to use hero image">
+<small class="admin-text-small">Used for Google Images and link previews. Leave blank to use the hero image automatically (all event image sizes are listed in the image sitemap).</small>
 </div>
 
 <div class="form-group" style="margin-bottom: 0;">
@@ -1185,7 +1186,8 @@ Loading cron job logs...
 </div>
 <div>
 <label class="form-label">SEO Image URL</label>
-<input type="url" id="blog-seo-image" class="form-input" placeholder="https://...">
+<p class="blog-help-text">Used for Google Images and link previews. Leave blank to use the cover image automatically.</p>
+<input type="url" id="blog-seo-image" class="form-input" placeholder="https://... (optional)">
 </div>
 </div>
 
@@ -2841,6 +2843,10 @@ showCropModal(file, (bundle) => {
   document.getElementById('event-image').value = bundle.image_url || '';
   document.getElementById('event-image-card').value = bundle.image_url_card || '';
   document.getElementById('event-image-hero').value = bundle.image_url_hero || '';
+  const eventSeoImage = document.getElementById('event-seo-image');
+  if (eventSeoImage && !eventSeoImage.value.trim() && bundle.image_url_hero) {
+    eventSeoImage.value = bundle.image_url_hero;
+  }
   document.getElementById('event-image-preview').innerHTML =
     `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
       <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.image_url}" alt="Main"></div></div>
@@ -5826,6 +5832,10 @@ function blogApplyCardImage(url) {
 function blogApplyCoverImage(url) {
   document.getElementById('blog-featured-image-hero').value = url || '';
   document.getElementById('blog-featured-image').value = url || '';
+  const seoImage = document.getElementById('blog-seo-image');
+  if (seoImage && !seoImage.value.trim() && url) {
+    seoImage.value = url;
+  }
   blogRenderCoverPreview(url);
 }
 

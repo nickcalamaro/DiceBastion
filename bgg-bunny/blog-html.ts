@@ -89,8 +89,63 @@ function defaultOgImage(siteUrl: string): string {
   return `${siteUrl}/img/DB_Logo_2025.png`;
 }
 
+function isSiteLogoUrl(url: string): boolean {
+  return /DB_Logo_2025\.png/i.test(url);
+}
+
+/** Prefer HTTPS and absolute URLs for crawlers (Google Images, og:image). */
+function ensureAbsoluteImageUrl(url: string, siteUrl: string): string {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  if (/^http:\/\//i.test(trimmed)) return trimmed.replace(/^http:\/\//i, "https://");
+  if (/^https:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("/")) return `${siteUrl.replace(/\/$/, "")}${trimmed}`;
+  return trimmed;
+}
+
+function extractImgUrlsFromHtml(html: string): string[] {
+  if (!html || !html.includes("<img")) return [];
+  const urls: string[] = [];
+  const re = /<img\b[^>]*\bsrc=(["'])([^"']+)\1/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html))) {
+    urls.push(match[2]);
+  }
+  return urls;
+}
+
+/** All indexable images for a post (hero, card, inline), deduped, HTTPS. */
+export function collectPostImageUrls(post: BlogPostRow, siteUrl: string): string[] {
+  const seen = new Set<string>();
+  const ordered = [
+    post.seo_image,
+    heroImage(post),
+    post.featured_image,
+    post.featured_image_card,
+    ...extractImgUrlsFromHtml(post.html || ""),
+  ];
+  const out: string[] = [];
+  for (const raw of ordered) {
+    const abs = ensureAbsoluteImageUrl(raw || "", siteUrl);
+    if (!abs || seen.has(abs) || isSiteLogoUrl(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+  }
+  return out;
+}
+
 function resolvePostOgImage(post: BlogPostRow, siteUrl: string): string {
-  return post.seo_image?.trim() || defaultOgImage(siteUrl);
+  const images = collectPostImageUrls(post, siteUrl);
+  if (images.length > 0) return images[0];
+  return defaultOgImage(siteUrl);
+}
+
+function postJsonLdImages(post: BlogPostRow, siteUrl: string): string | string[] {
+  const images = collectPostImageUrls(post, siteUrl);
+  if (images.length === 0) return defaultOgImage(siteUrl);
+  if (images.length === 1) return images[0];
+  return images;
 }
 
 function latestIsoDate(posts: BlogPostRow[]): string {
@@ -229,8 +284,11 @@ function stripEmbeddedAuthorBlocks(html: string): string {
 }
 
 /** Wrap legacy bare inline images; preserve existing blog-inline-figure blocks. */
-function enhanceBlogBodyImages(html: string): string {
+function enhanceBlogBodyImages(html: string, postTitle = ""): string {
   if (!html || !html.includes("<img")) return html;
+  const fallbackAlt = postTitle.trim()
+    ? `Photo from ${postTitle.trim()}`
+    : "Blog post image";
 
   const figures: string[] = [];
   let work = html.replace(
@@ -243,11 +301,17 @@ function enhanceBlogBodyImages(html: string): string {
 
   work = work.replace(/<img\b([^>]*?)>/gi, (_match, attrs: string) => {
     const altMatch = attrs.match(/\balt=(["'])([\s\S]*?)\1/i);
-    const alt = altMatch ? altMatch[2] : "";
-    const imgTag = `<img${attrs}>`;
+    let alt = altMatch ? altMatch[2] : "";
+    let imgAttrs = attrs;
     if (!alt.trim()) {
-      return `<figure class="blog-inline-figure">${imgTag}</figure>`;
+      alt = fallbackAlt;
+      if (/\balt=/i.test(imgAttrs)) {
+        imgAttrs = imgAttrs.replace(/\balt=(["'])([\s\S]*?)\1/i, `alt="${escapeHtml(alt)}"`);
+      } else {
+        imgAttrs = `${imgAttrs} alt="${escapeHtml(alt)}"`;
+      }
     }
+    const imgTag = `<img${imgAttrs} loading="lazy" decoding="async">`;
     return `<figure class="blog-inline-figure">${imgTag}<figcaption>${escapeHtml(alt)}</figcaption></figure>`;
   });
 
@@ -271,8 +335,10 @@ function stripConflictingInlineStyles(html: string): string {
   });
 }
 
-function prepareBlogBodyHtml(html: string): string {
-  return stripConflictingInlineStyles(enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(html)));
+function prepareBlogBodyHtml(html: string, postTitle = ""): string {
+  return stripConflictingInlineStyles(
+    enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(html), postTitle)
+  );
 }
 
 export function buildTaxonomyIndex(
@@ -1412,6 +1478,7 @@ function renderSiteHeader(siteUrl: string): string {
 interface PageShellOptions {
   jsonLd?: object;
   ogImage?: string;
+  ogImageAlt?: string;
   ogType?: "website" | "article" | "profile";
 }
 
@@ -1423,7 +1490,8 @@ function pageShell(
   bodyHtml: string,
   options: PageShellOptions = {}
 ): string {
-  const ogImage = options.ogImage || defaultOgImage(siteUrl);
+  const ogImage = ensureAbsoluteImageUrl(options.ogImage || defaultOgImage(siteUrl), siteUrl);
+  const ogImageAlt = options.ogImageAlt || SITE_NAME;
   const ogType = options.ogType || "website";
   const fullTitle = `${title} | Dice Bastion`;
   const jsonLd = options.jsonLd ? jsonLdScript(options.jsonLd) : "";
@@ -1439,6 +1507,7 @@ function pageShell(
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="${escapeHtml(canonical)}">
   <link rel="sitemap" type="application/xml" title="Blog Sitemap" href="${escapeHtml(siteUrl)}/posts/sitemap.xml">
+  <link rel="sitemap" type="application/xml" title="Blog Image Sitemap" href="${escapeHtml(siteUrl)}/posts/sitemap-images.xml">
   <meta property="og:site_name" content="${escapeHtml(SITE_NAME)}">
   <meta property="og:locale" content="en_GB">
   <meta property="og:title" content="${escapeHtml(title)}">
@@ -1446,12 +1515,12 @@ function pageShell(
   <meta property="og:url" content="${escapeHtml(canonical)}">
   <meta property="og:type" content="${ogType}">
   <meta property="og:image" content="${escapeHtml(ogImage)}">
-  <meta property="og:image:alt" content="${escapeHtml(SITE_NAME)} logo">
+  <meta property="og:image:alt" content="${escapeHtml(ogImageAlt)}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="${escapeHtml(fullTitle)}">
   <meta name="twitter:description" content="${escapeHtml(description)}">
   <meta name="twitter:image" content="${escapeHtml(ogImage)}">
-  <meta name="twitter:image:alt" content="${escapeHtml(SITE_NAME)} logo">
+  <meta name="twitter:image:alt" content="${escapeHtml(ogImageAlt)}">
   ${jsonLd}
   <script src="${escapeHtml(siteUrl)}/js/appearance.js"></script>
   <style>${PAGE_CSS}</style>
@@ -1717,12 +1786,13 @@ export function renderBlogPostPage(
   const ogImage = resolvePostOgImage(post, siteUrl);
   const tags = renderTagLinks(post.tags || [], siteUrl);
   const category = (post.categories || []).join(", ");
-  const sanitizedBody = prepareBlogBodyHtml(post.html || "");
+  const sanitizedBody = prepareBlogBodyHtml(post.html || "", post.title);
+  const heroSrc = hero ? ensureAbsoluteImageUrl(hero, siteUrl) : "";
   const taxonomy = buildTaxonomyIndex(allPosts.length ? allPosts : [post], authors);
 
   const articleHtml = `
     <article class="blog-article">
-      ${hero ? `<img class="blog-hero-image" src="${escapeHtml(hero)}" alt="${escapeHtml(post.title)}">` : ""}
+      ${heroSrc ? `<img class="blog-hero-image" src="${escapeHtml(heroSrc)}" alt="${escapeHtml(post.title)}" width="885" height="300" loading="eager" decoding="async" fetchpriority="high">` : ""}
       <h1 class="blog-article-title">${escapeHtml(post.title)}</h1>
       <div class="blog-article-meta">
         ${dateStr ? `
@@ -1756,7 +1826,7 @@ export function renderBlogPostPage(
     description,
     datePublished: post.published_at || undefined,
     dateModified: post.updated_at || post.published_at || undefined,
-    image: ogImage,
+    image: postJsonLdImages(post, siteUrl),
     author: authorProfiles.map((profile) => ({
       "@type": "Person",
       name: profile.name,
@@ -1770,6 +1840,7 @@ export function renderBlogPostPage(
   return pageShell(post.title, description, canonical, siteUrl, body, {
     jsonLd,
     ogImage,
+    ogImageAlt: post.title,
     ogType: "article",
   });
 }
@@ -1807,4 +1878,30 @@ export function renderBlogSitemap(
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
+}
+
+/** Google Image Sitemap — helps Image Search discover post photos. */
+export function renderBlogImageSitemap(posts: BlogPostRow[], siteUrl: string): string {
+  const urls: string[] = [];
+
+  for (const post of posts) {
+    const images = collectPostImageUrls(post, siteUrl);
+    if (!images.length) continue;
+
+    const pageUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
+    const imageEntries = images
+      .map(
+        (loc) =>
+          `    <image:image>\n      <image:loc>${escapeHtml(loc)}</image:loc>\n      <image:title>${escapeHtml(post.title)}</image:title>\n    </image:image>`
+      )
+      .join("\n");
+
+    urls.push(`  <url>\n    <loc>${escapeHtml(pageUrl)}</loc>\n${imageEntries}\n  </url>`);
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${urls.join("\n")}
+</urlset>`;
 }
