@@ -7124,6 +7124,19 @@ BunnySDK.net.http.serve(async (request) => {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   try {
+    if (path === "/posts/sitemap-images.xml" && request.method === "GET") {
+      const dbError = dbConfigError();
+      if (dbError)
+        return dbError;
+      const posts = await fetchPublishedPostsForRender();
+      return new Response(renderBlogImageSitemap(posts, blogSiteUrl()), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/xml; charset=utf-8",
+          "Cache-Control": "public, max-age=300"
+        }
+      });
+    }
     if (path.startsWith("/admin/blog")) {
       const authError = await requireAdmin(request);
       if (authError)

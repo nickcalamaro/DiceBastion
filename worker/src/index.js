@@ -11316,7 +11316,34 @@ export default {
       }
 
       if (url.pathname === '/posts/sitemap-images.xml') {
-        return proxyBlogCdn('blog/posts/sitemap-images.xml')
+        const cdnRes = await fetch(`${cdnBase}/blog/posts/sitemap-images.xml`, {
+          headers: { Accept: request.headers.get('Accept') || '*/*' }
+        })
+        if (cdnRes.ok) {
+          const headers = new Headers(cdnRes.headers)
+          headers.set('Cache-Control', 'public, max-age=300, s-maxage=600')
+          return new Response(cdnRes.body, { status: cdnRes.status, headers })
+        }
+        const blogApi = String(env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
+        try {
+          const apiRes = await fetch(`${blogApi}/posts/sitemap-images.xml`, {
+            headers: { Accept: 'application/xml, text/xml, */*' }
+          })
+          if (!apiRes.ok) {
+            return new Response('Not found', { status: apiRes.status === 404 ? 404 : 502 })
+          }
+          const body = await apiRes.text()
+          return new Response(body, {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/xml; charset=utf-8',
+              'Cache-Control': 'public, max-age=300, s-maxage=600'
+            }
+          })
+        } catch (e) {
+          console.error('[posts sitemap-images fallback]', e)
+          return new Response('Blog unavailable', { status: 502 })
+        }
       }
 
       if (parts.length >= 4 && parts[2] === 'tag' && parts[3]) {
