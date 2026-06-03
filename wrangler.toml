@@ -46,6 +46,7 @@ BUNNY_DB_URL = "https://your-bunny-db-api-url"  # Update with your bunny.net dat
 # - MAILERSEND_API_KEY
 # - ADMIN_KEY (for admin endpoints)
 # - BUNNY_DB_TOKEN (for bunny.net database access)
+# - BOOKING_SAME_DAY_WHATSAPP (JSON array of {name, url} for same-day booking WhatsApp links)
 # Legacy SumUp secrets (no longer used, calls go through payments worker):
 # - SUMUP_CLIENT_ID (can be deleted)
 # - SUMUP_CLIENT_SECRET (can be deleted)

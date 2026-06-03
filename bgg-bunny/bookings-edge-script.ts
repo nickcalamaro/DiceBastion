@@ -35,7 +35,8 @@ const CORS_HEADERS = {
 };
 
 const BOOKING_TZ = "Europe/Gibraltar";
-const MEMBER_SAME_DAY_MIN_HOURS = 2;
+const SAME_DAY_CONTACT_MESSAGE =
+  "We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.";
 
 function getGibraltarNow(): { dateStr: string; minutesSinceMidnight: number } {
   const now = new Date();
@@ -73,7 +74,7 @@ function validateBookingAdvance(params: {
   startTime: string;
   isMember: boolean;
 }): { ok: true } | { ok: false; error: string; message: string } {
-  const { dateStr: todayStr, minutesSinceMidnight: nowMinutes } = getGibraltarNow();
+  const { dateStr: todayStr } = getGibraltarNow();
 
   if (params.bookingDate < todayStr) {
     return {
@@ -84,23 +85,13 @@ function validateBookingAdvance(params: {
   }
 
   if (params.bookingDate === todayStr) {
-    if (!params.isMember) {
-      return {
-        ok: false,
-        error: "Same-day bookings are not accepted",
-        message: "Tables must be booked at least the day before. Please contact us if you need a last-minute table.",
-      };
-    }
-
-    const slotStartMinutes = parseTimeToMinutes(params.startTime);
-    const earliestMinutes = nowMinutes + MEMBER_SAME_DAY_MIN_HOURS * 60;
-    if (slotStartMinutes < earliestMinutes) {
-      return {
-        ok: false,
-        error: "member_same_day_too_soon",
-        message: `Members can book same-day tables from ${MEMBER_SAME_DAY_MIN_HOURS} hours before the slot start time.`,
-      };
-    }
+    return {
+      ok: false,
+      error: params.isMember ? "member_same_day_not_allowed" : "same_day_not_allowed",
+      message: params.isMember
+        ? SAME_DAY_CONTACT_MESSAGE
+        : "Tables must be booked at least the day before. Please contact us if you need a last-minute table.",
+    };
   }
 
   return { ok: true };
@@ -467,16 +458,18 @@ async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: 
       return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
     }
 
-    const { dateStr: todayStr, minutesSinceMidnight: nowMinutes } = getGibraltarNow();
+    const { dateStr: todayStr } = getGibraltarNow();
     if (date < todayStr) {
       return jsonResponse({ error: "past_date", message: "Cannot book dates in the past." }, 400);
     }
 
     const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
-    if (date === todayStr && !isMember) {
+    if (date === todayStr) {
       return jsonResponse({
         slots: [],
-        message: "Same-day booking is available to active members only.",
+        message: isMember
+          ? SAME_DAY_CONTACT_MESSAGE
+          : "Tables must be booked at least the day before.",
       });
     }
 
@@ -549,14 +542,7 @@ async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: 
         const count = Number(bookingCount.rows[0]?.count || 0);
         const spotsLeft = maxBookings - count;
 
-        let available = spotsLeft > 0;
-        if (available && date === todayStr && isMember) {
-          const slotStartMinutes = parseTimeToMinutes(slot.start);
-          const earliestMinutes = nowMinutes + MEMBER_SAME_DAY_MIN_HOURS * 60;
-          if (slotStartMinutes < earliestMinutes) {
-            available = false;
-          }
-        }
+        const available = spotsLeft > 0;
         
         return {
           start_time: slot.start,
@@ -652,7 +638,7 @@ async function createBooking(request: Request) {
     if (is_member_booking && !isMember) {
       return jsonResponse({
         error: "membership_required",
-        message: "Active membership is required for member pricing and same-day bookings.",
+        message: "Active membership is required for member pricing.",
       }, 403);
     }
 

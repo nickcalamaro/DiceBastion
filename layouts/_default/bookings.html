@@ -256,8 +256,7 @@
   <div class="alert alert-info" id="booking-advance-notice" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
     <span style="font-size: 1.3rem; flex-shrink: 0;">📅</span>
     <div>
-      <strong>Advance booking required</strong> — Non-members must book at least the day before.
-      <span id="member-same-day-note" style="display: none;"> Active members can also book same-day slots from 2 hours before start time.</span>
+      <strong>Advance booking required</strong> — Bookings must be made at least the day before. For same-day requests, contact our team via WhatsApp.
     </div>
   </div>
 
@@ -352,6 +351,8 @@ let picker = null;
 let userSession = null;
 let membershipStatus = null;
 let paymentModal = null;
+let sameDayBookingModal = null;
+let sameDayContactsCache = null;
 let authModal = null;
 let bookingTurnstileWidgetId = null; // Track Turnstile widget for cleanup
 let userBookings = []; // Cache of user's bookings
@@ -407,7 +408,6 @@ async function checkMembershipStatus() {
   if (!userSession || !userSession.email) {
     membershipStatus = null;
     utils.session.setMembershipStatus(null);
-    updateBookingAdvanceNotice();
     refreshDatePickerMinDate();
     return;
   }
@@ -430,14 +430,98 @@ async function checkMembershipStatus() {
     utils.session.setMembershipStatus(null);
   }
 
-  updateBookingAdvanceNotice();
   refreshDatePickerMinDate();
 }
 
-function updateBookingAdvanceNotice() {
-  const memberNote = document.getElementById('member-same-day-note');
-  if (memberNote) {
-    memberNote.style.display = membershipStatus?.active ? 'inline' : 'none';
+function getGibraltarTodayStr() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Gibraltar' });
+}
+
+function isMemberSameDayDate(dateStr) {
+  return !!(membershipStatus?.active && dateStr && dateStr === getGibraltarTodayStr());
+}
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function fetchSameDayContacts() {
+  if (sameDayContactsCache) return sameDayContactsCache;
+  try {
+    const response = await fetch(`${window.MAIN_API}/bookings/same-day-contacts`);
+    if (response.ok) {
+      const data = await response.json();
+      sameDayContactsCache = Array.isArray(data.contacts) ? data.contacts : [];
+    } else {
+      sameDayContactsCache = [];
+    }
+  } catch (error) {
+    console.error('Failed to load same-day contacts:', error);
+    sameDayContactsCache = [];
+  }
+  return sameDayContactsCache;
+}
+
+function buildSameDayContactsHtml(contacts) {
+  if (!contacts.length) {
+    return '<p class="modal-help-text modal-text-center">Please email contact@dicebastion.com and we will help you arrange your booking.</p>';
+  }
+  return contacts.map((contact) => `
+    <a href="${escapeHtml(contact.url)}" class="modal-btn modal-btn-primary" target="_blank" rel="noopener noreferrer" style="text-decoration: none; display: block; margin-bottom: 0.5rem; text-align: center;">
+      Message ${escapeHtml(contact.name)} on WhatsApp
+    </a>
+  `).join('');
+}
+
+function resetSlotsAndBookingForm() {
+  const slotsSection = document.getElementById('slots-section');
+  const formSection = document.getElementById('booking-form-section');
+  slotsSection.style.opacity = '0.5';
+  slotsSection.style.pointerEvents = 'none';
+  document.getElementById('slots-instruction').style.display = 'block';
+  document.getElementById('slots-container').style.display = 'none';
+  document.getElementById('slots-container').innerHTML = '';
+  formSection.style.opacity = '0.5';
+  formSection.style.pointerEvents = 'none';
+  document.getElementById('booking-form-instruction').style.display = 'block';
+  document.getElementById('booking-form-wrapper').style.display = 'none';
+  selectedSlot = null;
+}
+
+async function showSameDayBookingModal() {
+  const contacts = await fetchSameDayContacts();
+  const linksHtml = buildSameDayContactsHtml(contacts);
+
+  if (sameDayBookingModal) {
+    sameDayBookingModal.close();
+  }
+
+  sameDayBookingModal = new Modal({
+    title: 'Same-day booking',
+    size: 'md',
+    content: `
+      <div class="modal-prose">
+        <p>We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.</p>
+      </div>
+      <div class="modal-actions" style="margin-top: 1rem;">
+        ${linksHtml}
+      </div>
+    `,
+    footer: `
+      <button type="button" class="modal-btn modal-btn-secondary db-modal-close-same-day">Close</button>
+    `,
+    onClose: () => { sameDayBookingModal = null; }
+  });
+
+  sameDayBookingModal.open();
+
+  const closeBtn = sameDayBookingModal.contentEl.querySelector('.db-modal-close-same-day');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => sameDayBookingModal.close());
   }
 }
 
@@ -532,7 +616,7 @@ async function loadTableTypes() {
   memberMessage.classList.add('menu-item');
   memberMessage.innerHTML = `
     <div class="alert alert-success" style="margin-bottom: 1.5rem;">
-      ✓ You're getting free bookings as a GWC Member — including same-day slots from 2 hours before start time. Thank you for your support!
+      ✓ You're getting free bookings as a GWC Member. Thank you for your support!
     </div>
   `;
   
@@ -631,6 +715,14 @@ function selectTableType(type, cardElement) {
 
 async function handleDateChange(date) {
   if (!date || !selectedTableType) return;
+
+  if (isMemberSameDayDate(date)) {
+    if (picker) picker.clear();
+    currentDate = null;
+    resetSlotsAndBookingForm();
+    await showSameDayBookingModal();
+    return;
+  }
   
   currentDate = date;
   selectedSlot = null;
@@ -707,6 +799,11 @@ async function loadAvailableSlots(date) {
 }
 
 function selectSlot(slot, btnElement) {
+  if (isMemberSameDayDate(currentDate)) {
+    showSameDayBookingModal();
+    return;
+  }
+
   document.querySelectorAll('.slot-btn').forEach(btn => btn.classList.remove('selected'));
   btnElement.classList.add('selected');
   selectedSlot = {
@@ -761,6 +858,11 @@ async function handleBookingSubmit(e) {
   
   if (!selectedTableType || !selectedSlot || !currentDate) {
     showAlert('⚠️ Please select a table type, date and time slot', 'error');
+    return;
+  }
+
+  if (isMemberSameDayDate(currentDate)) {
+    await showSameDayBookingModal();
     return;
   }
   

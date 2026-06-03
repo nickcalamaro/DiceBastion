@@ -57,6 +57,7 @@ SHOP_PAGES_ORIGIN = "https://dicebastion-shop.pages.dev"
 # - ADMIN_KEY (for shop admin endpoints)
 # - BGG_API_TOKEN (for BoardGameGeek API access)
 # - GOOGLE_SA_KEY (Google Indexing API service account JSON)
+# - BOOKING_SAME_DAY_WHATSAPP (JSON: [{"name":"Nicky","url":"https://wa.me/+34711042604"}, ...])
 
 # Cron trigger for membership renewals (daily at 2 AM UTC)
 [triggers]

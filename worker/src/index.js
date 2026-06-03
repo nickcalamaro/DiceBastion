@@ -4036,6 +4036,34 @@ app.post('/membership/free-trial/checkout', async (c) => {
   }
 })
 
+/**
+ * Same-day booking WhatsApp contacts (names + wa.me URLs only; stored in Worker secret).
+ * Set via: wrangler secret put BOOKING_SAME_DAY_WHATSAPP
+ * JSON: [{"name":"Nicky","url":"https://wa.me/+34711042604"}, ...]
+ */
+function parseBookingSameDayWhatsapp(env) {
+  const raw = env.BOOKING_SAME_DAY_WHATSAPP
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    const list = Array.isArray(parsed) ? parsed : (parsed.contacts || [])
+    return list
+      .filter((c) => c && typeof c.name === 'string' && typeof c.url === 'string')
+      .map((c) => ({
+        name: String(c.name).trim(),
+        url: String(c.url).trim()
+      }))
+      .filter((c) => c.name && /^https:\/\/wa\.me\/\+[0-9]+$/.test(c.url))
+  } catch (e) {
+    console.error('[bookings/same-day-contacts] invalid BOOKING_SAME_DAY_WHATSAPP JSON:', e)
+    return []
+  }
+}
+
+app.get('/bookings/same-day-contacts', async (c) => {
+  return c.json({ contacts: parseBookingSameDayWhatsapp(c.env) })
+})
+
 app.get('/membership/status', async (c) => {
   const email = c.req.query('email')
   if (!email) return c.json({ error: 'email required' }, 400)
