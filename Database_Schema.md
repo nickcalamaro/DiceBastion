@@ -280,6 +280,50 @@ CREATE INDEX idx_newsletter_unsub_tokens_user ON newsletter_unsub_tokens(user_id
 CREATE INDEX idx_newsletter_drafts_status ON newsletter_drafts(status);
 CREATE INDEX idx_newsletter_drafts_scheduled ON newsletter_drafts(scheduled_for) WHERE status = 'scheduled';
 
+## blog_posts
+
+Admin-managed blog posts stored in D1 and published to Hugo at deploy time via CI content generation.
+
+```sql
+CREATE TABLE blog_posts (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug             TEXT    NOT NULL UNIQUE,
+  title            TEXT    NOT NULL DEFAULT '',
+  html             TEXT    NOT NULL DEFAULT '',
+  excerpt          TEXT,
+  featured_image   TEXT,
+  featured_image_card TEXT,
+  featured_image_hero TEXT,
+  tags             TEXT    NOT NULL DEFAULT '[]',
+  categories       TEXT    NOT NULL DEFAULT '[]',
+  series           TEXT    NOT NULL DEFAULT '[]',
+  authors          TEXT    NOT NULL DEFAULT '[]',
+  status           TEXT    NOT NULL DEFAULT 'draft',  -- 'draft' | 'published'
+  published_at     TEXT,
+  seo_description  TEXT,
+  seo_image        TEXT,
+  created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_blog_posts_status ON blog_posts(status);
+CREATE INDEX idx_blog_posts_published_at ON blog_posts(published_at);
+```
+
+## blog_authors
+
+Author profiles referenced by the `authors` taxonomy on blog posts (maps to Hugo `data/authors/*.yaml`).
+
+```sql
+CREATE TABLE blog_authors (
+  slug       TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  image      TEXT,
+  bio        TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```
+
 ## newsletter_drafts
 
 Server-side persistent newsletter drafts with scheduling support.

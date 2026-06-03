@@ -385,8 +385,9 @@ function openEventModal(eventId, allEvents) {
   let html = '';
   
   if (event.image_url) {
-    html += `<div class="event-detail-hero" style="--modal-bg-image: url('${event.image_url}');">
-      <img src="${event.image_url}" alt="${event.title}">
+    const heroSrc = event.image_url_hero || event.image_url;
+    html += `<div class="event-detail-hero" style="--modal-bg-image: url('${heroSrc}');">
+      <img src="${heroSrc}" alt="${event.title}" width="885" height="300" loading="lazy">
     </div>`;
   }
   

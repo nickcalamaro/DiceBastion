@@ -117,6 +117,7 @@ Place Order
 <p>Please wait while we prepare your payment.</p>
 </div>
 <div id="sumup-card" style="max-width: 500px; margin: 2rem auto;"></div>
+<p class="payment-support-note" style="margin:1rem auto 0;max-width:500px;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>
 </div>
 </div>
 

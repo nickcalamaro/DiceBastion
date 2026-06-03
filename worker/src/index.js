@@ -149,7 +149,17 @@ async function getGoogleAccessToken(env) {
     return _googleTokenCache.token
   }
 
-  const sa = JSON.parse(env.GOOGLE_SA_KEY)
+  let sa
+  try {
+    sa = JSON.parse(env.GOOGLE_SA_KEY)
+  } catch (e) {
+    throw new Error(
+      'GOOGLE_SA_KEY must be valid JSON (paste the full service account .json). Parse error: ' + (e.message || e)
+    )
+  }
+  if (!sa.client_email || !sa.private_key) {
+    throw new Error('GOOGLE_SA_KEY JSON must include client_email and private_key')
+  }
   const jwt = await buildJWT(sa.client_email, sa.private_key)
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -189,12 +199,18 @@ async function notifyGoogleIndexing(env, url, type = 'URL_UPDATED') {
       },
       body: JSON.stringify({ url, type })
     })
-    const body = await res.json()
+    const raw = await res.text()
+    let body
+    try {
+      body = raw ? JSON.parse(raw) : {}
+    } catch {
+      body = { parseError: true, raw: raw.slice(0, 500) }
+    }
     console.log(`Google Indexing [${type}] ${url} → ${res.status}`, JSON.stringify(body))
     return { ok: res.ok, status: res.status, body }
   } catch (err) {
     console.error('Google Indexing error:', err)
-    return { ok: false, status: 0, body: { error: err.message } }
+    return { ok: false, status: 0, body: { error: err.message || String(err) } }
   }
 }
 
@@ -210,11 +226,190 @@ function notifyGoogleIndexingAsync(ctx, env, url, type = 'URL_UPDATED') {
   )
 }
 
+/** Canonical sitemap URLs (also listed in layouts/robots.txt and shop/static/robots.txt). */
+const SEO_SITEMAP_URLS = {
+  main: 'https://dicebastion.com/sitemap.xml',
+  events: 'https://dicebastion.com/events/sitemap.xml',
+  eventImages: 'https://dicebastion.com/events/sitemap-images.xml',
+  blog: 'https://dicebastion.com/posts/sitemap.xml',
+  blogImages: 'https://dicebastion.com/posts/sitemap-images.xml',
+  shopIndex: 'https://shop.dicebastion.com/sitemap.xml',
+  shopProducts: 'https://shop.dicebastion.com/products/sitemap.xml',
+  shopProductImages: 'https://shop.dicebastion.com/products/sitemap-images.xml'
+}
+
+/** Prefer HTTPS and absolute URLs for crawlers (Google Images, Open Graph). */
+function ensureAbsoluteImageUrl(url, baseUrl) {
+  const trimmed = String(url || '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('//')) return `https:${trimmed}`
+  if (/^http:\/\//i.test(trimmed)) return trimmed.replace(/^http:\/\//i, 'https://')
+  if (/^https:\/\//i.test(trimmed)) return trimmed
+  if (trimmed.startsWith('/')) return `${String(baseUrl).replace(/\/$/, '')}${trimmed}`
+  return trimmed
+}
+
+function escapeXmlSitemapText(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function isGenericSeoFallbackImage(url) {
+  return /\/img\/(DB_Logo|default-event|og-image)\./i.test(url)
+}
+
+function extractImgUrlsFromHtml(html) {
+  if (!html || !html.includes('<img')) return []
+  const urls = []
+  const re = /<img\b[^>]*\bsrc=(["'])([^"']+)\1/gi
+  let match
+  while ((match = re.exec(html))) {
+    urls.push(match[2])
+  }
+  return urls
+}
+
+function collectEventImageUrls(event, siteUrl) {
+  const seen = new Set()
+  const out = []
+  const add = (raw) => {
+    const abs = ensureAbsoluteImageUrl(raw, siteUrl)
+    if (!abs || seen.has(abs) || isGenericSeoFallbackImage(abs)) return
+    seen.add(abs)
+    out.push(abs)
+  }
+  add(event.seo_image)
+  add(event.image_url_hero)
+  add(event.image_url)
+  add(event.image_url_card)
+  return out
+}
+
+function resolveEventPrimaryImage(event, siteUrl) {
+  const images = collectEventImageUrls(event, siteUrl)
+  if (images.length) return images[0]
+  return `${siteUrl}/img/default-event.jpg`
+}
+
+function collectProductImageUrls(product, shopUrl) {
+  const seen = new Set()
+  const out = []
+  const add = (raw) => {
+    const abs = ensureAbsoluteImageUrl(raw, shopUrl)
+    if (!abs || seen.has(abs) || isGenericSeoFallbackImage(abs)) return
+    seen.add(abs)
+    out.push(abs)
+  }
+  add(product.image_url)
+  for (const src of extractImgUrlsFromHtml(product.full_description)) add(src)
+  for (const src of extractImgUrlsFromHtml(product.summary)) add(src)
+  for (const src of extractImgUrlsFromHtml(product.description)) add(src)
+  return out
+}
+
+function resolveProductPrimaryImage(product, shopUrl) {
+  const images = collectProductImageUrls(product, shopUrl)
+  if (images.length) return images[0]
+  return `${shopUrl}/img/og-image.png`
+}
+
+function buildUrlsetSitemapXml(urlEntries) {
+  const urls = []
+  for (const e of urlEntries || []) {
+    if (!e?.loc) continue
+    const parts = [`    <loc>${escapeXmlSitemapText(e.loc)}</loc>`]
+    if (e.lastmod) parts.push(`    <lastmod>${escapeXmlSitemapText(e.lastmod)}</lastmod>`)
+    if (e.changefreq) parts.push(`    <changefreq>${escapeXmlSitemapText(e.changefreq)}</changefreq>`)
+    if (e.priority != null && e.priority !== '') parts.push(`    <priority>${escapeXmlSitemapText(String(e.priority))}</priority>`)
+    urls.push(`  <url>\n${parts.join('\n')}\n  </url>`)
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>`
+}
+
+function buildSitemapIndexXml(sitemapLocs) {
+  const items = (sitemapLocs || []).map(
+    (loc) => `  <sitemap>\n    <loc>${escapeXmlSitemapText(loc)}</loc>\n  </sitemap>`
+  )
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${items.join('\n')}\n</sitemapindex>`
+}
+
+function buildImageSitemapXml(entries) {
+  const urls = []
+  for (const entry of entries) {
+    if (!entry.images?.length) continue
+    const imageEntries = entry.images
+      .map(
+        (loc) =>
+          `    <image:image>\n      <image:loc>${escapeXmlSitemapText(loc)}</image:loc>\n      <image:title>${escapeXmlSitemapText(entry.title)}</image:title>\n    </image:image>`
+      )
+      .join('\n')
+    urls.push(`  <url>\n    <loc>${escapeXmlSitemapText(entry.pageUrl)}</loc>\n${imageEntries}\n  </url>`)
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${urls.join('\n')}
+</urlset>`
+}
+
+/**
+ * Ask Google to recrawl a sitemap (same mechanism as daily seo_freshness cron).
+ * Blog does this implicitly by uploading a fresh sitemap.xml to CDN on every publish.
+ */
+async function pingGoogleSitemap(sitemapUrl) {
+  try {
+    const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`
+    const res = await fetch(pingUrl)
+    console.log(`[SEO] Pinged Google sitemap: ${sitemapUrl} → ${res.status}`)
+    return { ok: res.ok, status: res.status }
+  } catch (err) {
+    console.error(`[SEO] Sitemap ping failed for ${sitemapUrl}:`, err)
+    return { ok: false, status: 0, error: err.message || String(err) }
+  }
+}
+
+/**
+ * Fire-and-forget sitemap ping + optional Indexing API (mirrors blog publish side-effects).
+ */
+function notifyContentSeoAsync(ctx, env, { sitemapUrls = [], indexingUrl = null, indexingType = 'URL_UPDATED' } = {}) {
+  if (!ctx?.waitUntil) return
+  ctx.waitUntil((async () => {
+    for (const sitemapUrl of sitemapUrls) {
+      if (sitemapUrl) await pingGoogleSitemap(sitemapUrl)
+    }
+    if (indexingUrl && env.GOOGLE_SA_KEY) {
+      await notifyGoogleIndexing(env, indexingUrl, indexingType)
+    }
+  })().catch(err => console.error('[SEO] Content SEO notify failed:', err)))
+}
+
+/** Map a public page URL to the sitemap(s) that should be pinged after it changes. */
+function inferSitemapUrlsForPage(pageUrl) {
+  try {
+    const u = new URL(pageUrl)
+    if (u.hostname.includes('shop.dicebastion.com')) {
+      return [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages]
+    }
+    if (u.pathname.startsWith('/posts/')) {
+      return [SEO_SITEMAP_URLS.blog, SEO_SITEMAP_URLS.blogImages, SEO_SITEMAP_URLS.main]
+    }
+    if (u.pathname.startsWith('/events/')) {
+      return [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main]
+    }
+  } catch { /* ignore invalid URLs */ }
+  return []
+}
+
 // Rate limiting storage (in-memory for this worker instance)
 const checkoutRateLimits = new Map()
 const membershipCheckoutRateLimits = new Map()
 const eventCheckoutRateLimits = new Map()
 const donationCheckoutRateLimits = new Map()
+const supportContactRateLimits = new Map()
+const sameDayContactsRateLimits = new Map()
 
 // Rate limiting helper function
 function checkRateLimit(ip, rateLimitMap, limit, windowMinutes) {
@@ -514,8 +709,60 @@ async function migrateFreeTrialColumns(db) {
 }
 
 async function hasUsedFreeTrial(db, userId) {
-  const row = await db.prepare('SELECT 1 FROM memberships WHERE user_id = ? AND is_free_trial = 1 LIMIT 1').bind(userId).first()
+  // Only count trials that were actually activated — pending/failed checkout attempts must not block retries.
+  const row = await db.prepare(`
+    SELECT 1 FROM memberships
+    WHERE user_id = ? AND is_free_trial = 1
+      AND status IN ('active', 'expired')
+    LIMIT 1
+  `).bind(userId).first()
   return !!row
+}
+
+/** Cancel abandoned free-trial checkout attempts so users can retry after card failure. */
+async function abandonPendingFreeTrialAttempts(db, userId) {
+  const pending = await db.prepare(`
+    SELECT m.id AS membership_id, t.id AS transaction_id
+    FROM memberships m
+    JOIN transactions t ON t.reference_id = m.id
+    WHERE m.user_id = ? AND m.status = 'pending'
+      AND t.transaction_type = 'free_trial'
+      AND t.payment_status = 'pending'
+  `).bind(userId).all()
+  const rows = pending.results || []
+  if (!rows.length) return 0
+  const now = toIso(new Date())
+  for (const row of rows) {
+    // memberships.status CHECK only allows pending/active/expired — delete never-activated rows
+    await db.prepare(`
+      DELETE FROM memberships WHERE id = ? AND status = 'pending'
+    `).bind(row.membership_id).run()
+    await db.prepare(`
+      UPDATE transactions SET payment_status = 'abandoned', updated_at = ?
+      WHERE id = ? AND payment_status = 'pending'
+    `).bind(now, row.transaction_id).run()
+  }
+  return rows.length
+}
+
+let __eventImageVariantColsReady = false
+/**
+ * Add optional per-layout event image URLs (card grid vs modal hero). Safe to call repeatedly.
+ */
+async function ensureEventImageVariantColumns(db) {
+  if (__eventImageVariantColsReady) return
+  for (const col of ['image_url_card', 'image_url_hero']) {
+    try {
+      await db.prepare(`ALTER TABLE events ADD COLUMN ${col} TEXT`).run()
+      console.log(`[migration] Added events.${col}`)
+    } catch (e) {
+      const msg = String(e.message || e)
+      if (!msg.includes('duplicate column') && !msg.includes('already exists')) {
+        console.error(`[migration] events.${col}:`, e)
+      }
+    }
+  }
+  __eventImageVariantColsReady = true
 }
 
 // ============================================================================
@@ -610,6 +857,44 @@ function isCheckoutPaid(payment) {
 }
 
 /**
+ * Charge the real membership amount after a SETUP_RECURRING_PAYMENT tokenization checkout.
+ * Returns { ok: true, paymentId } or { ok: false, status, paymentId }.
+ */
+async function chargeMembershipAfterTokenization(env, db, { identityId, membershipId, membership, instrumentId, transaction }) {
+  // Unique ref per attempt — SumUp rejects duplicate checkout_reference values.
+  const chargeOrderRef = `${transaction.order_ref}-charge-${crypto.randomUUID().slice(0, 8)}`
+  const chargeDesc = `Dice Bastion ${membership.plan} membership payment`
+  const chargeAmount = transaction.amount
+  const chargeCurrency = transaction.currency || 'GBP'
+
+  let chargeResult
+  try {
+    chargeResult = await chargePaymentInstrument(
+      env, identityId, instrumentId, chargeAmount, chargeCurrency, chargeOrderRef, chargeDesc
+    )
+  } catch (chargeError) {
+    console.error('[chargeMembershipAfterTokenization] Charge error:', chargeError)
+    return { ok: false, status: 'FAILED' }
+  }
+
+  if (!chargeResult || !isCheckoutPaid(chargeResult)) {
+    console.error('[chargeMembershipAfterTokenization] Charge not paid:', chargeResult?.status)
+    return { ok: false, status: chargeResult?.status || 'FAILED', paymentId: chargeResult?.id || null }
+  }
+
+  await db.prepare(`
+    INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                              payment_id, amount, currency, payment_status, created_at)
+    VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
+  `).bind(
+    membershipId, identityId, transaction.email, transaction.name,
+    chargeOrderRef, chargeResult.id, chargeAmount, chargeCurrency, toIso(new Date())
+  ).run()
+
+  return { ok: true, paymentId: chargeResult.id }
+}
+
+/**
  * Activate a membership: compute dates, update DB, optionally save payment instrument
  * and charge the real amount (tokenization flow).
  * Returns { endDate, instrumentId, actualPaymentId } on success.
@@ -634,36 +919,15 @@ async function activateMembership(db, env, { membershipId, membership, paymentId
     // The SETUP_RECURRING_PAYMENT checkout authorized and instantly reimbursed the amount —
     // this is the actual charge that collects payment.
     if (instrumentId && transaction) {
-      const chargeAmount = transaction.amount
-      const chargeCurrency = transaction.currency || 'GBP'
-      const chargeOrderRef = `${transaction.order_ref}-charge`
-      const chargeDesc = `Dice Bastion ${membership.plan} membership payment`
-      
-      console.log(`[activateMembership] Charging real amount £${chargeAmount} via instrument ${instrumentId}`)
-      try {
-        const chargeResult = await chargePaymentInstrument(
-          env, identityId, instrumentId, chargeAmount, chargeCurrency, chargeOrderRef, chargeDesc
-        )
-        if (chargeResult && chargeResult.id) {
-          actualPaymentId = chargeResult.id
-          console.log('[activateMembership] Real charge successful:', actualPaymentId)
-          
-          // Record the actual charge as a separate transaction
-          await db.prepare(`
-            INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
-                                      payment_id, amount, currency, payment_status, created_at)
-            VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
-          `).bind(
-            membershipId, identityId, transaction.email, transaction.name,
-            chargeOrderRef, actualPaymentId, chargeAmount, chargeCurrency, toIso(new Date())
-          ).run()
-        } else {
-          console.error('[activateMembership] Charge returned no id — membership still activates but payment may be refunded')
-        }
-      } catch (chargeError) {
-        console.error('[activateMembership] Error charging saved instrument:', chargeError)
-        // Continue with activation — the setup payment was successful even if actual charge failed
+      console.log(`[activateMembership] Charging real amount £${transaction.amount} via instrument ${instrumentId}`)
+      const charge = await chargeMembershipAfterTokenization(env, db, {
+        identityId, membershipId, membership, instrumentId, transaction
+      })
+      if (!charge.ok) {
+        throw new Error(`membership_charge_failed:${charge.status || 'FAILED'}`)
       }
+      actualPaymentId = charge.paymentId
+      console.log('[activateMembership] Real charge successful:', actualPaymentId)
     }
   }
   
@@ -3669,16 +3933,26 @@ app.post('/membership/checkout', async (c) => {
     // Ensure schema is up to date
     await migrateToTransactions(c.env.DB)
 
-    // Idempotency check in transactions table
+    // Idempotency check in transactions table (same key = same checkout for double-submit protection)
     const order_ref = crypto.randomUUID()
     if (idem){
       const existing = await c.env.DB.prepare(`
-        SELECT t.*, m.id as membership_id FROM transactions t
+        SELECT t.*, m.id as membership_id, m.plan as membership_plan FROM transactions t
         JOIN memberships m ON m.id = t.reference_id
         WHERE t.transaction_type = 'membership' AND t.user_id = ? AND t.idempotency_key = ?
         ORDER BY t.id DESC LIMIT 1
       `).bind(ident.id, idem).first()
       if (existing && existing.checkout_id){
+        if (existing.membership_plan && existing.membership_plan !== plan) {
+          console.warn('[membership/checkout] Idempotency key reused with different plan:', { idem, existingPlan: existing.membership_plan, requestedPlan: plan })
+          return c.json({ error: 'idempotency_plan_mismatch' }, 409)
+        }
+        console.log('[membership/checkout] Idempotent reuse:', {
+          orderRef: existing.order_ref,
+          sumupCheckoutId: existing.checkout_id,
+          idempotencyKey: idem,
+          plan
+        })
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
     }    // Auto-renewal is always enabled — users get a 7-day reminder email before renewal
@@ -3719,8 +3993,18 @@ app.post('/membership/checkout', async (c) => {
     if (!checkout.id) {
       console.error('membership checkout missing id', checkout)
       return c.json({ error: 'sumup_missing_id' }, 502)
-    }    // Store payment details in transactions table
-    console.log('Creating transaction record with order_ref:', order_ref, 'checkout_id:', checkout.id)
+    }
+    // Store payment details in transactions table
+    // order_ref is sent to SumUp as checkout_reference; checkout.id is the SumUp checkout UUID for the widget
+    console.log('[membership/checkout] Created checkout:', {
+      orderRef: order_ref,
+      sumupCheckoutId: checkout.id,
+      idempotencyKey: idem || null,
+      plan,
+      userId: ident.id,
+      amount,
+      currency
+    })
     await c.env.DB.prepare(`
       INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
                                 checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
@@ -3783,11 +4067,16 @@ app.post('/membership/free-trial/checkout', async (c) => {
       return c.json({ error: 'already_active', message: 'You already have an active membership.' }, 400)
     }
 
+    await abandonPendingFreeTrialAttempts(c.env.DB, ident.id)
+
     const svc = await getServiceForPlan(c.env.DB, plan)
     if (!svc) return c.json({ error: 'unknown_plan' }, 400)
     const amount = Number(svc.amount)
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'invalid_amount' }, 400)
     const currency = svc.currency || c.env.CURRENCY || 'GBP'
+    // Free trials always use a £1 card verification hold (instantly reimbursed by SumUp), not the plan price.
+    const setupOverride = Number(c.env.FREE_TRIAL_SETUP_AUTH_AMOUNT)
+    const cardVerifyAmount = Number.isFinite(setupOverride) && setupOverride > 0 ? setupOverride : 1
 
     await migrateToTransactions(c.env.DB)
 
@@ -3804,8 +4093,8 @@ app.post('/membership/free-trial/checkout', async (c) => {
       }
     }
 
-    const cols = ['user_id', 'plan', 'status', 'auto_renew', 'order_ref', 'is_free_trial']
-    const vals = [ident.id, plan, 'pending', 1, order_ref, 1]
+    const cols = ['user_id', 'plan', 'status', 'auto_renew', 'order_ref']
+    const vals = [ident.id, plan, 'pending', 1, order_ref]
     const placeholders = cols.map(() => '?').join(',')
     const mResult = await c.env.DB.prepare(`INSERT INTO memberships (${cols.join(',')}) VALUES (${placeholders}) RETURNING id`).bind(...vals).first()
     const membershipId = mResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
@@ -3815,19 +4104,28 @@ app.post('/membership/free-trial/checkout', async (c) => {
     try {
       customerId = await getOrCreateSumUpCustomer(c.env, ident)
       checkout = await createCheckout(c.env, {
-        amount,
+        amount: cardVerifyAmount,
         currency,
         orderRef: order_ref,
         title: `Dice Bastion ${plan} membership free trial`,
         description: `Card setup for ${plan} membership free trial`,
         savePaymentInstrument: true,
-        customerId
+        customerId,
+        isFreeTrialSetup: true
+      })
+      console.log('[free-trial/checkout] Card verification amount:', {
+        plan,
+        planAmount: amount,
+        cardVerifyAmount,
+        orderRef: order_ref
       })
     } catch (err) {
+      await c.env.DB.prepare('DELETE FROM memberships WHERE id = ? AND status = ?').bind(membershipId, 'pending').run()
       console.error('free trial checkout error', err)
       return c.json({ error: 'sumup_checkout_failed', message: String(err?.message || err) }, 502)
     }
     if (!checkout.id) {
+      await c.env.DB.prepare('DELETE FROM memberships WHERE id = ? AND status = ?').bind(membershipId, 'pending').run()
       console.error('free trial checkout missing id', checkout)
       return c.json({ error: 'sumup_missing_id' }, 502)
     }
@@ -3847,6 +4145,7 @@ app.post('/membership/free-trial/checkout', async (c) => {
       membershipId,
       userId: ident.id,
       amount,
+      cardVerifyAmount,
       currency,
       customerId: customerId || null,
       isFreeTrial: true
@@ -3855,6 +4154,74 @@ app.post('/membership/free-trial/checkout', async (c) => {
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
     console.error('free trial checkout error', e)
     return c.json(debugMode ? { error: 'internal_error', detail: String(e), stack: String(e?.stack || '') } : { error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * Same-day booking WhatsApp contacts (names + wa.me URLs only; stored in Worker secret).
+ * Set via: wrangler secret put BOOKING_SAME_DAY_WHATSAPP
+ * JSON: [{"name":"Nicky","url":"https://wa.me/+34711042604"}, ...]
+ */
+function parseBookingSameDayWhatsapp(env) {
+  const raw = env.BOOKING_SAME_DAY_WHATSAPP
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    const list = Array.isArray(parsed) ? parsed : (parsed.contacts || [])
+    return list
+      .filter((c) => c && typeof c.name === 'string' && typeof c.url === 'string')
+      .map((c) => ({
+        name: String(c.name).trim(),
+        url: String(c.url).trim()
+      }))
+      .filter((c) => c.name && /^https:\/\/wa\.me\/\+[0-9]+$/.test(c.url))
+  } catch (e) {
+    console.error('[bookings/same-day-contacts] invalid BOOKING_SAME_DAY_WHATSAPP JSON:', e)
+    return []
+  }
+}
+
+app.post('/bookings/same-day-contacts', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, sameDayContactsRateLimits, 10, 1)) {
+      return c.json({
+        error: 'rate_limit_exceeded',
+        message: 'Too many requests. Please wait a minute and try again.'
+      }, 429)
+    }
+
+    const body = await c.req.json().catch(() => ({}))
+    if (body.website) return c.json({ contacts: [] })
+
+    const email = clampStr(body.email, 320).toLowerCase()
+    const turnstileToken = body.turnstileToken
+
+    if (!email || !EMAIL_RE.test(email)) {
+      return c.json({ error: 'email_required', message: 'A valid member email is required.' }, 400)
+    }
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
+    if (!tsOk) {
+      return c.json({
+        error: 'turnstile_failed',
+        message: 'Security check failed. Please refresh and try again.'
+      }, 403)
+    }
+
+    const ident = await findIdentityByEmail(c.env.DB, email)
+    if (!ident) {
+      return c.json({ error: 'membership_required', message: 'Active membership is required.' }, 403)
+    }
+    const active = await getActiveMembership(c.env.DB, ident.id)
+    if (!active) {
+      return c.json({ error: 'membership_required', message: 'Active membership is required.' }, 403)
+    }
+
+    return c.json({ contacts: parseBookingSameDayWhatsapp(c.env) })
+  } catch (e) {
+    console.error('[bookings/same-day-contacts] error:', e)
+    return c.json({ error: 'internal_error', message: 'Could not load contact options.' }, 500)
   }
 })
 
@@ -3985,47 +4352,25 @@ app.get('/membership/confirm', async (c) => {
     // We need to make an actual charge using the saved payment instrument
     if (instrumentId && payment.purpose === 'SETUP_RECURRING_PAYMENT') {
       console.log('Setup payment detected - charging saved instrument for actual membership payment')
-      try {
-        const chargeResult = await chargePaymentInstrument(
-          c.env,
-          identityId,
-          instrumentId,
-          transaction.amount,
-          transaction.currency || 'GBP',
-          `${transaction.order_ref}-charge`,
-          `Dice Bastion ${pending.plan} membership payment`
-        )
-        
-        if (chargeResult && chargeResult.id) {
-          actualPaymentId = chargeResult.id
-          console.log('Successfully charged saved instrument:', actualPaymentId)
-          
-          // Card details are already saved by the payments worker in savePaymentInstrument
-          // No need to fetch them again here
-          
-          // Create a transaction record for the actual charge
-          await c.env.DB.prepare(`
-            INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
-                                      payment_id, amount, currency, payment_status, created_at)
-            VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
-          `).bind(
-            pending.id,
-            identityId,
-            transaction.email,
-            transaction.name,
-            `${transaction.order_ref}-charge`,
-            actualPaymentId,
-            transaction.amount,
-            transaction.currency || 'GBP',
-            toIso(new Date())
-          ).run()
-        } else {
-          console.error('Failed to charge saved instrument - membership will still activate but payment may be refunded')
-        }
-      } catch (chargeError) {
-        console.error('Error charging saved instrument:', chargeError)
-        // Continue with activation - the setup payment was successful even if actual charge failed
+      const charge = await chargeMembershipAfterTokenization(c.env, c.env.DB, {
+        identityId,
+        membershipId: pending.id,
+        membership: pending,
+        instrumentId,
+        transaction
+      })
+      if (!charge.ok) {
+        console.error('[membership/confirm] Real charge failed:', charge.status)
+        return c.json({
+          ok: false,
+          status: charge.status === 'DECLINED' ? 'DECLINED' : 'FAILED',
+          message: charge.status === 'DECLINED'
+            ? 'Your card was declined. Please use a different payment method.'
+            : 'Payment failed. Please check your card details and try again.'
+        })
       }
+      actualPaymentId = charge.paymentId
+      console.log('Successfully charged saved instrument:', actualPaymentId)
     }
   }
   
@@ -4163,6 +4508,16 @@ app.get('/membership/free-trial/confirm', async (c) => {
     const txStatuses = payment?.transactions?.map(t => t.status) || []
     const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
     const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    if ((hasFailed || hasDeclined) && pending.status === 'pending') {
+      const now = toIso(new Date())
+      await c.env.DB.prepare(`
+        DELETE FROM memberships WHERE id = ? AND status = 'pending'
+      `).bind(pending.id).run()
+      await c.env.DB.prepare(`
+        UPDATE transactions SET payment_status = 'failed', updated_at = ?
+        WHERE id = ? AND payment_status = 'pending'
+      `).bind(now, transaction.id).run()
+    }
     return c.json({
       ok: false,
       status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
@@ -4293,6 +4648,85 @@ async function migrateSponsoredMemberships(db) {
 }
 
 /**
+ * Confirm a sponsorship payment and add it to the pool.
+ * Shared by GET /membership/sponsor/confirm and the SumUp webhook.
+ * @returns {{ ok: true, status: string, message: string, alreadyConfirmed?: boolean }}
+ */
+async function confirmSponsorshipPayment(db, env, orderRef, paymentOverride = null) {
+  await migrateSponsoredMemberships(db)
+
+  const transaction = await db.prepare(
+    `SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship'`
+  ).bind(orderRef).first()
+  if (!transaction) {
+    return { ok: false, error: 'order_not_found', status: 404 }
+  }
+
+  const sm = await db.prepare(
+    `SELECT * FROM sponsored_memberships WHERE id = ?`
+  ).bind(transaction.reference_id).first()
+  if (!sm) {
+    return { ok: false, error: 'sponsorship_not_found', status: 404 }
+  }
+
+  if (sm.status === 'available') {
+    return { ok: true, status: 'active', message: 'Sponsorship already active', alreadyConfirmed: true }
+  }
+  if (sm.status !== 'pending') {
+    return { ok: false, error: 'invalid_sponsorship_status', status: 409, sponsorshipStatus: sm.status }
+  }
+
+  // Backfill user_id on legacy rows that were created before identity linking.
+  if (!transaction.user_id && transaction.email) {
+    const ident = await getOrCreateIdentity(db, transaction.email, transaction.name || null)
+    if (ident?.id) {
+      await db.prepare('UPDATE transactions SET user_id = ?, updated_at = ? WHERE id = ?')
+        .bind(ident.id, toIso(new Date()), transaction.id).run()
+      transaction.user_id = ident.id
+    }
+  }
+
+  let payment = paymentOverride
+  if (!payment) {
+    try {
+      payment = await fetchPayment(env, transaction.checkout_id)
+    } catch {
+      return { ok: false, error: 'verify_failed', status: 400 }
+    }
+  }
+
+  if (!isCheckoutPaid(payment)) {
+    const currentStatus = payment?.status || 'PENDING'
+    const txStatuses = payment?.transactions?.map(t => t.status) || []
+    const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+    const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    return {
+      ok: false,
+      error: 'payment_not_paid',
+      status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
+      message: hasFailed ? 'Payment failed. Please try again.' :
+               hasDeclined ? 'Your card was declined.' : 'Payment is still processing.'
+    }
+  }
+
+  const paymentId = payment.id || payment.payment_id || null
+  const now = toIso(new Date())
+
+  await db.batch([
+    db.prepare(`UPDATE sponsored_memberships SET status = 'available' WHERE id = ?`).bind(sm.id),
+    db.prepare(`
+      UPDATE transactions SET payment_status = 'PAID', payment_id = ?, updated_at = ? WHERE id = ?
+    `).bind(paymentId, now, transaction.id)
+  ])
+
+  return {
+    ok: true,
+    status: 'active',
+    message: 'Thank you! Your sponsorship has been added to the pool.'
+  }
+}
+
+/**
  * GET /membership/sponsor/pool
  * Returns the number of available sponsored memberships.
  */
@@ -4335,6 +4769,9 @@ app.post('/membership/sponsor/checkout', async (c) => {
 
     await migrateSponsoredMemberships(c.env.DB)
 
+    const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name, 200))
+    if (!ident?.id) return c.json({ error: 'identity_error' }, 500)
+
     // Use the quarterly plan price
     const svc = await getServiceForPlan(c.env.DB, 'quarterly')
     if (!svc) return c.json({ error: 'plan_not_configured' }, 400)
@@ -4343,14 +4780,14 @@ app.post('/membership/sponsor/checkout', async (c) => {
 
     const order_ref = crypto.randomUUID()
 
-    // Idempotency check
+    // Idempotency check (aligned with membership/ticket checkout flows)
     if (idem) {
       const existing = await c.env.DB.prepare(
         `SELECT t.order_ref, t.checkout_id FROM transactions t
          JOIN sponsored_memberships sm ON sm.id = t.reference_id
-         WHERE t.transaction_type = 'sponsorship' AND t.email = ? AND t.idempotency_key = ?
+         WHERE t.transaction_type = 'sponsorship' AND t.user_id = ? AND t.idempotency_key = ?
          ORDER BY t.id DESC LIMIT 1`
-      ).bind(email, idem).first()
+      ).bind(ident.id, idem).first()
       if (existing?.checkout_id) {
         return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
       }
@@ -4383,8 +4820,8 @@ app.post('/membership/sponsor/checkout', async (c) => {
     await c.env.DB.prepare(
       `INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
                                  checkout_id, amount, currency, payment_status, idempotency_key, consent_at)
-       VALUES ('sponsorship', ?, NULL, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
-    ).bind(smId, email, name || null, order_ref, checkout.id,
+       VALUES ('sponsorship', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+    ).bind(smId, ident.id, email, clampStr(name, 200) || null, order_ref, checkout.id,
            String(amount), currency, idem || null, toIso(new Date())).run()
 
     return c.json({ orderRef: order_ref, checkoutId: checkout.id })
@@ -4404,52 +4841,17 @@ app.get('/membership/sponsor/confirm', async (c) => {
   if (!orderRef || !UUID_RE.test(orderRef)) return c.json({ ok: false, error: 'invalid_orderRef' }, 400)
 
   try {
-    await migrateSponsoredMemberships(c.env.DB)
-
-    const transaction = await c.env.DB.prepare(
-      `SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship'`
-    ).bind(orderRef).first()
-    if (!transaction) return c.json({ ok: false, error: 'order_not_found' }, 404)
-
-    const sm = await c.env.DB.prepare(
-      `SELECT * FROM sponsored_memberships WHERE id = ?`
-    ).bind(transaction.reference_id).first()
-    if (!sm) return c.json({ ok: false, error: 'sponsorship_not_found' }, 404)
-
-    // Already confirmed
-    if (sm.status === 'available') {
-      return c.json({ ok: true, status: 'active', message: 'Sponsorship already active' })
-    }
-
-    // Verify payment
-    let payment
-    try { payment = await fetchPayment(c.env, transaction.checkout_id) }
-    catch { return c.json({ ok: false, error: 'verify_failed' }, 400) }
-
-    if (!isCheckoutPaid(payment)) {
-      const currentStatus = payment?.status || 'PENDING'
-      const txStatuses = payment?.transactions?.map(t => t.status) || []
-      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
-      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    const result = await confirmSponsorshipPayment(c.env.DB, c.env, orderRef)
+    if (!result.ok) {
+      const httpStatus = result.status && typeof result.status === 'number' ? result.status : 400
       return c.json({
         ok: false,
-        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
-        message: hasFailed ? 'Payment failed. Please try again.' :
-                 hasDeclined ? 'Your card was declined.' : 'Payment is still processing.'
-      })
+        error: result.error,
+        status: typeof result.status === 'string' ? result.status : undefined,
+        message: result.message
+      }, httpStatus === 404 || httpStatus === 409 ? httpStatus : 400)
     }
-
-    // Mark sponsorship as available (in the pool)
-    await c.env.DB.prepare(
-      `UPDATE sponsored_memberships SET status = 'available' WHERE id = ?`
-    ).bind(sm.id).run()
-
-    // Update transaction status
-    await c.env.DB.prepare(
-      `UPDATE transactions SET payment_status = 'PAID', payment_id = ?, updated_at = ? WHERE id = ?`
-    ).bind(payment.id, toIso(new Date()), transaction.id).run()
-
-    return c.json({ ok: true, status: 'active', message: 'Thank you! Your sponsorship has been added to the pool.' })
+    return c.json({ ok: true, status: result.status, message: result.message })
   } catch (e) {
     console.error('[sponsor/confirm] Error:', e)
     return c.json({ ok: false, error: 'internal_error' }, 500)
@@ -4598,10 +5000,18 @@ app.post('/webhooks/sumup', async (c) => {
   // Detect if this is a bundle purchase (BUNDLE-{eventId}-{uuid})
   const isBundle = orderRef.startsWith('BUNDLE-')
   const isShopOrder = orderRef.startsWith('ORD-')
+  const isDonation = orderRef.startsWith('DON-')
+
+  const sponsorshipTx = !isBundle && !isShopOrder && !isDonation
+    ? await c.env.DB.prepare(
+        `SELECT id FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship' LIMIT 1`
+      ).bind(orderRef).first()
+    : null
+  const isSponsorship = !!sponsorshipTx
 
   // Check for duplicate webhook processing
   const webhookId = `${paymentId}-${orderRef}`
-  const entityType = isBundle ? 'bundle' : isShopOrder ? 'shop_order' : 'membership'
+  const entityType = isBundle ? 'bundle' : isShopOrder ? 'shop_order' : isDonation ? 'donation' : isSponsorship ? 'sponsorship' : 'membership'
   const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, entityType, orderRef)
   if (isDuplicate) {
     console.log(`Duplicate ${entityType} webhook received, skipping processing`)
@@ -4657,6 +5067,25 @@ app.post('/webhooks/sumup', async (c) => {
     return c.json({ ok: true })
   }
 
+  // ==================== SPONSORSHIP WEBHOOK ====================
+  if (isSponsorship) {
+    console.log('[webhook-sponsorship] Processing sponsorship order:', orderRef)
+    try {
+      const result = await confirmSponsorshipPayment(c.env.DB, c.env, orderRef, payment)
+      if (!result.ok && result.error !== 'payment_not_paid') {
+        console.error('[webhook-sponsorship] Confirm failed:', result.error, orderRef)
+        return c.json({ ok: false, error: result.error }, result.status === 404 ? 404 : 400)
+      }
+      if (result.ok) {
+        console.log('[webhook-sponsorship] Sponsorship confirmed for order:', orderRef)
+      }
+    } catch (err) {
+      console.error('[webhook-sponsorship] Failed to confirm sponsorship:', err)
+      return c.json({ ok: false, error: String(err?.message || err) }, 400)
+    }
+    return c.json({ ok: true })
+  }
+
   // ==================== REGULAR MEMBERSHIP WEBHOOK ====================
   const pending = await c.env.DB.prepare('SELECT * FROM memberships WHERE order_ref = ?').bind(orderRef).first()
   if (!pending) return c.json({ ok: false, error: 'order_not_found' }, 404)
@@ -4669,7 +5098,10 @@ app.post('/webhooks/sumup', async (c) => {
   const identityId = pending.user_id
 
   // ==================== FREE TRIAL WEBHOOK PATH ====================
-  if (pending.is_free_trial === 1) {
+  const trialTxForWebhook = await c.env.DB.prepare(`
+    SELECT id FROM transactions WHERE order_ref = ? AND transaction_type = 'free_trial' LIMIT 1
+  `).bind(orderRef).first()
+  if (trialTxForWebhook) {
     console.log('[webhook-free-trial] Processing free trial activation for order:', orderRef)
     const instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
     const trialEnd = addMonths(now, 1)
@@ -4728,43 +5160,19 @@ app.post('/webhooks/sumup', async (c) => {
       // If tokenization checkout, charge the real amount with the saved instrument
       if (payment.purpose === 'SETUP_RECURRING_PAYMENT' && transaction) {
         console.log('[webhook] Tokenization detected - charging saved instrument for actual membership payment')
-        try {
-          const chargeResult = await chargePaymentInstrument(
-            c.env,
-            identityId,
-            instrumentId,
-            transaction.amount,
-            transaction.currency || 'GBP',
-            `${orderRef}-charge`,
-            `Dice Bastion ${pending.plan} membership payment`
-          )
-          
-          if (chargeResult && chargeResult.id) {
-            actualPaymentId = chargeResult.id
-            console.log('[webhook] Successfully charged saved instrument:', actualPaymentId)
-            
-            // Create a transaction record for the actual charge
-            await c.env.DB.prepare(`
-              INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref, 
-                                        payment_id, amount, currency, payment_status, created_at)
-              VALUES ('membership_charge', ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)
-            `).bind(
-              pending.id,
-              identityId,
-              transaction.email,
-              transaction.name,
-              `${orderRef}-charge`,
-              actualPaymentId,
-              transaction.amount,
-              transaction.currency || 'GBP',
-              toIso(new Date())
-            ).run()
-          } else {
-            console.error('[webhook] Failed to charge saved instrument - tokenization succeeded but real payment failed')
-          }
-        } catch (chargeError) {
-          console.error('[webhook] Error charging saved instrument:', chargeError)
+        const charge = await chargeMembershipAfterTokenization(c.env, c.env.DB, {
+          identityId,
+          membershipId: pending.id,
+          membership: pending,
+          instrumentId,
+          transaction
+        })
+        if (!charge.ok) {
+          console.error('[webhook] Real charge failed — leaving membership pending:', charge.status)
+          return c.json({ ok: true, status: 'charge_failed', chargeStatus: charge.status })
         }
+        actualPaymentId = charge.paymentId
+        console.log('[webhook] Successfully charged saved instrument:', actualPaymentId)
       }
     } else {
       console.warn('[webhook] Failed to save payment instrument, but membership activation will continue')
@@ -4950,7 +5358,8 @@ function generateEventSeoPage(event) {
   const dt = event.event_datetime || '';
   const endTime = event.end_time || '';  // HH:MM format
   const loc = e(event.location || 'Gibraltar Warhammer Club');
-  const img = event.seo_image || event.image_url || `${site}/img/default-event.jpg`;
+  const eventImages = collectEventImageUrls(event, site);
+  const img = resolveEventPrimaryImage(event, site);
   const raw = event.seo_description || event.description || '';
   const desc = e(raw.length > 160 ? raw.substring(0, 157) + '...' : raw);
   const fullDesc = e(raw);
@@ -5027,7 +5436,7 @@ function generateEventSeoPage(event) {
         'addressCountry': 'GI'
       }
     },
-    'image': [img],
+    'image': eventImages.length ? eventImages : [img],
     'url': url,
     'offers': {
       '@type': 'Offer',
@@ -5064,12 +5473,15 @@ function generateEventSeoPage(event) {
 <meta name="description" content="${desc}">
 <meta property="og:type" content="event"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${title}"><meta property="og:description" content="${desc}">
-<meta property="og:image" content="${img}"><meta property="og:site_name" content="Dice Bastion">
+<meta property="og:image" content="${img}"><meta property="og:image:alt" content="${title}">
+<meta property="og:site_name" content="Dice Bastion">
 <meta property="event:start_time" content="${dt}"><meta property="event:location" content="${loc}">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}">
 <meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
+<meta name="twitter:image:alt" content="${title}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <link rel="canonical" href="${url}">
+<link rel="sitemap" type="application/xml" title="Event Image Sitemap" href="${site}/events/sitemap-images.xml">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
@@ -5095,7 +5507,7 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 </head><body>
 <div class="header"><a href="${site}">Dice Bastion</a></div>
 <div class="card">
-${img ? `<img src="${img}" alt="${title}">` : ''}
+${img ? `<img src="${img}" alt="${title}" width="885" height="300" loading="eager" decoding="async" fetchpriority="high">` : ''}
 <div class="card-body">
 <h1>${title}</h1>
 ${fullDesc ? `<p class="desc">${fullDesc}</p>` : ''}
@@ -5115,6 +5527,7 @@ ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span cl
 // Get all active events (public endpoint)
 app.get('/events', async c => {
   try {
+    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -5133,6 +5546,8 @@ app.get('/events', async c => {
         capacity,
         tickets_sold,
         image_url,
+        image_url_card,
+        image_url_hero,
         requires_purchase,
         is_recurring,
         recurrence_pattern,
@@ -5481,48 +5896,69 @@ app.get('/events/confirm', async c => {
 })
 
 // Dynamic sitemap for event URLs (so Google can discover them)
+function formatEventSitemapLastMod(event, today, thirtyDaysAgo) {
+  let lastmod
+  if (event.updated_at) {
+    lastmod = new Date(event.updated_at).toISOString().split('T')[0]
+  } else if (event.created_at) {
+    lastmod = new Date(event.created_at).toISOString().split('T')[0]
+  } else if (event.event_datetime) {
+    lastmod = new Date(event.event_datetime).toISOString().split('T')[0]
+  } else {
+    lastmod = today
+  }
+  const lastmodDate = new Date(lastmod)
+  if (event.is_recurring || lastmodDate < thirtyDaysAgo) {
+    lastmod = today
+  }
+  return lastmod
+}
+
+function buildEventsSitemapXml(events) {
+  const site = 'https://dicebastion.com'
+  const today = new Date().toISOString().split('T')[0]
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const rows = events || []
+
+  let indexLastmod = today
+  for (const e of rows) {
+    const lm = formatEventSitemapLastMod(e, today, thirtyDaysAgo)
+    if (lm > indexLastmod) indexLastmod = lm
+  }
+
+  const urls = [
+    `  <url>\n    <loc>${site}/events/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>`
+  ]
+
+  for (const e of rows) {
+    const lastmod = formatEventSitemapLastMod(e, today, thirtyDaysAgo)
+    urls.push(
+      `  <url>\n    <loc>${site}/events/${encodeURIComponent(e.slug)}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+    )
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>`
+}
+
 app.get('/events/sitemap.xml', async c => {
   try {
     const { results } = await c.env.DB.prepare(`
       SELECT slug, event_datetime, updated_at, created_at, is_recurring
       FROM events
       WHERE is_active = 1
+        AND slug IS NOT NULL
+        AND TRIM(slug) != ''
         AND (event_datetime >= datetime('now') OR is_recurring = 1)
       ORDER BY event_datetime ASC
     `).all()
 
-    const today = new Date().toISOString().split('T')[0]
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-
-    const urls = (results || []).map(e => {
-      const loc = `https://dicebastion.com/events/${e.slug}`
-      // Pick the best lastmod: updated_at > created_at > event_datetime > today
-      let lastmod
-      if (e.updated_at) {
-        lastmod = new Date(e.updated_at).toISOString().split('T')[0]
-      } else if (e.created_at) {
-        lastmod = new Date(e.created_at).toISOString().split('T')[0]
-      } else if (e.event_datetime) {
-        lastmod = new Date(e.event_datetime).toISOString().split('T')[0]
-      } else {
-        lastmod = today
-      }
-      // For recurring events or any event with a stale lastmod (>30 days old),
-      // use today so Google doesn't deprioritize crawling
-      const lastmodDate = new Date(lastmod)
-      if (e.is_recurring || lastmodDate < thirtyDaysAgo) {
-        lastmod = today
-      }
-      return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
-    }).join('\n')
-
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
+    const xml = buildEventsSitemapXml(results || [])
 
     return new Response(xml, {
       status: 200,
       headers: {
         'Content-Type': 'application/xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
       }
     })
   } catch (err) {
@@ -5530,6 +5966,108 @@ app.get('/events/sitemap.xml', async c => {
     return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
       status: 200,
       headers: { 'Content-Type': 'application/xml' }
+    })
+  }
+})
+
+const XML_SITEMAP_RESPONSE_HEADERS = {
+  'Content-Type': 'application/xml; charset=utf-8',
+  'Cache-Control': 'public, max-age=300, s-maxage=300'
+}
+
+const EMPTY_IMAGE_SITEMAP_XML = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"></urlset>'
+
+async function fetchBlogSitemapEntries(env) {
+  const blogApi = String(env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
+  const res = await fetch(`${blogApi}/posts/sitemap-entries.json`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'DiceBastion-sitemap/1' }
+  })
+  if (!res.ok) throw new Error(`blog sitemap entries ${res.status}`)
+  const data = await res.json()
+  return Array.isArray(data?.urls) ? data.urls : []
+}
+
+async function fetchBlogImageSitemapEntries(env) {
+  const blogApi = String(env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
+  const res = await fetch(`${blogApi}/posts/sitemap-image-entries.json`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'DiceBastion-sitemap/1' }
+  })
+  if (!res.ok) throw new Error(`blog image sitemap entries ${res.status}`)
+  const data = await res.json()
+  return Array.isArray(data?.entries) ? data.entries : []
+}
+
+/** Blog sitemap index — GSC type "Sitemap Index" (like shop.dicebastion.com/sitemap.xml). */
+app.get('/posts/sitemap-index.xml', async c => {
+  const site = 'https://dicebastion.com'
+  const xml = buildSitemapIndexXml([
+    `${site}/posts/sitemap.xml`,
+    `${site}/posts/sitemap-images.xml`
+  ])
+  return new Response(xml, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
+})
+
+/** Blog page sitemap — built in Worker (same XML path as /events/sitemap.xml). */
+app.get('/posts/sitemap.xml', async c => {
+  try {
+    const urls = await fetchBlogSitemapEntries(c.env)
+    const xml = buildUrlsetSitemapXml(urls)
+    return new Response(xml, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
+  } catch (err) {
+    console.error('[posts sitemap] error:', err)
+    return new Response(
+      '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>',
+      { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS }
+    )
+  }
+})
+
+/** Blog image sitemap — built in Worker (same XML path as /events/sitemap-images.xml). */
+app.get('/posts/sitemap-images.xml', async c => {
+  try {
+    const entries = await fetchBlogImageSitemapEntries(c.env)
+    const xml = buildImageSitemapXml(entries)
+    return new Response(xml, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
+  } catch (err) {
+    console.error('[posts sitemap-images] error:', err)
+    return new Response(EMPTY_IMAGE_SITEMAP_XML, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
+  }
+})
+
+app.get('/events/sitemap-images.xml', async c => {
+  try {
+    await ensureEventImageVariantColumns(c.env.DB)
+    const site = 'https://dicebastion.com'
+    const { results } = await c.env.DB.prepare(`
+      SELECT slug, event_name, seo_image, image_url, image_url_card, image_url_hero
+      FROM events
+      WHERE is_active = 1
+        AND slug IS NOT NULL
+        AND TRIM(slug) != ''
+        AND (event_datetime >= datetime('now') OR is_recurring = 1)
+      ORDER BY event_datetime ASC
+    `).all()
+
+    const entries = (results || []).map((event) => ({
+      pageUrl: `${site}/events/${encodeURIComponent(event.slug)}`,
+      title: event.event_name || event.slug,
+      images: collectEventImageUrls(event, site)
+    }))
+
+    const xml = buildImageSitemapXml(entries)
+
+    return new Response(xml, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
+      }
+    })
+  } catch (err) {
+    console.error('Event image sitemap error:', err)
+    return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"></urlset>', {
+      status: 200,
+      headers: { 'Content-Type': 'application/xml; charset=utf-8' }
     })
   }
 })
@@ -5545,6 +6083,7 @@ app.get('/events/:slug', async c => {
       return c.json({ error: 'not_found' }, 404)
     }
     
+    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -5563,6 +6102,8 @@ app.get('/events/:slug', async c => {
         capacity,
         tickets_sold,
         image_url,
+        image_url_card,
+        image_url_hero,
         requires_purchase,
         is_recurring,
         recurrence_pattern,
@@ -5981,6 +6522,7 @@ app.get('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
     
+    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -5999,6 +6541,8 @@ app.get('/admin/events/:id', requireAdmin, async c => {
         capacity,
         tickets_sold,
         image_url,
+        image_url_card,
+        image_url_hero,
         requires_purchase,
         is_active,
         is_recurring,
@@ -6023,7 +6567,8 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
-    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    await ensureEventImageVariantColumns(c.env.DB)
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -6033,8 +6578,8 @@ app.post('/admin/events', requireAdmin, async c => {
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
     
     const result = await c.env.DB.prepare(`
-      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date, end_time)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date, end_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       title,
       slug,
@@ -6050,6 +6595,8 @@ app.post('/admin/events', requireAdmin, async c => {
       non_membership_price || 0,
       max_attendees || null,
       image_url || null,
+      image_url_card || null,
+      image_url_hero || null,
       requires_purchase !== undefined ? requires_purchase : 1,
       is_active !== undefined ? is_active : 1,
       is_recurring || 0,
@@ -6058,10 +6605,10 @@ app.post('/admin/events', requireAdmin, async c => {
       end_time || null
     ).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    if (c.env.GOOGLE_SA_KEY && slug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://dicebastion.com/events/${encodeURIComponent(slug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
+      indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
+    })
 
     return c.json({ success: true, id: result.meta.last_row_id })
   } catch (e) {
@@ -6077,7 +6624,8 @@ app.post('/admin/events', requireAdmin, async c => {
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
-    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
+    await ensureEventImageVariantColumns(c.env.DB)
+    const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -6088,7 +6636,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     await c.env.DB.prepare(`
       UPDATE events 
-      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?, end_time = ?
+      SET event_name = ?, slug = ?, organiser = ?, description = ?, full_description = ?, seo_description = ?, seo_organizer = ?, seo_image = ?, event_datetime = ?, location = ?, membership_price = ?, non_membership_price = ?, capacity = ?, image_url = ?, image_url_card = ?, image_url_hero = ?, requires_purchase = ?, is_active = ?, is_recurring = ?, recurrence_pattern = ?, recurrence_end_date = ?, end_time = ?, updated_at = ?
       WHERE event_id = ?
     `).bind(
       title,
@@ -6105,19 +6653,22 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       non_membership_price || 0,
       max_attendees || null,
       image_url || null,
+      image_url_card || null,
+      image_url_hero || null,
       requires_purchase !== undefined ? requires_purchase : 1,
       is_active !== undefined ? is_active : 1,
       is_recurring || 0,
       recurrence_pattern || null,
       recurrence_end_date || null,
       end_time || null,
+      toIso(new Date()),
       id
     ).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    if (c.env.GOOGLE_SA_KEY && slug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://dicebastion.com/events/${encodeURIComponent(slug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
+      indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
+    })
 
     return c.json({ success: true })
   } catch (e) {
@@ -6167,6 +6718,12 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     }
     
     await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
+
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
+      indexingUrl: event.slug ? `https://dicebastion.com/events/${encodeURIComponent(event.slug)}` : null,
+      indexingType: 'URL_DELETED'
+    })
 
     return c.json({ success: true })
   } catch (e) {
@@ -6815,7 +7372,8 @@ function generateProductSeoPage(product, allCategories) {
   const shop = 'https://shop.dicebastion.com';
   const name = e(product.name || 'Product');
   const slug = product.slug || '';
-  const img = product.image_url || `${shop}/img/og-image.png`;
+  const productImages = collectProductImageUrls(product, shop);
+  const img = resolveProductPrimaryImage(product, shop);
   const rawDesc = product.full_description || product.summary || product.description || '';
   const plainDesc = stripHtml(rawDesc);
   const fallbackBlurb =
@@ -6838,7 +7396,7 @@ function generateProductSeoPage(product, allCategories) {
     '@type': 'Product',
     'name': product.name || 'Product',
     'description': plainForMeta,
-    'image': img,
+    'image': productImages.length ? (productImages.length === 1 ? productImages[0] : productImages) : img,
     'url': url,
     'sku': slug,
     'brand': { '@type': 'Brand', 'name': 'Dice Bastion' },
@@ -6911,14 +7469,17 @@ function generateProductSeoPage(product, allCategories) {
 <meta name="description" content="${desc}">
 <meta property="og:type" content="product"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${name}"><meta property="og:description" content="${desc}">
-<meta property="og:image" content="${img}"><meta property="og:site_name" content="Dice Bastion Shop">
+<meta property="og:image" content="${img}"><meta property="og:image:alt" content="${name}">
+<meta property="og:site_name" content="Dice Bastion Shop">
 <meta property="product:price:amount" content="${priceDisplay}"><meta property="product:price:currency" content="${product.currency || 'GBP'}">
 <meta property="product:availability" content="${inStock ? 'in stock' : 'out of stock'}">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${name}">
 <meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
+<meta name="twitter:image:alt" content="${name}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
 <link rel="canonical" href="${url}">
+<link rel="sitemap" type="application/xml" title="Product Image Sitemap" href="${shop}/products/sitemap-images.xml">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
@@ -6956,7 +7517,7 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 <a href="${shop}">Shop</a>${categories[0] ? ` › <a href="${shop}/products/category/${encodeURIComponent(categories[0])}">${e(categories[0])}</a>` : ''} › ${name}
 </div>
 <div class="card">
-${img ? `<img src="${img}" alt="${name}">` : ''}
+${img ? `<img src="${img}" alt="${name}" loading="eager" decoding="async" fetchpriority="high">` : ''}
 <div class="card-body">
 <h1>${name}</h1>
 ${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${shop}/products/category/${encodeURIComponent(c)}">${e(c)}</a>`).join('')}</div>` : ''}
@@ -7011,8 +7572,9 @@ function generateCategorySeoPage(categoryName, products) {
 
   const productCards = products.map(p => {
     const price = ((Number(p.price) || 0) / 100).toFixed(2);
+    const cardImg = p.image_url ? ensureAbsoluteImageUrl(p.image_url, shop) : '';
     return `<a href="${shop}/products/${p.slug}" class="cat-product-card">
-${p.image_url ? `<img src="${p.image_url}" alt="${e(p.name)}">` : '<div class="cat-product-img-placeholder"></div>'}
+${cardImg ? `<img src="${cardImg}" alt="${e(p.name)}" loading="lazy" decoding="async">` : '<div class="cat-product-img-placeholder"></div>'}
 <div class="cat-product-info"><span class="cat-product-name">${e(p.name)}</span><span class="cat-product-price">£${price}</span></div></a>`;
   }).join('\n');
 
@@ -7058,6 +7620,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </body></html>`;
 }
 
+/** YYYY-MM-DD for product sitemap <lastmod> (D1 may return ISO string or unix ms). */
+function formatProductSitemapLastMod(updatedAt) {
+  if (updatedAt == null || updatedAt === '') return ''
+  let d
+  if (typeof updatedAt === 'number') {
+    d = new Date(updatedAt > 1e12 ? updatedAt : updatedAt * 1000)
+  } else {
+    const s = String(updatedAt)
+    d = new Date(s.includes('T') ? s : s.replace(' ', 'T'))
+  }
+  if (Number.isNaN(d.getTime())) return ''
+  return `<lastmod>${d.toISOString().slice(0, 10)}</lastmod>`
+}
+
 // ---------- Product Sitemap ----------
 app.get('/products/sitemap.xml', async c => {
   try {
@@ -7081,7 +7657,7 @@ app.get('/products/sitemap.xml', async c => {
 
     // Product pages
     for (const p of (results || [])) {
-      const lastmod = p.updated_at ? `<lastmod>${p.updated_at.split('T')[0]}</lastmod>` : ''
+      const lastmod = formatProductSitemapLastMod(p.updated_at)
       xml += `\n<url><loc>${shop}/products/${encodeURIComponent(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.8</priority></url>`
     }
 
@@ -7095,13 +7671,45 @@ app.get('/products/sitemap.xml', async c => {
     return new Response(xml, {
       headers: {
         'Content-Type': 'application/xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
       }
     })
   } catch (err) {
     console.error('Product sitemap error:', err)
     return new Response('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
       headers: { 'Content-Type': 'application/xml' }
+    })
+  }
+})
+
+app.get('/products/sitemap-images.xml', async c => {
+  try {
+    const shop = 'https://shop.dicebastion.com'
+    const { results } = await c.env.DB.prepare(`
+      SELECT slug, name, image_url, summary, description, full_description
+      FROM products
+      WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+      ORDER BY updated_at DESC
+    `).all()
+
+    const entries = (results || []).map((product) => ({
+      pageUrl: `${shop}/products/${encodeURIComponent(product.slug)}`,
+      title: product.name || product.slug,
+      images: collectProductImageUrls(product, shop)
+    }))
+
+    const xml = buildImageSitemapXml(entries)
+
+    return new Response(xml, {
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
+      }
+    })
+  } catch (err) {
+    console.error('Product image sitemap error:', err)
+    return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"></urlset>', {
+      headers: { 'Content-Type': 'application/xml; charset=utf-8' }
     })
   }
 })
@@ -7278,10 +7886,10 @@ app.post('/admin/products', requireAdmin, async (c) => {
       now
     ).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    if (c.env.GOOGLE_SA_KEY && slug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
+      indexingUrl: slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}` : null
+    })
     
     return c.json({ success: true, product_id: result.meta.last_row_id })
   } catch (e) {
@@ -7346,12 +7954,11 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
       UPDATE products SET ${updates.join(', ')} WHERE id = ?
     `).bind(...binds).run()
 
-    // Notify Google Indexing API (fire-and-forget)
-    // Resolve the slug: use the updated slug if provided, otherwise fetch from DB
     const productSlug = slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
-    if (c.env.GOOGLE_SA_KEY && productSlug) {
-      notifyGoogleIndexingAsync(c.executionCtx, c.env, `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}`)
-    }
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
+      indexingUrl: productSlug ? `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}` : null
+    })
     
     return c.json({ success: true })
   } catch (e) {
@@ -7366,7 +7973,7 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
     const id = c.req.param('id')
     
     // Get product to find image
-    const product = await c.env.DB.prepare('SELECT image_url FROM products WHERE id = ?')
+    const product = await c.env.DB.prepare('SELECT image_url, slug FROM products WHERE id = ?')
       .bind(id).first()
     
     // Delete image from R2
@@ -7384,6 +7991,12 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
     await c.env.DB.prepare('UPDATE products SET is_active = 0, updated_at = ? WHERE id = ?')
       .bind(toIso(new Date()), id)
       .run()
+
+    notifyContentSeoAsync(c.executionCtx, c.env, {
+      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
+      indexingUrl: product?.slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(product.slug)}` : null,
+      indexingType: 'URL_DELETED'
+    })
     
     return c.json({ success: true })
   } catch (e) {
@@ -7687,13 +8300,27 @@ app.post('/admin/indexing/notify', requireAdmin, async (c) => {
   try {
     const { url, type } = await c.req.json()
     if (!url) return c.json({ error: 'url_required' }, 400)
-    if (!c.env.GOOGLE_SA_KEY) return c.json({ error: 'google_sa_key_not_configured' }, 500)
+
+    const sitemapUrls = inferSitemapUrlsForPage(url)
+    const sitemapPings = await Promise.all(sitemapUrls.map(sm => pingGoogleSitemap(sm)))
+
+    if (!c.env.GOOGLE_SA_KEY) {
+      return c.json({
+        ok: sitemapPings.some(p => p.ok),
+        error: 'google_sa_key_not_configured',
+        sitemap_pings: sitemapPings
+      }, 200)
+    }
 
     const result = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
-    return c.json(result, result.ok ? 200 : 502)
+    // Always 200 so the browser exposes JSON; client checks result.ok (502 hid details in some setups).
+    return c.json({ ...result, sitemap_pings: sitemapPings }, 200)
   } catch (e) {
     console.error('Admin indexing notify error:', e)
-    return c.json({ error: e.message }, 500)
+    return c.json(
+      { ok: false, status: 0, body: { error: e.message || String(e) } },
+      200
+    )
   }
 })
 
@@ -7703,7 +8330,16 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
     const { urls, type } = await c.req.json()
     if (!Array.isArray(urls) || urls.length === 0) return c.json({ error: 'urls_array_required' }, 400)
     if (urls.length > 100) return c.json({ error: 'max_100_urls_per_batch' }, 400)
-    if (!c.env.GOOGLE_SA_KEY) return c.json({ error: 'google_sa_key_not_configured' }, 500)
+    const sitemapUrls = [...new Set(urls.flatMap(u => inferSitemapUrlsForPage(u)))]
+    const sitemapPings = await Promise.all(sitemapUrls.map(sm => pingGoogleSitemap(sm)))
+
+    if (!c.env.GOOGLE_SA_KEY) {
+      return c.json({
+        ok: sitemapPings.some(p => p.ok),
+        error: 'google_sa_key_not_configured',
+        sitemap_pings: sitemapPings
+      }, 200)
+    }
 
     const results = await Promise.allSettled(
       urls.map(u => notifyGoogleIndexing(c.env, u, type || 'URL_UPDATED'))
@@ -7718,11 +8354,12 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
       total: urls.length,
       succeeded: summary.filter(s => s.ok).length,
       failed: summary.filter(s => !s.ok).length,
-      results: summary
+      results: summary,
+      sitemap_pings: sitemapPings
     })
   } catch (e) {
     console.error('Admin batch indexing error:', e)
-    return c.json({ error: e.message }, 500)
+    return c.json({ ok: false, error: e.message || String(e) }, 200)
   }
 })
 
@@ -7775,8 +8412,9 @@ app.get('/admin/newsletter/recipients', requireAdmin, async c => {
  */
 app.get('/admin/newsletter/events', requireAdmin, async c => {
   try {
+    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
-      SELECT event_id, event_name, description, event_datetime, location, image_url, slug
+      SELECT event_id, event_name, description, event_datetime, location, image_url, image_url_card, slug
       FROM events
       WHERE is_active = 1 AND event_datetime >= datetime('now')
       ORDER BY event_datetime ASC
@@ -8063,6 +8701,117 @@ app.get('/unsubscribe', handleUnsubscribe)
 app.get('/unsubscribe/', handleUnsubscribe)
 
 // ============================================================================
+// PUBLIC: Support contact form
+// ============================================================================
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+app.post('/support/contact', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, supportContactRateLimits, 3, 1)) {
+      return c.json({
+        error: 'rate_limit_exceeded',
+        message: 'Too many messages sent. Please wait a minute and try again.'
+      }, 429)
+    }
+
+    const body = await c.req.json()
+    if (body.website) return c.json({ ok: true })
+
+    const trimmedName = clampStr(body.name, 200)
+    const trimmedEmail = clampStr(body.email, 320).toLowerCase()
+    const trimmedMessage = clampStr(body.message, 5000)
+    const trimmedCategory = clampStr(body.category || 'general', 50)
+    const turnstileToken = body.turnstileToken
+
+    if (!trimmedName) return c.json({ error: 'name_required', message: 'Please enter your name.' }, 400)
+    if (!trimmedEmail || !EMAIL_RE.test(trimmedEmail)) {
+      return c.json({ error: 'invalid_email', message: 'Please enter a valid email address.' }, 400)
+    }
+    if (trimmedMessage.length < 10) {
+      return c.json({ error: 'message_too_short', message: 'Please enter a message of at least 10 characters.' }, 400)
+    }
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
+    if (!tsOk) {
+      return c.json({ error: 'turnstile_failed', message: 'Security check failed. Please refresh and try again.' }, 403)
+    }
+
+    const supportTo = c.env.SUPPORT_CONTACT_EMAIL || 'contact@dicebastion.com'
+    const categoryLabels = {
+      general: 'General enquiry',
+      membership: 'Membership',
+      events: 'Events',
+      bookings: 'Table bookings',
+      website: 'Website / technical issue',
+      other: 'Other'
+    }
+    const categoryLabel = categoryLabels[trimmedCategory] || categoryLabels.general
+    const submittedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Gibraltar' })
+    const subject = `[Dice Bastion Support] ${categoryLabel} — ${trimmedName}`
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"></head>
+      <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+        <div style="background:linear-gradient(135deg,#b2c6df 0%,#5374a5 100%);color:white;padding:24px 20px;text-align:center;border-radius:8px 8px 0 0;">
+          <h1 style="margin:0;font-size:1.4rem;">New support message</h1>
+        </div>
+        <div style="background:#ffffff;padding:24px;border:1px solid #e5e7eb;border-top:none;">
+          <p>You received a new message from the Dice Bastion support form.</p>
+          <div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:15px;margin:16px 0;">
+            <p style="margin:0 0 8px;"><strong>From:</strong> ${escapeHtml(trimmedName)} &lt;${escapeHtml(trimmedEmail)}&gt;</p>
+            <p style="margin:0 0 8px;"><strong>Category:</strong> ${escapeHtml(categoryLabel)}</p>
+            <p style="margin:0;"><strong>Submitted:</strong> ${escapeHtml(submittedAt)} (Gibraltar time)</p>
+          </div>
+          <p><strong>Message:</strong></p>
+          <p style="white-space:pre-wrap;">${escapeHtml(trimmedMessage)}</p>
+          <p style="color:#666;font-size:0.9rem;">Reply directly to this email to respond to the sender.</p>
+        </div>
+      </body>
+      </html>
+    `.trim()
+    const text = [
+      'New support message from dicebastion.com/support',
+      '',
+      `From: ${trimmedName} <${trimmedEmail}>`,
+      `Category: ${categoryLabel}`,
+      `Submitted: ${submittedAt} (Gibraltar time)`,
+      '',
+      'Message:',
+      trimmedMessage
+    ].join('\n')
+
+    const sent = await sendEmail(c.env, {
+      to: supportTo,
+      subject,
+      html,
+      text,
+      replyTo: { email: trimmedEmail, name: trimmedName },
+      emailType: 'support_contact',
+      metadata: { category: trimmedCategory, senderEmail: trimmedEmail }
+    })
+    if (!sent?.success) {
+      return c.json({
+        error: 'send_failed',
+        message: 'Could not send your message. Please try again later.'
+      }, 502)
+    }
+
+    return c.json({ ok: true })
+  } catch (e) {
+    console.error('[support/contact] error:', e)
+    return c.json({ error: 'internal_error', message: 'Something went wrong. Please try again.' }, 500)
+  }
+})
+
 // PUBLIC: Newsletter subscribe
 // ============================================================================
 
@@ -8256,13 +9005,13 @@ async function processScheduledNewsletters(env) {
 }
 
 // ============================================================================
-// CRON JOB: Daily SEO freshness – sitemap ping + re-index active events
+// CRON JOB: Daily SEO freshness – sitemap ping + Indexing API (events + shop products)
 // ============================================================================
 
 /**
- * Ping Google & Bing with sitemap URLs so they know content has changed,
- * then batch-notify the Indexing API for any events updated in the last 48 h
- * (or all active events on Sundays for a weekly full sweep).
+ * Always: GET Google’s sitemap ping URL for each sitemap (asks Google to refresh crawl lists).
+ * If GOOGLE_SA_KEY is set: Indexing API for events + shop products (shared daily quota; events first).
+ * Cron schedule: worker wrangler.toml [triggers] crons (e.g. daily 02:00 UTC).
  */
 async function processSeoFreshness(env) {
   const jobName = 'seo_freshness'
@@ -8272,25 +9021,28 @@ async function processSeoFreshness(env) {
   let processed = 0
   let succeeded = 0
   let failed = 0
+  let prodProcessed = 0
+  let prodSucceeded = 0
+  let prodFailed = 0
 
   try {
-    // 1. Ping search-engine sitemap endpoints (lightweight GET)
+    // 1. Ping Google sitemap endpoint (lightweight GET) — same URLs as layouts/robots.txt
     const sitemaps = [
-      'https://dicebastion.com/sitemap.xml',
-      'https://dicebastion.com/events/sitemap.xml',
-      'https://shop.dicebastion.com/products/sitemap.xml'
+      SEO_SITEMAP_URLS.main,
+      SEO_SITEMAP_URLS.events,
+      SEO_SITEMAP_URLS.blog,
+      SEO_SITEMAP_URLS.blogImages,
+      SEO_SITEMAP_URLS.events,
+      SEO_SITEMAP_URLS.eventImages,
+      SEO_SITEMAP_URLS.shopIndex,
+      SEO_SITEMAP_URLS.shopProducts,
+      SEO_SITEMAP_URLS.shopProductImages
     ]
     for (const sm of sitemaps) {
-      try {
-        const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sm)}`
-        const res = await fetch(pingUrl)
-        console.log(`[SEO] Pinged Google sitemap: ${sm} → ${res.status}`)
-      } catch (e) {
-        console.error(`[SEO] Sitemap ping failed for ${sm}:`, e)
-      }
+      await pingGoogleSitemap(sm)
     }
 
-    // 2. Batch re-index events via Google Indexing API
+    // 2. Google Indexing API (optional — requires GOOGLE_SA_KEY)
     if (!env.GOOGLE_SA_KEY) {
       console.log('[SEO] GOOGLE_SA_KEY not configured – skipping Indexing API')
       await logCronJob(env.DB, jobName, 'completed', {
@@ -8298,14 +9050,14 @@ async function processSeoFreshness(env) {
         records_processed: 0,
         records_succeeded: 0,
         records_failed: 0,
-        extra: { note: 'sitemap pinged only, no SA key' }
+        extra: { note: 'sitemap_ping_only_no_GOOGLE_SA_KEY', sitemaps_pinged: sitemaps.length }
       })
       return
     }
 
-    // On Sundays (day 0) re-index ALL active events for a weekly sweep.
-    // Other days only re-index events updated in the last 48 hours.
     const dayOfWeek = new Date().getUTCDay()
+
+    // --- Events: Sunday = all active; else last 48h ---
     let events
     if (dayOfWeek === 0) {
       const { results } = await env.DB.prepare(`
@@ -8326,8 +9078,8 @@ async function processSeoFreshness(env) {
       console.log(`[SEO] Daily delta: ${events.length} recently updated events`)
     }
 
-    // Google Indexing API allows 200 requests/day – cap at 100 to leave room
-    const batch = events.slice(0, 100)
+    const eventCap = 100
+    const batch = events.slice(0, eventCap)
     processed = batch.length
 
     for (const e of batch) {
@@ -8346,22 +9098,73 @@ async function processSeoFreshness(env) {
       }
     }
 
-    console.log(`[SEO] Batch indexing done: ${succeeded}/${processed} succeeded`)
+    console.log(`[SEO] Event indexing: ${succeeded}/${processed} succeeded`)
 
-    await logCronJob(env.DB, jobName, failed === 0 ? 'completed' : 'partial', {
+    // --- Shop products: remaining budget toward ~200/day total with events ---
+    const shopBudget = Math.max(0, 200 - batch.length)
+    let products = []
+    if (shopBudget > 0) {
+      if (dayOfWeek === 0) {
+        const { results } = await env.DB.prepare(`
+          SELECT slug FROM products
+          WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+          ORDER BY updated_at DESC
+        `).all()
+        products = (results || []).slice(0, shopBudget)
+        console.log(`[SEO] Sunday shop sweep: notifying up to ${shopBudget} products (pool ${(results || []).length})`)
+      } else {
+        const { results } = await env.DB.prepare(`
+          SELECT slug FROM products
+          WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+            AND updated_at >= datetime('now', '-48 hours')
+          ORDER BY updated_at DESC
+        `).all()
+        products = (results || []).slice(0, shopBudget)
+        console.log(`[SEO] Shop product delta: ${products.length} URLs (budget ${shopBudget})`)
+      }
+
+      prodProcessed = products.length
+      for (const p of products) {
+        try {
+          const url = `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`
+          const result = await notifyGoogleIndexing(env, url, 'URL_UPDATED')
+          if (result.ok) {
+            prodSucceeded++
+          } else {
+            prodFailed++
+            console.error(`[SEO] Product index notify failed for ${p.slug}:`, result.body)
+          }
+        } catch (err) {
+          prodFailed++
+          console.error(`[SEO] Product index notify error for ${p.slug}:`, err)
+        }
+      }
+      console.log(`[SEO] Product indexing: ${prodSucceeded}/${prodProcessed} succeeded`)
+    }
+
+    const totalProcessed = processed + prodProcessed
+    const totalSucceeded = succeeded + prodSucceeded
+    const totalFailed = failed + prodFailed
+
+    await logCronJob(env.DB, jobName, totalFailed === 0 ? 'completed' : 'partial', {
       started_at: startedAt,
-      records_processed: processed,
-      records_succeeded: succeeded,
-      records_failed: failed,
-      extra: { day: dayOfWeek === 0 ? 'sunday_sweep' : 'daily_delta' }
+      records_processed: totalProcessed,
+      records_succeeded: totalSucceeded,
+      records_failed: totalFailed,
+      extra: {
+        day: dayOfWeek === 0 ? 'sunday_sweep' : 'daily_delta',
+        events: { processed, succeeded, failed },
+        products: { processed: prodProcessed, succeeded: prodSucceeded, failed: prodFailed },
+        sitemaps_pinged: sitemaps.length
+      }
     })
   } catch (err) {
     console.error(`[CRON] ${jobName} FAILED:`, err)
     await logCronJob(env.DB, jobName, 'failed', {
       started_at: startedAt,
-      records_processed: processed,
-      records_succeeded: succeeded,
-      records_failed: failed,
+      records_processed: processed + prodProcessed,
+      records_succeeded: succeeded + prodSucceeded,
+      records_failed: failed + prodFailed,
       error_message: err.message
     })
     throw err
@@ -8853,6 +9656,32 @@ async function processAutoRenewals(env) {
         UPDATE transactions
         SET payment_status = 'abandoned', updated_at = ?
         WHERE transaction_type = 'sponsorship'
+          AND payment_status = 'pending'
+          AND created_at < ?
+      `).bind(toIso(now), staleCutoff).run()
+    }
+
+    // ========================================================================
+    // STEP 3c: Clean up stale pending free trial checkouts
+    // ========================================================================
+    console.log(`[CRON] Step 3c: Cleaning up stale pending free trial memberships...`)
+    const staleFreeTrialResult = await env.DB.prepare(`
+      DELETE FROM memberships
+      WHERE status = 'pending'
+        AND id IN (
+          SELECT reference_id FROM transactions
+          WHERE transaction_type = 'free_trial'
+            AND payment_status = 'pending'
+            AND created_at < ?
+        )
+    `).bind(staleCutoff).run()
+    const staleFreeTrialCount = staleFreeTrialResult.meta?.changes || 0
+    if (staleFreeTrialCount > 0) {
+      console.log(`[CRON] Cleaned up ${staleFreeTrialCount} stale pending free trial checkout(s)`)
+      await env.DB.prepare(`
+        UPDATE transactions
+        SET payment_status = 'abandoned', updated_at = ?
+        WHERE transaction_type = 'free_trial'
           AND payment_status = 'pending'
           AND created_at < ?
       `).bind(toIso(now), staleCutoff).run()
@@ -9703,6 +10532,29 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
 /** Minimum card charge after discounts (SumUp GBP). */
 const SHOP_MIN_PAYMENT_PENCE = 100
 
+/** SumUp checkout description length (portal display). */
+const SHOP_CHECKOUT_DESC_MAX = 255
+
+/**
+ * Human-readable SumUp checkout description for shop orders (shown in SumUp portal).
+ * @param {Array<{ product_name?: string, name?: string, quantity?: number }>} items
+ */
+function formatShopCheckoutDescription(items, { deliveryMethod, promoCode } = {}) {
+  const lines = (items || []).map(item => {
+    const qty = Math.max(1, Number(item.quantity) || 1)
+    const name = clampStr(item.product_name || item.name || 'Item', 80).trim() || 'Item'
+    return `${qty}x ${name}`
+  })
+  let desc = lines.length ? `Dice Bastion Shop: ${lines.join(', ')}` : 'Dice Bastion Shop order'
+  if (deliveryMethod === 'delivery') desc += ' · Delivery'
+  else if (deliveryMethod === 'collection') desc += ' · Collection'
+  if (promoCode) desc += ` · Promo: ${clampStr(promoCode, 30)}`
+  if (desc.length > SHOP_CHECKOUT_DESC_MAX) {
+    desc = `${desc.substring(0, SHOP_CHECKOUT_DESC_MAX - 1)}…`
+  }
+  return desc
+}
+
 /**
  * Extendable promo rules JSON (persisted):
  * require_active_membership?: boolean — checkout email must have active Dice Bastion membership
@@ -10119,8 +10971,11 @@ app.post('/shop/checkout', async c => {
       amount: totalPence / 100,
       currency: currencyResolved,
       orderRef: orderNumber,
-      title: `Order ${orderNumber}`,
-      description: `Shop (${orderItemsPayload.length} line(s))`
+      title: `Dice Bastion Shop – ${orderItemsPayload.length} item(s)`,
+      description: formatShopCheckoutDescription(orderItemsPayload, {
+        deliveryMethod,
+        promoCode: promoCodeSnap
+      })
     })
     if (!checkout?.id) return c.json({ error: 'sumup_checkout_failed' }, 502)
 
@@ -10264,9 +11119,14 @@ app.post('/orders/checkout', async c => {
     const orderNumber = `ORD-${crypto.randomUUID()}`
     const orderItems = products.map(p => ({ product_id: p.id, product_name: p.name, quantity: qtyMap[p.id], unit_price: p.price, subtotal: p.price * qtyMap[p.id] }))
     const total = orderItems.reduce((s, r) => s + r.subtotal, 0)
-    const desc = orderItems.map(r => `${r.quantity}x ${r.product_name}`).join(', ')
 
-    const checkout = await createCheckout(c.env, { amount: total / 100, currency, orderRef: orderNumber, description: desc })
+    const checkout = await createCheckout(c.env, {
+      amount: total / 100,
+      currency,
+      orderRef: orderNumber,
+      title: `Dice Bastion Shop – ${orderItems.length} item(s)`,
+      description: formatShopCheckoutDescription(orderItems)
+    })
     if (!checkout?.id) return c.json({ error: 'checkout_failed' }, 502)
 
     // Use defaults for email/name since orders table has NOT NULL constraints
@@ -10309,7 +11169,8 @@ app.get('/orders/confirm', async c => {
 
 /**
  * Main scheduled handler - runs all cron jobs
- * Scheduled to run daily at 2 AM UTC
+ * Scheduled to run daily at 2 AM UTC (see wrangler.toml [triggers] crons).
+ * Includes sitemap pings + optional Indexing API for events and shop products.
  */
 async function handleScheduled(event, env, ctx) {
   const runStarted = new Date().toISOString()
@@ -10396,6 +11257,7 @@ export default {
    * from normal API requests (workers.dev domain).
    *
    * dicebastion.com/events/*         → Event SEO pages / origin pass-through
+   * dicebastion.com/posts/*          → Blog HTML proxied from Bunny CDN
    * shop.dicebastion.com/products/*  → Product SEO pages / origin pass-through
    *
    * Calling fetch(request) OUTSIDE Hono guarantees Cloudflare sends to origin,
@@ -10404,6 +11266,36 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
     const host = request.headers.get('Host') || ''
+    const pathNorm = url.pathname.replace(/\/+$/, '') || '/'
+
+    // Hugo writes /pages-sitemap.xml to Pages; shop custom domain only routed /products/* to Worker → 404.
+    // Proxy from Pages project host (see SHOP_PAGES_ORIGIN) so GSC can read the child sitemap.
+    if (host.includes('shop.dicebastion.com') && pathNorm === '/pages-sitemap.xml') {
+      const pagesBase = String(env.SHOP_PAGES_ORIGIN || 'https://dicebastion-shop.pages.dev').replace(/\/+$/, '')
+      const target = `${pagesBase}/pages-sitemap.xml`
+      try {
+        const res = await fetch(target, {
+          headers: {
+            Accept: 'application/xml, text/xml, */*',
+            'User-Agent': request.headers.get('User-Agent') || 'DiceBastion-sitemap-proxy/1'
+          }
+        })
+        const body = await res.arrayBuffer()
+        return new Response(body, {
+          status: res.status,
+          headers: {
+            'Content-Type': 'application/xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=300'
+          }
+        })
+      } catch (e) {
+        console.error('[pages-sitemap proxy]', e)
+        return new Response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
+          status: 502,
+          headers: { 'Content-Type': 'application/xml; charset=utf-8' }
+        })
+      }
+    }
 
     // ====== SHOP: shop.dicebastion.com/products/* ======
     if (host.includes('shop.dicebastion.com') && url.pathname.startsWith('/products')) {
@@ -10411,7 +11303,7 @@ export default {
       const parts = trimmed.split('/')  // ['', 'products', ...]
 
       // /products/sitemap.xml → Hono serves dynamic sitemap
-      if (url.pathname === '/products/sitemap.xml') {
+      if (url.pathname === '/products/sitemap.xml' || url.pathname === '/products/sitemap-images.xml') {
         return app.fetch(request, env, ctx)
       }
 
@@ -10479,6 +11371,56 @@ export default {
       }
     }
 
+    // ====== BLOG: dicebastion.com/posts/* → Bunny CDN pre-rendered HTML ======
+    if (host.includes('dicebastion.com') && !host.includes('shop.') && url.pathname.startsWith('/posts')) {
+      const cdnBase = String(env.BUNNY_CDN_URL || 'https://dicebastion.b-cdn.net').replace(/\/+$/, '')
+      const trimmed = url.pathname.replace(/\/+$/, '') || '/'
+      const parts = trimmed.split('/')
+
+      async function proxyBlogCdn(storagePath) {
+        const target = `${cdnBase}/${storagePath.replace(/^\/+/, '')}`
+        try {
+          const res = await fetch(target, {
+            headers: { Accept: request.headers.get('Accept') || '*/*' }
+          })
+          if (!res.ok) {
+            return new Response('Not found', { status: res.status === 404 ? 404 : 502 })
+          }
+          const headers = new Headers(res.headers)
+          headers.set('Cache-Control', 'public, max-age=300, s-maxage=600')
+          return new Response(res.body, { status: res.status, headers })
+        } catch (e) {
+          console.error('[posts proxy]', e)
+          return new Response('Blog unavailable', { status: 502 })
+        }
+      }
+
+      if (
+        url.pathname === '/posts/sitemap.xml' ||
+        url.pathname === '/posts/sitemap-images.xml' ||
+        url.pathname === '/posts/sitemap-index.xml'
+      ) {
+        return app.fetch(request, env, ctx)
+      }
+
+      if (parts.length >= 4 && parts[2] === 'tag' && parts[3]) {
+        return proxyBlogCdn(`blog/posts/tag/${encodeURIComponent(parts[3])}/index.html`)
+      }
+
+      if (parts.length >= 4 && parts[2] === 'author' && parts[3]) {
+        return proxyBlogCdn(`blog/posts/author/${encodeURIComponent(parts[3])}/index.html`)
+      }
+
+      const slug = parts.length === 3 ? parts[2] : null
+      if (slug && !slug.includes('.')) {
+        return proxyBlogCdn(`blog/posts/${encodeURIComponent(slug)}/index.html`)
+      }
+
+      if (trimmed === '/posts' || trimmed === '/posts/index.html') {
+        return proxyBlogCdn('blog/posts/index.html')
+      }
+    }
+
     // ====== EVENTS: dicebastion.com/events/* ======
     if (host.includes('dicebastion.com') && !host.includes('shop.') && url.pathname.startsWith('/events')) {
 
@@ -10488,7 +11430,7 @@ export default {
       const slug = parts.length === 3 ? parts[2] : null  // 'foo' or null
 
       // sitemap.xml → let Hono serve the dynamic sitemap
-      if (url.pathname === '/events/sitemap.xml') {
+      if (url.pathname === '/events/sitemap.xml' || url.pathname === '/events/sitemap-images.xml') {
         return app.fetch(request, env, ctx)
       }
 

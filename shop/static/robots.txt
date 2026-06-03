@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://shop.dicebastion.com/products/sitemap.xml
+Sitemap: https://shop.dicebastion.com/sitemap.xml
+Sitemap: https://shop.dicebastion.com/products/sitemap-images.xml

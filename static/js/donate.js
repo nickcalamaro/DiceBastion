@@ -12,7 +12,7 @@
   const CAMPAIGN = 'pokemon-day-2026';
   /** Paid to Childline; subtracted from displayed club / Aircon fund total only */
   const CHILDLINE_PAID_GBP = 647;
-  const MILESTONES = [100, 200, 300, 500, 750, 1000];
+  const MILESTONES = [100, 200, 300, 500, 750, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
 
   function getCurrentGoal(total) {
     for (const m of MILESTONES) {

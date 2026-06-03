@@ -8,8 +8,8 @@ showPagination: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js"></script>
-<script src="/js/modal.js"></script>
+<script src="/js/utils.js?v=3"></script>
+<script src="/js/modal.js?v=4"></script>
 
 <!-- Component Styles -->
 <link rel="stylesheet" href="/css/forms.css">
@@ -176,6 +176,7 @@ For those able to give a bit more, or for those of you who can't afford a member
 <script>
 (function() {
   const API_BASE = utils.getApiBase();
+  const PAYMENT_SUPPORT_NOTE = '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>';
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   const IS_LOCALHOST = window.location.hostname === 'localhost' ||
                        window.location.hostname === '127.0.0.1' ||
@@ -279,12 +280,12 @@ For those able to give a bit more, or for those of you who can't afford a member
   document.getElementById('sponsor-cta-btn').addEventListener('click', openSponsorInfoModal);
 
   function openSponsorInfoModal() {
-    sponsorModal = new Modal({
+    const infoModal = new Modal({
       title: 'Sponsor a Membership',
       size: 'md',
       closeOnBackdrop: true,
       content: `
-        <div style="margin-bottom: 1.25rem; line-height: 1.7; color: rgb(var(--color-neutral-700));">
+        <div class="modal-prose">
           <p>Dice Bastion and the Gibraltar Warhammer Club are funded primarily by our members, and so we kindly request that all those using the club on a regular basis become paying members. Despite that, we appreciate that not everyone has the same financial means.</p><br>
           <p>Because of that, we're letting those who can afford to give a bit more the option to purchase this 'sponsored membership' which will allow others to use the club at no extra cost.</p><br>
           <p>If you have any other ideas how we can continue to improve our club and make our community as inclusive as possible, please let us know at <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a></p><br>
@@ -294,12 +295,14 @@ For those able to give a bit more, or for those of you who can't afford a member
           Continue to Checkout
         </button>
       `,
-      onClose: () => { sponsorModal = null; }
+      onClose: () => {
+        if (sponsorModal === infoModal) sponsorModal = null;
+      }
     });
-    sponsorModal.open();
-    sponsorModal.querySelector('#sponsor-info-proceed').addEventListener('click', () => {
-      sponsorModal.close();
-      sponsorModal = null;
+    sponsorModal = infoModal;
+    infoModal.open();
+    infoModal.querySelector('#sponsor-info-proceed').addEventListener('click', () => {
+      infoModal.close();
       openSponsorCheckoutModal();
     });
   }
@@ -335,8 +338,8 @@ For those able to give a bit more, or for those of you who can't afford a member
     const loggedForm = `
       <div id="sp-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
         <div class="modal-info-box">
-          <p style="margin: 0 0 4px 0; color: #666;">Purchasing as:</p>
-          <p style="margin: 0; font-weight: 600;">${isLoggedIn ? user.email : ''}</p>
+          <p class="modal-info-label">Purchasing as:</p>
+          <p class="modal-info-value">${isLoggedIn ? user.email : ''}</p>
         </div>
         <div class="modal-section">
           <div class="modal-help-text">Security check</div>
@@ -344,15 +347,14 @@ For those able to give a bit more, or for those of you who can't afford a member
         </div>
         <button id="sp-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
         <div class="modal-section" style="text-align: center;">
-          <button id="sp-use-different" type="button" class="modal-btn-secondary"
-            style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+          <button id="sp-use-different" type="button" class="modal-btn-secondary modal-text-link-btn">
             Use a different email address
           </button>
         </div>
       </div>
     `;
 
-    sponsorModal = new Modal({
+    const checkoutModal = new Modal({
       title: 'Sponsor a Membership – Checkout',
       size: 'md',
       closeOnBackdrop: false,
@@ -361,10 +363,14 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedForm}
         <div id="sp-sumup-card" class="modal-widget-container"></div>
         <div id="sp-error" class="modal-error"></div>
+        ${PAYMENT_SUPPORT_NOTE}
       `,
-      onClose: () => { sponsorModal = null; }
+      onClose: () => {
+        if (sponsorModal === checkoutModal) sponsorModal = null;
+      }
     });
-    sponsorModal.open();
+    sponsorModal = checkoutModal;
+    checkoutModal.open();
 
     // Render Turnstile
     if (isLoggedIn) {
@@ -374,16 +380,16 @@ For those able to give a bit more, or for those of you who can't afford a member
     }
 
     // Wire up buttons
-    const guestContinue  = sponsorModal.querySelector('#sp-continue');
-    const loggedContinue = sponsorModal.querySelector('#sp-continue-logged');
-    const useDiff        = sponsorModal.querySelector('#sp-use-different');
+    const guestContinue  = checkoutModal.querySelector('#sp-continue');
+    const loggedContinue = checkoutModal.querySelector('#sp-continue-logged');
+    const useDiff        = checkoutModal.querySelector('#sp-use-different');
 
     if (guestContinue)  guestContinue.addEventListener('click',  handleSponsorGuestContinue);
     if (loggedContinue) loggedContinue.addEventListener('click', handleSponsorLoggedContinue);
     if (useDiff) {
       useDiff.addEventListener('click', () => {
-        sponsorModal.querySelector('#sp-guest-step').style.display  = 'block';
-        sponsorModal.querySelector('#sp-logged-step').style.display = 'none';
+        checkoutModal.querySelector('#sp-guest-step').style.display  = 'block';
+        checkoutModal.querySelector('#sp-logged-step').style.display = 'none';
         setTimeout(() => window.utils.renderTurnstile('sp-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
       });
     }
@@ -399,6 +405,10 @@ For those able to give a bit more, or for those of you who can't afford a member
   }
 
   async function handleSponsorGuestContinue() {
+    if (!sponsorModal) {
+      showSponsorAlert('Checkout session expired. Please start again.', 'error');
+      return;
+    }
     const email   = (sponsorModal.querySelector('#sp-email')?.value || '').trim();
     const name    = (sponsorModal.querySelector('#sp-name')?.value  || '').trim();
     const consent = sponsorModal.querySelector('#sp-privacy')?.checked;
@@ -417,6 +427,10 @@ For those able to give a bit more, or for those of you who can't afford a member
   }
 
   async function doSponsorCheckout(email, name, privacyConsent, turnstileToken) {
+    if (!sponsorModal) {
+      showSponsorAlert('Checkout session expired. Please start again.', 'error');
+      return;
+    }
     try {
       clearSponsorError();
       const resp = await fetch(`${API_BASE}/membership/sponsor/checkout`, {
@@ -491,7 +505,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         size: 'sm',
         closeOnBackdrop: true,
         content: `
-          <div style="line-height: 1.7; color: rgb(var(--color-neutral-700));">
+          <div class="modal-prose" style="margin-bottom: 0;">
             <p>Unfortunately we don't have any sponsored memberships available at the moment.</p>
             <p>If you'd like access to club facilities please contact us at
                <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a></p>
@@ -505,12 +519,12 @@ For those able to give a bit more, or for those of you who can't afford a member
   });
 
   function openClaimDisclaimerModal() {
-    claimModal = new Modal({
+    const disclaimerModal = new Modal({
       title: 'Sponsored Membership',
       size: 'md',
       closeOnBackdrop: true,
       content: `
-        <div style="margin-bottom: 1.25rem; line-height: 1.7; color: rgb(var(--color-neutral-700));">
+        <div class="modal-prose">
           <p>Dice Bastion and the Gibraltar Warhammer Club are funded primarily by our members, and so we kindly request that all those using the club on a regular basis become paying members. Despite that, we appreciate that not everyone has the same financial means and these sponsored memberships have been provided by other members to ensure that everyone has a welcoming and inclusive space to play their favourite games.</p><br>
           <p>Your information will solely be shared with the GWC Committee for administrative purposes and this sponsored membership entitles you to all the standard benefits.</p><br>
           <p>If you ever need any support, please feel free to reach out to us confidentially at <a href="mailto:contact@dicebastion.com" class="modal-link">contact@dicebastion.com</a>.</p><br>
@@ -520,12 +534,14 @@ For those able to give a bit more, or for those of you who can't afford a member
           I understand – Claim my Membership
         </button>
       `,
-      onClose: () => { claimModal = null; }
+      onClose: () => {
+        if (claimModal === disclaimerModal) claimModal = null;
+      }
     });
-    claimModal.open();
-    claimModal.querySelector('#claim-info-proceed').addEventListener('click', () => {
-      claimModal.close();
-      claimModal = null;
+    claimModal = disclaimerModal;
+    disclaimerModal.open();
+    disclaimerModal.querySelector('#claim-info-proceed').addEventListener('click', () => {
+      disclaimerModal.close();
       openClaimFormModal();
     });
   }
@@ -561,8 +577,8 @@ For those able to give a bit more, or for those of you who can't afford a member
     const loggedForm = `
       <div id="cl-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
         <div class="modal-info-box">
-          <p style="margin: 0 0 4px 0; color: #666;">Claiming as:</p>
-          <p style="margin: 0; font-weight: 600;">${isLoggedIn ? user.email : ''}</p>
+          <p class="modal-info-label">Claiming as:</p>
+          <p class="modal-info-value">${isLoggedIn ? user.email : ''}</p>
         </div>
         <div class="modal-section">
           <div class="modal-help-text">Security check</div>
@@ -570,15 +586,14 @@ For those able to give a bit more, or for those of you who can't afford a member
         </div>
         <button id="cl-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Claim Membership</button>
         <div class="modal-section" style="text-align: center;">
-          <button id="cl-use-different" type="button" class="modal-btn-secondary"
-            style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+          <button id="cl-use-different" type="button" class="modal-btn-secondary modal-text-link-btn">
             Use a different email address
           </button>
         </div>
       </div>
     `;
 
-    claimModal = new Modal({
+    const formModal = new Modal({
       title: 'Claim your Sponsored Membership',
       size: 'md',
       closeOnBackdrop: false,
@@ -587,9 +602,12 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedForm}
         <div id="cl-error" class="modal-error"></div>
       `,
-      onClose: () => { claimModal = null; }
+      onClose: () => {
+        if (claimModal === formModal) claimModal = null;
+      }
     });
-    claimModal.open();
+    claimModal = formModal;
+    formModal.open();
 
     // Render Turnstile
     if (isLoggedIn) {
@@ -598,16 +616,16 @@ For those able to give a bit more, or for those of you who can't afford a member
       setTimeout(() => window.utils.renderTurnstile('cl-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
     }
 
-    const guestContinue  = claimModal.querySelector('#cl-continue');
-    const loggedContinue = claimModal.querySelector('#cl-continue-logged');
-    const useDiff        = claimModal.querySelector('#cl-use-different');
+    const guestContinue  = formModal.querySelector('#cl-continue');
+    const loggedContinue = formModal.querySelector('#cl-continue-logged');
+    const useDiff        = formModal.querySelector('#cl-use-different');
 
     if (guestContinue)  guestContinue.addEventListener('click',  handleClaimGuest);
     if (loggedContinue) loggedContinue.addEventListener('click', handleClaimLogged);
     if (useDiff) {
       useDiff.addEventListener('click', () => {
-        claimModal.querySelector('#cl-guest-step').style.display  = 'block';
-        claimModal.querySelector('#cl-logged-step').style.display = 'none';
+        formModal.querySelector('#cl-guest-step').style.display  = 'block';
+        formModal.querySelector('#cl-logged-step').style.display = 'none';
         setTimeout(() => window.utils.renderTurnstile('cl-ts', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST }), 100);
       });
     }
@@ -684,6 +702,7 @@ For those able to give a bit more, or for those of you who can't afford a member
 <script>
 (function(){
   const API_BASE = utils.getApiBase();
+  const PAYMENT_SUPPORT_NOTE = '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>';
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   
   // Detect if we're running on localhost
@@ -697,6 +716,34 @@ For those able to give a bit more, or for those of you who can't afford a member
 
   let membershipModal = null;
   let pendingPlan = null;
+  /** One idempotency key per modal open — prevents duplicate SumUp checkouts on double-click Continue */
+  let modalIdempotencyKey = null;
+  let checkoutInProgress = false;
+  /** Set after checkout API succeeds; reused if Continue is clicked again before paying */
+  let activeCheckout = null;
+
+  function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
+
+  function resetCheckoutSession() {
+    modalIdempotencyKey = newIdempotencyKey();
+    checkoutInProgress = false;
+    activeCheckout = null;
+  }
+
+  /** After a failed/cancelled card attempt, SumUp checkout is dead — need a fresh session */
+  function regenerateCheckoutSession() {
+    modalIdempotencyKey = newIdempotencyKey();
+    checkoutInProgress = false;
+    activeCheckout = null;
+  }
+
+  function setContinueButtonsDisabled(disabled) {
+    if (!membershipModal) return;
+    membershipModal.querySelectorAll('#modal-continue, #modal-continue-logged').forEach(btn => {
+      btn.disabled = disabled;
+      btn.setAttribute('aria-busy', disabled ? 'true' : 'false');
+    });
+  }
 
   function formatDateOnly(iso){ try { const d=new Date(iso); return d.toLocaleDateString(); } catch { return iso; } }
   
@@ -732,9 +779,11 @@ For those able to give a bit more, or for those of you who can't afford a member
       membershipModal.close();
       membershipModal = null;
     }
+    resetCheckoutSession();
   }
   
   function openModal(){
+    resetCheckoutSession();
     const user = getLoggedInUser();
     const isLoggedIn = user && user.email;
     
@@ -759,8 +808,8 @@ For those able to give a bit more, or for those of you who can't afford a member
           </label>
         </div>
 
-        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"> <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+        <div class="modal-info-box modal-info-box-sm">
+          <p><strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -775,12 +824,12 @@ For those able to give a bit more, or for those of you who can't afford a member
     const loggedInForm = `
       <div id="sumup-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
         <div class="modal-info-box">
-          <p style="margin: 0 0 8px 0; color: #666;">Purchasing membership as:</p>
-          <p style="margin: 0; font-weight: 600; font-size: 1.05em;" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
+          <p class="modal-info-label modal-info-label-lg">Purchasing membership as:</p>
+          <p class="modal-info-value modal-info-value-lg" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
         </div>
         
-        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"> <strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+        <div class="modal-info-box modal-info-box-sm">
+          <p><strong>Auto-renewal is included</strong> — your membership will renew automatically so you never lose access. We'll email you 7 days before each renewal. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -791,7 +840,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         <button id="modal-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Payment</button>
         
         <div class="modal-section" style="text-align: center;">
-          <button id="modal-use-different" type="button" class="modal-btn-secondary" style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+          <button id="modal-use-different" type="button" class="modal-btn-secondary modal-text-link-btn">
             Use a different email address
           </button>
         </div>
@@ -807,6 +856,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
         <div id="sumup-error" class="modal-error"></div>
+        ${PAYMENT_SUPPORT_NOTE}
       `,
       onClose: closeModal
     });
@@ -929,12 +979,14 @@ For those able to give a bit more, or for those of you who can't afford a member
   async function mountSumUpWidget(checkoutId, ref){
     try {
       clearError();
+      console.log('[mountSumUpWidget] orderRef (checkout_reference):', ref, 'sumupCheckoutId:', checkoutId);
       const emailStepEl = membershipModal ? membershipModal.querySelector('#sumup-email-step') : null;
       const loggedStepEl = membershipModal ? membershipModal.querySelector('#sumup-logged-step') : null;
       const sumupCardEl = membershipModal ? membershipModal.querySelector('#sumup-card') : null;
       if (emailStepEl) emailStepEl.style.display = 'none';
       if (loggedStepEl) loggedStepEl.style.display = 'none';
       if (sumupCardEl) { sumupCardEl.style.display = 'block'; sumupCardEl.innerHTML = ''; }
+      setContinueButtonsDisabled(true);
       await window.utils.loadSumUpSdk();
       await SumUpCard.mount({
         id:'sumup-card',
@@ -947,26 +999,45 @@ For those able to give a bit more, or for those of you who can't afford a member
           if (t === 'success') {
             await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
           } else if (t === 'error' || t === 'fail') {
+            regenerateCheckoutSession();
+            setContinueButtonsDisabled(false);
             showError('Payment failed. Please try again.');
           } else if (t === 'cancel') {
+            regenerateCheckoutSession();
+            setContinueButtonsDisabled(false);
             showError('Payment cancelled.');
           }
         }
       });
-    } catch (e) { showError('Could not load payment widget.'); }
+    } catch (e) {
+      regenerateCheckoutSession();
+      setContinueButtonsDisabled(false);
+      showError('Could not load payment widget.');
+    }
   }
 
-  function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
-
   async function startCheckout(plan, email, name, privacyConsent, autoRenew, isLoggedIn = false){ 
+    if (checkoutInProgress) {
+      console.log('[startCheckout] Ignored — checkout already in progress');
+      return;
+    }
+    if (activeCheckout) {
+      console.log('[startCheckout] Reusing checkout in this modal session:', activeCheckout);
+      await mountSumUpWidget(activeCheckout.checkoutId, activeCheckout.orderRef);
+      return;
+    }
+    checkoutInProgress = true;
+    setContinueButtonsDisabled(true);
     try { 
       clearError(); 
       const token = await getTurnstileToken(isLoggedIn); 
+      if (!modalIdempotencyKey) modalIdempotencyKey = newIdempotencyKey();
+      console.log('[startCheckout] plan:', plan, 'idempotencyKey:', modalIdempotencyKey);
       const resp = await fetch(`${API_BASE}/membership/checkout`, { 
         method:'POST', 
         headers:{ 
           'Content-Type':'application/json', 
-          'Idempotency-Key': newIdempotencyKey() 
+          'Idempotency-Key': modalIdempotencyKey
         }, 
         body: JSON.stringify({ email, name, plan, privacyConsent, autoRenew, turnstileToken: token }) 
       }); 
@@ -977,16 +1048,23 @@ For those able to give a bit more, or for those of you who can't afford a member
         return; 
       } 
       if(data.checkoutId){ 
+        activeCheckout = { checkoutId: data.checkoutId, orderRef: data.orderRef };
+        if (data.reused) console.log('[startCheckout] Server returned existing checkout (idempotent)');
+        console.log('[startCheckout] orderRef:', data.orderRef, 'sumupCheckoutId:', data.checkoutId);
         await mountSumUpWidget(data.checkoutId, data.orderRef); 
         return; 
       } 
       showError('Failed to create in-page checkout.'); 
     } catch(e){ 
       showError('Checkout error.'); 
-    } 
+    } finally {
+      checkoutInProgress = false;
+      if (!activeCheckout) setContinueButtonsDisabled(false);
+    }
   }
 
   async function handleContinue(){
+    if (checkoutInProgress) return;
     const modalNameEl = membershipModal ? membershipModal.querySelector('#modal-name') : null;
     const modalEmailEl = membershipModal ? membershipModal.querySelector('#modal-email') : null;
     const privacyEl = membershipModal ? membershipModal.querySelector('#modal-privacy') : null;
@@ -1008,6 +1086,7 @@ For those able to give a bit more, or for those of you who can't afford a member
   }
   
   async function handleContinueLogged(){
+    if (checkoutInProgress) return;
     const user = getLoggedInUser();
     if (!user || !user.email) {
       showError('Session expired. Please refresh and try again.');

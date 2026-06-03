@@ -1,4 +1,30 @@
 {{ define "main" }}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": {{ .Title | jsonify }},
+  "description": {{ (.Description | default .Params.summary) | jsonify }},
+  "url": {{ .Permalink | jsonify }},
+  {{ with .Params.images }}
+  "image": {{ (index . 0 | absURL) | jsonify }},
+  {{ end }}
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": {{ .Site.Title | jsonify }},
+    "url": {{ .Site.BaseURL | jsonify }}
+  },
+  "about": {
+    "@type": "Thing",
+    "name": "Board games"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Dice Bastion",
+    "url": {{ .Site.BaseURL | jsonify }}
+  }
+}
+</script>
 <article>
   {{ if .Params.showHero | default (.Site.Params.article.showHero | default true) }}
   {{ $heroStyle := .Params.heroStyle }}

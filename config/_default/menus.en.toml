@@ -2,6 +2,8 @@
 none = "none"
 
 # Visibilty options: 0 = admin only, 1 = members only, 2 = logged-in users, 3 = everyone, 5 = logged-out users only
+
+
 [[main]]
 name = "Events"
 pageRef = "Events"
@@ -11,12 +13,13 @@ weight = 9997
 visibility = 3
 
 [[main]]
-name = "Memberships"
-pageRef = "Memberships"
-identifier = "MU5KHCnt3z"
-weight = 9998
+name = "Donate"
+pageRef = "Donate"
+identifier = "iwuegwh"
+weight = 9996
 [main.params]
 visibility = 3
+
 
 [[main]]
 name = "About Us"
@@ -27,12 +30,38 @@ weight = 9999
 visibility = 3
 
 [[main]]
-name = "Book a Table"
-pageRef = "Bookings"
-identifier = "qwkjjnq"
-weight = 133
+name = "Services"
+identifier = "GJSJUISJ"
+weight = 9998
 [main.params]
 visibility = 3
+
+[[main]]
+name = "Memberships"
+pageRef = "Memberships"
+parent = "GJSJUISJ"
+weight = 1
+[main.params]
+visibility = 3
+
+
+[[main]]
+name = "Book a Table"
+pageRef = "Bookings"
+parent = "GJSJUISJ"
+weight = 2
+[main.params]
+visibility = 3
+
+[[main]]
+name = "Board Game Library"
+pageRef = "board-game-library"
+parent = "GJSJUISJ"
+weight = 3
+[main.params]
+visibility = 3
+
+
 
 
 [[main]]
@@ -48,6 +77,14 @@ name = "Team"
 pageRef = "team"
 parent = "MU5KHCnt3y"
 weight = 2
+[main.params]
+visibility = 3
+
+[[main]]
+name = "Dice Bastion Blog"
+pageRef = "posts"
+parent = "MU5KHCnt3y"
+weight = 3
 [main.params]
 visibility = 3
 
@@ -85,3 +122,23 @@ weight = 10003
 visibility = 0
 [[footer]]
 none = "none"
+
+[[footer]]
+name = "Support"
+pageRef = "support"
+weight = 10
+
+[[footer]]
+name = "Privacy Policy"
+pageRef = "privacy-policy"
+weight = 20
+
+[[footer]]
+name = "Cookie Policy"
+pageRef = "cookie-policy"
+weight = 30
+
+[[footer]]
+name = "Code of Conduct"
+pageRef = "code-of-conduct"
+weight = 40

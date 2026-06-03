@@ -16,3 +16,10 @@ disableKinds = ["taxonomy", "term"]
 # yielding spurious "unexpected EOF" during `hugo --minify`. Keep HTML/CSS minified; skip JS.
 [minify]
   disableJS = true
+
+# Hugo’s default sitemap.xml would list only Markdown pages — products live in D1.
+# Emit page URLs as pages-sitemap.xml so the root sitemap index (static/sitemap.xml) can list both.
+[sitemap]
+  filename = "pages-sitemap.xml"
+  changefreq = "weekly"
+  priority = 0.5

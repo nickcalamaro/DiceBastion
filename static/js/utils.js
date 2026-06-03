@@ -5,6 +5,8 @@
 
 // API Configuration
 window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+// Blog API — Bunny Edge Script 75941
+window.__BLOG_API_BASE = window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run';
 
 window.utils = {
   /**
@@ -25,6 +27,11 @@ window.utils = {
    */
   getApiBase: (removeTrailingSlash = false) => {
     const base = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+    return removeTrailingSlash ? base.replace(/\/+$/, '') : base;
+  },
+
+  getBlogApiBase: (removeTrailingSlash = false) => {
+    const base = window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run';
     return removeTrailingSlash ? base.replace(/\/+$/, '') : base;
   },
 
@@ -68,6 +75,12 @@ window.utils = {
     const timeOptions = { hour: '2-digit', minute: '2-digit' };
     return `${date.toLocaleDateString('en-GB', dateOptions)} at ${date.toLocaleTimeString('en-GB', timeOptions)}`;
   },
+
+  /**
+   * Support note for payment and registration modals.
+   */
+  paymentSupportNoteHtml: () =>
+    '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>',
 
   /**
    * Generate a unique idempotency key

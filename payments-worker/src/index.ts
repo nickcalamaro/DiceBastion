@@ -262,9 +262,10 @@ app.post('/internal/checkout', async (c) => {
 			description: string
 			savePaymentInstrument?: boolean
 			customerId?: string
+			isFreeTrialSetup?: boolean
 		}>()
 		
-		const { amount, currency, orderRef, description, savePaymentInstrument, customerId } = body
+		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup } = body
 
 		const { access_token } = await sumupToken(c.env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
 		
@@ -274,20 +275,30 @@ app.post('/internal/checkout', async (c) => {
 			description
 		}
 
-		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose with the real amount.
+		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose.
 		// Per SumUp docs, the authorization amount is "instantly reimbursed" (auth hold released).
-		// The real charge is made separately after the card is saved.
+		// Standard memberships auth the plan price; free trials always auth £1 regardless of tier.
 		if (savePaymentInstrument && customerId) {
-			checkoutBody.amount = Number(amount) || 1.00
+			const authAmount = isFreeTrialSetup ? 1.00 : (Number(amount) || 1.00)
+			checkoutBody.amount = authAmount
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
 			checkoutBody.customer_id = customerId
-			console.log('[Checkout] Creating tokenization checkout (auth + instant reimburse):', JSON.stringify(checkoutBody))
+			console.log('[Checkout] Creating tokenization checkout (auth + instant reimburse):', JSON.stringify({
+				...checkoutBody,
+				checkout_reference: orderRef,
+				isFreeTrialSetup: !!isFreeTrialSetup,
+				note: 'checkout_reference is our orderRef; SumUp checkout id returned after create'
+			}))
 		} else {
 			// Regular payment (no card saving) — use the provided amount
 			checkoutBody.amount = Number(amount)
 			checkoutBody.currency = currency
-			console.log('[Checkout] Creating regular payment checkout:', JSON.stringify(checkoutBody))
+			console.log('[Checkout] Creating regular payment checkout:', JSON.stringify({
+				...checkoutBody,
+				checkout_reference: orderRef,
+				note: 'checkout_reference is our orderRef; SumUp checkout id returned after create'
+			}))
 		}
 
 		const res = await fetch('https://api.sumup.com/v0.1/checkouts', {
@@ -309,6 +320,13 @@ app.post('/internal/checkout', async (c) => {
 		if (!json || !json.id) {
 			throw new Error('missing_checkout_id')
 		}
+
+		console.log('[Checkout] SumUp checkout created:', {
+			sumup_checkout_id: json.id,
+			checkout_reference: orderRef,
+			status: json.status,
+			purpose: json.purpose || null
+		})
 
 		return c.json(json)
 	} catch (error: any) {
@@ -357,15 +375,78 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 		}
 
 		const payment: any = await res.json()
-		console.log('[Payment] Retrieved checkout:', checkoutId, 'status:', payment.status,
-			'purpose:', payment.purpose || 'none',
-			'transactions:', payment.transactions?.length || 0,
-			'txStatuses:', payment.transactions?.map((t: any) => t.status) || [],
-			'hasInstrument:', !!payment.payment_instrument
-		)
+		const failedTx = (payment.transactions || []).filter((t: any) => t?.status === 'FAILED')
+		const failedDetails = failedTx.map((t: any) => ({
+			id: t.id,
+			status: t.status,
+			result_code: t.result_code ?? t.resultCode ?? null,
+			response_code: t.response_code ?? t.responseCode ?? null,
+			auth_code: t.auth_code ?? t.authCode ?? null,
+			error_code: t.error_code ?? t.errorCode ?? null,
+			error_message: t.error_message ?? t.errorMessage ?? null
+		}))
+		console.log('[Payment] Retrieved checkout:', {
+			sumup_checkout_id: checkoutId,
+			checkout_reference: payment.checkout_reference || null,
+			status: payment.status,
+			purpose: payment.purpose || 'none',
+			transactionCount: payment.transactions?.length || 0,
+			txStatuses: payment.transactions?.map((t: any) => t.status) || [],
+			hasInstrument: !!payment.payment_instrument,
+			failedTxDetails: failedDetails
+		})
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Fetch payment error:', error)
+		return c.json({ error: error.message || 'Failed to fetch payment' }, 500)
+	}
+})
+
+/**
+ * Fetch the most recent payment/checkout for an order reference.
+ * GET /internal/payment-by-reference/:orderRef
+ * Used as a fallback when the SumUp checkout id was not stored on our row.
+ */
+app.get('/internal/payment-by-reference/:orderRef', async (c) => {
+	try {
+		const orderRef = c.req.param('orderRef')
+		const { access_token } = await sumupToken(c.env, 'payments')
+
+		const res = await fetch(
+			`https://api.sumup.com/v0.1/checkouts?checkout_reference=${encodeURIComponent(orderRef)}`,
+			{ headers: { Authorization: `Bearer ${access_token}` } }
+		)
+
+		if (!res.ok) {
+			const txt = await res.text()
+			console.error('[PaymentByRef] SumUp API error:', res.status, txt)
+			throw new Error(`Failed to fetch payment (${res.status}): ${txt}`)
+		}
+
+		const checkouts: any = await res.json()
+		const list = Array.isArray(checkouts) ? checkouts : []
+		if (list.length === 0) {
+			return c.json({ error: 'checkout_not_found' }, 404)
+		}
+
+		// Prefer a paid checkout if present, otherwise the most recent one.
+		const isPaid = (p: any) =>
+			p?.status === 'PAID' ||
+			p?.status === 'SUCCESSFUL' ||
+			(Array.isArray(p?.transactions) &&
+				p.transactions.some((t: any) => t?.status === 'SUCCESSFUL' || t?.status === 'PAID'))
+		const payment = list.find(isPaid) || list[list.length - 1]
+
+		console.log('[PaymentByRef] Resolved checkout:', {
+			checkout_reference: orderRef,
+			sumup_checkout_id: payment?.id || null,
+			status: payment?.status,
+			matches: list.length
+		})
+
+		return c.json(payment)
+	} catch (error: any) {
+		console.error('Fetch payment by reference error:', error)
 		return c.json({ error: error.message || 'Failed to fetch payment' }, 500)
 	}
 })
@@ -465,6 +546,20 @@ app.post('/internal/payment-instrument', async (c) => {
 })
 
 /**
+ * Check if a SumUp checkout response represents a successful payment.
+ */
+function isCheckoutPaid(payment: any): boolean {
+	if (!payment) return false
+	if (payment.status === 'PAID' || payment.status === 'SUCCESSFUL') return true
+	if (payment.transactions && Array.isArray(payment.transactions)) {
+		return payment.transactions.some(
+			(t: any) => t.status === 'SUCCESSFUL' || t.status === 'PAID'
+		)
+	}
+	return false
+}
+
+/**
  * Charge a saved payment instrument
  * POST /internal/charge
  */
@@ -552,7 +647,24 @@ app.post('/internal/charge', async (c) => {
 			throw new Error(`Payment processing failed: ${txt}`)		}
 
 		const payment: any = await paymentRes.json()
-		console.log('Processed recurring payment:', payment.id, payment.status)
+		console.log('Processed recurring payment:', payment.id, payment.status, {
+			txStatuses: payment.transactions?.map((t: any) => t.status) || []
+		})
+
+		if (!isCheckoutPaid(payment)) {
+			console.error('Recurring charge not paid:', {
+				checkoutId: checkout.id,
+				orderRef,
+				status: payment.status,
+				txStatuses: payment.transactions?.map((t: any) => t.status) || []
+			})
+			return c.json({
+				error: 'Payment not successful',
+				status: payment.status || 'UNKNOWN',
+				payment
+			}, 402)
+		}
+
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Charge payment instrument error:', error)

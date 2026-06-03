@@ -56,6 +56,104 @@ showDate: false
 .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-600)); color: rgb(var(--color-primary-600)); }
 .dark .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-400)); color: rgb(var(--color-primary-400)); }
 
+/* Deep-link section headings (e.g. /admin#bookings-upcoming) */
+.admin-section-heading { scroll-margin-top: 5rem; margin: 0 0 1rem 0; font-size: 1.125rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.admin-section-heading .admin-permalink { font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-neutral-400)); text-decoration: none; opacity: 0.65; }
+.admin-section-heading .admin-permalink:hover { opacity: 1; text-decoration: underline; color: rgb(var(--color-primary-600)); }
+.admin-jump-links { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin-bottom: 1.25rem; padding: 0.65rem 1rem; background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; font-size: 0.875rem; }
+.dark .admin-jump-links { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.admin-jump-links a { color: rgb(var(--color-primary-600)); text-decoration: none; }
+.admin-jump-links a:hover { text-decoration: underline; }
+/* Schedule greens/reds — Blowfish scheme has no --color-success/danger tokens */
+#bookings-tab {
+  --sch-green-50: 240, 253, 244;
+  --sch-green-100: 220, 252, 231;
+  --sch-green-200: 167, 243, 208;
+  --sch-green-300: 110, 231, 183;
+  --sch-green-500: 16, 185, 129;
+  --sch-green-600: 5, 150, 105;
+  --sch-green-700: 4, 120, 87;
+  --sch-green-800: 6, 95, 70;
+  --sch-green-900: 6, 78, 59;
+  --sch-red-50: 254, 242, 242;
+  --sch-red-100: 254, 226, 226;
+  --sch-red-200: 254, 202, 202;
+  --sch-red-300: 252, 165, 165;
+  --sch-red-500: 239, 68, 68;
+  --sch-red-600: 220, 38, 38;
+  --sch-red-700: 185, 28, 28;
+  --sch-red-800: 153, 27, 27;
+  --sch-red-900: 127, 29, 29;
+}
+.admin-schedule-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0 0 1rem 0; padding: 0; list-style: none; }
+.admin-schedule-legend li { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-600)); }
+.dark .admin-schedule-legend li { color: rgb(var(--color-neutral-400)); }
+.admin-schedule-legend-swatch { width: 0.65rem; height: 0.65rem; border-radius: 2px; flex-shrink: 0; }
+.admin-schedule-legend-swatch--event { background: rgb(var(--sch-green-500)); }
+.admin-schedule-legend-swatch--booking { background: rgb(var(--color-primary-500)); }
+.admin-schedule-legend-swatch--block { background: rgb(var(--sch-red-500)); }
+.admin-schedule-month { display: flex; align-items: center; gap: 0.85rem; margin: 1.35rem 0 0.65rem; }
+.admin-schedule-month:first-child { margin-top: 0; }
+.admin-schedule-month-label { font-size: 0.9375rem; font-weight: 700; color: rgb(var(--color-neutral-800)); white-space: nowrap; letter-spacing: -0.01em; }
+.dark .admin-schedule-month-label { color: rgb(var(--color-neutral-100)); }
+.admin-schedule-month-line { flex: 1; height: 1px; background: rgb(var(--color-neutral-200)); }
+.dark .admin-schedule-month-line { background: rgb(var(--color-neutral-700)); }
+.admin-schedule-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.admin-schedule-row {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 1rem;
+  align-items: start;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 10px;
+  background: rgb(var(--color-neutral-50));
+  border-left-width: 4px;
+}
+.dark .admin-schedule-row { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.admin-schedule-row--event { border-left-color: rgb(var(--sch-green-500)); }
+.dark .admin-schedule-row--event { border-left-color: rgb(var(--sch-green-500)); }
+.admin-schedule-row--booking { border-left-color: rgb(var(--color-primary-500)); }
+.dark .admin-schedule-row--booking { border-left-color: rgb(var(--color-primary-500)); }
+.admin-schedule-row--block { border-left-color: rgb(var(--sch-red-500)); }
+.dark .admin-schedule-row--block { border-left-color: rgb(var(--sch-red-500)); }
+.admin-schedule-date-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 76px;
+  padding: 0.4rem 0.35rem;
+  border-radius: 8px;
+  background: rgb(var(--color-neutral));
+  border: 1px solid rgb(var(--color-neutral-200));
+  line-height: 1.15;
+}
+.dark .admin-schedule-date-box { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); }
+.admin-schedule-date-dow { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; color: rgb(var(--color-neutral-500)); margin-bottom: 0.15rem; }
+.admin-schedule-date-day { font-size: 1.625rem; font-weight: 700; color: rgb(var(--color-neutral-800)); }
+.dark .admin-schedule-date-day { color: rgb(var(--color-neutral-100)); }
+.admin-schedule-date-month { font-size: 0.75rem; font-weight: 600; color: rgb(var(--color-neutral-600)); margin-top: 0.1rem; }
+.dark .admin-schedule-date-month { color: rgb(var(--color-neutral-400)); }
+.admin-schedule-body-title { font-weight: 600; font-size: 1rem; margin: 0 0 0.25rem 0; color: rgb(var(--color-neutral-900)); }
+.dark .admin-schedule-body-title { color: rgb(var(--color-neutral-100)); }
+.admin-schedule-body-subtitle { font-size: 0.8125rem; font-weight: 400; color: rgb(var(--color-neutral-600)); line-height: 1.4; margin: -0.1rem 0 0.35rem 0; }
+.dark .admin-schedule-body-subtitle { color: rgb(var(--color-neutral-400)); }
+.admin-schedule-body-meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); line-height: 1.45; margin: 0; }
+.dark .admin-schedule-body-meta { color: rgb(var(--color-neutral-400)); }
+.admin-schedule-badge { display: inline-block; font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.15rem 0.45rem; border-radius: 4px; margin-right: 0.35rem; vertical-align: middle; }
+.admin-schedule-badge--event { background: rgb(var(--sch-green-50)); color: rgb(var(--sch-green-700)); }
+.dark .admin-schedule-badge--event { background: rgba(var(--sch-green-900), 0.25); color: rgb(var(--sch-green-300)); }
+.admin-schedule-badge--booking { background: rgb(var(--color-primary-50)); color: rgb(var(--color-primary-700)); }
+.dark .admin-schedule-badge--booking { background: rgba(var(--color-primary-900), 0.25); color: rgb(var(--color-primary-300)); }
+.admin-schedule-badge--block { background: rgb(var(--sch-red-50)); color: rgb(var(--sch-red-700)); }
+.dark .admin-schedule-badge--block { background: rgba(var(--sch-red-900), 0.25); color: rgb(var(--sch-red-300)); }
+.admin-schedule-actions { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; }
+@media (max-width: 640px) {
+  .admin-schedule-row { grid-template-columns: 64px 1fr; }
+  .admin-schedule-actions { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; }
+}
+
 /* Info/category containers */
 .admin-info-box { background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
 .dark .admin-info-box { background: rgb(var(--color-neutral-900)); }
@@ -109,6 +207,13 @@ showDate: false
 
 /* Image cropper */
 .image-preview { max-width: 200px; max-height: 200px; border-radius: 6px; margin-top: 0.5rem; }
+/* Event export previews: fixed frame + cover so card/hero match how they render on site */
+.event-export-thumb { margin-top: 0.5rem; border-radius: 6px; overflow: hidden; background: rgb(var(--color-neutral-200)); }
+.dark .event-export-thumb { background: rgb(var(--color-neutral-700)); }
+.event-export-thumb--main { width: 200px; aspect-ratio: 800 / 379; }
+.event-export-thumb--card { width: 200px; aspect-ratio: 400 / 238; }
+.event-export-thumb--hero { width: 200px; aspect-ratio: 885 / 300; }
+.event-export-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; margin: 0; max-width: none; max-height: none; }
 #crop-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 9999; align-items: center; justify-content: center; }
 #crop-modal.is-open { display: flex; }
 .crop-container { background: white; border-radius: 12px; padding: 1rem 2rem 2rem 2rem; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; overflow-y: auto; }
@@ -198,12 +303,29 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings & Calendar</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 <button class="admin-tab-btn tab-btn" data-tab="newsletter">Newsletter</button>
+<button class="admin-tab-btn tab-btn" data-tab="blog">Blog</button>
 </div>
+
+<nav class="admin-jump-links admin-mb-2" aria-label="Admin sections">
+<span style="color: rgb(var(--color-neutral-500));">Quick links:</span>
+<a href="#products">Products</a>
+<a href="#shop-promos">Shop promos</a>
+<a href="#events">Events</a>
+<a href="#registrations">Registrations</a>
+<a href="#orders">Orders</a>
+<a href="#memberships">Memberships</a>
+<a href="#bookings">Bookings</a>
+<a href="#bookings-upcoming">Upcoming</a>
+<a href="#cron">Cron</a>
+<a href="#newsletter">Newsletter</a>
+<a href="#blog">Blog</a>
+<a href="#blog-authors">Authors</a>
+</nav>
 
 <!-- Products Tab -->
 <div id="products-tab" class="tab-content">
 <div class="card card-compact">
-<h2 id="product-form-title">Add New Product</h2>
+<h2 id="product-form-title" class="admin-section-heading">Add New Product</h2>
 <form id="product-form">
 <input type="hidden" id="product-id">
 
@@ -265,6 +387,7 @@ Logout
 <div class="admin-mb-1">
 <label class="form-label">Image URL</label>
 <input type="url" id="product-image" placeholder="https://..." class="form-input">
+<p class="blog-help-text" style="margin-top:0.35rem;">Product image is used on the SEO page, Open Graph previews, and the product image sitemap for Google Images.</p>
 <small class="admin-text-small">Or upload an image below</small>
 </div>
 
@@ -298,7 +421,7 @@ Logout
 </form>
 </div>
 
-<h2>Products</h2>
+<h2 id="admin-section-products" class="admin-section-heading">Products <a href="#products" class="admin-permalink" aria-label="Link to products">#</a></h2>
 <div id="products-list"></div>
 </div>
 
@@ -310,7 +433,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </p>
 </div>
 <div class="card card-compact admin-mb-2">
-<h2 class="admin-mt-0">New / edit promo code</h2>
+<h2 id="admin-section-shop-promos" class="admin-section-heading admin-mt-0">New / edit promo code <a href="#shop-promos" class="admin-permalink" aria-label="Link to shop promos">#</a></h2>
 <form id="shop-promo-form">
 <input type="hidden" id="shop-promo-id">
 <div class="admin-grid-2 admin-mb-1">
@@ -396,7 +519,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <!-- Events Tab -->
 <div id="events-tab" class="tab-content" style="display: none;">
 <div class="card card-compact">
-<h2 id="event-form-title">Add New Event</h2>
+<h2 id="event-form-title" class="admin-section-heading">Add New Event</h2>
 <form id="event-form">
 <input type="hidden" id="event-id">
 
@@ -457,8 +580,8 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <span class="seo-tooltip"><strong>Google Image Guidelines:</strong><br>• Minimum width: 720px (1920px recommended)<br>• Minimum 50K total pixels (w×h)<br>• Provide 16:9, 4:3 and/or 1:1 ratios<br>• Must be crawlable (not blocked by robots.txt)<br>• Use .jpg, .png or .webp format<br><br>The event's uploaded image is used by default. Only set this if you want a different image for Google.</span>
 </span>
 </div>
-<input type="url" id="event-seo-image" class="form-input" placeholder="Leave empty to use event image">
-<small class="admin-text-small">Optional override. Uses the event's main image by default.</small>
+<input type="url" id="event-seo-image" class="form-input" placeholder="Leave empty to use hero image">
+<small class="admin-text-small">Used for Google Images and link previews. Leave blank to use the hero image automatically (all event image sizes are listed in the image sitemap).</small>
 </div>
 
 <div class="form-group" style="margin-bottom: 0;">
@@ -612,7 +735,9 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="form-group">
 <label class="form-label">Image URL</label>
 <input type="url" id="event-image" placeholder="https://..." class="form-input">
-<small class="admin-text-small">Or upload an image below</small>
+<small class="admin-text-small">Or upload below — one crop produces 800×379 (general), 400×238 (cards), and 885×300 (modal hero), each with the same edge treatment.</small>
+<input type="hidden" id="event-image-card" value="">
+<input type="hidden" id="event-image-hero" value="">
 </div>
 
 <div class="form-group">
@@ -635,27 +760,27 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </form>
 </div>
 
-<h2>Events</h2>
+<h2 id="admin-section-events" class="admin-section-heading">Events <a href="#events" class="admin-permalink" aria-label="Link to events list">#</a></h2>
 <div id="events-list"></div>
 </div>
 
 <!-- Registrations Tab -->
 <div id="registrations-tab" class="tab-content" style="display: none;">
-<h2>Event Registrations</h2>
+<h2 id="admin-section-registrations" class="admin-section-heading">Event Registrations <a href="#registrations" class="admin-permalink" aria-label="Link to registrations">#</a></h2>
 <p style="color: rgb(var(--color-neutral-600)); margin-bottom: 2rem;">View and manage event registrations and ticket purchases</p>
 <div id="registrations-list"></div>
 </div>
 
 <!-- Orders Tab -->
 <div id="orders-tab" class="tab-content" style="display: none;">
-<h2>Recent Orders</h2>
+<h2 id="admin-section-orders" class="admin-section-heading">Recent Orders <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
 <div id="orders-list"></div>
 </div>
 
 <!-- Memberships Tab -->
 <div id="memberships-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">Active Memberships</h2>
+<h2 id="admin-section-memberships" class="admin-section-heading admin-m-0">Active Memberships <a href="#memberships" class="admin-permalink" aria-label="Link to memberships">#</a></h2>
 <div class="admin-flex">
 <select id="membership-filter" onchange="loadMemberships()" class="form-select" style="padding: 0.5rem 1rem; font-size: 0.875rem;">
 <option value="all">All Memberships</option>
@@ -720,7 +845,7 @@ Loading memberships...
 <!-- Bookings & Calendar Tab -->
 <div id="bookings-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">📅 Bookings & Calendar</h2>
+<h2 id="admin-section-bookings" class="admin-section-heading admin-m-0">📅 Bookings &amp; Calendar <a href="#bookings" class="admin-permalink" aria-label="Link to bookings tab">#</a></h2>
 <div class="admin-flex">
 <button id="create-block-btn" class="btn btn-primary" onclick="showCreateBlockModal()">
 + Block Time
@@ -731,8 +856,63 @@ Loading memberships...
 </div>
 </div>
 
+<nav class="admin-jump-links" aria-label="Bookings sections">
+<span style="color: rgb(var(--color-neutral-500));">Jump to:</span>
+<a href="#bookings-schedule">Schedule settings</a>
+<a href="#bookings-upcoming">Upcoming</a>
+<a href="#bookings-calendar">Week view</a>
+</nav>
+
+<section id="admin-section-bookings-schedule" class="card card-compact admin-mb-2">
+<h3 class="admin-section-heading admin-mt-0">Schedule settings <a href="#bookings-schedule" class="admin-permalink" aria-label="Link to schedule settings">#</a></h3>
+<p class="admin-text-small admin-mb-1">Default opening hours apply every day. Add rules to restrict certain weekdays (for example Tuesday and Thursday from 6pm only).</p>
+<div id="booking-schedule-config-status" class="admin-text-small admin-mb-1">Loading schedule settings…</div>
+<form id="booking-schedule-config-form" class="form-container" style="display: none;">
+<div class="form-row">
+<div class="form-group">
+<label for="booking-start-hour" class="form-label">Default start hour</label>
+<input type="number" id="booking-start-hour" class="form-input" min="0" max="23" required>
+</div>
+<div class="form-group">
+<label for="booking-end-hour" class="form-label">Default end hour</label>
+<input type="number" id="booking-end-hour" class="form-input" min="1" max="24" required>
+</div>
+<div class="form-group">
+<label for="booking-slot-duration" class="form-label">Slot duration (hours)</label>
+<input type="number" id="booking-slot-duration" class="form-input" min="1" max="12" required>
+</div>
+<div class="form-group">
+<label for="booking-max-bookings" class="form-label">Max simultaneous bookings</label>
+<input type="number" id="booking-max-bookings" class="form-input" min="1" max="50" required>
+</div>
+</div>
+<h4 class="admin-section-heading" style="font-size: 1rem;">Day-specific hour rules</h4>
+<div id="booking-day-rules-list"></div>
+<button type="button" class="btn btn-secondary btn-sm admin-mb-1" onclick="addBookingDayHourRuleRow()">Add day rule</button>
+<div class="form-actions">
+<button type="submit" class="btn btn-primary">Save schedule settings</button>
+</div>
+</form>
+</section>
+
+<section id="admin-section-bookings-upcoming" class="card card-compact admin-mb-2">
+<span id="admin-section-bookings-blocks" class="admin-permalink" style="position:absolute;visibility:hidden;" aria-hidden="true"></span>
+<h3 class="admin-section-heading admin-mt-0">Upcoming schedule <a href="#bookings-upcoming" class="admin-permalink" aria-label="Link to upcoming schedule">#</a></h3>
+<p class="admin-text-small admin-mb-1">Everything from now onward, sorted by date.</p>
+<ul class="admin-schedule-legend" aria-label="Schedule colour key">
+<li><span class="admin-schedule-legend-swatch admin-schedule-legend-swatch--event" aria-hidden="true"></span> Events</li>
+<li><span class="admin-schedule-legend-swatch admin-schedule-legend-swatch--booking" aria-hidden="true"></span> Table bookings</li>
+<li><span class="admin-schedule-legend-swatch admin-schedule-legend-swatch--block" aria-hidden="true"></span> Blocked time</li>
+</ul>
+<div id="bookings-schedule-content">
+<p class="admin-text-small" style="text-align: center; padding: 1.5rem;">Loading schedule…</p>
+</div>
+
+</section>
+
 <!-- Calendar Week View -->
-<div class="card card-compact">
+<section id="admin-section-bookings-calendar" class="card card-compact admin-mb-2">
+<h3 class="admin-section-heading admin-mt-0">🗓️ Week view <a href="#bookings-calendar" class="admin-permalink" aria-label="Link to week calendar">#</a></h3>
 <div id="calendar-nav" class="admin-flex-between admin-mb-1">
 <button id="prev-week-btn" class="btn btn-secondary btn-sm" onclick="changeWeek(-1)">
 ← Previous
@@ -745,23 +925,15 @@ Next →
 <div id="calendar-grid" style="display: grid; gap: 1rem;">
 <!-- Days will be populated by JavaScript -->
 </div>
-</div>
+</section>
 
-<!-- Active Time Blocks -->
-<div class="card card-compact">
-<h3 class="admin-mt-0">⛔ Active Time Blocks</h3>
-<div id="blocks-list" style="display: grid; gap: 0.75rem;">
-<div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">
-Loading time blocks...
-</div>
-</div>
-</div>
+
 </div>
 
 <!-- Cron Jobs Tab -->
 <div id="cron-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">Automated Jobs</h2>
+<h2 id="admin-section-cron" class="admin-section-heading admin-m-0">Automated Jobs <a href="#cron" class="admin-permalink" aria-label="Link to cron jobs">#</a></h2>
 <div class="admin-flex">
 <button id="sync-board-games-btn" onclick="syncBoardGames()" class="btn btn-sm" style="background: rgb(var(--color-secondary-600));">
 🎲 Sync Board Games
@@ -825,7 +997,7 @@ Loading cron job logs...
 <!-- Newsletter Tab -->
 <div id="newsletter-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 class="admin-m-0">Newsletter Builder</h2>
+<h2 id="admin-section-newsletter" class="admin-section-heading admin-m-0">Newsletter Builder <a href="#newsletter" class="admin-permalink" aria-label="Link to newsletter">#</a></h2>
 <div style="display:flex;gap:0.75rem;align-items:center;">
   <button type="button" id="nl-newsletters-btn" onclick="nlToggleNewslettersPanel()" class="btn btn-secondary btn-sm">Saved Newsletters</button>
   <div id="nl-recipient-badge" class="nl-badge">Loading recipients...</div>
@@ -940,8 +1112,222 @@ Loading cron job logs...
 </div>
 </div>
 </div>
-
 </div>
+
+<!-- Blog Tab -->
+<div id="blog-tab" class="tab-content" style="display: none;">
+<div id="blog-health-banner" class="blog-health-banner" style="display:none;"></div>
+<div class="admin-flex-between admin-mb-2">
+<h2 id="admin-section-blog" class="admin-section-heading admin-m-0">Blog <a href="#blog" class="admin-permalink" aria-label="Link to blog">#</a></h2>
+<div style="display:flex;gap:0.75rem;align-items:center;">
+  <button type="button" onclick="blogNewPost()" class="btn btn-secondary btn-sm">New Post</button>
+  <span id="blog-status-badge" class="nl-badge" style="display:none;"></span>
+</div>
+</div>
+
+<div class="admin-grid-2 admin-mb-2" style="gap: 1.5rem; align-items: start;">
+<div class="card card-compact">
+<h3 class="admin-m-0 admin-mb-1">Posts</h3>
+<div id="blog-posts-list">
+  <div class="blog-empty-text" style="text-align:center;padding:1.5rem;">Loading...</div>
+</div>
+</div>
+
+<div class="card card-compact">
+<input type="hidden" id="blog-post-id">
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label">Title *</label>
+<input type="text" id="blog-title" class="form-input" placeholder="Post title">
+</div>
+<div>
+<label class="form-label">URL Slug *</label>
+<input type="text" id="blog-slug" class="form-input" style="font-family: monospace;">
+</div>
+</div>
+
+<div class="admin-mb-1">
+<label class="form-label">Excerpt</label>
+<textarea id="blog-excerpt" rows="2" class="form-textarea" placeholder="Short summary for list cards"></textarea>
+</div>
+
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label">Publish Date</label>
+<input type="datetime-local" id="blog-published-at" class="form-input">
+</div>
+<div></div>
+</div>
+
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label">Card image</label>
+<p class="blog-help-text">Shown on blog list cards. Crop to 400×238.</p>
+<button type="button" onclick="document.getElementById('blog-card-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop card</button>
+<input type="file" id="blog-card-upload" accept="image/*" style="display:none;">
+<input type="url" id="blog-featured-image-card" class="form-input" placeholder="Or paste card image URL" style="margin-top:0.5rem;">
+<div id="blog-card-preview" style="margin-top:0.5rem;"></div>
+</div>
+<div>
+<label class="form-label">Cover image</label>
+<p class="blog-help-text">Wide hero at the top of the post. Crop to 885×300.</p>
+<button type="button" onclick="document.getElementById('blog-cover-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop cover</button>
+<input type="file" id="blog-cover-upload" accept="image/*" style="display:none;">
+<input type="hidden" id="blog-featured-image" value="">
+<input type="url" id="blog-featured-image-hero" class="form-input" placeholder="Or paste cover image URL" style="margin-top:0.5rem;">
+<div id="blog-cover-preview" style="margin-top:0.5rem;"></div>
+</div>
+</div>
+
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label">SEO Description</label>
+<input type="text" id="blog-seo-description" class="form-input">
+</div>
+<div>
+<label class="form-label">SEO Image URL</label>
+<p class="blog-help-text">Used for Google Images and link previews. Leave blank to use the cover image automatically.</p>
+<input type="url" id="blog-seo-image" class="form-input" placeholder="https://... (optional)">
+</div>
+</div>
+
+<div class="admin-mb-1">
+<label class="form-label">Tags</label>
+<div id="blog-tags-chips" class="admin-category-container"></div>
+<div class="admin-flex" style="margin-top:0.5rem;">
+<input type="text" id="blog-tags-input" list="blog-tags-suggestions" placeholder="Add tag..." class="form-input" style="flex:1;">
+<button type="button" onclick="blogAddChip('tags')" class="btn btn-primary" style="padding:0.75rem 1.5rem;">Add</button>
+</div>
+<datalist id="blog-tags-suggestions"></datalist>
+</div>
+
+<div class="admin-mb-1">
+<label class="form-label">Categories</label>
+<div id="blog-categories-chips" class="admin-category-container"></div>
+<div class="admin-flex" style="margin-top:0.5rem;">
+<input type="text" id="blog-categories-input" list="blog-categories-suggestions" placeholder="Add category..." class="form-input" style="flex:1;">
+<button type="button" onclick="blogAddChip('categories')" class="btn btn-primary" style="padding:0.75rem 1.5rem;">Add</button>
+</div>
+<datalist id="blog-categories-suggestions"></datalist>
+</div>
+
+<div class="admin-mb-1">
+<label class="form-label">Series</label>
+<div id="blog-series-chips" class="admin-category-container"></div>
+<div class="admin-flex" style="margin-top:0.5rem;">
+<input type="text" id="blog-series-input" list="blog-series-suggestions" placeholder="Add series..." class="form-input" style="flex:1;">
+<button type="button" onclick="blogAddChip('series')" class="btn btn-primary" style="padding:0.75rem 1.5rem;">Add</button>
+</div>
+<datalist id="blog-series-suggestions"></datalist>
+</div>
+
+<div class="admin-mb-1">
+<label class="form-label">Authors</label>
+<div id="blog-authors-chips" class="admin-category-container"></div>
+<div class="admin-flex" style="margin-top:0.5rem;">
+<input type="text" id="blog-authors-input" list="blog-authors-suggestions" placeholder="Author slug (e.g. nick)" class="form-input" style="flex:1;">
+<button type="button" onclick="blogAddChip('authors')" class="btn btn-primary" style="padding:0.75rem 1.5rem;">Add</button>
+</div>
+<datalist id="blog-authors-suggestions"></datalist>
+<div id="blog-author-meta-panel" class="blog-meta-panel" style="display:none;">
+  <p class="blog-help-text">New author — add their display name here, then set photo and bio in the <strong>Authors</strong> section below.</p>
+  <div>
+    <label class="form-label">Display name</label>
+    <input type="text" id="blog-author-name" class="form-input">
+  </div>
+</div>
+</div>
+
+<div class="form-group">
+<label class="form-label">Post Body</label>
+<div id="blog-quill-wrap">
+<div id="blog-toolbar">
+<span class="ql-formats"><select class="ql-header"><option selected></option><option value="1">Heading 1</option><option value="2">Heading 2</option><option value="3">Heading 3</option></select></span>
+<span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
+<span class="ql-formats"><button class="ql-list" value="bullet"></button><button class="ql-list" value="ordered"></button></span>
+<span class="ql-formats"><button class="ql-link"></button></span>
+</div>
+<div class="blog-media-bar">
+<span class="blog-media-bar-label">Body images</span>
+<button type="button" onclick="blogInsertImageUpload()" class="btn btn-secondary btn-sm">Upload image</button>
+<button type="button" onclick="blogInsertImageUrl()" class="btn btn-secondary btn-sm">Paste URL</button>
+<input type="file" id="blog-inline-image-upload" accept="image/*" style="display:none;">
+</div>
+<div id="blog-editor"></div>
+</div>
+</div>
+
+<div class="admin-flex" style="justify-content:flex-end;gap:1rem;flex-wrap:wrap;align-items:center;margin-top:1rem;">
+<span id="blog-save-status" class="nl-draft-status"></span>
+<button type="button" onclick="blogPreview()" class="btn btn-secondary">Preview</button>
+<button type="button" onclick="blogSaveDraft()" class="btn btn-secondary" id="blog-save-btn">Save Draft</button>
+<button type="button" onclick="blogPublish()" class="btn btn-primary" id="blog-publish-btn">Publish</button>
+<button type="button" onclick="blogSyncCdn()" class="btn btn-secondary" id="blog-sync-cdn-btn">Rebuild CDN</button>
+<button type="button" onclick="blogUnpublish()" class="btn btn-secondary" id="blog-unpublish-btn" style="display:none;">Unpublish</button>
+<button type="button" onclick="blogDeletePost()" class="btn btn-secondary" id="blog-delete-btn" style="display:none;">Delete</button>
+</div>
+<div id="blog-action-result" style="display:none;margin-top:1rem;"></div>
+</div>
+</div>
+
+<div class="card card-compact admin-mb-2" style="margin-top:1.5rem;">
+<h3 id="admin-section-blog-authors" class="admin-m-0 admin-mb-1">Authors <a href="#blog-authors" class="admin-permalink" aria-label="Link to authors">#</a></h3>
+<p class="blog-help-text blog-help-text--spaced">Profile photos and bios appear on article bylines and each author&apos;s page at <code>/posts/author/slug/</code>.</p>
+
+<div class="admin-grid-2" style="gap:1.5rem;align-items:start;">
+<div>
+<div class="admin-flex-between admin-mb-1">
+<strong style="font-size:0.95rem;">All authors</strong>
+<button type="button" onclick="blogNewAuthor()" class="btn btn-secondary btn-sm">Add author</button>
+</div>
+<div id="blog-authors-admin-list">
+  <div class="blog-empty-text" style="text-align:center;padding:1rem;">Loading...</div>
+</div>
+</div>
+
+<div id="blog-author-admin-form" class="card card-compact blog-author-form" style="display:none;">
+<input type="hidden" id="blog-author-admin-editing" value="0">
+<div class="admin-mb-1">
+<label class="form-label">Slug *</label>
+<input type="text" id="blog-author-admin-slug" class="form-input" placeholder="e.g. nick" style="font-family:monospace;">
+<small class="admin-text-small">Used in URLs: /posts/author/<em>slug</em>/</small>
+</div>
+<div class="admin-mb-1">
+<label class="form-label">Display name *</label>
+<input type="text" id="blog-author-admin-name" class="form-input" placeholder="Nick Calamaro">
+</div>
+<div class="admin-mb-1">
+<label class="form-label">Profile photo</label>
+<button type="button" onclick="document.getElementById('blog-author-avatar-upload').click()" class="btn btn-secondary btn-sm">Upload &amp; crop photo</button>
+<input type="file" id="blog-author-avatar-upload" accept="image/*" style="display:none;">
+<input type="url" id="blog-author-admin-image" class="form-input" placeholder="Or paste image URL" style="margin-top:0.5rem;">
+<div id="blog-author-admin-preview" style="margin-top:0.5rem;"></div>
+</div>
+<div class="admin-mb-1">
+<label class="form-label">Short bio</label>
+<textarea id="blog-author-admin-bio" rows="4" class="form-textarea" placeholder="A few sentences about this author…"></textarea>
+</div>
+<div class="admin-flex" style="gap:0.75rem;flex-wrap:wrap;">
+<button type="button" onclick="blogSaveAuthor()" class="btn btn-primary" id="blog-author-save-btn">Save author</button>
+<button type="button" onclick="blogCancelAuthorEdit()" class="btn btn-secondary">Cancel</button>
+<button type="button" onclick="blogDeleteAuthor()" class="btn btn-secondary" id="blog-author-delete-btn" style="display:none;">Delete</button>
+</div>
+<div id="blog-author-admin-result" style="display:none;margin-top:0.75rem;font-size:0.9rem;"></div>
+</div>
+</div>
+</div>
+
+<div id="blog-preview-modal" class="nl-modal" style="display:none;">
+<div class="nl-modal-box" style="max-width:min(900px,96vw);width:100%;">
+<div class="admin-flex-between" style="margin-bottom:1rem;">
+<h3 class="admin-m-0">Post Preview</h3>
+<button onclick="blogClosePreview()" class="btn btn-secondary btn-sm">Close</button>
+</div>
+<iframe id="blog-preview-frame" style="width:100%;height:min(82vh,700px);border:1px solid rgb(var(--color-neutral-300));border-radius:8px;background:white;"></iframe>
+</div>
+</div>
+</div>
+
 </div>
 
 <style>
@@ -1017,17 +1403,238 @@ Loading cron job logs...
 .nl-send-result { padding: 1rem 1.25rem; border-radius: 8px; margin-top: 1rem; font-size: 0.9rem; }
 .nl-send-result.nl-success { background: rgb(var(--color-success-50)); border: 1px solid rgb(var(--color-success-200)); color: rgb(var(--color-success-700)); }
 .nl-send-result.nl-error { background: rgb(var(--color-danger-50)); border: 1px solid rgb(var(--color-danger-200)); color: rgb(var(--color-danger-700)); }
-#nl-quill-wrap { border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; overflow: hidden; }
-.dark #nl-quill-wrap { border-color: rgb(var(--color-neutral-600)); }
-#nl-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-50)); border: none; border-bottom: 1px solid rgb(var(--color-neutral-200)); flex-wrap: wrap; padding: 6px 8px; }
-.dark #nl-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-900)); border-bottom-color: rgb(var(--color-neutral-700)); }
-#nl-quill-wrap .ql-container.ql-snow { border: none; font-family: inherit; }
-#nl-quill-wrap .ql-editor { min-height: 300px; font-size: 1rem; line-height: 1.7; padding: 1rem; color: rgb(var(--color-neutral-900)); }
-.dark #nl-quill-wrap .ql-editor { color: rgb(var(--color-neutral-100)); background: rgb(var(--color-neutral-800)); }
-.dark #nl-quill-wrap .ql-stroke { stroke: rgb(var(--color-neutral-400)) !important; }
-.dark #nl-quill-wrap .ql-fill { fill: rgb(var(--color-neutral-400)) !important; }
-.dark #nl-quill-wrap .ql-picker { color: rgb(var(--color-neutral-300)); }
-.dark #nl-quill-wrap .ql-picker-options { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-200)); }
+#nl-quill-wrap, #blog-quill-wrap { border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; overflow: hidden; }
+.dark #nl-quill-wrap, .dark #blog-quill-wrap { border-color: rgb(var(--color-neutral-600)); }
+#nl-quill-wrap .ql-toolbar.ql-snow, #blog-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-50)); border: none; border-bottom: 1px solid rgb(var(--color-neutral-200)); flex-wrap: wrap; padding: 6px 8px; }
+.dark #nl-quill-wrap .ql-toolbar.ql-snow, .dark #blog-quill-wrap .ql-toolbar.ql-snow { background: rgb(var(--color-neutral-900)); border-bottom-color: rgb(var(--color-neutral-700)); }
+.blog-media-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.625rem 0.875rem;
+  background: rgb(var(--color-neutral-50));
+  border-bottom: 1px solid rgb(var(--color-neutral-200));
+}
+.dark .blog-media-bar {
+  background: rgb(var(--color-neutral-900));
+  border-bottom-color: rgb(var(--color-neutral-700));
+}
+.blog-media-bar-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--color-neutral-500));
+  margin-right: 0.125rem;
+  white-space: nowrap;
+}
+.blog-media-bar .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#nl-quill-wrap .ql-container.ql-snow, #blog-quill-wrap .ql-container.ql-snow { border: none; font-family: inherit; }
+#nl-quill-wrap .ql-editor, #blog-quill-wrap .ql-editor { min-height: 300px; font-size: 1rem; line-height: 1.7; padding: 1rem; color: rgb(var(--color-neutral-900)); }
+#blog-quill-wrap .ql-editor img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+#blog-quill-wrap .ql-editor .blog-inline-figure {
+  margin: 1.75rem 0;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: box-shadow 0.15s ease;
+}
+#blog-quill-wrap .ql-editor .blog-inline-figure:hover {
+  box-shadow: 0 0 0 2px rgb(var(--color-primary-400));
+}
+#blog-quill-wrap .ql-editor .blog-inline-figure img {
+  pointer-events: none;
+}
+#blog-quill-wrap .ql-editor .blog-inline-figure figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  font-style: italic;
+  color: rgb(var(--color-neutral-500));
+  text-align: center;
+  line-height: 1.5;
+}
+.dark #nl-quill-wrap .ql-editor, .dark #blog-quill-wrap .ql-editor { color: rgb(var(--color-neutral-100)); background: rgb(var(--color-neutral-800)); }
+.dark #nl-quill-wrap .ql-stroke, .dark #blog-quill-wrap .ql-stroke { stroke: rgb(var(--color-neutral-400)) !important; }
+.dark #nl-quill-wrap .ql-fill, .dark #blog-quill-wrap .ql-fill { fill: rgb(var(--color-neutral-400)) !important; }
+.dark #nl-quill-wrap .ql-picker, .dark #blog-quill-wrap .ql-picker { color: rgb(var(--color-neutral-300)); }
+.dark #nl-quill-wrap .ql-picker-options, .dark #blog-quill-wrap .ql-picker-options { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-200)); }
+
+/* Blog admin tab — dark mode */
+.blog-health-banner {
+  margin-bottom: 1rem;
+  padding: 0.875rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--color-neutral-300));
+  background: rgb(var(--color-neutral-50));
+  color: rgb(var(--color-neutral-800));
+  font-size: 0.95rem;
+}
+.dark .blog-health-banner {
+  background: rgb(var(--color-neutral-800));
+  border-color: rgb(var(--color-neutral-600));
+  color: rgb(var(--color-neutral-200));
+}
+.blog-health-banner--warning {
+  border-color: rgb(var(--color-primary-300));
+  background: rgb(var(--color-primary-50));
+  color: rgb(var(--color-primary-900));
+}
+.dark .blog-health-banner--warning {
+  background: rgba(var(--color-primary-900), 0.25);
+  border-color: rgba(var(--color-primary-500), 0.45);
+  color: rgb(var(--color-primary-200));
+}
+.blog-help-text {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: rgb(var(--color-neutral-500));
+}
+.blog-help-text--spaced {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.dark .blog-help-text {
+  color: rgb(var(--color-neutral-400));
+}
+.dark .blog-help-text strong {
+  color: rgb(var(--color-neutral-100));
+}
+.blog-meta-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 8px;
+}
+.dark .blog-meta-panel {
+  background: rgb(var(--color-neutral-900));
+  border-color: rgb(var(--color-neutral-600));
+}
+.dark .blog-author-form {
+  background: rgb(var(--color-neutral-800)) !important;
+}
+.dark #blog-tab {
+  color: rgb(var(--color-neutral-100));
+}
+.dark #blog-tab h2,
+.dark #blog-tab h3,
+.dark #blog-tab .admin-section-heading {
+  color: rgb(var(--color-neutral-100));
+}
+.dark #blog-tab .item-card strong {
+  color: rgb(var(--color-neutral-100));
+}
+.dark #blog-tab code {
+  color: rgb(var(--color-primary-300));
+  background: rgba(var(--color-neutral-700), 0.6);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.blog-post-slug-meta {
+  font-size: 0.875rem;
+  color: rgb(var(--color-neutral-600));
+  margin-top: 0.25rem;
+}
+.blog-post-date {
+  font-size: 0.8rem;
+  color: rgb(var(--color-neutral-500));
+  margin-top: 0.25rem;
+}
+.dark .blog-post-slug-meta {
+  color: rgb(var(--color-neutral-400));
+}
+.dark .blog-post-date {
+  color: rgb(var(--color-neutral-500));
+}
+.blog-post-status--published {
+  color: #059669;
+  font-weight: 600;
+}
+.blog-post-status--draft {
+  color: #64748b;
+  font-weight: 600;
+}
+.dark .blog-post-status--published {
+  color: #34d399;
+}
+.dark .blog-post-status--draft {
+  color: rgb(var(--color-neutral-400));
+}
+.blog-author-slug {
+  font-size: 0.8rem;
+  color: rgb(var(--color-neutral-500));
+  font-family: monospace;
+}
+.blog-author-bio-preview {
+  font-size: 0.8rem;
+  color: rgb(var(--color-neutral-500));
+  margin-top: 0.25rem;
+  line-height: 1.4;
+}
+.dark .blog-author-slug,
+.dark .blog-author-bio-preview {
+  color: rgb(var(--color-neutral-400));
+}
+.blog-empty-text {
+  color: rgb(var(--color-neutral-500));
+}
+.dark .blog-empty-text {
+  color: rgb(var(--color-neutral-400));
+}
+.blog-admin-result {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+.blog-admin-result--success {
+  color: #059669;
+}
+.blog-admin-result--error {
+  color: #b91c1c;
+}
+.dark .blog-admin-result--success {
+  color: rgb(var(--color-success-400));
+}
+.dark .blog-admin-result--error {
+  color: rgb(var(--color-danger-400));
+}
+.dark .nl-send-result.nl-success {
+  background: rgba(var(--color-success-900), 0.2);
+  border-color: rgba(var(--color-success-700), 0.35);
+  color: rgb(var(--color-success-300));
+}
+.dark .nl-send-result.nl-error {
+  background: rgba(var(--color-danger-900), 0.2);
+  border-color: rgba(var(--color-danger-700), 0.35);
+  color: rgb(var(--color-danger-300));
+}
+.dark .nl-draft-status.saved {
+  color: rgb(var(--color-success-400));
+}
+/* Quill body — override pasted inline dark text in dark mode */
+.dark #blog-quill-wrap .ql-editor :where(p, li, ol, ul, span, div, blockquote, h1, h2, h3, h4, h5, h6, strong, em, b, i, u) {
+  color: rgb(var(--color-neutral-100)) !important;
+}
+.dark #blog-quill-wrap .ql-editor a {
+  color: rgb(var(--color-primary-400)) !important;
+}
+.dark #blog-quill-wrap .ql-editor .blog-inline-figure figcaption {
+  color: rgb(var(--color-neutral-400)) !important;
+}
+.dark #blog-quill-wrap .ql-editor.ql-blank::before {
+  color: rgb(var(--color-neutral-500));
+}
+
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
@@ -1077,10 +1684,12 @@ Loading cron job logs...
 
 <script>
 const API_BASE = utils.getApiBase();
+const BLOG_API_BASE = (window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '');
 let sessionToken = null;
 let currentUser = null;
 let uploadedProductImage = null;
-let uploadedEventImage = null;
+/** After crop upload: { image_url, image_url_card, image_url_hero } or null */
+let uploadedEventBundle = null;
 let editingShopPromoId = null;
 
 function adminJsonHeaders() {
@@ -1328,6 +1937,7 @@ loadOrders();
 loadRegistrations();
 loadCronLogs();
 loadShopPromoCodes();
+handleAdminHash();
 // Verify session is still valid in background
 verifySession();
 } else {
@@ -1402,7 +2012,8 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       loadOrders();
 loadRegistrations();
 loadCronLogs();
-loadShopPromoCodes();
+      loadShopPromoCodes();
+      handleAdminHash();
 } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
 errorEl.style.display = 'block';
@@ -1601,8 +2212,180 @@ document.getElementById('event-location')?.addEventListener('input', (e) => {
 let cropper = null;
 let currentCropCallback = null;
 let currentAspectRatio = 336 / 220;
+/** 'event' = multi-size pack; 'blog-card' | 'blog-cover' | 'blog-inline' | 'blog-author' = single blog image; 'product' = single product image */
+let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
+
+const EVENT_IMAGE_MASTER_W = 1600;
+const EVENT_IMAGE_MASTER_H = 758;
+/** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
+const EVENT_IMAGE_EXPORT_SPECS = [
+  /** At least fill target height when needed; blur fills any letterbox. */
+  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg', fit: 'fillHeight' },
+  /** Full artwork visible in 400×238; blur above/below (or sides) — never side-crop wide art. */
+  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'contain' },
+  /** Hero stays contain so the full crop stays visible on the wide frame. */
+  { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'contain' }
+];
+
+const BLOG_CARD_SPEC = { w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contain' };
+const BLOG_COVER_SPEC = { w: 885, h: 300, filename: 'blog-cover.jpg', fit: 'contain' };
+/** 16:9 landscape — full text column width at 1× (960px), common blog embed ratio */
+const BLOG_INLINE_SPEC = { w: 960, h: 540, filename: 'blog-inline.jpg' };
+const BLOG_AUTHOR_SPEC = { w: 400, h: 400, filename: 'author-avatar.jpg' };
+
+const MULTI_SIZE_CROP_SPECS = {
+  event: EVENT_IMAGE_EXPORT_SPECS,
+};
+
+/** Tight axis-aligned bbox of sufficiently opaque pixels, or null if none. */
+function getOpaqueBoundingBox(canvas, alphaThreshold = 24) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const data = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      if (data[row + x * 4 + 3] > alphaThreshold) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+/**
+ * Opaque artwork rect on the master (alpha-weighted). No flush-to-full shortcut — margin size
+ * flows through to how much extra zoom fillHeight needs vs pure contain.
+ */
+function getExportFitSourceRect(canvas) {
+  const cw = canvas.width;
+  const ch = canvas.height;
+  const bbox = getOpaqueBoundingBox(canvas);
+  if (!bbox || bbox.w * bbox.h < cw * ch * 0.02) {
+    return { sx: 0, sy: 0, sw: cw, sh: ch };
+  }
+  return { sx: bbox.x, sy: bbox.y, sw: bbox.w, sh: bbox.h };
+}
+
+function containCenterOnCanvasRegion(sourceCanvas, sx, sy, sw, sh, targetW, targetH) {
+  const scale = Math.min(targetW / sw, targetH / sh);
+  const dw = Math.round(sw * scale);
+  const dh = Math.round(sh * scale);
+  const c = document.createElement('canvas');
+  c.width = targetW;
+  c.height = targetH;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, targetW, targetH);
+  const ox = Math.floor((targetW - dw) / 2);
+  const oy = Math.floor((targetH - dh) / 2);
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, ox, oy, dw, dh);
+  return c;
+}
+
+/**
+ * Uniform scale, centered: never less than contain; add zoom only until the artwork fills the
+ * target height (so no transparent band top/bottom). If contain already touches top and bottom,
+ * scale stays at contain (no extra zoom). Wider than target width → horizontal crop only.
+ */
+function fillHeightMinCenterOnCanvasRegion(sourceCanvas, sx, sy, sw, sh, targetW, targetH) {
+  const sContain = Math.min(targetW / sw, targetH / sh);
+  const sFillHeight = targetH / sh;
+  const scale = Math.max(sContain, sFillHeight);
+  const dw = Math.round(sw * scale);
+  const dh = Math.round(sh * scale);
+  const c = document.createElement('canvas');
+  c.width = targetW;
+  c.height = targetH;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, targetW, targetH);
+  const ox = Math.floor((targetW - dw) / 2);
+  const oy = Math.floor((targetH - dh) / 2);
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, ox, oy, dw, dh);
+  return c;
+}
+
+/** Mean RGB of opaque pixels — used when flattening transparent pixels before blur/JPEG. */
+function averageOpaqueRgb(canvas) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] > 128) {
+      r += d[i];
+      g += d[i + 1];
+      b += d[i + 2];
+      n++;
+    }
+  }
+  if (!n) return { r: 100, g: 116, b: 139 };
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+}
+
+function hexToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
+  if (!m) return { r: 255, g: 255, b: 255 };
+  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+
+/** Paint under transparent pixels so blur/JPEG never composites against white letterbox. */
+function flattenTransparentWithFill(src, rgb) {
+  const c = document.createElement('canvas');
+  c.width = src.width;
+  c.height = src.height;
+  const x = c.getContext('2d');
+  x.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+  x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(src, 0, 0);
+  return c;
+}
+
+function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
+  const baseArea = 800 * 379;
+  const area = targetWidth * targetHeight;
+  const blurPx = Math.max(12, Math.round(28 * Math.sqrt(area / baseArea)));
+  const pad = Math.round(blurPx * 1.07);
+
+  let fillRgb;
+  if (cropBgMode === 'white') {
+    fillRgb = { r: 255, g: 255, b: 255 };
+  } else if (cropBgMode === 'pick' && cropBgPickedCol) {
+    fillRgb = hexToRgb(cropBgPickedCol);
+  } else {
+    fillRgb = averageOpaqueRgb(croppedCanvas);
+  }
+
+  const fillCol = `rgb(${fillRgb.r},${fillRgb.g},${fillRgb.b})`;
+  const opaqueSrc = flattenTransparentWithFill(croppedCanvas, fillRgb);
+
+  const finalCanvas = document.createElement('canvas');
+  finalCanvas.width = targetWidth;
+  finalCanvas.height = targetHeight;
+  const ctx = finalCanvas.getContext('2d');
+  ctx.fillStyle = fillCol;
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
+  if (cropBgMode === 'auto') {
+    ctx.save();
+    ctx.filter = `blur(${blurPx}px)`;
+    ctx.drawImage(opaqueSrc, -pad, -pad, targetWidth + pad * 2, targetHeight + pad * 2);
+    ctx.restore();
+  }
+  ctx.drawImage(opaqueSrc, 0, 0, targetWidth, targetHeight);
+  return finalCanvas.toDataURL('image/jpeg', 0.92);
+}
 
 // Background fill mode buttons
 document.querySelectorAll('.crop-bg-btn').forEach(btn => {
@@ -1653,8 +2436,9 @@ document.querySelector('.crop-image-container').addEventListener('click', (e) =>
   document.getElementById('crop-bg-pick-hint').textContent = `Sampled: ${cropBgPickedCol}`;
 });
 
-function showCropModal(file, callback, aspectRatio = 336 / 220) {
+function showCropModal(file, callback, aspectRatio = 336 / 220, cropKind = 'product') {
   currentAspectRatio = aspectRatio;
+  currentCropKind = cropKind;
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = document.getElementById('crop-image');
@@ -1789,86 +2573,166 @@ document.querySelector('.crop-image-container').classList.remove('eyedropper-act
 document.getElementById('crop-confirm').addEventListener('click', async () => {
   if (!cropper || !currentCropCallback) return;
 
-  // Determine target dimensions based on aspect ratio
-  let targetWidth, targetHeight;
-  if (Math.abs(currentAspectRatio - (800 / 379)) < 0.01) {
-    // Event image (800x379)
-    targetWidth = 800;
-    targetHeight = 379;
-  } else {
-    // Product image (672x440, which is 336/220 * 2)
-    targetWidth = 672;
-    targetHeight = 440;
-  }
-
-  // Get the cropped portion (transparent where crop extends beyond image)
-  const croppedCanvas = cropper.getCroppedCanvas({
-    width: targetWidth,
-    height: targetHeight,
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: 'high',
-    fillColor: 'transparent',
-  });
-
-  // Build final canvas with background fill
-  const finalCanvas = document.createElement('canvas');
-  finalCanvas.width = targetWidth;
-  finalCanvas.height = targetHeight;
-  const ctx = finalCanvas.getContext('2d');
-
-  // Determine fill colour based on selected mode
-  let fillCol;
-  if (cropBgMode === 'white') {
-    fillCol = '#ffffff';
-  } else if (cropBgMode === 'pick' && cropBgPickedCol) {
-    fillCol = cropBgPickedCol;
-  } else {
-    // Auto: sample average colour from opaque edge pixels
-    const srcCtx = croppedCanvas.getContext('2d');
-    const px = srcCtx.getImageData(0, 0, targetWidth, targetHeight).data;
-    let rSum = 0, gSum = 0, bSum = 0, cnt = 0;
-    const samplePx = (x, y) => {
-      const i = (y * targetWidth + x) * 4;
-      if (px[i + 3] > 128) { rSum += px[i]; gSum += px[i+1]; bSum += px[i+2]; cnt++; }
-    };
-    for (let x = 0; x < targetWidth; x += 3) {
-      for (let d = 0; d < 3; d++) { samplePx(x, d); samplePx(x, targetHeight - 1 - d); }
+  const closeCropModal = () => {
+    document.getElementById('crop-modal').classList.remove('is-open');
+    if (cropper) {
+      cropper.destroy();
+      cropper = null;
     }
-    for (let y = 0; y < targetHeight; y += 3) {
-      for (let d = 0; d < 3; d++) { samplePx(d, y); samplePx(targetWidth - 1 - d, y); }
-    }
-    fillCol = cnt > 0
-      ? `rgb(${Math.round(rSum/cnt)},${Math.round(gSum/cnt)},${Math.round(bSum/cnt)})`
-      : '#ffffff';
-  }
+    currentCropCallback = null;
+    cropBgMode = 'auto';
+    cropBgPickedCol = null;
+  };
 
-  // 1) Fill entire canvas with the chosen colour
-  ctx.fillStyle = fillCol;
-  ctx.fillRect(0, 0, targetWidth, targetHeight);
-
-  // 2) For auto mode, draw a blurred copy so edges bleed softly
-  if (cropBgMode === 'auto') {
-    ctx.save();
-    ctx.filter = 'blur(28px)';
-    ctx.drawImage(croppedCanvas, -30, -30, targetWidth + 60, targetHeight + 60);
-    ctx.restore();
-  }
-
-  // 3) Draw the sharp crop on top
-  ctx.drawImage(croppedCanvas, 0, 0, targetWidth, targetHeight);
-
-  // Convert to JPEG (no transparency needed)
-  const croppedImage = finalCanvas.toDataURL('image/jpeg', 0.92);
-
-  // Upload to R2
   try {
+    if (currentCropKind === 'blog-inline' || currentCropKind === 'blog-author') {
+      const spec = currentCropKind === 'blog-author' ? BLOG_AUTHOR_SPEC : BLOG_INLINE_SPEC;
+      const croppedCanvas = cropper.getCroppedCanvas({
+        width: spec.w,
+        height: spec.h,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        fillColor: currentCropKind === 'blog-author' ? '#ffffff' : '#ffffff'
+      });
+      if (!croppedCanvas) {
+        Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
+        return;
+      }
+      const dataUrl = croppedCanvas.toDataURL('image/jpeg', 0.88);
+      try {
+        const uploadName = currentCropKind === 'blog-author'
+          ? `avatar-${Date.now()}.jpg`
+          : `inline-${Date.now()}.jpg`;
+        const url = await blogUploadImageToBunny(
+          dataUrl,
+          uploadName,
+          currentCropKind === 'blog-author' ? blogAuthorImageSubpath() : null
+        );
+        currentCropCallback(url);
+        closeCropModal();
+      } catch (inlineErr) {
+        Modal.alert({ title: 'Upload Failed', message: inlineErr.message || 'Failed to upload image.' });
+        console.error('Inline upload error:', inlineErr);
+      }
+      return;
+    }
+
+    if (currentCropKind === 'blog-card' || currentCropKind === 'blog-cover') {
+      const spec = currentCropKind === 'blog-card' ? BLOG_CARD_SPEC : BLOG_COVER_SPEC;
+      const masterCropped = cropper.getCroppedCanvas({
+        width: spec.w * 2,
+        height: spec.h * 2,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        fillColor: 'transparent'
+      });
+      if (!masterCropped) {
+        Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
+        return;
+      }
+      const fitRect = getExportFitSourceRect(masterCropped);
+      const sized = containCenterOnCanvasRegion(
+        masterCropped,
+        fitRect.sx,
+        fitRect.sy,
+        fitRect.sw,
+        fitRect.sh,
+        spec.w,
+        spec.h
+      );
+      const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+      try {
+        const url = await blogUploadImageToBunny(dataUrl, spec.filename);
+        currentCropCallback(url);
+        closeCropModal();
+      } catch (uploadErr) {
+        Modal.alert({ title: 'Upload Failed', message: uploadErr.message || 'Failed to upload image.' });
+        console.error('Upload error:', uploadErr);
+      }
+      return;
+    }
+
+    if (currentCropKind === 'event') {
+      const exportSpecs = MULTI_SIZE_CROP_SPECS.event;
+      const masterCropped = cropper.getCroppedCanvas({
+        width: EVENT_IMAGE_MASTER_W,
+        height: EVENT_IMAGE_MASTER_H,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        fillColor: 'transparent'
+      });
+      if (!masterCropped) {
+        Modal.alert({ title: 'Crop Error', message: 'Could not read the cropped image.' });
+        return;
+      }
+      const fitRect = getExportFitSourceRect(masterCropped);
+      const batchId = Date.now();
+      const bundle = {};
+      for (const spec of exportSpecs) {
+        const sized =
+          spec.fit === 'contain'
+            ? containCenterOnCanvasRegion(
+                masterCropped,
+                fitRect.sx,
+                fitRect.sy,
+                fitRect.sw,
+                fitRect.sh,
+                spec.w,
+                spec.h
+              )
+            : fillHeightMinCenterOnCanvasRegion(
+                masterCropped,
+                fitRect.sx,
+                fitRect.sy,
+                fitRect.sw,
+                fitRect.sh,
+                spec.w,
+                spec.h
+              );
+        const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+        try {
+          const uploadUrl = await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
+          bundle[spec.key] = uploadUrl;
+        } catch (uploadErr) {
+          Modal.alert({ title: 'Upload Failed', message: uploadErr.message || 'Failed to upload an image variant.' });
+          console.error('Upload error:', uploadErr);
+          return;
+        }
+      }
+      currentCropCallback(bundle);
+      closeCropModal();
+      return;
+    }
+
+    // Product (or other single-size) crop
+    let targetWidth, targetHeight;
+    if (Math.abs(currentAspectRatio - (800 / 379)) < 0.01) {
+      targetWidth = 800;
+      targetHeight = 379;
+    } else {
+      targetWidth = 672;
+      targetHeight = 440;
+    }
+
+    const croppedCanvas = cropper.getCroppedCanvas({
+      width: targetWidth,
+      height: targetHeight,
+      imageSmoothingEnabled: true,
+      imageSmoothingQuality: 'high',
+      fillColor: 'transparent'
+    });
+
+    const croppedImage = composeBlurredBackgroundJpeg(
+      croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol
+    );
+
     const uploadRes = await fetch(`${API_BASE}/admin/images`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Session-Token': sessionToken
       },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         image: croppedImage,
         filename: 'product-image.jpg'
       })
@@ -1878,14 +2742,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 
     if (uploadData.success) {
       currentCropCallback(uploadData.url);
-      document.getElementById('crop-modal').classList.remove('is-open');
-      if (cropper) {
-        cropper.destroy();
-        cropper = null;
-      }
-      currentCropCallback = null;
-      cropBgMode = 'auto';
-      cropBgPickedCol = null;
+      closeCropModal();
     } else {
       Modal.alert({ title: 'Upload Failed', message: 'Failed to upload image. Please try again.' });
       console.error('Upload error:', uploadData);
@@ -1896,38 +2753,74 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
   }
 });
 
-// Tabs
+// Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
+const ADMIN_TABS = ['products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'bookings', 'cron', 'newsletter', 'blog'];
+
+function scrollToAdminSection(sectionId) {
+  const el = document.getElementById(sectionId);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function switchAdminTab(tab, options = {}) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+  if (!btn) return false;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.borderBottomColor = 'transparent';
+    b.style.color = 'rgb(var(--color-neutral-600))';
+  });
+  btn.classList.add('active');
+  btn.style.borderBottomColor = 'rgb(var(--color-primary-600))';
+  btn.style.color = 'rgb(var(--color-primary-600))';
+  document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+  const panel = document.getElementById(tab + '-tab');
+  if (panel) panel.style.display = 'block';
+  if (tab === 'bookings') loadBookingsAndCalendar();
+  if (tab === 'memberships') loadMemberships();
+  if (tab === 'newsletter') {
+    loadNewsletterRecipients();
+    loadNewsletterEvents();
+    nlInitEditor();
+  }
+  if (tab === 'blog') {
+    blogInitTab();
+  }
+  if (tab === 'shop-promos') loadShopPromoCodes();
+  if (options.sectionId) {
+    setTimeout(() => scrollToAdminSection(options.sectionId), 80);
+  }
+  return true;
+}
+
+function handleAdminHash() {
+  const raw = (location.hash || '').replace(/^#/, '');
+  if (!raw) return;
+  if (document.getElementById('admin-dashboard').style.display === 'none') return;
+  let tab = null;
+  let sectionId = null;
+  if (ADMIN_TABS.includes(raw)) {
+    tab = raw;
+  } else {
+    for (const t of ADMIN_TABS) {
+      if (raw === t || raw.startsWith(t + '-')) {
+        tab = t;
+        if (raw !== t) sectionId = 'admin-section-' + raw;
+        break;
+      }
+    }
+  }
+  if (!tab) return;
+  switchAdminTab(tab, { sectionId });
+}
+
+window.addEventListener('hashchange', handleAdminHash);
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
-btn.addEventListener('click', () => {
-const tab = btn.dataset.tab;
-document.querySelectorAll('.tab-btn').forEach(b => {
-b.classList.remove('active');
-b.style.borderBottomColor = 'transparent';
-b.style.color = 'rgb(var(--color-neutral-600))';
-});
-btn.classList.add('active');
-btn.style.borderBottomColor = 'rgb(var(--color-primary-600))';
-btn.style.color = 'rgb(var(--color-primary-600))';
-
-document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-document.getElementById(tab + '-tab').style.display = 'block';
-
-// Auto-load data when switching to specific tabs
-if (tab === 'bookings') {
-  loadBookingsAndCalendar();
-}
-if (tab === 'memberships') {
-  loadMemberships();
-}
-if (tab === 'newsletter') {
-  loadNewsletterRecipients();
-  loadNewsletterEvents();
-  nlInitEditor();
-}
-if (tab === 'shop-promos') {
-  loadShopPromoCodes();
-}
-});
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    if (tab) history.replaceState(null, '', '#' + tab);
+    switchAdminTab(tab);
+  });
 });
 
 // Image Upload Handlers
@@ -1945,11 +2838,22 @@ document.getElementById('product-image-preview').innerHTML =
 document.getElementById('event-image-upload').addEventListener('change', (e) => {
 const file = e.target.files[0];
 if (file) {
-showCropModal(file, (croppedImage) => {
-uploadedEventImage = croppedImage;
-document.getElementById('event-image-preview').innerHTML = 
-`<img src="${croppedImage}" class="image-preview" alt="Preview">`;
-}, 800 / 379);
+showCropModal(file, (bundle) => {
+  uploadedEventBundle = bundle;
+  document.getElementById('event-image').value = bundle.image_url || '';
+  document.getElementById('event-image-card').value = bundle.image_url_card || '';
+  document.getElementById('event-image-hero').value = bundle.image_url_hero || '';
+  const eventSeoImage = document.getElementById('event-seo-image');
+  if (eventSeoImage && !eventSeoImage.value.trim() && bundle.image_url_hero) {
+    eventSeoImage.value = bundle.image_url_hero;
+  }
+  document.getElementById('event-image-preview').innerHTML =
+    `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.image_url}" alt="Main"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.image_url_card}" alt="Card"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.image_url_hero}" alt="Hero"></div></div>
+    </div>`;
+}, 800 / 379, 'event');
 }
 });
 
@@ -2267,7 +3171,7 @@ const eventId = e.id || e.event_id;
 return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
-${e.image_url ? `<img src="${e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
+${e.image_url ? `<img src="${e.image_url_card || e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
 <div style="flex: 1;">
 <h3>${e.title} ${e.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'} ${requiresPurchase ? '' : '<span style="color: #2563eb; font-size: 0.875rem;">(Free Event)</span>'}</h3>
 <p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${e.description || ''}</p>
@@ -2291,7 +3195,9 @@ console.error('Load events error:', err);
 document.getElementById('event-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('event-id').value;
-  const imageUrl = uploadedEventImage || document.getElementById('event-image').value;
+  const imageUrl = uploadedEventBundle?.image_url || document.getElementById('event-image').value.trim();
+  const imageUrlCard = uploadedEventBundle?.image_url_card ?? (document.getElementById('event-image-card').value.trim() || null);
+  const imageUrlHero = uploadedEventBundle?.image_url_hero ?? (document.getElementById('event-image-hero').value.trim() || null);
   const requiresPurchase = document.getElementById('event-requires-purchase').checked;
   const isRecurring = document.getElementById('event-is-recurring').checked;
 
@@ -2312,7 +3218,9 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     non_membership_price: requiresPurchase ? parseFloat(document.getElementById('event-nonmember-price').value) : 0,
     max_attendees: requiresPurchase ? (parseInt(document.getElementById('event-max-attendees').value) || null) : null,
     location: document.getElementById('event-location').value,
-    image_url: imageUrl,
+    image_url: imageUrl || null,
+    image_url_card: imageUrlCard || null,
+    image_url_hero: imageUrlHero || null,
     is_active: document.getElementById('event-active').checked ? 1 : 0,
     is_recurring: isRecurring ? 1 : 0,
     recurrence_pattern: isRecurring ? getRecurrencePattern() : null,
@@ -2342,7 +3250,9 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
       document.getElementById('event-full-description').innerHTML = '';
       document.getElementById('event-seo-organizer').value = '';
       document.getElementById('event-seo-image').value = '';
-uploadedEventImage = null;
+      document.getElementById('event-image-card').value = '';
+      document.getElementById('event-image-hero').value = '';
+uploadedEventBundle = null;
 loadEvents();
 alert('Event saved successfully!');
 } else {
@@ -2352,6 +3262,15 @@ alert('Failed to save event: ' + (error.error || error.message || 'Unknown error
 } catch (err) {
 alert('Error saving event: ' + err.message);
 }
+});
+
+document.getElementById('event-image')?.addEventListener('input', () => {
+  const v = document.getElementById('event-image').value.trim();
+  if (!uploadedEventBundle || v !== uploadedEventBundle.image_url) {
+    uploadedEventBundle = null;
+    document.getElementById('event-image-card').value = '';
+    document.getElementById('event-image-hero').value = '';
+  }
 });
 
 document.getElementById('cancel-event-edit').addEventListener('click', () => {
@@ -2370,11 +3289,13 @@ document.getElementById('event-form-title').textContent = 'Add New Event';
 document.getElementById('event-submit-text').textContent = 'Add Event';
 document.getElementById('cancel-event-edit').style.display = 'none';
 document.getElementById('event-image-preview').innerHTML = '';
+document.getElementById('event-image-card').value = '';
+document.getElementById('event-image-hero').value = '';
 const seoBody = document.getElementById('seo-section-body');
 const seoBtn = seoBody?.previousElementSibling;
 if (seoBody) seoBody.classList.remove('is-open');
 if (seoBtn) seoBtn.classList.remove('is-open');
-uploadedEventImage = null;
+uploadedEventBundle = null;
 });
 
 async function editEvent(id) {
@@ -2424,6 +3345,8 @@ async function editEvent(id) {
 
     document.getElementById('event-location').value = event.location || '';
     document.getElementById('event-image').value = event.image_url || '';
+    document.getElementById('event-image-card').value = event.image_url_card || '';
+    document.getElementById('event-image-hero').value = event.image_url_hero || '';
 
     // Pricing
     const requiresPurchase = event.requires_purchase === 1;
@@ -2452,8 +3375,14 @@ async function editEvent(id) {
     }
 
     if (event.image_url) {
-      document.getElementById('event-image-preview').innerHTML = 
-        `<img src="${event.image_url}" class="image-preview" alt="Current">`;
+      const card = event.image_url_card || event.image_url;
+      const hero = event.image_url_hero || event.image_url;
+      document.getElementById('event-image-preview').innerHTML =
+        `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main</div><div class="event-export-thumb event-export-thumb--main"><img src="${event.image_url}" alt="Current"></div></div>
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card</div><div class="event-export-thumb event-export-thumb--card"><img src="${card}" alt="Card"></div></div>
+          <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero</div><div class="event-export-thumb event-export-thumb--hero"><img src="${hero}" alt="Hero"></div></div>
+        </div>`;
     }
 
     document.getElementById('event-form-title').textContent = 'Edit Event';
@@ -3189,93 +4118,188 @@ function showCronDetails(logId, details) {
   }
 }
 
-async function loadBookings() {
-  const container = document.getElementById('bookings-list');
-  
+function adminEscapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function adminParseDateTime(dateStr, timeStr) {
+  const t = String(timeStr || '00:00').slice(0, 5);
+  return new Date(`${dateStr}T${t}:00`);
+}
+
+function isUpcomingBooking(booking) {
+  if (!booking || booking.status === 'cancelled') return false;
+  if (!booking.booking_date) return false;
+  return adminParseDateTime(booking.booking_date, booking.end_time || booking.start_time) >= new Date();
+}
+
+function isUpcomingTimeBlock(block) {
+  if (!block || !block.block_date) return false;
+  return adminParseDateTime(block.block_date, block.end_time || block.start_time) >= new Date();
+}
+
+function adminFormatBookingDate(dateStr) {
   try {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
-        Loading bookings...
-      </div>
-    `;
-    
-    const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', {
-      headers: {
-        'Authorization': `Bearer ${sessionToken}`
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch bookings');
+    const [y, m, d] = String(dateStr).split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  } catch { return dateStr; }
+}
+
+function adminScheduleDateBox(dt) {
+  const d = dt instanceof Date ? dt : new Date(dt);
+  if (Number.isNaN(d.getTime())) {
+    return '<div class="admin-schedule-date-box"><div class="admin-schedule-date-day">—</div></div>';
+  }
+  const day = d.getDate();
+  const month = d.toLocaleDateString('en-GB', { month: 'short' });
+  const dow = d.toLocaleDateString('en-GB', { weekday: 'short' });
+  return '<div class="admin-schedule-date-box">' +
+    '<div class="admin-schedule-date-dow">' + dow + '</div>' +
+    '<div class="admin-schedule-date-day">' + day + '</div>' +
+    '<div class="admin-schedule-date-month">' + month + '</div>' +
+    '</div>';
+}
+
+function adminScheduleRow(opts) {
+  const type = opts.type;
+  const rowClass = 'admin-schedule-row admin-schedule-row--' + type;
+  const badgeClass = 'admin-schedule-badge admin-schedule-badge--' + type;
+  const badgeLabel = type === 'event' ? 'Event' : type === 'booking' ? 'Booking' : 'Blocked';
+  let actions = opts.actionsHtml || '';
+  return '<article class="' + rowClass + '">' +
+    adminScheduleDateBox(opts.when) +
+    '<div class="admin-schedule-body">' +
+    '<h4 class="admin-schedule-body-title"><span class="' + badgeClass + '">' + badgeLabel + '</span> ' + opts.title + '</h4>' +
+    (opts.subtitle ? '<p class="admin-schedule-body-subtitle">' + opts.subtitle + '</p>' : '') +
+    (opts.meta ? '<p class="admin-schedule-body-meta">' + opts.meta + '</p>' : '') +
+    '</div>' +
+    (actions ? '<div class="admin-schedule-actions">' + actions + '</div>' : '') +
+    '</article>';
+}
+
+function adminScheduleMonthKey(dt) {
+  const d = dt instanceof Date ? dt : new Date(dt);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+function adminScheduleMonthLabel(dt) {
+  const d = dt instanceof Date ? dt : new Date(dt);
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+function renderScheduleMonthDivider(when) {
+  const label = adminScheduleMonthLabel(when);
+  return '<div class="admin-schedule-month" role="separator" aria-label="' + adminEscapeHtml(label) + '">' +
+    '<span class="admin-schedule-month-label">' + adminEscapeHtml(label) + '</span>' +
+    '<span class="admin-schedule-month-line" aria-hidden="true"></span>' +
+    '</div>';
+}
+
+function renderScheduleTimeline(items) {
+  if (!items.length) return '';
+  const sorted = items.slice().sort((a, b) => a.when - b.when).slice(0, 60);
+  let html = '';
+  let currentMonth = '';
+  for (const item of sorted) {
+    const monthKey = adminScheduleMonthKey(item.when);
+    if (monthKey !== currentMonth) {
+      currentMonth = monthKey;
+      html += renderScheduleMonthDivider(item.when);
     }
-    
-    const data = await response.json();
-    const bookings = data.bookings || [];
-    
-    if (bookings.length === 0) {
-      container.innerHTML = `
-        <div style="text-align: center; padding: 3rem; color: rgb(var(--color-neutral-500));">
-          📅 No upcoming bookings found.
-        </div>
-      `;
+    html += item.html;
+  }
+  return '<div class="admin-schedule-list">' + html + '</div>';
+}
+
+function normalizeEventsList(events) {
+  if (Array.isArray(events)) return events;
+  if (events && Array.isArray(events.events)) return events.events;
+  if (events && Array.isArray(events.results)) return events.results;
+  return [];
+}
+
+function buildScheduleEventItems(events, now) {
+  return normalizeEventsList(events)
+    .filter(e => e && e.event_datetime && new Date(e.event_datetime) >= now)
+    .map(e => {
+      const when = new Date(e.event_datetime);
+      const timeStr = when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const endStr = e.end_time ? String(e.end_time).slice(0, 5) : '';
+      const timeLine = endStr ? timeStr + ' – ' + adminEscapeHtml(endStr) : timeStr;
+      const loc = e.location ? adminEscapeHtml(e.location) : '';
+      const meta = timeLine + (loc ? '<br>' + loc : '');
+      const title = adminEscapeHtml(e.title || e.event_name || 'Event');
+      return { when, html: adminScheduleRow({ type: 'event', when, title, meta }) };
+    });
+}
+
+function buildScheduleBookingItems(bookings) {
+  return (bookings || [])
+    .filter(isUpcomingBooking)
+    .map(b => {
+      const when = adminParseDateTime(b.booking_date, b.start_time);
+      const meta = adminEscapeHtml(b.start_time) + ' – ' + adminEscapeHtml(b.end_time) +
+        (b.table_type ? '<br>Table: ' + adminEscapeHtml(b.table_type) : '') +
+        '<br>' + adminEscapeHtml(b.user_email || '');
+      const title = adminEscapeHtml(b.user_name || 'Guest');
+      const notesRaw = b.notes != null ? String(b.notes).trim() : '';
+      const subtitle = notesRaw ? adminEscapeHtml(notesRaw) : '';
+      return { when, html: adminScheduleRow({ type: 'booking', when, title, subtitle, meta }) };
+    });
+}
+
+function buildScheduleBlockItems(blocks) {
+  return (blocks || [])
+    .filter(isUpcomingTimeBlock)
+    .map(block => {
+      const when = adminParseDateTime(block.block_date, block.start_time);
+      const title = adminEscapeHtml(block.reason || 'Time blocked');
+      const meta = adminEscapeHtml(block.start_time) + ' – ' + adminEscapeHtml(block.end_time);
+      return { when, html: adminScheduleRow({ type: 'block', when, title, meta }) };
+    });
+}
+
+async function loadBookingsSchedule() {
+  const container = document.getElementById('bookings-schedule-content');
+  if (!container) return;
+  container.innerHTML = '<p class="admin-text-small" style="text-align:center;padding:1.5rem;">Loading schedule…</p>';
+  try {
+    const headers = sessionToken ? { 'Authorization': 'Bearer ' + sessionToken } : {};
+    const [eventsRes, bookingsRes, blocksRes] = await Promise.all([
+      fetch(API_BASE + '/events'),
+      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', { headers }),
+      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks')
+    ]);
+    const eventsRaw = eventsRes.ok ? await eventsRes.json() : [];
+    const bookingsData = bookingsRes.ok ? await bookingsRes.json() : { bookings: [] };
+    const blocksData = blocksRes.ok ? await blocksRes.json() : { blocks: [] };
+    const now = new Date();
+
+    const items = [
+      ...buildScheduleEventItems(eventsRaw, now),
+      ...buildScheduleBookingItems(bookingsData.bookings || []),
+      ...buildScheduleBlockItems(blocksData.blocks || [])
+    ];
+
+    if (!items.length) {
+      container.innerHTML = '<p class="admin-text-small" style="text-align:center;padding:2rem;margin:0;">Nothing scheduled from now onward.</p>';
       return;
     }
-    
-    container.innerHTML = bookings.map(booking => {
-      const statusColor = booking.status === 'confirmed' ? '#10b981' : booking.status === 'cancelled' ? '#ef4444' : '#f59e0b';
-      const statusIcon = booking.status === 'confirmed' ? '✓' : booking.status === 'cancelled' ? '✕' : '⏳';
-      
-      return `
-        <div style="background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; padding: 1.5rem;">
-          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-            <div style="flex: 1;">
-              <h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">${booking.table_type || 'Table Booking'}</h3>
-              <div style="color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">
-                📅 ${formatDate(booking.booking_date)} • 🕐 ${booking.start_time} - ${booking.end_time}
-              </div>
-            </div>
-            <span style="background: ${statusColor}; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;">
-              ${statusIcon} ${booking.status.toUpperCase()}
-            </span>
-          </div>
-          
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 8px; margin-bottom: 1rem;">
-            <div>
-              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Customer</div>
-              <div style="font-weight: 600;">${booking.user_name || 'N/A'}</div>
-            </div>
-            <div>
-              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Email</div>
-              <div style="font-weight: 500; font-size: 0.875rem;">${booking.user_email}</div>
-            </div>
-          </div>
-          
-          ${booking.notes ? `
-            <div style="padding: 1rem; background: rgb(var(--color-neutral-50)); border-left: 3px solid rgb(var(--color-primary-600)); border-radius: 4px; margin-bottom: 1rem;">
-              <div style="font-size: 0.75rem; color: rgb(var(--color-neutral-500)); margin-bottom: 0.25rem;">Notes</div>
-              <div style="font-size: 0.875rem; color: rgb(var(--color-neutral-700));">${booking.notes}</div>
-            </div>
-          ` : ''}
-          
-          ${booking.status !== 'cancelled' ? `
-            <div style="text-align: right;">
-              <button onclick="cancelBookingAdmin(${booking.id})" class="admin-btn-secondary-sm" style="background: #ef4444; color: white;">
-                Cancel Booking
-              </button>
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }).join('');
-    
+
+    container.innerHTML = renderScheduleTimeline(items);
   } catch (err) {
-    console.error('Error loading bookings:', err);
-    container.innerHTML = `
-      <div style="text-align: center; padding: 3rem; color: #f44336;">
-        ❌ Error loading bookings: ${err.message}
-      </div>
-    `;
+    console.error('Error loading bookings schedule:', err);
+    container.innerHTML = '<p class="admin-text-small" style="color:#dc2626;text-align:center;padding:1.5rem;">Failed to load schedule.</p>';
   }
+}
+
+async function loadUpcomingOverview() {
+  await loadBookingsSchedule();
+}
+
+async function loadBookings() {
+  await loadBookingsSchedule();
 }
 
 async function cancelBookingAdmin(bookingId) {
@@ -3299,7 +4323,7 @@ async function cancelBookingAdmin(bookingId) {
     
     if (data.success) {
       alert('Booking cancelled successfully');
-      loadBookings(); // Reload the list
+      loadBookingsAndCalendar();
     } else {
       throw new Error(data.error || 'Unknown error');
     }
@@ -3319,33 +4343,7 @@ const diff = currentWeekStart.getDate() - day + (day === 0 ? -6 : 1);
 currentWeekStart.setDate(diff);
 
 async function loadTimeBlocks() {
-  try {
-    const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks');
-    const data = await response.json();
-    
-    const container = document.getElementById('blocks-list');
-    
-    if (!data.blocks || data.blocks.length === 0) {
-      container.innerHTML = '<div style="text-align: center; padding: 2rem; color: rgb(var(--color-neutral-500));">No time blocks active</div>';
-      return;
-    }
-    
-    container.innerHTML = data.blocks.map(block => `
-      <div class="card" style="padding: 1rem; display: flex; justify-content: space-between; align-items: center;">
-        <div style="flex: 1;">
-          <div style="font-weight: 600; color: rgb(var(--color-neutral-900)); margin-bottom: 0.25rem;">
-            ${block.block_date} • ${block.start_time} - ${block.end_time}
-          </div>
-          ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">${block.reason}</div>` : ''}
-        </div>
-        <button onclick="deleteTimeBlock(${block.id})" class="btn btn-secondary btn-sm" style="background: rgb(var(--color-danger-600)); color: white;">
-          Delete
-        </button>
-      </div>
-    `).join('');
-  } catch (err) {
-    console.error('Error loading time blocks:', err);
-  }
+  await loadBookingsSchedule();
 }
 
 async function deleteTimeBlock(blockId) {
@@ -3465,7 +4463,7 @@ async function loadCalendarWeek() {
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       
       const dayBookings = bookingsData.bookings?.filter(b => b.booking_date === dateStr && b.status !== 'cancelled') || [];
-      const dayBlocks = blocksData.blocks?.filter(b => b.block_date === dateStr) || [];
+      const dayBlocks = blocksData.blocks?.filter(b => b.block_date === dateStr && isUpcomingTimeBlock(b)) || [];
       
       days.push({ date, dateStr, bookings: dayBookings, blocks: dayBlocks });
     }
@@ -3481,11 +4479,12 @@ async function loadCalendarWeek() {
           </div>
           
           ${day.blocks.length > 0 ? day.blocks.map(block => `
-            <div style="padding: 1rem; background: rgb(var(--color-danger-50)); border-left: 4px solid rgb(var(--color-danger-600)); border-radius: 6px; margin-bottom: 1rem;">
-              <div style="font-weight: 600; color: rgb(var(--color-danger-900)); margin-bottom: 0.25rem;">
-                ⛔ BLOCKED • ${block.start_time} - ${block.end_time}
+            <div style="padding: 1rem; background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-left: 4px solid rgb(var(--sch-red-500)); border-radius: 6px; margin-bottom: 1rem;">
+              <div style="font-weight: 600; color: rgb(var(--color-neutral-800)); margin-bottom: 0.25rem;">
+                <span style="display:inline-block;font-size:0.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;padding:0.15rem 0.45rem;border-radius:4px;background:rgb(var(--sch-red-50));color:rgb(var(--sch-red-700));margin-right:0.35rem;">Blocked</span>
+                ${block.start_time} – ${block.end_time}
               </div>
-              ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-danger-700));">${block.reason}</div>` : ''}
+              ${block.reason ? `<div style="font-size: 0.875rem; color: rgb(var(--color-neutral-600));">${block.reason}</div>` : ''}
             </div>
           `).join('') : ''}
           
@@ -3529,7 +4528,7 @@ async function loadCalendarWeek() {
     }).join('');
   } catch (err) {
     console.error('Error loading calendar:', err);
-    calendarGrid.innerHTML = '<div style="text-align: center; padding: 2rem; color: rgb(var(--color-danger-600));">Failed to load calendar</div>';
+    calendarGrid.innerHTML = '<div style="text-align: center; padding: 2rem; color: #dc2626;">Failed to load calendar</div>';
   }
 }
 
@@ -3538,8 +4537,136 @@ function changeWeek(direction) {
   loadCalendarWeek();
 }
 
+const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run';
+
+const BOOKING_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+let bookingDayRulesDraft = [];
+
+function addBookingDayHourRuleRow(rule) {
+  const list = document.getElementById('booking-day-rules-list');
+  if (!list) return;
+
+  const row = document.createElement('div');
+  row.className = 'card card-compact admin-mb-1 booking-day-rule-row';
+  const days = rule?.days || [];
+  const startHour = rule?.start_hour != null ? rule.start_hour : 18;
+  const endHour = rule?.end_hour != null ? rule.end_hour : '';
+
+  row.innerHTML = `
+    <div class="form-group">
+      <span class="form-label">Days</span>
+      <div class="admin-flex" style="flex-wrap: wrap; gap: 0.5rem 1rem;">
+        ${BOOKING_WEEKDAYS.map((day) => `
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem;">
+            <input type="checkbox" class="booking-day-rule-day" value="${day}" ${days.includes(day) ? 'checked' : ''}>
+            ${day.slice(0, 3)}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Earliest start hour (24h)</label>
+        <input type="number" class="form-input booking-day-rule-start" min="0" max="23" value="${startHour}" required>
+        <p class="admin-text-small admin-m-0">Use 18 for 6pm. Slots cannot start before this hour on the selected days.</p>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Latest end hour (optional)</label>
+        <input type="number" class="form-input booking-day-rule-end" min="1" max="24" placeholder="Use default" value="${endHour}">
+      </div>
+    </div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="this.closest('.booking-day-rule-row').remove()">Remove rule</button>
+  `;
+  list.appendChild(row);
+}
+
+function collectBookingDayHourRulesFromForm() {
+  const rows = document.querySelectorAll('.booking-day-rule-row');
+  const rules = [];
+  rows.forEach((row) => {
+    const days = Array.from(row.querySelectorAll('.booking-day-rule-day:checked')).map((el) => el.value);
+    if (!days.length) return;
+    const startRaw = row.querySelector('.booking-day-rule-start')?.value;
+    const endRaw = row.querySelector('.booking-day-rule-end')?.value;
+    const rule = { days };
+    if (startRaw !== '' && startRaw != null) rule.start_hour = parseInt(startRaw, 10);
+    if (endRaw !== '' && endRaw != null) rule.end_hour = parseInt(endRaw, 10);
+    rules.push(rule);
+  });
+  return rules;
+}
+
+async function loadBookingScheduleConfig() {
+  const statusEl = document.getElementById('booking-schedule-config-status');
+  const formEl = document.getElementById('booking-schedule-config-form');
+  const rulesList = document.getElementById('booking-day-rules-list');
+  if (!statusEl || !formEl) return;
+
+  statusEl.textContent = 'Loading schedule settings…';
+  formEl.style.display = 'none';
+
+  try {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/config`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to load config');
+
+    const config = data.config || {};
+    document.getElementById('booking-start-hour').value = config.start_hour ?? 10;
+    document.getElementById('booking-end-hour').value = config.end_hour ?? 22;
+    document.getElementById('booking-slot-duration').value = config.slot_duration_hours ?? 3;
+    document.getElementById('booking-max-bookings').value = config.max_bookings ?? 4;
+
+    if (rulesList) {
+      rulesList.innerHTML = '';
+      const rules = config.day_hour_rules || [];
+      if (rules.length) {
+        rules.forEach((rule) => addBookingDayHourRuleRow(rule));
+      }
+    }
+
+    statusEl.textContent = 'Changes apply to new availability checks immediately after saving.';
+    formEl.style.display = 'block';
+  } catch (err) {
+    console.error('Error loading booking schedule config:', err);
+    statusEl.textContent = 'Could not load schedule settings. Run migration 0006_booking_day_hour_rules.sql on Bunny DB, redeploy the bookings script, then refresh.';
+  }
+}
+
+async function saveBookingScheduleConfig(event) {
+  event.preventDefault();
+  const statusEl = document.getElementById('booking-schedule-config-status');
+  const payload = {
+    start_hour: parseInt(document.getElementById('booking-start-hour').value, 10),
+    end_hour: parseInt(document.getElementById('booking-end-hour').value, 10),
+    slot_duration_hours: parseInt(document.getElementById('booking-slot-duration').value, 10),
+    max_bookings: parseInt(document.getElementById('booking-max-bookings').value, 10),
+    day_hour_rules: collectBookingDayHourRulesFromForm()
+  };
+
+  try {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/config`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || data.error || 'Save failed');
+    }
+    if (statusEl) statusEl.textContent = 'Schedule settings saved.';
+    alert('Booking schedule settings saved.');
+  } catch (err) {
+    console.error('Error saving booking schedule config:', err);
+    alert('Failed to save schedule settings: ' + err.message);
+  }
+}
+
+document.getElementById('booking-schedule-config-form')?.addEventListener('submit', saveBookingScheduleConfig);
+
 function loadBookingsAndCalendar() {
-  loadTimeBlocks();
+  loadBookingScheduleConfig();
+  loadBookingsSchedule();
   loadCalendarWeek();
 }
 
@@ -3549,6 +4676,7 @@ function formatIndexingError(data) {
   if (data.error) return String(data.error);
   const b = data.body;
   if (b && typeof b === 'object') {
+    if (typeof b.error === 'string') return b.error;
     if (b.error && b.error.message) return String(b.error.message);
     if (b.error && typeof b.error === 'object' && b.error.status) return JSON.stringify(b.error);
     return JSON.stringify(b);
@@ -3582,7 +4710,7 @@ async function requestIndexing(type, slug, btn) {
     } catch (_) {
       data = { error: 'invalid_response', rawStatus: res.status };
     }
-    if (res.ok && data.ok) {
+    if (data.ok) {
       btn.textContent = '✅ Request submitted';
       btn.style.background = '#059669';
       btn.title = 'Google received the request. Crawling and ranking are not immediate; use Search Console to verify. Product URLs may be declined if not Indexing API–eligible — sitemap ping still helps.';
@@ -3920,9 +5048,19 @@ function nlNewDraft() {
 let nlQuill = null;
 let nlEditorReady = false;
 
-function nlInitEditor() {
-  if (nlEditorReady) return;
-  nlEditorReady = true;
+const quillMarkdownKeyboardBindings = {
+  h1: { key: ' ', collapsed: true, prefix: /^#$/, handler: function(r) { this.quill.deleteText(r.index - 1, 1, 'user'); this.quill.formatLine(r.index - 1, 1, 'header', 1, 'user'); return false; } },
+  h2: { key: ' ', collapsed: true, prefix: /^##$/, handler: function(r) { this.quill.deleteText(r.index - 2, 2, 'user'); this.quill.formatLine(r.index - 2, 1, 'header', 2, 'user'); return false; } },
+  h3: { key: ' ', collapsed: true, prefix: /^###$/, handler: function(r) { this.quill.deleteText(r.index - 3, 3, 'user'); this.quill.formatLine(r.index - 3, 1, 'header', 3, 'user'); return false; } },
+  ul: { key: ' ', collapsed: true, prefix: /^[-*]$/, handler: function(r) { this.quill.deleteText(r.index - 1, 1, 'user'); this.quill.formatLine(r.index - 1, 1, 'list', 'bullet', 'user'); return false; } },
+  ol: { key: ' ', collapsed: true, prefix: /^\d+\.$/, handler: function(r, ctx) { const l = ctx.prefix.length; this.quill.deleteText(r.index - l, l, 'user'); this.quill.formatLine(r.index - l, 1, 'list', 'ordered', 'user'); return false; } }
+};
+
+function loadQuillAssets(onReady) {
+  if (window.Quill && document.getElementById('quill-css')) {
+    onReady();
+    return;
+  }
   if (!document.getElementById('quill-css')) {
     const link = document.createElement('link');
     link.id = 'quill-css';
@@ -3930,27 +5068,38 @@ function nlInitEditor() {
     link.href = 'https://cdn.quilljs.com/1.3.7/quill.snow.css';
     document.head.appendChild(link);
   }
-  if (!window.Quill) {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.quilljs.com/1.3.7/quill.min.js';
-    script.onload = nlCreateEditor;
-    document.head.appendChild(script);
-  } else {
-    nlCreateEditor();
+  if (window.Quill) {
+    onReady();
+    return;
   }
+  if (loadQuillAssets._loading) {
+    loadQuillAssets._queue = loadQuillAssets._queue || [];
+    loadQuillAssets._queue.push(onReady);
+    return;
+  }
+  loadQuillAssets._loading = true;
+  loadQuillAssets._queue = [onReady];
+  const script = document.createElement('script');
+  script.src = 'https://cdn.quilljs.com/1.3.7/quill.min.js';
+  script.onload = () => {
+    loadQuillAssets._loading = false;
+    const queue = loadQuillAssets._queue || [];
+    loadQuillAssets._queue = [];
+    queue.forEach((fn) => fn());
+  };
+  document.head.appendChild(script);
 }
 
-function nlCreateEditor() {
-  if (nlQuill) return;
+function registerNewsletterQuillBlots() {
+  if (registerNewsletterQuillBlots._done) return;
+  registerNewsletterQuillBlots._done = true;
 
-  // Custom blot: renders an hr divider
   const BlockEmbed = Quill.import('blots/block/embed');
   class DividerBlot extends BlockEmbed {}
   DividerBlot.blotName = 'divider';
   DividerBlot.tagName = 'hr';
   Quill.register(DividerBlot);
 
-  // Custom blot: renders a non-editable event card, preserving full HTML
   class EventCardBlot extends BlockEmbed {
     static create(html) {
       const node = super.create();
@@ -3968,7 +5117,6 @@ function nlCreateEditor() {
   EventCardBlot.className = 'nl-event-card-embed';
   Quill.register(EventCardBlot);
 
-  // Custom blot: renders a non-editable 2-column events calendar grid
   class CalendarBlot extends BlockEmbed {
     static create(html) {
       const node = super.create();
@@ -3985,32 +5133,82 @@ function nlCreateEditor() {
   CalendarBlot.tagName = 'div';
   CalendarBlot.className = 'nl-calendar-embed';
   Quill.register(CalendarBlot);
+}
 
-  nlQuill = new Quill('#nl-editor', {
-    theme: 'snow',
-    placeholder: 'Start writing your newsletter...',
-    modules: {
-      toolbar: { container: '#nl-toolbar' },
-      keyboard: {
-        bindings: {
-          h1: { key: ' ', collapsed: true, prefix: /^#$/,   handler: function(r)     { this.quill.deleteText(r.index-1,1,'user'); this.quill.formatLine(r.index-1,1,'header',1,'user'); return false; } },
-          h2: { key: ' ', collapsed: true, prefix: /^##$/,  handler: function(r)     { this.quill.deleteText(r.index-2,2,'user'); this.quill.formatLine(r.index-2,1,'header',2,'user'); return false; } },
-          h3: { key: ' ', collapsed: true, prefix: /^###$/, handler: function(r)     { this.quill.deleteText(r.index-3,3,'user'); this.quill.formatLine(r.index-3,1,'header',3,'user'); return false; } },
-          ul: { key: ' ', collapsed: true, prefix: /^[-*]$/, handler: function(r)    { this.quill.deleteText(r.index-1,1,'user'); this.quill.formatLine(r.index-1,1,'list','bullet','user'); return false; } },
-          ol: { key: ' ', collapsed: true, prefix: /^\d+\.$/,handler: function(r,ctx){ const l=ctx.prefix.length; this.quill.deleteText(r.index-l,l,'user'); this.quill.formatLine(r.index-l,1,'list','ordered','user'); return false; } }
-        }
+function registerBlogQuillBlots() {
+  if (registerBlogQuillBlots._done) return;
+  registerBlogQuillBlots._done = true;
+
+  const BlockEmbed = Quill.import('blots/block/embed');
+  class BlogImageBlot extends BlockEmbed {
+    static create(value) {
+      const node = super.create();
+      const url = typeof value === 'string' ? value : (value?.url || '');
+      const alt = typeof value === 'object' ? (value?.alt || '') : '';
+      node.setAttribute('class', 'blog-inline-figure');
+      node.contentEditable = 'false';
+      const img = document.createElement('img');
+      img.setAttribute('src', url);
+      img.setAttribute('alt', alt);
+      node.appendChild(img);
+      if (alt) {
+        const caption = document.createElement('figcaption');
+        caption.textContent = alt;
+        node.appendChild(caption);
       }
+      return node;
     }
+    static value(node) {
+      const img = node.querySelector('img');
+      return {
+        url: img?.getAttribute('src') || '',
+        alt: img?.getAttribute('alt') || '',
+      };
+    }
+  }
+  BlogImageBlot.blotName = 'blog-image';
+  BlogImageBlot.tagName = 'figure';
+  BlogImageBlot.className = 'blog-inline-figure';
+  Quill.register(BlogImageBlot);
+}
+
+function initQuillEditor(containerId, toolbarId, options = {}) {
+  if (options.newsletterBlots) registerNewsletterQuillBlots();
+  if (options.blogBlots) registerBlogQuillBlots();
+  const modules = {
+    toolbar: { container: toolbarId },
+  };
+  if (options.keyboardBindings) {
+    modules.keyboard = { bindings: options.keyboardBindings };
+  }
+  return new Quill(containerId, {
+    theme: 'snow',
+    placeholder: options.placeholder || '',
+    modules,
+  });
+}
+
+function nlInitEditor() {
+  if (nlEditorReady) return;
+  nlEditorReady = true;
+  loadQuillAssets(nlCreateEditor);
+}
+
+function nlCreateEditor() {
+  if (nlQuill) return;
+
+  nlQuill = initQuillEditor('#nl-editor', '#nl-toolbar', {
+    placeholder: 'Start writing your newsletter...',
+    newsletterBlots: true,
+    keyboardBindings: quillMarkdownKeyboardBindings,
   });
 
-  // Auto-save to localStorage on any change (debounced 1.5 s — crash-recovery only)
   nlQuill.on('text-change', function() {
     if (nlRestoringDraft) return;
     clearTimeout(nlDraftTimer);
     nlDraftTimer = setTimeout(nlSaveDraft, 1500);
   });
 
-  // Also auto-save when the subject line changes
   const subjectEl = document.getElementById('nl-subject');
   if (subjectEl) {
     subjectEl.addEventListener('input', function() {
@@ -4063,7 +5261,7 @@ function renderNlEventPickerList() {
     const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
     const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const imgHtml = ev.image_url
-      ? `<img class="nl-event-pick-img" src="${ev.image_url}" alt="">`
+      ? `<img class="nl-event-pick-img" src="${ev.image_url_card || ev.image_url}" alt="">`
       : `<div class="nl-event-pick-img"></div>`;
     const locationSuffix = ev.location ? ` &middot; ${ev.location}` : '';
     return `
@@ -4099,7 +5297,7 @@ function insertNlEventBlock(idx) {
 
   // Images are always 400x190 - use natural aspect ratio, no cropping
   const imgPart = ev.image_url
-    ? '<img src="' + ev.image_url + '" alt="" width="400" height="190" style="width:100%;height:auto;display:block;">'
+    ? '<img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="400" height="190" style="width:100%;height:auto;display:block;">'
     : '';
   const locationPart = ev.location
     ? '<p style="margin:4px 0;font-size:14px;color:#64748b;">' + ev.location + '</p>'
@@ -4144,7 +5342,7 @@ function buildCalendarHtml(events) {
   function buildCard(ev) {
     const p = fmtDate(ev.event_datetime);
     const imgRow = ev.image_url
-      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + ev.image_url + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
+      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
       : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
     const href = ev.slug ? 'https://dicebastion.com/events/' + ev.slug : 'https://dicebastion.com/events';
     return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
@@ -4377,6 +5575,951 @@ async function sendNewsletter() {
     btn.textContent = 'Send Now';
   }
 }
+
+// Blog
+let blogQuill = null;
+let blogEditorReady = false;
+let blogPosts = [];
+let blogCurrentStatus = 'draft';
+let blogTaxonomyTerms = { tags: [], categories: [], series: [], authors: [], authorProfiles: [] };
+const blogChipState = {
+  tags: [],
+  categories: [],
+  series: [],
+  authors: [],
+};
+let blogAuthorMeta = {};
+let blogPendingAuthorSlug = null;
+
+const blogChipConfig = {
+  tags: { inputId: 'blog-tags-input', containerId: 'blog-tags-chips', datalistId: 'blog-tags-suggestions' },
+  categories: { inputId: 'blog-categories-input', containerId: 'blog-categories-chips', datalistId: 'blog-categories-suggestions' },
+  series: { inputId: 'blog-series-input', containerId: 'blog-series-chips', datalistId: 'blog-series-suggestions' },
+  authors: { inputId: 'blog-authors-input', containerId: 'blog-authors-chips', datalistId: 'blog-authors-suggestions' },
+};
+
+function blogInitTab() {
+  blogInitEditor();
+  blogCheckHealth();
+  loadBlogTaxonomyTerms();
+  loadBlogPosts();
+  loadBlogAuthorsAdmin();
+}
+
+async function blogCheckHealth() {
+  const banner = document.getElementById('blog-health-banner');
+  if (!banner) return;
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/health`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || 'Health check failed');
+    const issues = [];
+    if (!data.database?.ok) {
+      issues.push(`Database: ${data.database?.error || 'not connected'} — copy BUNNY_DATABASE_URL and BUNNY_DATABASE_AUTH_TOKEN from bookings script 63643 into blog script 75941.`);
+    }
+    if (!data.storage) issues.push('BUNNY_STORAGE_API_KEY is not set on script 75941.');
+    if (!data.cdnUrl) issues.push('BUNNY_CDN_URL is not set on script 75941.');
+    if (issues.length) {
+      banner.style.display = 'block';
+      banner.classList.add('blog-health-banner--warning');
+      banner.textContent = issues.join(' ');
+    } else {
+      banner.style.display = 'none';
+      banner.classList.remove('blog-health-banner--warning');
+    }
+  } catch (err) {
+    banner.style.display = 'block';
+    banner.classList.add('blog-health-banner--warning');
+    banner.textContent = err.message || 'Blog API health check failed.';
+  }
+}
+
+function blogInitEditor() {
+  if (blogEditorReady) return;
+  blogEditorReady = true;
+  loadQuillAssets(blogCreateEditor);
+}
+
+function blogCreateEditor() {
+  if (blogQuill) return;
+  blogQuill = initQuillEditor('#blog-editor', '#blog-toolbar', {
+    placeholder: 'Write your blog post...',
+    keyboardBindings: quillMarkdownKeyboardBindings,
+    blogBlots: true,
+  });
+  blogQuill.root.addEventListener('click', blogHandleInlineImageClick);
+}
+
+function blogSlugify(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function blogSetActionResult(message, isError) {
+  const el = document.getElementById('blog-action-result');
+  if (!el) return;
+  el.className = isError ? 'nl-send-result nl-error' : 'nl-send-result nl-success';
+  el.textContent = message;
+  el.style.display = message ? 'block' : 'none';
+}
+
+function blogUpdateStatusUi(status) {
+  blogCurrentStatus = status || 'draft';
+  const badge = document.getElementById('blog-status-badge');
+  const unpublishBtn = document.getElementById('blog-unpublish-btn');
+  const deleteBtn = document.getElementById('blog-delete-btn');
+  const publishBtn = document.getElementById('blog-publish-btn');
+  if (badge) {
+    badge.style.display = 'inline-flex';
+    badge.textContent = blogCurrentStatus === 'published' ? 'Published' : 'Draft';
+  }
+  if (unpublishBtn) unpublishBtn.style.display = blogCurrentStatus === 'published' ? 'inline-flex' : 'none';
+  if (deleteBtn) deleteBtn.style.display = document.getElementById('blog-post-id').value ? 'inline-flex' : 'none';
+  if (publishBtn) publishBtn.textContent = blogCurrentStatus === 'published' ? 'Update Published' : 'Publish';
+}
+
+function blogRenderChipField(field) {
+  const cfg = blogChipConfig[field];
+  const container = document.getElementById(cfg.containerId);
+  const chips = blogChipState[field];
+  if (!container) return;
+  if (!chips.length) {
+    container.innerHTML = '<span class="blog-empty-text" style="font-size:0.875rem;">None selected</span>';
+    return;
+  }
+  container.innerHTML = chips.map((chip) => `
+    <span style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;background:rgb(var(--color-primary-600));color:white;border-radius:6px;font-size:0.875rem;">
+      ${chip}
+      <button type="button" onclick="blogRemoveChip('${field}', '${chip.replace(/'/g, "\\'")}')" style="background:none;border:none;color:white;cursor:pointer;padding:0;font-size:1.25rem;line-height:1;">&times;</button>
+    </span>
+  `).join('');
+}
+
+function blogRenderAllChips() {
+  Object.keys(blogChipConfig).forEach(blogRenderChipField);
+}
+
+function blogFillDatalists() {
+  Object.entries(blogChipConfig).forEach(([field, cfg]) => {
+    const datalist = document.getElementById(cfg.datalistId);
+    if (!datalist) return;
+    const terms = blogTaxonomyTerms[field] || [];
+    datalist.innerHTML = terms.map((term) => `<option value="${term}"></option>`).join('');
+  });
+}
+
+function blogAddChip(field) {
+  const cfg = blogChipConfig[field];
+  const input = document.getElementById(cfg.inputId);
+  const raw = field === 'authors' ? blogSlugify(input.value) : input.value.trim();
+  if (!raw) return;
+  if (blogChipState[field].includes(raw)) {
+    input.value = '';
+    return;
+  }
+  blogChipState[field].push(raw);
+  input.value = '';
+  blogRenderChipField(field);
+
+  if (field === 'authors') {
+    const profile = (blogTaxonomyTerms.authorProfiles || []).find((item) => item.slug === raw);
+    if (profile) {
+      blogAuthorMeta[raw] = {
+        name: profile.name,
+      };
+    } else if (!blogAuthorMeta[raw]?.name) {
+      blogPendingAuthorSlug = raw;
+      document.getElementById('blog-author-meta-panel').style.display = 'block';
+      document.getElementById('blog-author-name').value = raw.replace(/-/g, ' ');
+    }
+  }
+}
+
+function blogRemoveChip(field, value) {
+  blogChipState[field] = blogChipState[field].filter((item) => item !== value);
+  blogRenderChipField(field);
+  if (field === 'authors') {
+    delete blogAuthorMeta[value];
+  }
+}
+
+function blogCollectAuthorMeta() {
+  if (blogPendingAuthorSlug) {
+    const name = document.getElementById('blog-author-name').value.trim();
+    if (name) {
+      blogAuthorMeta[blogPendingAuthorSlug] = {
+        name,
+      };
+    }
+  }
+  const meta = {};
+  for (const slug of blogChipState.authors) {
+    if (blogAuthorMeta[slug]?.name) {
+      meta[slug] = blogAuthorMeta[slug];
+    }
+  }
+  return meta;
+}
+
+function blogImageSubpath() {
+  const slug = document.getElementById('blog-slug')?.value.trim();
+  return slug ? blogSlugify(slug) : 'draft';
+}
+
+function blogAuthorImageSubpath() {
+  const slug = document.getElementById('blog-author-admin-slug')?.value.trim();
+  return slug ? `authors/${blogSlugify(slug)}` : 'authors/draft';
+}
+
+async function blogUploadImageToBunny(dataUrl, filename, subpathOverride) {
+  const res = await fetch(`${BLOG_API_BASE}/admin/blog/images`, {
+    method: 'POST',
+    headers: adminJsonHeaders(),
+    body: JSON.stringify({
+      image: dataUrl,
+      filename,
+      subpath: subpathOverride || blogImageSubpath(),
+    }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.message || data.error || 'Failed to upload image to Bunny CDN');
+  }
+  return data.url;
+}
+
+async function adminUploadImageToR2(dataUrl, filename) {
+  const uploadRes = await fetch(`${API_BASE}/admin/images`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Session-Token': sessionToken
+    },
+    body: JSON.stringify({ image: dataUrl, filename })
+  });
+  const uploadData = await uploadRes.json();
+  if (!uploadData.success) {
+    throw new Error(uploadData.error || 'Failed to upload image.');
+  }
+  return uploadData.url;
+}
+
+function blogRenderCardPreview(url) {
+  const el = document.getElementById('blog-card-preview');
+  if (!el) return;
+  el.innerHTML = url
+    ? `<div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${url}" alt="Card"></div></div>`
+    : '';
+}
+
+function blogRenderCoverPreview(url) {
+  const el = document.getElementById('blog-cover-preview');
+  if (!el) return;
+  el.innerHTML = url
+    ? `<div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Cover 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${url}" alt="Cover"></div></div>`
+    : '';
+}
+
+function blogApplyCardImage(url) {
+  document.getElementById('blog-featured-image-card').value = url || '';
+  blogRenderCardPreview(url);
+}
+
+function blogApplyCoverImage(url) {
+  document.getElementById('blog-featured-image-hero').value = url || '';
+  document.getElementById('blog-featured-image').value = url || '';
+  const seoImage = document.getElementById('blog-seo-image');
+  if (seoImage && !seoImage.value.trim() && url) {
+    seoImage.value = url;
+  }
+  blogRenderCoverPreview(url);
+}
+
+function blogRenderAuthorAdminPreview(url) {
+  const el = document.getElementById('blog-author-admin-preview');
+  if (!el) return;
+  el.innerHTML = url
+    ? `<div style="display:flex;align-items:center;gap:0.75rem;"><img src="${url}" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid rgb(var(--color-neutral-200));"><span class="blog-help-text" style="margin:0;">Profile preview</span></div>`
+    : '';
+}
+
+function blogAuthorAdminResult(message, isError) {
+  const el = document.getElementById('blog-author-admin-result');
+  if (!el) return;
+  if (!message) {
+    el.style.display = 'none';
+    el.textContent = '';
+    el.className = '';
+    return;
+  }
+  el.style.display = 'block';
+  el.className = isError ? 'blog-admin-result blog-admin-result--error' : 'blog-admin-result blog-admin-result--success';
+  el.textContent = message;
+}
+
+async function loadBlogAuthorsAdmin() {
+  const list = document.getElementById('blog-authors-admin-list');
+  if (!list) return;
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    if (!res.ok) throw new Error('Failed to load authors');
+    const data = await res.json();
+    blogAuthorsAdmin = data.authors || [];
+    blogRenderAuthorsAdminList();
+  } catch (err) {
+    console.error('Load authors error:', err);
+    list.innerHTML = '<p style="color:#c00;">Failed to load authors</p>';
+  }
+}
+
+function blogRenderAuthorsAdminList() {
+  const list = document.getElementById('blog-authors-admin-list');
+  if (!list) return;
+  if (!blogAuthorsAdmin.length) {
+    list.innerHTML = '<p class="blog-empty-text" style="font-size:0.9rem;">No authors yet. Add one to set profile photos and bios.</p>';
+    return;
+  }
+  list.innerHTML = blogAuthorsAdmin.map((author) => {
+    const avatar = author.image
+      ? `<img src="${author.image}" alt="" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;">`
+      : `<div style="width:40px;height:40px;border-radius:50%;background:rgb(var(--color-primary-100));color:rgb(var(--color-primary-700));display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">${(author.name || author.slug).charAt(0).toUpperCase()}</div>`;
+    const bioPreview = author.bio
+      ? `<div class="blog-author-bio-preview">${escapeHtmlPromo(author.bio.slice(0, 100))}${author.bio.length > 100 ? '…' : ''}</div>`
+      : '';
+    return `
+      <div class="item-card" style="margin-bottom:0.75rem;">
+        <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;">
+          <div style="display:flex;gap:0.75rem;align-items:flex-start;min-width:0;">
+            ${avatar}
+            <div style="min-width:0;">
+              <strong>${escapeHtmlPromo(author.name)}</strong>
+              <div class="blog-author-slug">/${author.slug}/</div>
+              ${bioPreview}
+            </div>
+          </div>
+          <button type="button" class="btn-edit btn-sm" onclick="blogEditAuthor('${author.slug.replace(/'/g, "\\'")}')">Edit</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function blogNewAuthor() {
+  document.getElementById('blog-author-admin-editing').value = '0';
+  document.getElementById('blog-author-admin-slug').value = '';
+  document.getElementById('blog-author-admin-slug').readOnly = false;
+  document.getElementById('blog-author-admin-name').value = '';
+  document.getElementById('blog-author-admin-image').value = '';
+  document.getElementById('blog-author-admin-bio').value = '';
+  blogRenderAuthorAdminPreview('');
+  document.getElementById('blog-author-delete-btn').style.display = 'none';
+  document.getElementById('blog-author-admin-form').style.display = 'block';
+  blogAuthorAdminResult('', false);
+  document.getElementById('blog-author-admin-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function blogEditAuthor(slug) {
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    if (!res.ok) throw new Error('Failed to load author');
+    const author = await res.json();
+    document.getElementById('blog-author-admin-editing').value = '1';
+    document.getElementById('blog-author-admin-slug').value = author.slug || '';
+    document.getElementById('blog-author-admin-slug').readOnly = true;
+    document.getElementById('blog-author-admin-name').value = author.name || '';
+    document.getElementById('blog-author-admin-image').value = author.image || '';
+    document.getElementById('blog-author-admin-bio').value = author.bio || '';
+    blogRenderAuthorAdminPreview(author.image || '');
+    document.getElementById('blog-author-delete-btn').style.display = 'inline-flex';
+    document.getElementById('blog-author-admin-form').style.display = 'block';
+    blogAuthorAdminResult('', false);
+    document.getElementById('blog-author-admin-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    Modal.alert({ title: 'Error', message: err.message || 'Could not load author.' });
+  }
+}
+
+function blogCancelAuthorEdit() {
+  document.getElementById('blog-author-admin-form').style.display = 'none';
+  blogAuthorAdminResult('', false);
+}
+
+async function blogSaveAuthor() {
+  const slugRaw = document.getElementById('blog-author-admin-slug').value.trim();
+  const slug = blogSlugify(slugRaw);
+  const name = document.getElementById('blog-author-admin-name').value.trim();
+  const image = document.getElementById('blog-author-admin-image').value.trim() || null;
+  const bio = document.getElementById('blog-author-admin-bio').value.trim() || null;
+
+  if (!slug || !name) {
+    Modal.alert({ title: 'Missing fields', message: 'Slug and display name are required.' });
+    return;
+  }
+
+  const btn = document.getElementById('blog-author-save-btn');
+  btn.disabled = true;
+  blogAuthorAdminResult('Saving…', false);
+
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
+      method: 'PUT',
+      headers: adminJsonHeaders(),
+      body: JSON.stringify({ name, image, bio }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || 'Save failed');
+
+    blogAuthorAdminResult('Author saved and CDN updated.', false);
+    document.getElementById('blog-author-admin-editing').value = '1';
+    document.getElementById('blog-author-admin-slug').value = slug;
+    document.getElementById('blog-author-admin-slug').readOnly = true;
+    document.getElementById('blog-author-delete-btn').style.display = 'inline-flex';
+    await loadBlogAuthorsAdmin();
+    await loadBlogTaxonomyTerms();
+  } catch (err) {
+    blogAuthorAdminResult(err.message || 'Save failed', true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function blogDeleteAuthor() {
+  const slug = document.getElementById('blog-author-admin-slug').value.trim();
+  if (!slug) return;
+  const ok = await Modal.confirm({
+    title: 'Delete author?',
+    message: `Remove "${slug}" from the authors list? Posts that reference this slug will keep it, but the profile page and photo will be gone.`,
+    confirmText: 'Delete',
+    confirmStyle: 'danger',
+  });
+  if (!ok) return;
+
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Delete failed');
+    blogCancelAuthorEdit();
+    await loadBlogAuthorsAdmin();
+    await loadBlogTaxonomyTerms();
+  } catch (err) {
+    Modal.alert({ title: 'Error', message: err.message || 'Could not delete author.' });
+  }
+}
+
+let blogAuthorsAdmin = [];
+
+function blogCollectPayload(status) {
+  const publishedAtRaw = document.getElementById('blog-published-at').value;
+  return {
+    title: document.getElementById('blog-title').value.trim(),
+    slug: document.getElementById('blog-slug').value.trim(),
+    excerpt: document.getElementById('blog-excerpt').value.trim() || null,
+    featured_image: document.getElementById('blog-featured-image-hero').value.trim()
+      || document.getElementById('blog-featured-image').value.trim()
+      || null,
+    featured_image_card: document.getElementById('blog-featured-image-card').value.trim() || null,
+    featured_image_hero: document.getElementById('blog-featured-image-hero').value.trim() || null,
+    seo_description: document.getElementById('blog-seo-description').value.trim() || null,
+    seo_image: document.getElementById('blog-seo-image').value.trim() || null,
+    html: blogQuill ? blogQuill.root.innerHTML.trim() : '',
+    tags: [...blogChipState.tags],
+    categories: [...blogChipState.categories],
+    series: [...blogChipState.series],
+    authors: [...blogChipState.authors],
+    author_meta: blogCollectAuthorMeta(),
+    status,
+    published_at: publishedAtRaw ? new Date(publishedAtRaw).toISOString() : null,
+  };
+}
+
+function blogValidatePayload(payload) {
+  if (!payload.title || !payload.slug) {
+    Modal.alert({ title: 'Missing fields', message: 'Title and slug are required.' });
+    return false;
+  }
+  if (payload.status === 'published' && (!payload.html || payload.html === '<p><br></p>')) {
+    Modal.alert({ title: 'Missing body', message: 'Add post content before publishing.' });
+    return false;
+  }
+  return true;
+}
+
+async function loadBlogTaxonomyTerms() {
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/taxonomy-terms`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    if (!res.ok) throw new Error('Failed to load taxonomy terms');
+    blogTaxonomyTerms = await res.json();
+    blogFillDatalists();
+  } catch (err) {
+    console.error('Blog taxonomy terms error:', err);
+  }
+}
+
+async function loadBlogPosts() {
+  const list = document.getElementById('blog-posts-list');
+  if (!list) return;
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/posts?limit=50`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    blogPosts = data.posts || [];
+    if (!blogPosts.length) {
+      list.innerHTML = '<p class="blog-empty-text">No posts yet</p>';
+      return;
+    }
+    list.innerHTML = blogPosts.map((post) => {
+      const statusLabel = post.status === 'published'
+        ? '<span class="blog-post-status blog-post-status--published">Published</span>'
+        : '<span class="blog-post-status blog-post-status--draft">Draft</span>';
+      const dateLabel = post.published_at
+        ? new Date(post.published_at).toLocaleString('en-GB')
+        : new Date(post.updated_at || post.created_at).toLocaleString('en-GB');
+      return `
+        <div class="item-card" style="margin-bottom:0.75rem;">
+          <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;">
+            <div>
+              <strong>${post.title || 'Untitled'}</strong>
+              <div class="blog-post-slug-meta">/${post.slug}/ · ${statusLabel}</div>
+              <div class="blog-post-date">${dateLabel}</div>
+            </div>
+            <button type="button" class="btn-edit btn-sm" onclick="blogEditPost(${post.id})">Edit</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Load blog posts error:', err);
+    list.innerHTML = '<p style="color:#c00;">Failed to load posts</p>';
+  }
+}
+
+function blogResetForm() {
+  document.getElementById('blog-post-id').value = '';
+  document.getElementById('blog-title').value = '';
+  document.getElementById('blog-slug').value = '';
+  document.getElementById('blog-excerpt').value = '';
+  document.getElementById('blog-published-at').value = '';
+  document.getElementById('blog-featured-image').value = '';
+  document.getElementById('blog-featured-image-card').value = '';
+  document.getElementById('blog-featured-image-hero').value = '';
+  document.getElementById('blog-seo-description').value = '';
+  document.getElementById('blog-seo-image').value = '';
+  blogRenderCardPreview('');
+  blogRenderCoverPreview('');
+  document.getElementById('blog-author-meta-panel').style.display = 'none';
+  document.getElementById('blog-save-status').textContent = '';
+  blogPendingAuthorSlug = null;
+  blogAuthorMeta = {};
+  Object.keys(blogChipState).forEach((field) => { blogChipState[field] = []; });
+  blogRenderAllChips();
+  if (blogQuill) blogQuill.setContents([]);
+  blogUpdateStatusUi('draft');
+  blogSetActionResult('', false);
+}
+
+function blogNewPost() {
+  blogResetForm();
+}
+
+function blogIsoToLocalInput(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function blogEditPost(id) {
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/posts/${id}`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    if (!res.ok) throw new Error('Failed to load post');
+    const post = await res.json();
+    blogResetForm();
+    document.getElementById('blog-post-id').value = post.id;
+    document.getElementById('blog-title').value = post.title || '';
+    document.getElementById('blog-slug').value = post.slug || '';
+    document.getElementById('blog-excerpt').value = post.excerpt || '';
+    document.getElementById('blog-published-at').value = blogIsoToLocalInput(post.published_at);
+    document.getElementById('blog-featured-image').value = post.featured_image || post.featured_image_hero || '';
+    document.getElementById('blog-featured-image-card').value = post.featured_image_card || '';
+    document.getElementById('blog-featured-image-hero').value = post.featured_image_hero || '';
+    document.getElementById('blog-seo-description').value = post.seo_description || '';
+    document.getElementById('blog-seo-image').value = post.seo_image || '';
+    blogRenderCardPreview(post.featured_image_card || '');
+    blogRenderCoverPreview(post.featured_image_hero || post.featured_image || '');
+    blogChipState.tags = [...(post.tags || [])];
+    blogChipState.categories = [...(post.categories || [])];
+    blogChipState.series = [...(post.series || [])];
+    blogChipState.authors = [...(post.authors || [])];
+    blogRenderAllChips();
+    for (const slug of blogChipState.authors) {
+      const profile = (blogTaxonomyTerms.authorProfiles || []).find((item) => item.slug === slug);
+      if (profile) {
+        blogAuthorMeta[slug] = { name: profile.name };
+      }
+    }
+    if (blogQuill) {
+      blogQuill.root.innerHTML = post.html || '';
+    }
+    blogUpdateStatusUi(post.status);
+    blogSetActionResult('', false);
+  } catch (err) {
+    Modal.alert({ title: 'Error', message: err.message || 'Could not load post.' });
+  }
+}
+
+async function blogSaveDraft() {
+  const payload = blogCollectPayload('draft');
+  if (!blogValidatePayload(payload)) return;
+  const saveBtn = document.getElementById('blog-save-btn');
+  saveBtn.disabled = true;
+  try {
+    const id = document.getElementById('blog-post-id').value;
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/posts${id ? `/${id}` : ''}`, {
+      method: id ? 'PUT' : 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': sessionToken,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Save failed');
+    if (!id && data.id) document.getElementById('blog-post-id').value = data.id;
+    document.getElementById('blog-save-status').textContent = 'Draft saved';
+    blogUpdateStatusUi('draft');
+    await loadBlogTaxonomyTerms();
+    await loadBlogPosts();
+    blogSetActionResult('Draft saved.', false);
+  } catch (err) {
+    blogSetActionResult(err.message || 'Save failed', true);
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+async function blogSyncCdn() {
+  const confirmed = await Modal.confirm({
+    title: 'Rebuild blog CDN?',
+    message: 'Uploads all published posts to Bunny Storage. Use this if /posts/ is empty or stale.',
+  });
+  if (!confirmed) return;
+
+  const btn = document.getElementById('blog-sync-cdn-btn');
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/sync-cdn`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'CDN rebuild failed');
+    blogSetActionResult(`CDN rebuilt (${data.posts ?? 0} published posts). /posts/ should be live within a minute.`, false);
+  } catch (err) {
+    blogSetActionResult(err.message || 'CDN rebuild failed', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Rebuild CDN';
+  }
+}
+
+async function blogPublish() {
+  const confirmed = await Modal.confirm({
+    title: 'Publish post?',
+    message: 'This will publish the post to /posts/ immediately (no site rebuild).',
+  });
+  if (!confirmed) return;
+
+  const payload = blogCollectPayload('published');
+  if (!blogValidatePayload(payload)) return;
+  const publishBtn = document.getElementById('blog-publish-btn');
+  publishBtn.disabled = true;
+  publishBtn.textContent = 'Publishing...';
+  try {
+    const id = document.getElementById('blog-post-id').value;
+    if (!id) {
+      const createRes = await fetch(`${BLOG_API_BASE}/admin/blog/posts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+        body: JSON.stringify(payload),
+      });
+      const createData = await createRes.json();
+      if (!createRes.ok) throw new Error(createData.error || 'Publish failed');
+      document.getElementById('blog-post-id').value = createData.id;
+    } else {
+      const updateRes = await fetch(`${BLOG_API_BASE}/admin/blog/posts/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken,
+        },
+        body: JSON.stringify(payload),
+      });
+      const updateData = await updateRes.json();
+      if (!updateRes.ok) throw new Error(updateData.error || 'Publish failed');
+    }
+    blogUpdateStatusUi('published');
+    await loadBlogTaxonomyTerms();
+    await loadBlogPosts();
+    blogSetActionResult('Published. Live at /posts/ now.', false);
+  } catch (err) {
+    blogSetActionResult(err.message || 'Publish failed', true);
+  } finally {
+    publishBtn.disabled = false;
+    blogUpdateStatusUi(blogCurrentStatus);
+  }
+}
+
+async function blogUnpublish() {
+  const id = document.getElementById('blog-post-id').value;
+  if (!id) return;
+  const confirmed = await Modal.confirm({
+    title: 'Unpublish post?',
+    message: 'The post will be removed from the public site immediately.',
+  });
+  if (!confirmed) return;
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/posts/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': sessionToken,
+      },
+      body: JSON.stringify({ status: 'draft' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unpublish failed');
+    blogUpdateStatusUi('draft');
+    await loadBlogPosts();
+    blogSetActionResult('Post unpublished.', false);
+  } catch (err) {
+    blogSetActionResult(err.message || 'Unpublish failed', true);
+  }
+}
+
+async function blogDeletePost() {
+  const id = document.getElementById('blog-post-id').value;
+  if (!id) return;
+  if (blogCurrentStatus === 'published') {
+    Modal.alert({ title: 'Unpublish first', message: 'Unpublish this post before deleting it.' });
+    return;
+  }
+  const confirmed = await Modal.confirm({
+    title: 'Delete draft?',
+    message: 'This cannot be undone.',
+  });
+  if (!confirmed) return;
+  try {
+    const res = await fetch(`${BLOG_API_BASE}/admin/blog/posts/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Delete failed');
+    blogResetForm();
+    await loadBlogPosts();
+    blogSetActionResult('Draft deleted.', false);
+  } catch (err) {
+    blogSetActionResult(err.message || 'Delete failed', true);
+  }
+}
+
+function blogPreview() {
+  const title = document.getElementById('blog-title').value.trim() || 'Post Preview';
+  const bodyHtml = blogQuill ? blogQuill.root.innerHTML.trim() : '';
+  if (!bodyHtml || bodyHtml === '<p><br></p>') {
+    Modal.alert({ title: 'Empty', message: 'Add some content before previewing.' });
+    return;
+  }
+  const featured = document.getElementById('blog-featured-image-hero').value.trim()
+    || document.getElementById('blog-featured-image').value.trim();
+  const hero = featured
+    ? '<div style="margin:-32px -32px 24px -32px;"><img src="' + featured + '" alt="" style="width:100%;aspect-ratio:885/300;max-height:320px;object-fit:cover;display:block;border-radius:12px;"></div>'
+    : '';
+  // Hugo goldmark chokes on literal <style> inside page content — split the tag.
+  const stO = '<sty' + 'le>';
+  const stC = '</sty' + 'le>';
+  const styles = stO
+    + 'body{font-family:Georgia,serif;line-height:1.7;color:#111;margin:0;padding:24px;background:#fafafa;}'
+    + '.wrap{max-width:720px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;}'
+    + '.content{padding:32px;}'
+    + 'h1,h2,h3{color:#111827;}'
+    + 'a{color:#4f46e5;}'
+    + '.content img{display:block;width:100%;max-width:100%;height:auto;border-radius:10px;margin:0;}'
+    + '.content .blog-inline-figure{margin:1.75rem 0;}'
+    + '.content .blog-inline-figure figcaption{margin-top:0.5rem;font-size:0.9rem;font-style:italic;color:#6b7280;text-align:center;line-height:1.5;}'
+    + stC;
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' + styles + '</head><body><div class="wrap">' + hero + '<div class="content"><h1>' + title + '</h1>' + bodyHtml + '</div></div></body></html>';
+  document.getElementById('blog-preview-frame').srcdoc = html;
+  document.getElementById('blog-preview-modal').style.display = 'flex';
+}
+
+function blogClosePreview() {
+  document.getElementById('blog-preview-modal').style.display = 'none';
+}
+
+function blogInsertInlineImage(url, alt) {
+  if (!blogQuill || !url) return;
+  const range = blogQuill.getSelection(true);
+  const index = range ? range.index : blogQuill.getLength();
+  blogQuill.insertEmbed(index, 'blog-image', { url, alt: alt || '' }, 'user');
+  blogQuill.setSelection(index + 1);
+}
+
+function blogPromptInlineImageAlt(currentAlt = '') {
+  const alt = prompt('Alt text / caption (shown below the image):', currentAlt);
+  if (alt === null) return null;
+  return alt.trim();
+}
+
+function blogApplyInlineImageAlt(targetNode, alt) {
+  const figure = targetNode?.classList?.contains('blog-inline-figure')
+    ? targetNode
+    : targetNode?.closest?.('.blog-inline-figure');
+  const img = figure
+    ? figure.querySelector('img')
+    : (targetNode?.tagName === 'IMG' ? targetNode : null);
+  if (!img) return;
+
+  img.setAttribute('alt', alt);
+  if (figure) {
+    let caption = figure.querySelector('figcaption');
+    if (alt) {
+      if (!caption) {
+        caption = document.createElement('figcaption');
+        figure.appendChild(caption);
+      }
+      caption.textContent = alt;
+    } else if (caption) {
+      caption.remove();
+    }
+  }
+}
+
+function blogHandleInlineImageClick(event) {
+  if (!blogQuill) return;
+  const figure = event.target.closest('.blog-inline-figure');
+  const img = figure
+    ? figure.querySelector('img')
+    : (event.target.tagName === 'IMG' ? event.target : null);
+  if (!img) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const currentAlt = img.getAttribute('alt') || '';
+  const newAlt = blogPromptInlineImageAlt(currentAlt);
+  if (newAlt === null || newAlt === currentAlt) return;
+
+  blogApplyInlineImageAlt(figure || img, newAlt);
+}
+
+function blogInsertImageUrl() {
+  if (!blogQuill) return;
+  const url = prompt('Image URL');
+  if (!url) return;
+  const alt = blogPromptInlineImageAlt();
+  if (alt === null) return;
+  blogInsertInlineImage(url.trim(), alt);
+}
+
+function blogInsertImageUpload() {
+  if (!blogQuill) return;
+  const input = document.getElementById('blog-inline-image-upload');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+document.getElementById('blog-title')?.addEventListener('input', (e) => {
+  const slugField = document.getElementById('blog-slug');
+  if (!slugField || slugField.dataset.manual === '1') return;
+  slugField.value = blogSlugify(e.target.value);
+});
+
+document.getElementById('blog-slug')?.addEventListener('input', () => {
+  document.getElementById('blog-slug').dataset.manual = '1';
+});
+
+['tags', 'categories', 'series', 'authors'].forEach((field) => {
+  const input = document.getElementById(blogChipConfig[field].inputId);
+  if (!input) return;
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      blogAddChip(field);
+    }
+  });
+});
+
+document.getElementById('blog-card-upload')?.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showCropModal(file, (url) => {
+    blogApplyCardImage(url);
+  }, 400 / 238, 'blog-card');
+  e.target.value = '';
+});
+
+document.getElementById('blog-cover-upload')?.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showCropModal(file, (url) => {
+    blogApplyCoverImage(url);
+  }, 885 / 300, 'blog-cover');
+  e.target.value = '';
+});
+
+document.getElementById('blog-author-avatar-upload')?.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showCropModal(file, (url) => {
+    document.getElementById('blog-author-admin-image').value = url;
+    blogRenderAuthorAdminPreview(url);
+  }, 1, 'blog-author');
+  e.target.value = '';
+});
+
+document.getElementById('blog-author-admin-name')?.addEventListener('input', (e) => {
+  const slugField = document.getElementById('blog-author-admin-slug');
+  if (!slugField || slugField.readOnly || slugField.dataset.manual === '1') return;
+  slugField.value = blogSlugify(e.target.value);
+});
+
+document.getElementById('blog-author-admin-slug')?.addEventListener('input', () => {
+  const slugField = document.getElementById('blog-author-admin-slug');
+  if (slugField && !slugField.readOnly) slugField.dataset.manual = '1';
+});
+
+document.getElementById('blog-inline-image-upload')?.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showCropModal(file, (url) => {
+    if (!blogQuill) return;
+    const alt = blogPromptInlineImageAlt();
+    if (alt === null) return;
+    blogInsertInlineImage(url, alt);
+  }, 960 / 540, 'blog-inline');
+  e.target.value = '';
+});
 
 // Initialize
 checkAuth();

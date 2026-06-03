@@ -1,30 +1,46 @@
 <div style="padding-left:0;padding-right:0;padding-top:2px;padding-bottom:3px"
     class="main-menu flex items-center justify-between px-4 py-6 sm:px-6 md:justify-start gap-x-3">
+    {{ $logoPath := "" }}
     {{ if .Site.Params.Logo }}
-    {{ $logo := resources.Get .Site.Params.Logo }}
-    {{ if $logo }}
-    <div>
-        <a href="{{ "" | relLangURL }}" class="flex">
+    {{ $logoPath = .Site.Params.Logo }}
+    {{ else if not .IsHome }}
+    {{ with .Site.Params.Author.image }}
+    {{ $logoPath = . }}
+    {{ end }}
+    {{ end }}
+    {{ if $logoPath }}
+    {{ $logo := "" }}
+    {{ if or (strings.HasPrefix $logoPath "http:") (strings.HasPrefix $logoPath "https:") }}
+    {{ $logo = resources.GetRemote $logoPath }}
+    {{ else }}
+    {{ $logo = resources.Get $logoPath }}
+    {{ end }}
+    <div class="header-logo shrink-0">
+        <a href="{{ "" | relLangURL }}" class="flex items-center">
             <span class="sr-only">{{ .Site.Title | markdownify }}</span>
 
+            {{ if $logo }}
             {{ if eq $logo.MediaType.SubType "svg" }}
             <span class="logo object-scale-down object-left nozoom">
                 {{ $logo.Content | safeHTML }}
             </span>
             {{ else }}
-            <img src="{{ $logo.RelPermalink }}" width="{{ div $logo.Width 2 }}" height="{{ div $logo.Height 2 }}"
-                class="logo max-h-[5rem] max-w-[5rem] object-scale-down object-left nozoom" alt="{{ .Site.Title }}" />
+            <img src="{{ $logo.RelPermalink }}"
+                class="logo object-scale-down object-left nozoom" alt="{{ .Site.Title }}" />
+            {{ end }}
+            {{ else }}
+            <img src="{{ $logoPath | relURL }}"
+                class="logo object-scale-down object-left nozoom" alt="{{ .Site.Title }}" />
             {{ end }}
 
         </a>
     </div>
     {{ end }}
-    {{- end }}
     <div class="flex flex-1 items-center justify-between">
         <nav class="flex space-x-3">
 
-            {{ if not .Site.Params.disableTextInHeader | default true }}
-            <a href="{{ "" | relLangURL }}" class="text-base font-medium text-gray-500 hover:text-gray-900">{{
+            {{ if and (not (.Site.Params.disableTextInHeader | default true)) .IsHome }}
+            <a href="{{ "" | relLangURL }}" class="text-base font-medium text-gray-500 hover:text-gray-900 dark:hover:text-neutral-200">{{
                 .Site.Title | markdownify
                 }}</a>
             {{ end }}
@@ -150,7 +166,7 @@
 </div>
 
 {{ if .Site.Menus.subnavigation }}
-<div class="main-menu flex pb-3 flex-col items-end justify-between md:justify-start space-x-3" {{ if .Site.Params.Logo
+<div class="main-menu flex pb-3 flex-col items-end justify-between md:justify-start space-x-3" {{ if or .Site.Params.Logo (and (not .IsHome) .Site.Params.Author.image) }}
     }} style="margin-top:-15px" {{ end }}>
     <div class="hidden md:flex items-center space-x-5">
         {{ range .Site.Menus.subnavigation }}

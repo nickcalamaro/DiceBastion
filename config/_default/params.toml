@@ -22,9 +22,9 @@ showScrollToTop = true
 [homepage]
 layout = "background"
 homepageImage = "/img/clubempty.png"
-showRecent = false
+showRecent = true
 showRecentItems = 5
-showMoreLink = false
+showMoreLink = true
 showMoreLinkDest = "/posts/"
 cardView = false
 cardViewScreenWidth = false
@@ -50,8 +50,8 @@ showPagination = true
 invertPagination = true
 showReadingTime = false
 showTableOfContents = false
-showTaxonomies = false
-showAuthorsBadges = false
+showTaxonomies = true
+showAuthorsBadges = true
 showWordCount = false
 showZenMode = false
 
@@ -74,7 +74,7 @@ heroStyle = "background"
 layout = "background"
 
 [sitemap]
-excludedKinds = [ "taxonomy", "term" ]
+excludedKinds = []
 
 [taxonomy]
 showTermCount = true

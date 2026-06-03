@@ -8,8 +8,8 @@ showPagination: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js"></script>
-<script src="/js/modal.js"></script>
+<script src="/js/utils.js?v=3"></script>
+<script src="/js/modal.js?v=4"></script>
 
 <!-- Component Styles -->
 <link rel="stylesheet" href="/css/forms.css">
@@ -35,7 +35,7 @@ showPagination: false
 
 <b>Gibraltar Dice Bastion is part of the Gibraltar Warhammer Club, and we’re completely funded by our members!</b>
 
-If you're not sure whether you're ready to support us just yet, we offer a one-month free trial. Your card will be saved but won't be charged until your trial ends. We'll send you a reminder 2 days before.
+If you're not sure whether you're ready to support us just yet, we offer a one-month free trial. We'll verify your card with a temporary **£1 authorisation** (refunded immediately by our payment provider), then save it for when your trial ends. You won't be charged your membership price until after the trial. We'll send you a reminder 2 days before.
 
 <b>Choose the plan you'd like to continue with after your trial:</b>
 
@@ -101,7 +101,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
 <div class="footer-info">
   <span>Secure card verification powered by SumUp</span>
   <span class="footer-divider" aria-hidden="true"></span>
-  <span>No charge during trial · Cancel anytime</span>
+  <span>£1 card verification (refunded) · No plan charge during trial · Cancel anytime</span>
 </div>
 
 <div id="membership-cta-footer" class="text-center" style="margin: 1.5rem auto;">
@@ -115,6 +115,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
 <script>
 (function() {
   const API_BASE = utils.getApiBase();
+  const PAYMENT_SUPPORT_NOTE = '<p class="payment-support-note" style="margin:1rem 0 0;font-size:0.875rem;color:rgb(var(--color-neutral-600));text-align:center;line-height:1.5;">Experiencing issues or have some feedback for us? <a href="/support/" style="color:rgb(var(--color-primary-600));">Please drop us a message.</a></p>';
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   const IS_LOCALHOST = window.location.hostname === 'localhost' ||
                        window.location.hostname === '127.0.0.1' ||
@@ -174,8 +175,8 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
           </label>
         </div>
 
-        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"><strong>How the free trial works:</strong> Your card will be verified but <strong>not charged</strong> during the 1-month trial. After the trial, your ${planName} membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+        <div class="modal-info-box modal-info-box-sm">
+          <p><strong>How the free trial works:</strong> We'll place a temporary <strong>£1 authorisation</strong> on your card to verify it (refunded immediately). You won't be charged your ${planName} membership price during the 1-month trial. After the trial, your membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -190,12 +191,12 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
     const loggedInForm = `
       <div id="sumup-logged-step" style="display: ${isLoggedIn ? 'block' : 'none'};">
         <div class="modal-info-box">
-          <p style="margin: 0 0 8px 0; color: #666;">Starting free trial as:</p>
-          <p style="margin: 0; font-weight: 600; font-size: 1.05em;" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
+          <p class="modal-info-label modal-info-label-lg">Starting free trial as:</p>
+          <p class="modal-info-value modal-info-value-lg" id="modal-user-email">${isLoggedIn ? user.email : ''}</p>
         </div>
 
-        <div class="modal-info-box" style="font-size: 0.9em; color: #666;">
-          <p style="margin: 0;"><strong>How the free trial works:</strong> Your card will be verified but <strong>not charged</strong> during the 1-month trial. After the trial, your ${planName} membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
+        <div class="modal-info-box modal-info-box-sm">
+          <p><strong>How the free trial works:</strong> We'll place a temporary <strong>£1 authorisation</strong> on your card to verify it (refunded immediately). You won't be charged your ${planName} membership price during the 1-month trial. After the trial, your membership will begin and renew automatically. We'll email you 2 days before your first charge. You can cancel anytime from your <a href="/account/" class="modal-link">account page</a>.</p>
         </div>
 
         <div class="modal-section">
@@ -206,7 +207,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         <button id="modal-continue-logged" type="button" class="modal-btn modal-btn-primary modal-section">Continue to Card Verification</button>
 
         <div class="modal-section" style="text-align: center;">
-          <button id="modal-use-different" type="button" class="modal-btn-secondary" style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 0.9em;">
+          <button id="modal-use-different" type="button" class="modal-btn-secondary modal-text-link-btn">
             Use a different email address
           </button>
         </div>
@@ -222,6 +223,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
         <div id="sumup-error" class="modal-error"></div>
+        ${PAYMENT_SUPPORT_NOTE}
       `,
       onClose: closeModal
     });
@@ -343,14 +345,17 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
             if (sumupCardEl) {
               sumupCardEl.innerHTML = `
                 <div style="text-align:center; padding: 2rem 1rem;">
-                  <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">✅</div>
-                  <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Card Verified Successfully!</div>
-                  <div style="color: #666; font-size: 0.9rem;">Setting up your free trial…</div>
+                  <div class="modal-status-title">Verifying your card…</div>
+                  <div class="modal-muted-text">Please wait while we confirm with our payment provider.</div>
                   <div class="spinner" style="border: 3px solid rgba(128,128,128,0.2); border-left-color: rgb(var(--color-primary-500)); border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; margin: 1rem auto 0;"></div>
                 </div>
               `;
             }
-            await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
+            const ok = await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
+            if (!ok && sumupCardEl) {
+              sumupCardEl.innerHTML = '';
+              sumupCardEl.style.display = 'none';
+            }
           } else if (t === 'error' || t === 'fail') {
             showError('Card verification failed. Please try again.');
           } else if (t === 'cancel') {

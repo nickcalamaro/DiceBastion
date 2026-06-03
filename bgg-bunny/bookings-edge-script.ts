@@ -8,6 +8,9 @@
  *   - BUNNY_DATABASE_URL: Database connection URL
  *   - BUNNY_DATABASE_AUTH_TOKEN: Database access token
  *   - EMAIL_API_URL: URL of the DiceBastionEmails edge script (e.g., https://dicebastionemails-xxxxx.bunny.run/send)
+ *   - WORKER_API_URL: Cloudflare worker base URL for membership verification
+ *   - PAYMENTS_API_URL: Payments worker base URL (SumUp checkouts)
+ *   - INTERNAL_SECRET: Shared secret for payments worker internal routes
  * 
  * API Endpoints:
  *   GET    /api/bookings/table-types    - Get available table types
@@ -32,6 +35,264 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
+
+const BOOKING_TZ = "Europe/Gibraltar";
+const SAME_DAY_CONTACT_MESSAGE =
+  "We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.";
+
+function getGibraltarNow(): { dateStr: string; minutesSinceMidnight: number } {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-CA", { timeZone: BOOKING_TZ });
+  const timeStr = now.toLocaleTimeString("en-GB", {
+    timeZone: BOOKING_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const [hours, minutes] = timeStr.split(":").map((part) => parseInt(part, 10));
+  return { dateStr, minutesSinceMidnight: hours * 60 + (minutes || 0) };
+}
+
+function parseTimeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map((part) => parseInt(part, 10));
+  return hours * 60 + (minutes || 0);
+}
+
+const VALID_WEEKDAYS = new Set([
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+]);
+
+type DayHourRule = {
+  days: string[];
+  start_hour?: number;
+  end_hour?: number;
+};
+
+type BookingScheduleConfig = {
+  maxBookings: number;
+  startHour: number;
+  endHour: number;
+  slotDuration: number;
+  dayHourRules: DayHourRule[];
+};
+
+function parseDayHourRules(raw: unknown): DayHourRule[] {
+  if (raw == null || raw === "") return [];
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      console.error("Invalid day_hour_rules JSON");
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const rules: DayHourRule[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as { days?: unknown; start_hour?: unknown; end_hour?: unknown };
+    const days = Array.isArray(record.days)
+      ? record.days.filter((d): d is string => typeof d === "string" && VALID_WEEKDAYS.has(d))
+      : [];
+    if (!days.length) continue;
+
+    const rule: DayHourRule = { days };
+    if (record.start_hour != null) {
+      const hour = Number(record.start_hour);
+      if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
+        rule.start_hour = hour;
+      }
+    }
+    if (record.end_hour != null) {
+      const hour = Number(record.end_hour);
+      if (Number.isInteger(hour) && hour >= 1 && hour <= 24) {
+        rule.end_hour = hour;
+      }
+    }
+    rules.push(rule);
+  }
+  return rules;
+}
+
+function getWeekdayName(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map((part) => parseInt(part, 10));
+  const noonUtc = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return noonUtc.toLocaleDateString("en-US", { weekday: "long", timeZone: BOOKING_TZ });
+}
+
+function getEffectiveHoursForDate(
+  dateStr: string,
+  globalStart: number,
+  globalEnd: number,
+  rules: DayHourRule[]
+): { startHour: number; endHour: number } {
+  const weekday = getWeekdayName(dateStr);
+  let startHour = globalStart;
+  let endHour = globalEnd;
+
+  for (const rule of rules) {
+    if (!rule.days.includes(weekday)) continue;
+    if (rule.start_hour != null) {
+      startHour = Math.max(startHour, rule.start_hour);
+    }
+    if (rule.end_hour != null) {
+      endHour = Math.min(endHour, rule.end_hour);
+    }
+  }
+
+  return { startHour, endHour };
+}
+
+function slotWithinEffectiveHours(
+  startTime: string,
+  endTime: string,
+  startHour: number,
+  endHour: number
+): boolean {
+  const startMinutes = parseTimeToMinutes(startTime);
+  const endMinutes = parseTimeToMinutes(endTime);
+  return startMinutes >= startHour * 60 && endMinutes <= endHour * 60;
+}
+
+async function loadBookingConfig(): Promise<BookingScheduleConfig> {
+  const configResult = await client.execute(
+    "SELECT max_bookings, start_hour, end_hour, slot_duration_hours, day_hour_rules FROM booking_config WHERE id = 1"
+  );
+  const config = configResult.rows[0] || {};
+  return {
+    maxBookings: Number(config.max_bookings || 4),
+    startHour: Number(config.start_hour || 10),
+    endHour: Number(config.end_hour || 22),
+    slotDuration: Number(config.slot_duration_hours || 3),
+    dayHourRules: parseDayHourRules(config.day_hour_rules),
+  };
+}
+
+async function checkActiveMembership(email: string): Promise<boolean> {
+  const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
+  try {
+    const res = await fetch(`${workerUrl}/membership/status?email=${encodeURIComponent(email)}`);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { active?: boolean };
+    return !!data.active;
+  } catch (error) {
+    console.error("Membership check failed:", error);
+    return false;
+  }
+}
+
+function validateBookingAdvance(params: {
+  bookingDate: string;
+  startTime: string;
+  isMember: boolean;
+}): { ok: true } | { ok: false; error: string; message: string } {
+  const { dateStr: todayStr } = getGibraltarNow();
+
+  if (params.bookingDate < todayStr) {
+    return {
+      ok: false,
+      error: "past_date",
+      message: "Cannot book dates in the past.",
+    };
+  }
+
+  if (params.bookingDate === todayStr) {
+    return {
+      ok: false,
+      error: params.isMember ? "member_same_day_not_allowed" : "same_day_not_allowed",
+      message: params.isMember
+        ? SAME_DAY_CONTACT_MESSAGE
+        : "Tables must be booked at least the day before. Please contact us if you need a last-minute table.",
+    };
+  }
+
+  return { ok: true };
+}
+
+function isCheckoutPaid(payment: Record<string, unknown> | null | undefined): boolean {
+  if (!payment) return false;
+  const status = payment.status as string | undefined;
+  if (status === "PAID" || status === "SUCCESSFUL") return true;
+  const transactions = payment.transactions;
+  if (Array.isArray(transactions)) {
+    return transactions.some(
+      (tx) =>
+        tx &&
+        typeof tx === "object" &&
+        ((tx as { status?: string }).status === "SUCCESSFUL" ||
+          (tx as { status?: string }).status === "PAID")
+    );
+  }
+  return false;
+}
+
+async function callPaymentsWorker(
+  path: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const paymentsApiUrl = (
+    process.env.PAYMENTS_API_URL || "https://dicebastion-payments.ncalamaro.workers.dev"
+  ).replace(/\/+$/, "");
+  const internalSecret = process.env.INTERNAL_SECRET;
+  if (!internalSecret) {
+    throw new Error("INTERNAL_SECRET not configured");
+  }
+  return fetch(`${paymentsApiUrl}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Internal-Secret": internalSecret,
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  });
+}
+
+async function fetchPayment(checkoutId: string): Promise<Record<string, unknown>> {
+  const res = await callPaymentsWorker(`/internal/payment/${encodeURIComponent(checkoutId)}`, {
+    method: "GET",
+  });
+  const data = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    throw new Error(String(data.error || "Failed to fetch payment"));
+  }
+  return data;
+}
+
+async function fetchPaymentByReference(
+  orderRef: string
+): Promise<Record<string, unknown> | null> {
+  const res = await callPaymentsWorker(
+    `/internal/payment-by-reference/${encodeURIComponent(orderRef)}`,
+    { method: "GET" }
+  );
+  const data = (await res.json()) as Record<string, unknown>;
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(String(data.error || "Failed to fetch payment"));
+  }
+  return data;
+}
+
+async function getExpectedBookingAmount(
+  tableTypeId: number,
+  isMember: boolean
+): Promise<number | null> {
+  const result = await client.execute({
+    sql: "SELECT member_price, non_member_price FROM booking_table_types WHERE id = ? AND active = 1",
+    args: [tableTypeId],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
+  return isMember ? Number(row.member_price) : Number(row.non_member_price);
+}
 
 /**
  * Helper function to create JSON responses
@@ -322,10 +583,11 @@ BunnySDK.net.http.serve(async (request: Request) => {
     if (path === "/api/bookings/available-slots" && request.method === "GET") {
       const date = url.searchParams.get('date');
       const tableTypeId = url.searchParams.get('table_type_id');
+      const email = url.searchParams.get('email');
       if (!date || !tableTypeId) {
         return jsonResponse({ error: "Missing date or table_type_id parameter" }, 400);
       }
-      return await getAvailableSlots(date, parseInt(tableTypeId));
+      return await getAvailableSlots(date, parseInt(tableTypeId), email);
     }
 
     // POST /api/bookings - Create new booking
@@ -372,6 +634,16 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await deleteTimeBlock(blockId);
     }
 
+    // GET /api/bookings/config - Booking schedule settings (admin)
+    if (path === "/api/bookings/config" && request.method === "GET") {
+      return await getBookingConfig();
+    }
+
+    // PATCH /api/bookings/config - Update booking schedule settings (admin)
+    if (path === "/api/bookings/config" && request.method === "PATCH") {
+      return await updateBookingConfig(request);
+    }
+
     // Default 404
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
@@ -391,6 +663,7 @@ BunnySDK.net.http.serve(async (request: Request) => {
  */
 async function getTableTypes() {
   try {
+    console.log("[bookings] GET /api/bookings/table-types");
     const result = await client.execute(
       `SELECT id, name, member_price, non_member_price, available_days, description
        FROM booking_table_types 
@@ -432,32 +705,51 @@ async function getTableTypes() {
  * Get available time slots for a specific date and table type
  * Returns slots with availability based on max_bookings config
  */
-async function getAvailableSlots(date: string, tableTypeId: number) {
+async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: string | null) {
   try {
     // Validate date format
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) {
       return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
     }
 
-    // Get config from booking_config table
-    const configResult = await client.execute(
-      "SELECT max_bookings, start_hour, end_hour, slot_duration_hours FROM booking_config WHERE id = 1"
-    );
-    
-    if (configResult.rows.length === 0) {
-      console.error("No booking config found, using defaults");
-      // Use defaults if config not found
+    const { dateStr: todayStr } = getGibraltarNow();
+    if (date < todayStr) {
+      return jsonResponse({ error: "past_date", message: "Cannot book dates in the past." }, 400);
     }
-    
-    const config = configResult.rows[0] || {};
-    const maxBookings = Number(config.max_bookings || 4);
-    const startHour = Number(config.start_hour || 10);
-    const endHour = Number(config.end_hour || 22);
-    const slotDuration = Number(config.slot_duration_hours || 3);
 
-    console.log('Slot config:', { maxBookings, startHour, endHour, slotDuration });
+    const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
+    if (date === todayStr) {
+      return jsonResponse({
+        slots: [],
+        message: isMember
+          ? SAME_DAY_CONTACT_MESSAGE
+          : "Tables must be booked at least the day before.",
+      });
+    }
 
-    // Generate time slots based on config
+    const schedule = await loadBookingConfig();
+    const { startHour, endHour } = getEffectiveHoursForDate(
+      date,
+      schedule.startHour,
+      schedule.endHour,
+      schedule.dayHourRules
+    );
+    const maxBookings = schedule.maxBookings;
+    const slotDuration = schedule.slotDuration;
+
+    console.log("Slot config:", { date, weekday: getWeekdayName(date), maxBookings, startHour, endHour, slotDuration });
+
+    if (startHour >= endHour || startHour + slotDuration > endHour) {
+      return jsonResponse({
+        date,
+        table_type_id: tableTypeId,
+        max_bookings: maxBookings,
+        slots: [],
+        message: "No bookable hours on this day with the current schedule rules.",
+      });
+    }
+
+    // Generate time slots based on config (including day-specific hour rules)
     const timeSlots: Array<{start: string, end: string}> = [];
     for (let hour = startHour; hour + slotDuration <= endHour; hour += slotDuration) {
       const startTime = `${hour.toString().padStart(2, '0')}:00`;
@@ -511,12 +803,14 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
         
         const count = Number(bookingCount.rows[0]?.count || 0);
         const spotsLeft = maxBookings - count;
+
+        const available = spotsLeft > 0;
         
         return {
           start_time: slot.start,
           end_time: slot.end,
           spots_left: spotsLeft,
-          available: spotsLeft > 0,
+          available,
           blocked: false
         };
       })
@@ -590,21 +884,48 @@ async function createBooking(request: Request) {
       }, 409);
     }
 
-    // Reject same-day bookings — must be booked at least the day before
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD in UTC
-    if (booking_date <= todayStr) {
+    const isMember = await checkActiveMembership(user_email);
+    const advanceCheck = validateBookingAdvance({
+      bookingDate: booking_date,
+      startTime: start_time,
+      isMember,
+    });
+    if (!advanceCheck.ok) {
       return jsonResponse({
-        error: "Same-day bookings are not accepted",
-        message: "Tables must be booked at least the day before. Please contact us if you need a last-minute table."
+        error: advanceCheck.error,
+        message: advanceCheck.message,
       }, 422);
     }
 
-    // Check max_bookings limit across ALL table types for this time slot
-    const configResult = await client.execute(
-      "SELECT max_bookings FROM booking_config WHERE id = 1"
+    if (is_member_booking && !isMember) {
+      return jsonResponse({
+        error: "membership_required",
+        message: "Active membership is required for member pricing.",
+      }, 403);
+    }
+
+    const expectedAmount = await getExpectedBookingAmount(table_type_id, isMember);
+    if (expectedAmount === null) {
+      return jsonResponse({ error: "Invalid table type" }, 400);
+    }
+    const amountToCharge = expectedAmount;
+
+    const schedule = await loadBookingConfig();
+    const { startHour, endHour } = getEffectiveHoursForDate(
+      booking_date,
+      schedule.startHour,
+      schedule.endHour,
+      schedule.dayHourRules
     );
-    const maxBookings = Number(configResult.rows[0]?.max_bookings || 4);
+    if (!slotWithinEffectiveHours(start_time, end_time, startHour, endHour)) {
+      const weekday = getWeekdayName(booking_date);
+      return jsonResponse({
+        error: "outside_booking_hours",
+        message: `Bookings on ${weekday} are only available between ${String(startHour).padStart(2, "0")}:00 and ${String(endHour).padStart(2, "0")}:00.`,
+      }, 422);
+    }
+
+    const maxBookings = schedule.maxBookings;
 
     const bookingCountResult = await client.execute({
       sql: `SELECT COUNT(*) as count FROM bookings 
@@ -648,9 +969,9 @@ async function createBooking(request: Request) {
         end_time,
         table_type_id,
         order_ref,
-        amount_paid || 0,
-        is_member_booking ? 1 : 0,
-        amount_paid > 0 ? 'pending' : 'confirmed', // Track payment status separately
+        amountToCharge,
+        isMember ? 1 : 0,
+        amountToCharge > 0 ? 'pending' : 'confirmed', // Track payment status separately
         notes || null,
         now,
         now,
@@ -658,26 +979,27 @@ async function createBooking(request: Request) {
       ],
     });
 
-    // Send admin notification email for every new booking
-    try {
-      await sendAdminBookingNotificationEmail({
-        userEmail: user_email,
-        userName: user_name,
-        bookingDate: booking_date,
-        startTime: start_time,
-        endTime: end_time,
-        tableTypeId: table_type_id,
-        amountPaid: amount_paid || 0,
-        orderRef: order_ref,
-        isMemberBooking: !!is_member_booking,
-        notes: notes || undefined,
-      });
-    } catch (e) {
-      console.error('Error sending admin notification email:', e);
+    // Free bookings: notify admin and customer immediately. Paid bookings wait until payment is verified.
+    if (amountToCharge === 0) {
+      try {
+        await sendAdminBookingNotificationEmail({
+          userEmail: user_email,
+          userName: user_name,
+          bookingDate: booking_date,
+          startTime: start_time,
+          endTime: end_time,
+          tableTypeId: table_type_id,
+          amountPaid: 0,
+          orderRef: order_ref,
+          isMemberBooking: isMember,
+          notes: notes || undefined,
+        });
+      } catch (e) {
+        console.error('Error sending admin notification email:', e);
+      }
     }
 
-    // For free bookings, send confirmation email immediately
-    if (amount_paid === 0) {
+    if (amountToCharge === 0) {
       try {
         await sendBookingConfirmationEmail({
           userEmail: user_email,
@@ -703,13 +1025,6 @@ async function createBooking(request: Request) {
 
     // For paid bookings, create payment checkout
     try {
-      const paymentsApiUrl = process.env.PAYMENTS_API_URL || 'https://dicebastion-payments.ncalamaro.workers.dev';
-      const internalSecret = process.env.INTERNAL_SECRET;
-      
-      if (!internalSecret) {
-        throw new Error('INTERNAL_SECRET not configured');
-      }
-
       // Get table type name for description
       const tableTypeResult = await client.execute({
         sql: "SELECT name FROM booking_table_types WHERE id = ?",
@@ -719,24 +1034,34 @@ async function createBooking(request: Request) {
       const tableTypeName = tableTypeResult.rows.length > 0 ? tableTypeResult.rows[0].name : 'Table Booking';
       const description = `${tableTypeName} - ${booking_date} ${start_time}`;
 
-      const checkoutResponse = await fetch(`${paymentsApiUrl}/internal/checkout`, {
+      const checkoutResponse = await callPaymentsWorker('/internal/checkout', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Internal-Secret': internalSecret
-        },
         body: JSON.stringify({
-          amount: amount_paid,
+          amount: amountToCharge,
           currency: 'GBP',
           orderRef: order_ref,
           description
         })
       });
 
-      const checkoutData = await checkoutResponse.json();
+      const checkoutData = await checkoutResponse.json() as { id?: string; error?: string };
 
       if (!checkoutResponse.ok) {
         throw new Error(checkoutData.error || 'Payment checkout failed');
+      }
+
+      if (checkoutData.id) {
+        // Best-effort: store the checkout id so confirm can verify payment directly.
+        // If the column is missing (migration not yet run), fall back to lookup by
+        // checkout_reference at confirm time, so this must not break checkout.
+        try {
+          await client.execute({
+            sql: "UPDATE bookings SET sumup_checkout_id = ?, updated_at = ? WHERE order_ref = ?",
+            args: [checkoutData.id, new Date().toISOString(), order_ref],
+          });
+        } catch (storeErr) {
+          console.error('Could not store sumup_checkout_id (run migration 0007):', storeErr);
+        }
       }
 
       return jsonResponse({
@@ -765,74 +1090,166 @@ async function createBooking(request: Request) {
 }
 
 /**
- * Confirm booking after successful payment
+ * Confirm booking after SumUp payment is verified (poll from payment widget).
  */
 async function confirmBooking(orderRef: string) {
   try {
+    // Select base columns first; sumup_checkout_id may not exist if migration 0007
+    // has not run yet, so read it separately and fall back to reference lookup.
+    const bookingResult = await client.execute({
+      sql: `SELECT id, status, payment_status, amount_paid,
+                   user_email, user_name, booking_date, start_time, end_time,
+                   table_type_id, is_member_booking, notes
+            FROM bookings WHERE order_ref = ?`,
+      args: [orderRef],
+    });
+
+    if (bookingResult.rows.length === 0) {
+      return jsonResponse({ ok: false, error: "booking_not_found" }, 404);
+    }
+
+    const booking = bookingResult.rows[0];
+    const paymentStatus = String(booking.payment_status || "");
+    const amountPaid = Number(booking.amount_paid || 0);
+
+    if (paymentStatus === "confirmed" || amountPaid === 0) {
+      return jsonResponse({
+        ok: true,
+        status: "already_active",
+        message: "Booking already confirmed",
+        booking_id: Number(booking.id),
+      });
+    }
+
+    if (paymentStatus !== "pending") {
+      return jsonResponse({
+        ok: false,
+        error: "invalid_payment_status",
+        message: "This booking cannot be confirmed.",
+      }, 400);
+    }
+
+    let checkoutId: string | null = null;
+    try {
+      const idResult = await client.execute({
+        sql: "SELECT sumup_checkout_id FROM bookings WHERE order_ref = ?",
+        args: [orderRef],
+      });
+      const stored = idResult.rows[0]?.sumup_checkout_id;
+      checkoutId = stored ? String(stored) : null;
+    } catch (colErr) {
+      console.warn("[bookings/confirm] sumup_checkout_id column unavailable, using reference lookup:", colErr);
+    }
+
+    let payment: Record<string, unknown> | null = null;
+    try {
+      payment = checkoutId
+        ? await fetchPayment(checkoutId)
+        : await fetchPaymentByReference(orderRef);
+      console.log(
+        "[bookings/confirm] SumUp status:",
+        payment?.status,
+        "checkout_id:",
+        checkoutId || payment?.id
+      );
+    } catch (err) {
+      console.error("[bookings/confirm] Failed to fetch payment:", err);
+      return jsonResponse({ ok: false, error: "verify_failed" }, 400);
+    }
+
+    // Security: when looking up by checkout id, ensure it belongs to this order.
+    if (checkoutId && payment && payment.checkout_reference &&
+        String(payment.checkout_reference) !== orderRef) {
+      console.error("[bookings/confirm] checkout_reference mismatch for", orderRef);
+      return jsonResponse({ ok: false, error: "verify_failed" }, 400);
+    }
+
+    if (!payment) {
+      return jsonResponse({
+        ok: false,
+        status: "PENDING",
+        message: "Payment is still processing.",
+      });
+    }
+
+    if (!isCheckoutPaid(payment)) {
+      const currentStatus = String(payment.status || "PENDING").toUpperCase();
+      const txStatuses = Array.isArray(payment.transactions)
+        ? (payment.transactions as { status?: string }[]).map((t) => t.status)
+        : [];
+      const hasFailed =
+        txStatuses.includes("FAILED") || currentStatus === "FAILED";
+      const hasDeclined =
+        txStatuses.includes("DECLINED") || currentStatus === "DECLINED";
+      return jsonResponse({
+        ok: false,
+        status: hasFailed ? "FAILED" : hasDeclined ? "DECLINED" : currentStatus,
+        message: hasFailed
+          ? "Payment failed. Please try again."
+          : hasDeclined
+            ? "Your card was declined. Please try a different payment method."
+            : "Payment is still processing.",
+      });
+    }
+
     const now = new Date().toISOString();
-    
-    // Update booking status
-    const result = await client.execute({
-      sql: `UPDATE bookings 
-            SET payment_status = 'confirmed', 
+    const updateResult = await client.execute({
+      sql: `UPDATE bookings
+            SET payment_status = 'confirmed',
                 status = 'confirmed',
                 updated_at = ?
             WHERE order_ref = ? AND payment_status = 'pending'`,
       args: [now, orderRef],
     });
 
-    if (result.rowsAffected === 0) {
-      // Check if booking exists but already confirmed
-      const checkResult = await client.execute({
-        sql: "SELECT id, status, payment_status FROM bookings WHERE order_ref = ?",
-        args: [orderRef],
+    if (updateResult.rowsAffected === 0) {
+      return jsonResponse({
+        ok: true,
+        status: "already_active",
+        message: "Booking already confirmed",
+        booking_id: Number(booking.id),
       });
-
-      if (checkResult.rows.length === 0) {
-        return jsonResponse({ error: "Booking not found" }, 404);
-      }
-
-      const booking = checkResult.rows[0];
-      if (booking.status === 'confirmed') {
-        return jsonResponse({ 
-          ok: true,
-          status: 'already_active',
-          message: "Booking already confirmed",
-          booking_id: Number(booking.id)
-        });
-      }
     }
-    
-    // Send confirmation email for paid bookings
+
+    const tableTypeId = Number(booking.table_type_id);
+    const emailParams = {
+      userEmail: String(booking.user_email),
+      userName: String(booking.user_name),
+      bookingDate: String(booking.booking_date),
+      startTime: String(booking.start_time),
+      endTime: String(booking.end_time),
+      tableTypeId,
+      amountPaid,
+    };
+
     try {
-      const booking = await client.execute({
-        sql: `SELECT b.user_email, b.user_name, b.booking_date, b.start_time, 
-                     b.end_time, b.amount_paid, b.table_type_id
-              FROM bookings b
-              WHERE b.order_ref = ?`,
-        args: [orderRef],
-      });
-      
-      if (booking.rows.length > 0) {
-        const row = booking.rows[0];
-        await sendBookingConfirmationEmail({
-          userEmail: String(row.user_email),
-          userName: String(row.user_name),
-          bookingDate: String(row.booking_date),
-          startTime: String(row.start_time),
-          endTime: String(row.end_time),
-          tableTypeId: Number(row.table_type_id),
-          amountPaid: Number(row.amount_paid)
-        });
-      }
+      await sendBookingConfirmationEmail(emailParams);
     } catch (e) {
-      console.error('Error sending confirmation email:', e);
+      console.error("Error sending confirmation email:", e);
     }
-    
-    return jsonResponse({ 
+
+    try {
+      await sendAdminBookingNotificationEmail({
+        userEmail: emailParams.userEmail,
+        userName: emailParams.userName,
+        bookingDate: emailParams.bookingDate,
+        startTime: emailParams.startTime,
+        endTime: emailParams.endTime,
+        tableTypeId,
+        amountPaid,
+        orderRef,
+        isMemberBooking: Number(booking.is_member_booking) === 1,
+        notes: booking.notes ? String(booking.notes) : undefined,
+      });
+    } catch (e) {
+      console.error("Error sending admin notification email:", e);
+    }
+
+    return jsonResponse({
       ok: true,
-      status: 'active',
-      message: "Booking confirmed successfully"
+      status: "active",
+      message: "Booking confirmed successfully",
+      booking_id: Number(booking.id),
     });
   } catch (error) {
     console.error("Error confirming booking:", error);
@@ -965,6 +1382,97 @@ async function cancelBooking(bookingId: number) {
   } catch (error) {
     console.error("Error cancelling booking:", error);
     return jsonResponse({ error: "Failed to cancel booking" }, 500);
+  }
+}
+
+/**
+ * Get booking schedule config (global hours + per-day rules)
+ */
+async function getBookingConfig() {
+  try {
+    const schedule = await loadBookingConfig();
+    return jsonResponse({
+      config: {
+        max_bookings: schedule.maxBookings,
+        start_hour: schedule.startHour,
+        end_hour: schedule.endHour,
+        slot_duration_hours: schedule.slotDuration,
+        day_hour_rules: schedule.dayHourRules,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching booking config:", error);
+    return jsonResponse({ error: "Failed to fetch booking config" }, 500);
+  }
+}
+
+/**
+ * Update booking schedule config
+ */
+async function updateBookingConfig(request: Request) {
+  try {
+    const data = await request.json();
+    const current = await loadBookingConfig();
+
+    const maxBookings =
+      data.max_bookings != null ? Number(data.max_bookings) : current.maxBookings;
+    const startHour = data.start_hour != null ? Number(data.start_hour) : current.startHour;
+    const endHour = data.end_hour != null ? Number(data.end_hour) : current.endHour;
+    const slotDuration =
+      data.slot_duration_hours != null
+        ? Number(data.slot_duration_hours)
+        : current.slotDuration;
+    const dayHourRules =
+      data.day_hour_rules != null
+        ? parseDayHourRules(data.day_hour_rules)
+        : current.dayHourRules;
+
+    if (
+      !Number.isInteger(maxBookings) ||
+      maxBookings < 1 ||
+      !Number.isInteger(startHour) ||
+      startHour < 0 ||
+      startHour > 23 ||
+      !Number.isInteger(endHour) ||
+      endHour < 1 ||
+      endHour > 24 ||
+      !Number.isInteger(slotDuration) ||
+      slotDuration < 1 ||
+      slotDuration > 12 ||
+      startHour + slotDuration > endHour
+    ) {
+      return jsonResponse(
+        {
+          error: "invalid_config",
+          message:
+            "Check max_bookings, start_hour, end_hour, and slot_duration_hours (start + duration must fit within end).",
+        },
+        400
+      );
+    }
+
+    const dayHourRulesJson = JSON.stringify(dayHourRules);
+
+    await client.execute({
+      sql: `UPDATE booking_config
+            SET max_bookings = ?, start_hour = ?, end_hour = ?, slot_duration_hours = ?, day_hour_rules = ?
+            WHERE id = 1`,
+      args: [maxBookings, startHour, endHour, slotDuration, dayHourRulesJson],
+    });
+
+    return jsonResponse({
+      success: true,
+      config: {
+        max_bookings: maxBookings,
+        start_hour: startHour,
+        end_hour: endHour,
+        slot_duration_hours: slotDuration,
+        day_hour_rules: dayHourRules,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating booking config:", error);
+    return jsonResponse({ error: "Failed to update booking config" }, 500);
   }
 }
 

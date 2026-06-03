@@ -6,3 +6,5 @@ Disallow: /
 {{- end }}
 Sitemap: https://dicebastion.com/sitemap.xml
 Sitemap: https://dicebastion.com/events/sitemap.xml
+Sitemap: https://dicebastion.com/events/sitemap-images.xml
+Sitemap: https://dicebastion.com/posts/sitemap-index.xml

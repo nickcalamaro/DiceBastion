@@ -253,10 +253,10 @@
 
   <div id="alert-container"></div>
 
-  <div class="alert alert-info" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
+  <div class="alert alert-info" id="booking-advance-notice" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
     <span style="font-size: 1.3rem; flex-shrink: 0;">📅</span>
     <div>
-      <strong>Advance booking required</strong> — Tables must be booked at least the day before.
+      <strong>Advance booking required</strong> — Bookings must be made at least the day before. For same-day requests, contact our team via WhatsApp.
     </div>
   </div>
 
@@ -351,6 +351,8 @@ let picker = null;
 let userSession = null;
 let membershipStatus = null;
 let paymentModal = null;
+let sameDayBookingModal = null;
+let sameDayTurnstileWidgetId = null;
 let authModal = null;
 let bookingTurnstileWidgetId = null; // Track Turnstile widget for cleanup
 let userBookings = []; // Cache of user's bookings
@@ -406,6 +408,7 @@ async function checkMembershipStatus() {
   if (!userSession || !userSession.email) {
     membershipStatus = null;
     utils.session.setMembershipStatus(null);
+    refreshDatePickerMinDate();
     return;
   }
 
@@ -425,6 +428,212 @@ async function checkMembershipStatus() {
     console.error('Error checking membership:', error);
     membershipStatus = null;
     utils.session.setMembershipStatus(null);
+  }
+
+  refreshDatePickerMinDate();
+}
+
+function getGibraltarTodayStr() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Gibraltar' });
+}
+
+function isMemberSameDayDate(dateStr) {
+  return !!(membershipStatus?.active && dateStr && dateStr === getGibraltarTodayStr());
+}
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Safe price display — bad API data must not break the whole table-types grid. */
+function formatBookingPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (n === 0) return 'FREE';
+  return `£${n.toFixed(2)}`;
+}
+
+async function fetchSameDayContacts(turnstileToken) {
+  const email = userSession?.email;
+  if (!email) {
+    throw new Error('Please log in to view contact options.');
+  }
+
+  const response = await fetch(`${window.MAIN_API}/bookings/same-day-contacts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, turnstileToken })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || data.error || 'Could not load contact options.');
+  }
+  return Array.isArray(data.contacts) ? data.contacts : [];
+}
+
+function buildSameDayContactsHtml(contacts) {
+  if (!contacts.length) {
+    return '<p class="modal-help-text modal-text-center">Please email contact@dicebastion.com and we will help you arrange your booking.</p>';
+  }
+  return contacts.map((contact) => `
+    <a href="${escapeHtml(contact.url)}" class="modal-btn modal-btn-primary" target="_blank" rel="noopener noreferrer" style="text-decoration: none; display: block; margin-bottom: 0.5rem; text-align: center;">
+      Message ${escapeHtml(contact.name)} on WhatsApp
+    </a>
+  `).join('');
+}
+
+function resetSlotsAndBookingForm() {
+  const slotsSection = document.getElementById('slots-section');
+  const formSection = document.getElementById('booking-form-section');
+  slotsSection.style.opacity = '0.5';
+  slotsSection.style.pointerEvents = 'none';
+  document.getElementById('slots-instruction').style.display = 'block';
+  document.getElementById('slots-container').style.display = 'none';
+  document.getElementById('slots-container').innerHTML = '';
+  formSection.style.opacity = '0.5';
+  formSection.style.pointerEvents = 'none';
+  document.getElementById('booking-form-instruction').style.display = 'block';
+  document.getElementById('booking-form-wrapper').style.display = 'none';
+  selectedSlot = null;
+}
+
+function closeSameDayBookingModal() {
+  utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
+  sameDayTurnstileWidgetId = null;
+  if (sameDayBookingModal) {
+    sameDayBookingModal.close();
+    sameDayBookingModal = null;
+  }
+}
+
+async function showSameDayBookingModal() {
+  if (sameDayBookingModal) {
+    closeSameDayBookingModal();
+  }
+
+  sameDayBookingModal = new Modal({
+    title: 'Same-day booking',
+    size: 'md',
+    closeOnBackdrop: true,
+    content: `
+      <div class="modal-prose">
+        <p>We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.</p>
+      </div>
+      <div id="same-day-contacts-area" class="modal-actions" style="margin-top: 1rem; display: none;"></div>
+      <div id="same-day-turnstile-container" class="form-group" style="margin-top: 1rem;"></div>
+      <div id="same-day-contacts-error" class="modal-error" style="display: none;"></div>
+    `,
+    footer: `
+      <button type="button" class="modal-btn modal-btn-primary db-modal-show-same-day-contacts">Show WhatsApp contacts</button>
+      <button type="button" class="modal-btn modal-btn-secondary db-modal-close-same-day">Close</button>
+    `,
+    onClose: () => {
+      utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
+      sameDayTurnstileWidgetId = null;
+      sameDayBookingModal = null;
+    }
+  });
+
+  sameDayBookingModal.open();
+
+  setTimeout(() => {
+    utils.renderTurnstile('same-day-turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST })
+      .then((id) => { sameDayTurnstileWidgetId = id; })
+      .catch((err) => console.error('Same-day Turnstile render failed:', err));
+  }, 100);
+
+  const closeBtn = sameDayBookingModal.contentEl.querySelector('.db-modal-close-same-day');
+  const showBtn = sameDayBookingModal.contentEl.querySelector('.db-modal-show-same-day-contacts');
+  const errorEl = sameDayBookingModal.contentEl.querySelector('#same-day-contacts-error');
+  const contactsArea = sameDayBookingModal.contentEl.querySelector('#same-day-contacts-area');
+
+  closeBtn?.addEventListener('click', closeSameDayBookingModal);
+
+  showBtn?.addEventListener('click', async () => {
+    if (errorEl) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
+    showBtn.disabled = true;
+    const originalText = showBtn.textContent;
+    showBtn.textContent = 'Loading...';
+
+    try {
+      const turnstileToken = await utils.getTurnstileToken('same-day-turnstile-container', sameDayTurnstileWidgetId, IS_LOCALHOST);
+      const contacts = await fetchSameDayContacts(turnstileToken);
+      if (contactsArea) {
+        contactsArea.innerHTML = buildSameDayContactsHtml(contacts);
+        contactsArea.style.display = 'block';
+      }
+      const turnstileWrap = sameDayBookingModal.contentEl.querySelector('#same-day-turnstile-container');
+      if (turnstileWrap) turnstileWrap.style.display = 'none';
+      showBtn.style.display = 'none';
+    } catch (error) {
+      console.error('Same-day contacts:', error);
+      if (errorEl) {
+        errorEl.textContent = error.message || 'Could not load contact options.';
+        errorEl.style.display = 'block';
+      }
+      utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
+      sameDayTurnstileWidgetId = await utils.renderTurnstile('same-day-turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+    } finally {
+      showBtn.disabled = false;
+      showBtn.textContent = originalText;
+    }
+  });
+}
+
+function getBookingMinDate() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (membershipStatus?.active) {
+    return today;
+  }
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  return tomorrow;
+}
+
+function refreshDatePickerMinDate() {
+  if (!picker) return;
+  picker.set('minDate', getBookingMinDate());
+  if (picker.selectedDates.length) {
+    const selected = picker.formatDate(picker.selectedDates[0], 'Y-m-d');
+    const minDateStr = picker.formatDate(getBookingMinDate(), 'Y-m-d');
+    if (selected < minDateStr) {
+      picker.clear();
+      currentDate = null;
+      selectedSlot = null;
+    }
+  }
+}
+
+function configureDatePicker(type) {
+  const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
+  const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
+  const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
+  const enableRule = function(date) {
+    return enabledDays.includes(date.getDay());
+  };
+
+  if (!picker) {
+    picker = flatpickr('#booking-date', {
+      minDate: getBookingMinDate(),
+      dateFormat: 'Y-m-d',
+      enable: [enableRule],
+      onChange: (selectedDates, dateStr) => {
+        handleDateChange(dateStr);
+      }
+    });
+  } else {
+    picker.set('minDate', getBookingMinDate());
+    picker.set('enable', [enableRule]);
+    picker.clear();
   }
 }
 
@@ -482,36 +691,55 @@ async function loadTableTypes() {
   
   try {
     const response = await fetch(`${BOOKINGS_API}/api/bookings/table-types`);
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseErr) {
+      console.error('Table types response was not JSON:', parseErr, response.status);
+      throw new Error('Invalid response from booking service');
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.error || `Booking service error (${response.status})`);
+    }
+
     tableTypes = data.table_types || [];
-    
+
     if (tableTypes.length === 0) {
       container.innerHTML = '<div class="alert alert-info">No table types available</div>';
       return;
     }
-    
+
     const grid = document.createElement('div');
     grid.className = 'table-types-grid';
-    
+
     tableTypes.forEach(type => {
       const isMember = membershipStatus?.active || false;
       const price = isMember ? type.member_price : type.non_member_price;
-      
+      const priceLabel = formatBookingPrice(price);
+      const memberPrice = Number(type.member_price);
+      const nonMemberPrice = Number(type.non_member_price);
+      const showMemberNote =
+        !isMember &&
+        Number.isFinite(memberPrice) &&
+        Number.isFinite(nonMemberPrice) &&
+        memberPrice < nonMemberPrice;
+
       const card = document.createElement('div');
       card.className = 'table-type-card';
       card.innerHTML = `
-        <div class="table-type-name">${type.name}</div>
-        <div class="table-type-price ${price === 0 ? 'free' : ''}">
-          ${price === 0 ? 'FREE' : `£${price.toFixed(2)}`}
+        <div class="table-type-name">${escapeHtml(type.name)}</div>
+        <div class="table-type-price ${priceLabel === 'FREE' ? 'free' : ''}">
+          ${priceLabel ?? 'Price unavailable'}
         </div>
-        ${type.description ? `<div class="table-type-description">${type.description}</div>` : ''}
-        ${!isMember && type.member_price < type.non_member_price ? `
+        ${type.description ? `<div class="table-type-description">${escapeHtml(type.description)}</div>` : ''}
+        ${showMemberNote ? `
           <div class="table-type-note">
-            💡 ${type.member_price === 0 ? 'Free for members' : `Members pay only £${type.member_price.toFixed(2)}`}
+            💡 ${memberPrice === 0 ? 'Free for members' : `Members pay only ${formatBookingPrice(memberPrice)}`}
           </div>
         ` : ''}
       `;
-      
+
       card.addEventListener('click', () => selectTableType(type, card));
       grid.appendChild(card);
     });
@@ -564,44 +792,19 @@ function selectTableType(type, cardElement) {
   }, 100);
   
   // Initialize Flatpickr if not already done
-  if (!picker) {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    
-    // Parse available days (day names like "Monday", "Tuesday", etc.)
-    const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
-    const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
-    const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
-    
-    picker = flatpickr('#booking-date', {
-      minDate: tomorrow,
-      dateFormat: 'Y-m-d',
-      enable: [
-        function(date) {
-          return enabledDays.includes(date.getDay());
-        }
-      ],
-      onChange: (selectedDates, dateStr) => {
-        handleDateChange(dateStr);
-      }
-    });
-  } else {
-    // Update enable function for new table type
-    const availableDays = Array.isArray(type.available_days) ? type.available_days : [];
-    const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
-    const enabledDays = availableDays.map(day => dayMap[day]).filter(d => d !== undefined);
-    
-    picker.set('enable', [
-      function(date) {
-        return enabledDays.includes(date.getDay());
-      }
-    ]);
-  }
+  configureDatePicker(type);
 }
 
 async function handleDateChange(date) {
   if (!date || !selectedTableType) return;
+
+  if (isMemberSameDayDate(date)) {
+    if (picker) picker.clear();
+    currentDate = null;
+    resetSlotsAndBookingForm();
+    await showSameDayBookingModal();
+    return;
+  }
   
   currentDate = date;
   selectedSlot = null;
@@ -636,7 +839,11 @@ async function loadAvailableSlots(date) {
   
   try {
     // Fetch available slots from API (excludes fully booked slots)
-    const response = await fetch(`${BOOKINGS_API}/api/bookings/available-slots?date=${date}&table_type_id=${selectedTableType.id}`);
+    let slotsUrl = `${BOOKINGS_API}/api/bookings/available-slots?date=${encodeURIComponent(date)}&table_type_id=${selectedTableType.id}`;
+    if (userSession?.email) {
+      slotsUrl += `&email=${encodeURIComponent(userSession.email)}`;
+    }
+    const response = await fetch(slotsUrl);
     const data = await response.json();
     
     if (!response.ok) {
@@ -646,7 +853,8 @@ async function loadAvailableSlots(date) {
     const slots = data.slots || [];
     
     if (slots.length === 0) {
-      container.innerHTML = '<div class="alert alert-info">📭 No available slots for this date. All tables are fully booked.</div>';
+      const emptyMessage = data.message || '📭 No available slots for this date. All tables are fully booked.';
+      container.innerHTML = `<div class="alert alert-info">${emptyMessage}</div>`;
       return;
     }
     
@@ -673,6 +881,11 @@ async function loadAvailableSlots(date) {
 }
 
 function selectSlot(slot, btnElement) {
+  if (isMemberSameDayDate(currentDate)) {
+    showSameDayBookingModal();
+    return;
+  }
+
   document.querySelectorAll('.slot-btn').forEach(btn => btn.classList.remove('selected'));
   btnElement.classList.add('selected');
   selectedSlot = {
@@ -729,6 +942,11 @@ async function handleBookingSubmit(e) {
     showAlert('⚠️ Please select a table type, date and time slot', 'error');
     return;
   }
+
+  if (isMemberSameDayDate(currentDate)) {
+    await showSameDayBookingModal();
+    return;
+  }
   
   const userEmail = document.getElementById('user-email').value.trim();
   const userName = document.getElementById('user-name').value.trim();
@@ -773,7 +991,7 @@ async function handleBookingSubmit(e) {
     
     if (!bookingResponse.ok) {
       console.error('Booking creation failed:', bookingResponse.status, bookingData);
-      throw new Error(bookingData.error || bookingData.details || 'Booking creation failed');
+      throw new Error(bookingData.message || bookingData.error || bookingData.details || 'Booking creation failed');
     }
     
     // If free booking, it's already confirmed
@@ -816,6 +1034,7 @@ async function showPaymentModal(checkoutId, orderRef, amount) {
       </div>
       <div id="sumup-card-container"></div>
       <div id="payment-error" class="alert alert-error" style="display: none; margin-top: 1rem;"></div>
+      ${utils.paymentSupportNoteHtml()}
     `,
     onClose: () => { paymentModal = null; }
   });
@@ -909,16 +1128,19 @@ async function loadBookingsForDate(date) {
         item.classList.add('cancelled');
       }
       
-      const statusBadge = booking.status === 'confirmed' ? '✅' : 
-                         booking.status === 'cancelled' ? '❌' : '⏳';
+      const paymentPending = booking.payment_status === 'pending';
+      const statusBadge = booking.status === 'cancelled' ? '❌' :
+                         paymentPending ? '⏳' :
+                         booking.status === 'confirmed' ? '✅' : '⏳';
       
       item.innerHTML = `
         <div class="booking-details">
           <div class="booking-time">⏰ ${booking.booking_date} ${booking.start_time} - ${booking.end_time}</div>
           <div>🎲 ${booking.table_type} ${statusBadge}</div>
+          ${paymentPending ? '<div style="font-size: 0.85rem; color: rgb(var(--color-neutral-600)); margin-top: 0.25rem;">Awaiting payment</div>' : ''}
           ${booking.status === 'cancelled' ? '<div style="font-size: 0.85rem; color: rgb(var(--color-neutral-600)); margin-top: 0.25rem;">Cancelled</div>' : ''}
         </div>
-        ${booking.status === 'confirmed' ? `
+        ${booking.status === 'confirmed' && !paymentPending ? `
           <button 
             onclick="cancelBooking(${booking.id}, '${booking.booking_date}', '${booking.start_time}')" 
             class="btn btn-secondary" 

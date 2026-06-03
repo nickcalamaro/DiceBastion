@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local wrangler dev (never commit .dev.vars)
+# BOOKING_SAME_DAY_WHATSAPP=[{"name":"Nicky","url":"https://wa.me/+34711042604"},{"name":"Jen","url":"https://wa.me/+35058009936"},{"name":"Steven","url":"https://wa.me/+35054003220"}]

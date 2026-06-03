@@ -128,7 +128,7 @@
   {{ partial "analytics/main.html" .Site }}
   {{/* Extend head - eg. for custom analytics scripts, etc. */}}
   {{ if templates.Exists "partials/extend-head.html" }}
-  {{ partialCached "extend-head.html" .Site }}
+  {{ partial "extend-head.html" . }}
   {{ end }}
   <meta name="theme-color"/>
   {{/* Firebase */}}
