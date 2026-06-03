@@ -6370,18 +6370,9 @@ function renderBlogSitemap(posts, authors, siteUrl) {
   for (const post of posts) {
     const lastmod = post.updated_at || post.published_at;
     const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
-    const images = collectPostImageUrlsForSitemap(post, siteUrl);
-    const imageEntries = images.map(
-      (loc) => `    <image:image>
-      <image:loc>${escapeHtml(loc)}</image:loc>
-      <image:title>${escapeHtml(post.title)}</image:title>
-    </image:image>`
-    ).join("\n");
-    const imageBlock = imageEntries ? `
-${imageEntries}` : "";
     urls.push(
       `  <url>
-    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>${imageBlock}
+    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>
     <lastmod>${mod}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
@@ -6409,8 +6400,7 @@ ${imageEntries}` : "";
     );
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.join("\n")}
 </urlset>`;
 }

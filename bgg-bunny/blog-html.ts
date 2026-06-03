@@ -1877,16 +1877,8 @@ export function renderBlogSitemap(
   for (const post of posts) {
     const lastmod = post.updated_at || post.published_at;
     const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
-    const images = collectPostImageUrlsForSitemap(post, siteUrl);
-    const imageEntries = images
-      .map(
-        (loc) =>
-          `    <image:image>\n      <image:loc>${escapeHtml(loc)}</image:loc>\n      <image:title>${escapeHtml(post.title)}</image:title>\n    </image:image>`
-      )
-      .join("\n");
-    const imageBlock = imageEntries ? `\n${imageEntries}` : "";
     urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>${imageBlock}\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>`
     );
   }
 
@@ -1902,7 +1894,7 @@ export function renderBlogSitemap(
     );
   }
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n${urls.join("\n")}\n</urlset>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
 }
 
 /** Google Image Sitemap — helps Image Search discover post photos. */
