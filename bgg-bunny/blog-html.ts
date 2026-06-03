@@ -1862,59 +1862,105 @@ export function renderBlogPostPage(
   });
 }
 
-export function renderBlogSitemap(
+export interface BlogSitemapUrlEntry {
+  loc: string;
+  lastmod?: string;
+  changefreq?: string;
+  priority?: string;
+}
+
+export function buildBlogSitemapEntries(
   posts: BlogPostRow[],
   authors: Record<string, BlogAuthorProfile>,
   siteUrl: string
-): string {
+): BlogSitemapUrlEntry[] {
   const today = new Date().toISOString().split("T")[0];
   const indexLastmod = latestIsoDate(posts);
   const taxonomy = buildTaxonomyIndex(posts, authors);
-  const urls: string[] = [
-    `  <url>\n    <loc>${siteUrl}/posts/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>`,
+  const entries: BlogSitemapUrlEntry[] = [
+    { loc: `${siteUrl}/posts/`, lastmod: indexLastmod, changefreq: "daily", priority: "0.9" },
   ];
 
   for (const post of posts) {
     const lastmod = post.updated_at || post.published_at;
     const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
-    urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>`
-    );
+    entries.push({
+      loc: `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`,
+      lastmod: mod,
+      changefreq: "monthly",
+      priority: "0.8",
+    });
   }
 
   for (const tag of taxonomy.tags) {
-    urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/tag/${encodeURIComponent(tag.slug)}/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>\n  </url>`
-    );
+    entries.push({
+      loc: `${siteUrl}/posts/tag/${encodeURIComponent(tag.slug)}/`,
+      lastmod: indexLastmod,
+      changefreq: "weekly",
+      priority: "0.6",
+    });
   }
 
   for (const author of taxonomy.authors) {
-    urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/author/${encodeURIComponent(author.slug)}/</loc>\n    <lastmod>${indexLastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>\n  </url>`
-    );
+    entries.push({
+      loc: `${siteUrl}/posts/author/${encodeURIComponent(author.slug)}/`,
+      lastmod: indexLastmod,
+      changefreq: "weekly",
+      priority: "0.6",
+    });
   }
 
+  return entries;
+}
+
+export function renderBlogSitemap(
+  posts: BlogPostRow[],
+  authors: Record<string, BlogAuthorProfile>,
+  siteUrl: string
+): string {
+  const entries = buildBlogSitemapEntries(posts, authors, siteUrl);
+  const urls = entries.map((e) => {
+    const parts = [`    <loc>${escapeHtml(e.loc)}</loc>`];
+    if (e.lastmod) parts.push(`    <lastmod>${escapeHtml(e.lastmod)}</lastmod>`);
+    if (e.changefreq) parts.push(`    <changefreq>${escapeHtml(e.changefreq)}</changefreq>`);
+    if (e.priority) parts.push(`    <priority>${escapeHtml(e.priority)}</priority>`);
+    return `  <url>\n${parts.join("\n")}\n  </url>`;
+  });
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
+}
+
+export interface BlogImageSitemapEntry {
+  pageUrl: string;
+  title: string;
+  images: string[];
+}
+
+export function buildBlogImageSitemapEntries(posts: BlogPostRow[], siteUrl: string): BlogImageSitemapEntry[] {
+  const entries: BlogImageSitemapEntry[] = [];
+  for (const post of posts) {
+    const images = collectPostImageUrlsForSitemap(post, siteUrl);
+    if (!images.length) continue;
+    entries.push({
+      pageUrl: `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`,
+      title: post.title,
+      images,
+    });
+  }
+  return entries;
 }
 
 /** Google Image Sitemap — helps Image Search discover post photos. */
 export function renderBlogImageSitemap(posts: BlogPostRow[], siteUrl: string): string {
-  const urls: string[] = [];
-
-  for (const post of posts) {
-    const images = collectPostImageUrlsForSitemap(post, siteUrl);
-    if (!images.length) continue;
-
-    const pageUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
-    const imageEntries = images
+  const entries = buildBlogImageSitemapEntries(posts, siteUrl);
+  const urls = entries.map((entry) => {
+    const imageEntries = entry.images
       .map(
         (loc) =>
-          `    <image:image>\n      <image:loc>${escapeHtml(loc)}</image:loc>\n      <image:title>${escapeHtml(post.title)}</image:title>\n    </image:image>`
+          `    <image:image>\n      <image:loc>${escapeHtml(loc)}</image:loc>\n      <image:title>${escapeHtml(entry.title)}</image:title>\n    </image:image>`
       )
       .join("\n");
-
-    urls.push(`  <url>\n    <loc>${escapeHtml(pageUrl)}</loc>\n${imageEntries}\n  </url>`);
-  }
+    return `  <url>\n    <loc>${escapeHtml(entry.pageUrl)}</loc>\n${imageEntries}\n  </url>`;
+  });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"

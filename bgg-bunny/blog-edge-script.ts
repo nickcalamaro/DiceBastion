@@ -22,8 +22,10 @@
  *   PUT    /admin/blog/posts/:id
  *   DELETE /admin/blog/posts/:id
  *   POST   /admin/blog/sync-cdn
- *   GET    /posts/sitemap.xml            (public; also uploaded on sync-cdn)
- *   GET    /posts/sitemap-images.xml   (public; also uploaded on sync-cdn)
+ *   GET    /posts/sitemap.xml              (public; also uploaded on sync-cdn)
+ *   GET    /posts/sitemap-entries.json     (public; Worker builds urlset like events)
+ *   GET    /posts/sitemap-image-entries.json
+ *   GET    /posts/sitemap-images.xml       (public; also uploaded on sync-cdn)
  *   GET    /admin/blog/authors
  *   GET    /admin/blog/authors/:slug
  *   PUT    /admin/blog/authors/:slug
@@ -43,6 +45,8 @@ import {
   uploadStorageFile,
 } from "./blog-cdn";
 import {
+  buildBlogImageSitemapEntries,
+  buildBlogSitemapEntries,
   buildTaxonomyIndex,
   renderBlogAuthorPage,
   renderBlogListPage,
@@ -804,6 +808,21 @@ BunnySDK.net.http.serve(async (request: Request): Promise<Response> => {
   }
 
   try {
+    if (path === "/posts/sitemap-entries.json" && request.method === "GET") {
+      const dbError = dbConfigError();
+      if (dbError) return dbError;
+      const posts = await fetchPublishedPostsForRender();
+      const authors = await fetchAuthorMap();
+      return jsonResponse({ urls: buildBlogSitemapEntries(posts, authors, blogSiteUrl()) });
+    }
+
+    if (path === "/posts/sitemap-image-entries.json" && request.method === "GET") {
+      const dbError = dbConfigError();
+      if (dbError) return dbError;
+      const posts = await fetchPublishedPostsForRender();
+      return jsonResponse({ entries: buildBlogImageSitemapEntries(posts, blogSiteUrl()) });
+    }
+
     if (path === "/posts/sitemap.xml" && request.method === "GET") {
       const dbError = dbConfigError();
       if (dbError) return dbError;

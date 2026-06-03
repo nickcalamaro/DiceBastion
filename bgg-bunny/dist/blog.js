@@ -6355,73 +6355,88 @@ function renderBlogPostPage(post, authors, siteUrl, allPosts = []) {
     ogType: "article"
   });
 }
-function renderBlogSitemap(posts, authors, siteUrl) {
+function buildBlogSitemapEntries(posts, authors, siteUrl) {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   const indexLastmod = latestIsoDate(posts);
   const taxonomy = buildTaxonomyIndex(posts, authors);
-  const urls = [
-    `  <url>
-    <loc>${siteUrl}/posts/</loc>
-    <lastmod>${indexLastmod}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>`
+  const entries = [
+    { loc: `${siteUrl}/posts/`, lastmod: indexLastmod, changefreq: "daily", priority: "0.9" }
   ];
   for (const post of posts) {
     const lastmod = post.updated_at || post.published_at;
     const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
-    urls.push(
-      `  <url>
-    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>
-    <lastmod>${mod}</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>`
-    );
+    entries.push({
+      loc: `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`,
+      lastmod: mod,
+      changefreq: "monthly",
+      priority: "0.8"
+    });
   }
   for (const tag of taxonomy.tags) {
-    urls.push(
-      `  <url>
-    <loc>${siteUrl}/posts/tag/${encodeURIComponent(tag.slug)}/</loc>
-    <lastmod>${indexLastmod}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>`
-    );
+    entries.push({
+      loc: `${siteUrl}/posts/tag/${encodeURIComponent(tag.slug)}/`,
+      lastmod: indexLastmod,
+      changefreq: "weekly",
+      priority: "0.6"
+    });
   }
   for (const author of taxonomy.authors) {
-    urls.push(
-      `  <url>
-    <loc>${siteUrl}/posts/author/${encodeURIComponent(author.slug)}/</loc>
-    <lastmod>${indexLastmod}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>`
-    );
+    entries.push({
+      loc: `${siteUrl}/posts/author/${encodeURIComponent(author.slug)}/`,
+      lastmod: indexLastmod,
+      changefreq: "weekly",
+      priority: "0.6"
+    });
   }
+  return entries;
+}
+function renderBlogSitemap(posts, authors, siteUrl) {
+  const entries = buildBlogSitemapEntries(posts, authors, siteUrl);
+  const urls = entries.map((e) => {
+    const parts = [`    <loc>${escapeHtml(e.loc)}</loc>`];
+    if (e.lastmod)
+      parts.push(`    <lastmod>${escapeHtml(e.lastmod)}</lastmod>`);
+    if (e.changefreq)
+      parts.push(`    <changefreq>${escapeHtml(e.changefreq)}</changefreq>`);
+    if (e.priority)
+      parts.push(`    <priority>${escapeHtml(e.priority)}</priority>`);
+    return `  <url>
+${parts.join("\n")}
+  </url>`;
+  });
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.join("\n")}
 </urlset>`;
 }
-function renderBlogImageSitemap(posts, siteUrl) {
-  const urls = [];
+function buildBlogImageSitemapEntries(posts, siteUrl) {
+  const entries = [];
   for (const post of posts) {
     const images = collectPostImageUrlsForSitemap(post, siteUrl);
     if (!images.length)
       continue;
-    const pageUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;
-    const imageEntries = images.map(
+    entries.push({
+      pageUrl: `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`,
+      title: post.title,
+      images
+    });
+  }
+  return entries;
+}
+function renderBlogImageSitemap(posts, siteUrl) {
+  const entries = buildBlogImageSitemapEntries(posts, siteUrl);
+  const urls = entries.map((entry) => {
+    const imageEntries = entry.images.map(
       (loc) => `    <image:image>
       <image:loc>${escapeHtml(loc)}</image:loc>
-      <image:title>${escapeHtml(post.title)}</image:title>
+      <image:title>${escapeHtml(entry.title)}</image:title>
     </image:image>`
     ).join("\n");
-    urls.push(`  <url>
-    <loc>${escapeHtml(pageUrl)}</loc>
+    return `  <url>
+    <loc>${escapeHtml(entry.pageUrl)}</loc>
 ${imageEntries}
-  </url>`);
-  }
+  </url>`;
+  });
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
@@ -7137,6 +7152,21 @@ BunnySDK.net.http.serve(async (request) => {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   try {
+    if (path === "/posts/sitemap-entries.json" && request.method === "GET") {
+      const dbError = dbConfigError();
+      if (dbError)
+        return dbError;
+      const posts = await fetchPublishedPostsForRender();
+      const authors = await fetchAuthorMap();
+      return jsonResponse({ urls: buildBlogSitemapEntries(posts, authors, blogSiteUrl()) });
+    }
+    if (path === "/posts/sitemap-image-entries.json" && request.method === "GET") {
+      const dbError = dbConfigError();
+      if (dbError)
+        return dbError;
+      const posts = await fetchPublishedPostsForRender();
+      return jsonResponse({ entries: buildBlogImageSitemapEntries(posts, blogSiteUrl()) });
+    }
     if (path === "/posts/sitemap.xml" && request.method === "GET") {
       const dbError = dbConfigError();
       if (dbError)

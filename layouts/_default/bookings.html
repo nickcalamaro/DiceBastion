@@ -449,6 +449,14 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+/** Safe price display — bad API data must not break the whole table-types grid. */
+function formatBookingPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (n === 0) return 'FREE';
+  return `£${n.toFixed(2)}`;
+}
+
 async function fetchSameDayContacts(turnstileToken) {
   const email = userSession?.email;
   if (!email) {
@@ -683,36 +691,55 @@ async function loadTableTypes() {
   
   try {
     const response = await fetch(`${BOOKINGS_API}/api/bookings/table-types`);
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseErr) {
+      console.error('Table types response was not JSON:', parseErr, response.status);
+      throw new Error('Invalid response from booking service');
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.error || `Booking service error (${response.status})`);
+    }
+
     tableTypes = data.table_types || [];
-    
+
     if (tableTypes.length === 0) {
       container.innerHTML = '<div class="alert alert-info">No table types available</div>';
       return;
     }
-    
+
     const grid = document.createElement('div');
     grid.className = 'table-types-grid';
-    
+
     tableTypes.forEach(type => {
       const isMember = membershipStatus?.active || false;
       const price = isMember ? type.member_price : type.non_member_price;
-      
+      const priceLabel = formatBookingPrice(price);
+      const memberPrice = Number(type.member_price);
+      const nonMemberPrice = Number(type.non_member_price);
+      const showMemberNote =
+        !isMember &&
+        Number.isFinite(memberPrice) &&
+        Number.isFinite(nonMemberPrice) &&
+        memberPrice < nonMemberPrice;
+
       const card = document.createElement('div');
       card.className = 'table-type-card';
       card.innerHTML = `
-        <div class="table-type-name">${type.name}</div>
-        <div class="table-type-price ${price === 0 ? 'free' : ''}">
-          ${price === 0 ? 'FREE' : `£${price.toFixed(2)}`}
+        <div class="table-type-name">${escapeHtml(type.name)}</div>
+        <div class="table-type-price ${priceLabel === 'FREE' ? 'free' : ''}">
+          ${priceLabel ?? 'Price unavailable'}
         </div>
-        ${type.description ? `<div class="table-type-description">${type.description}</div>` : ''}
-        ${!isMember && type.member_price < type.non_member_price ? `
+        ${type.description ? `<div class="table-type-description">${escapeHtml(type.description)}</div>` : ''}
+        ${showMemberNote ? `
           <div class="table-type-note">
-            💡 ${type.member_price === 0 ? 'Free for members' : `Members pay only £${type.member_price.toFixed(2)}`}
+            💡 ${memberPrice === 0 ? 'Free for members' : `Members pay only ${formatBookingPrice(memberPrice)}`}
           </div>
         ` : ''}
       `;
-      
+
       card.addEventListener('click', () => selectTableType(type, card));
       grid.appendChild(card);
     });

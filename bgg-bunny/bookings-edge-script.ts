@@ -538,6 +538,7 @@ BunnySDK.net.http.serve(async (request: Request) => {
  */
 async function getTableTypes() {
   try {
+    console.log("[bookings] GET /api/bookings/table-types");
     const result = await client.execute(
       `SELECT id, name, member_price, non_member_price, available_days, description
        FROM booking_table_types 

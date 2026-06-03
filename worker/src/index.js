@@ -316,6 +316,26 @@ function resolveProductPrimaryImage(product, shopUrl) {
   return `${shopUrl}/img/og-image.png`
 }
 
+function buildUrlsetSitemapXml(urlEntries) {
+  const urls = []
+  for (const e of urlEntries || []) {
+    if (!e?.loc) continue
+    const parts = [`    <loc>${escapeXmlSitemapText(e.loc)}</loc>`]
+    if (e.lastmod) parts.push(`    <lastmod>${escapeXmlSitemapText(e.lastmod)}</lastmod>`)
+    if (e.changefreq) parts.push(`    <changefreq>${escapeXmlSitemapText(e.changefreq)}</changefreq>`)
+    if (e.priority != null && e.priority !== '') parts.push(`    <priority>${escapeXmlSitemapText(String(e.priority))}</priority>`)
+    urls.push(`  <url>\n${parts.join('\n')}\n  </url>`)
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>`
+}
+
+function buildSitemapIndexXml(sitemapLocs) {
+  const items = (sitemapLocs || []).map(
+    (loc) => `  <sitemap>\n    <loc>${escapeXmlSitemapText(loc)}</loc>\n  </sitemap>`
+  )
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${items.join('\n')}\n</sitemapindex>`
+}
+
 function buildImageSitemapXml(entries) {
   const urls = []
   for (const entry of entries) {
@@ -5957,85 +5977,61 @@ const XML_SITEMAP_RESPONSE_HEADERS = {
 
 const EMPTY_IMAGE_SITEMAP_XML = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"></urlset>'
 
-/**
- * Blog image sitemap — CDN-first (same origin as post HTML), then blog API.
- * Unlike /events/sitemap-images.xml (built from D1 inside this Worker), blog data lives on Bunny.
- */
-app.get('/posts/sitemap-images.xml', async c => {
-  const cdnBase = String(c.env.BUNNY_CDN_URL || 'https://dicebastion.b-cdn.net').replace(/\/+$/, '')
-  const blogApi = String(c.env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
+async function fetchBlogSitemapEntries(env) {
+  const blogApi = String(env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
+  const res = await fetch(`${blogApi}/posts/sitemap-entries.json`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'DiceBastion-sitemap/1' }
+  })
+  if (!res.ok) throw new Error(`blog sitemap entries ${res.status}`)
+  const data = await res.json()
+  return Array.isArray(data?.urls) ? data.urls : []
+}
 
-  async function serveXmlBody(body) {
-    if (!body || !body.trimStart().startsWith('<?xml')) return null
-    return new Response(body, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
-  }
+async function fetchBlogImageSitemapEntries(env) {
+  const blogApi = String(env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
+  const res = await fetch(`${blogApi}/posts/sitemap-image-entries.json`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'DiceBastion-sitemap/1' }
+  })
+  if (!res.ok) throw new Error(`blog image sitemap entries ${res.status}`)
+  const data = await res.json()
+  return Array.isArray(data?.entries) ? data.entries : []
+}
 
-  try {
-    const cdnRes = await fetch(`${cdnBase}/blog/posts/sitemap-images.xml`, {
-      headers: { Accept: 'application/xml, text/xml, */*', 'User-Agent': 'DiceBastion-sitemap/1' }
-    })
-    const cdnBody = await cdnRes.text()
-    const cdnOk = await serveXmlBody(cdnBody)
-    if (cdnRes.ok && cdnOk) return cdnOk
-  } catch (err) {
-    console.error('[posts sitemap-images] CDN', err)
-  }
-
-  try {
-    const apiRes = await fetch(`${blogApi}/posts/sitemap-images.xml`, {
-      headers: { Accept: 'application/xml, text/xml, */*', 'User-Agent': 'DiceBastion-sitemap/1' }
-    })
-    const apiBody = await apiRes.text()
-    const apiOk = await serveXmlBody(apiBody)
-    if (apiRes.ok && apiOk) return apiOk
-    console.error('[posts sitemap-images] blog API', apiRes.status, apiBody.slice(0, 120))
-  } catch (err) {
-    console.error('[posts sitemap-images] blog API error:', err)
-  }
-
-  return new Response(EMPTY_IMAGE_SITEMAP_XML, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
+/** Blog sitemap index — GSC type "Sitemap Index" (like shop.dicebastion.com/sitemap.xml). */
+app.get('/posts/sitemap-index.xml', async c => {
+  const site = 'https://dicebastion.com'
+  const xml = buildSitemapIndexXml([
+    `${site}/posts/sitemap.xml`,
+    `${site}/posts/sitemap-images.xml`
+  ])
+  return new Response(xml, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
 })
 
-/**
- * Blog URL sitemap — blog API first (fresh DB + image tags), then CDN snapshot.
- * Mirrors /posts/sitemap-images.xml fetch strategy (image sitemap was CDN+API; this was CDN-only).
- */
+/** Blog page sitemap — built in Worker (same XML path as /events/sitemap.xml). */
 app.get('/posts/sitemap.xml', async c => {
-  const cdnBase = String(c.env.BUNNY_CDN_URL || 'https://dicebastion.b-cdn.net').replace(/\/+$/, '')
-  const blogApi = String(c.env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
-  const emptyUrlset =
-    '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
-
-  async function serveXmlBody(body) {
-    if (!body || !body.trimStart().startsWith('<?xml')) return null
-    return new Response(body, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
-  }
-
   try {
-    const apiRes = await fetch(`${blogApi}/posts/sitemap.xml`, {
-      headers: { Accept: 'application/xml, text/xml, */*', 'User-Agent': 'DiceBastion-sitemap/1' }
-    })
-    const apiBody = await apiRes.text()
-    const apiOk = await serveXmlBody(apiBody)
-    if (apiRes.ok && apiOk) return apiOk
-    console.error('[posts sitemap] blog API', apiRes.status, apiBody.slice(0, 120))
+    const urls = await fetchBlogSitemapEntries(c.env)
+    const xml = buildUrlsetSitemapXml(urls)
+    return new Response(xml, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
   } catch (err) {
-    console.error('[posts sitemap] blog API error:', err)
+    console.error('[posts sitemap] error:', err)
+    return new Response(
+      '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>',
+      { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS }
+    )
   }
+})
 
+/** Blog image sitemap — built in Worker (same XML path as /events/sitemap-images.xml). */
+app.get('/posts/sitemap-images.xml', async c => {
   try {
-    const cdnRes = await fetch(`${cdnBase}/blog/posts/sitemap.xml`, {
-      headers: { Accept: 'application/xml, text/xml, */*', 'User-Agent': 'DiceBastion-sitemap/1' }
-    })
-    const cdnBody = await cdnRes.text()
-    const cdnOk = await serveXmlBody(cdnBody)
-    if (cdnRes.ok && cdnOk) return cdnOk
-    console.error('[posts sitemap] CDN', cdnRes.status)
+    const entries = await fetchBlogImageSitemapEntries(c.env)
+    const xml = buildImageSitemapXml(entries)
+    return new Response(xml, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
   } catch (err) {
-    console.error('[posts sitemap] CDN error:', err)
+    console.error('[posts sitemap-images] error:', err)
+    return new Response(EMPTY_IMAGE_SITEMAP_XML, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
   }
-
-  return new Response(emptyUrlset, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
 })
 
 app.get('/events/sitemap-images.xml', async c => {
@@ -11399,7 +11395,11 @@ export default {
         }
       }
 
-      if (url.pathname === '/posts/sitemap.xml' || url.pathname === '/posts/sitemap-images.xml') {
+      if (
+        url.pathname === '/posts/sitemap.xml' ||
+        url.pathname === '/posts/sitemap-images.xml' ||
+        url.pathname === '/posts/sitemap-index.xml'
+      ) {
         return app.fetch(request, env, ctx)
       }
 

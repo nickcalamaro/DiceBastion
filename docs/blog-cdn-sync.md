@@ -115,9 +115,9 @@ If storage has no file (never synced or wrong slug), the user gets 404.
 
 Post images for sitemaps use **dicebastion.b-cdn.net** only (legacy `*.r2.dev` URLs are omitted — [Google requires extra domains to be verified](https://developers.google.com/search/docs/crawling-indexing/sitemaps/image-sitemaps) in Search Console).
 
-**GSC / Worker serving:** Both sitemaps are served by the memberships Worker with **`application/xml; charset=utf-8`**. `posts/sitemap.xml` is **page URLs only** (no `image:image` tags — Google Search Console rejects those in this file). `posts/sitemap-images.xml` carries image metadata. URL sitemap: blog API first, then CDN. Image sitemap: CDN first, then blog API.
+**GSC / Worker serving:** Blog sitemaps are built **inside the memberships Worker** (JSON feed from the blog API → same `buildUrlsetSitemapXml` / `buildImageSitemapXml` as events). This avoids GSC showing **Type: Unknown** from proxied Bunny XML.
 
-**Recommended GSC submit:** both `posts/sitemap.xml` and `posts/sitemap-images.xml` (same pattern as events + `events/sitemap-images.xml`).
+**Recommended GSC submit:** `posts/sitemap-index.xml` only (Type: **Sitemap Index**, like shop). It references `posts/sitemap.xml` (pages) and `posts/sitemap-images.xml` (images). `robots.txt` points at the index.
 
 ---
 
