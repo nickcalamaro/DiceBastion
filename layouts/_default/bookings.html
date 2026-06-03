@@ -352,7 +352,7 @@ let userSession = null;
 let membershipStatus = null;
 let paymentModal = null;
 let sameDayBookingModal = null;
-let sameDayContactsCache = null;
+let sameDayTurnstileWidgetId = null;
 let authModal = null;
 let bookingTurnstileWidgetId = null; // Track Turnstile widget for cleanup
 let userBookings = []; // Cache of user's bookings
@@ -449,21 +449,23 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-async function fetchSameDayContacts() {
-  if (sameDayContactsCache) return sameDayContactsCache;
-  try {
-    const response = await fetch(`${window.MAIN_API}/bookings/same-day-contacts`);
-    if (response.ok) {
-      const data = await response.json();
-      sameDayContactsCache = Array.isArray(data.contacts) ? data.contacts : [];
-    } else {
-      sameDayContactsCache = [];
-    }
-  } catch (error) {
-    console.error('Failed to load same-day contacts:', error);
-    sameDayContactsCache = [];
+async function fetchSameDayContacts(turnstileToken) {
+  const email = userSession?.email;
+  if (!email) {
+    throw new Error('Please log in to view contact options.');
   }
-  return sameDayContactsCache;
+
+  const response = await fetch(`${window.MAIN_API}/bookings/same-day-contacts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, turnstileToken })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || data.error || 'Could not load contact options.');
+  }
+  return Array.isArray(data.contacts) ? data.contacts : [];
 }
 
 function buildSameDayContactsHtml(contacts) {
@@ -492,37 +494,90 @@ function resetSlotsAndBookingForm() {
   selectedSlot = null;
 }
 
-async function showSameDayBookingModal() {
-  const contacts = await fetchSameDayContacts();
-  const linksHtml = buildSameDayContactsHtml(contacts);
-
+function closeSameDayBookingModal() {
+  utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
+  sameDayTurnstileWidgetId = null;
   if (sameDayBookingModal) {
     sameDayBookingModal.close();
+    sameDayBookingModal = null;
+  }
+}
+
+async function showSameDayBookingModal() {
+  if (sameDayBookingModal) {
+    closeSameDayBookingModal();
   }
 
   sameDayBookingModal = new Modal({
     title: 'Same-day booking',
     size: 'md',
+    closeOnBackdrop: true,
     content: `
       <div class="modal-prose">
         <p>We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.</p>
       </div>
-      <div class="modal-actions" style="margin-top: 1rem;">
-        ${linksHtml}
-      </div>
+      <div id="same-day-contacts-area" class="modal-actions" style="margin-top: 1rem; display: none;"></div>
+      <div id="same-day-turnstile-container" class="form-group" style="margin-top: 1rem;"></div>
+      <div id="same-day-contacts-error" class="modal-error" style="display: none;"></div>
     `,
     footer: `
+      <button type="button" class="modal-btn modal-btn-primary db-modal-show-same-day-contacts">Show WhatsApp contacts</button>
       <button type="button" class="modal-btn modal-btn-secondary db-modal-close-same-day">Close</button>
     `,
-    onClose: () => { sameDayBookingModal = null; }
+    onClose: () => {
+      utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
+      sameDayTurnstileWidgetId = null;
+      sameDayBookingModal = null;
+    }
   });
 
   sameDayBookingModal.open();
 
+  setTimeout(() => {
+    utils.renderTurnstile('same-day-turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST })
+      .then((id) => { sameDayTurnstileWidgetId = id; })
+      .catch((err) => console.error('Same-day Turnstile render failed:', err));
+  }, 100);
+
   const closeBtn = sameDayBookingModal.contentEl.querySelector('.db-modal-close-same-day');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => sameDayBookingModal.close());
-  }
+  const showBtn = sameDayBookingModal.contentEl.querySelector('.db-modal-show-same-day-contacts');
+  const errorEl = sameDayBookingModal.contentEl.querySelector('#same-day-contacts-error');
+  const contactsArea = sameDayBookingModal.contentEl.querySelector('#same-day-contacts-area');
+
+  closeBtn?.addEventListener('click', closeSameDayBookingModal);
+
+  showBtn?.addEventListener('click', async () => {
+    if (errorEl) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
+    showBtn.disabled = true;
+    const originalText = showBtn.textContent;
+    showBtn.textContent = 'Loading...';
+
+    try {
+      const turnstileToken = await utils.getTurnstileToken('same-day-turnstile-container', sameDayTurnstileWidgetId, IS_LOCALHOST);
+      const contacts = await fetchSameDayContacts(turnstileToken);
+      if (contactsArea) {
+        contactsArea.innerHTML = buildSameDayContactsHtml(contacts);
+        contactsArea.style.display = 'block';
+      }
+      const turnstileWrap = sameDayBookingModal.contentEl.querySelector('#same-day-turnstile-container');
+      if (turnstileWrap) turnstileWrap.style.display = 'none';
+      showBtn.style.display = 'none';
+    } catch (error) {
+      console.error('Same-day contacts:', error);
+      if (errorEl) {
+        errorEl.textContent = error.message || 'Could not load contact options.';
+        errorEl.style.display = 'block';
+      }
+      utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
+      sameDayTurnstileWidgetId = await utils.renderTurnstile('same-day-turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
+    } finally {
+      showBtn.disabled = false;
+      showBtn.textContent = originalText;
+    }
+  });
 }
 
 function getBookingMinDate() {

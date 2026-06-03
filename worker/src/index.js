@@ -289,6 +289,7 @@ const membershipCheckoutRateLimits = new Map()
 const eventCheckoutRateLimits = new Map()
 const donationCheckoutRateLimits = new Map()
 const supportContactRateLimits = new Map()
+const sameDayContactsRateLimits = new Map()
 
 // Rate limiting helper function
 function checkRateLimit(ip, rateLimitMap, limit, windowMinutes) {
@@ -4060,8 +4061,48 @@ function parseBookingSameDayWhatsapp(env) {
   }
 }
 
-app.get('/bookings/same-day-contacts', async (c) => {
-  return c.json({ contacts: parseBookingSameDayWhatsapp(c.env) })
+app.post('/bookings/same-day-contacts', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, sameDayContactsRateLimits, 10, 1)) {
+      return c.json({
+        error: 'rate_limit_exceeded',
+        message: 'Too many requests. Please wait a minute and try again.'
+      }, 429)
+    }
+
+    const body = await c.req.json().catch(() => ({}))
+    if (body.website) return c.json({ contacts: [] })
+
+    const email = clampStr(body.email, 320).toLowerCase()
+    const turnstileToken = body.turnstileToken
+
+    if (!email || !EMAIL_RE.test(email)) {
+      return c.json({ error: 'email_required', message: 'A valid member email is required.' }, 400)
+    }
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
+    if (!tsOk) {
+      return c.json({
+        error: 'turnstile_failed',
+        message: 'Security check failed. Please refresh and try again.'
+      }, 403)
+    }
+
+    const ident = await findIdentityByEmail(c.env.DB, email)
+    if (!ident) {
+      return c.json({ error: 'membership_required', message: 'Active membership is required.' }, 403)
+    }
+    const active = await getActiveMembership(c.env.DB, ident.id)
+    if (!active) {
+      return c.json({ error: 'membership_required', message: 'Active membership is required.' }, 403)
+    }
+
+    return c.json({ contacts: parseBookingSameDayWhatsapp(c.env) })
+  } catch (e) {
+    console.error('[bookings/same-day-contacts] error:', e)
+    return c.json({ error: 'internal_error', message: 'Could not load contact options.' }, 500)
+  }
 })
 
 app.get('/membership/status', async (c) => {
