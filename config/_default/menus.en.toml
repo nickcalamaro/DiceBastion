@@ -137,3 +137,8 @@ weight = 20
 name = "Cookie Policy"
 pageRef = "cookie-policy"
 weight = 30
+
+[[footer]]
+name = "Code of Conduct"
+pageRef = "code-of-conduct"
+weight = 40
