@@ -1128,16 +1128,19 @@ async function loadBookingsForDate(date) {
         item.classList.add('cancelled');
       }
       
-      const statusBadge = booking.status === 'confirmed' ? '✅' : 
-                         booking.status === 'cancelled' ? '❌' : '⏳';
+      const paymentPending = booking.payment_status === 'pending';
+      const statusBadge = booking.status === 'cancelled' ? '❌' :
+                         paymentPending ? '⏳' :
+                         booking.status === 'confirmed' ? '✅' : '⏳';
       
       item.innerHTML = `
         <div class="booking-details">
           <div class="booking-time">⏰ ${booking.booking_date} ${booking.start_time} - ${booking.end_time}</div>
           <div>🎲 ${booking.table_type} ${statusBadge}</div>
+          ${paymentPending ? '<div style="font-size: 0.85rem; color: rgb(var(--color-neutral-600)); margin-top: 0.25rem;">Awaiting payment</div>' : ''}
           ${booking.status === 'cancelled' ? '<div style="font-size: 0.85rem; color: rgb(var(--color-neutral-600)); margin-top: 0.25rem;">Cancelled</div>' : ''}
         </div>
-        ${booking.status === 'confirmed' ? `
+        ${booking.status === 'confirmed' && !paymentPending ? `
           <button 
             onclick="cancelBooking(${booking.id}, '${booking.booking_date}', '${booking.start_time}')" 
             class="btn btn-secondary" 

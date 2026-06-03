@@ -9,6 +9,8 @@
  *   - BUNNY_DATABASE_AUTH_TOKEN: Database access token
  *   - EMAIL_API_URL: URL of the DiceBastionEmails edge script (e.g., https://dicebastionemails-xxxxx.bunny.run/send)
  *   - WORKER_API_URL: Cloudflare worker base URL for membership verification
+ *   - PAYMENTS_API_URL: Payments worker base URL (SumUp checkouts)
+ *   - INTERNAL_SECRET: Shared secret for payments worker internal routes
  * 
  * API Endpoints:
  *   GET    /api/bookings/table-types    - Get available table types
@@ -213,6 +215,68 @@ function validateBookingAdvance(params: {
   }
 
   return { ok: true };
+}
+
+function isCheckoutPaid(payment: Record<string, unknown> | null | undefined): boolean {
+  if (!payment) return false;
+  const status = payment.status as string | undefined;
+  if (status === "PAID" || status === "SUCCESSFUL") return true;
+  const transactions = payment.transactions;
+  if (Array.isArray(transactions)) {
+    return transactions.some(
+      (tx) =>
+        tx &&
+        typeof tx === "object" &&
+        ((tx as { status?: string }).status === "SUCCESSFUL" ||
+          (tx as { status?: string }).status === "PAID")
+    );
+  }
+  return false;
+}
+
+async function callPaymentsWorker(
+  path: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const paymentsApiUrl = (
+    process.env.PAYMENTS_API_URL || "https://dicebastion-payments.ncalamaro.workers.dev"
+  ).replace(/\/+$/, "");
+  const internalSecret = process.env.INTERNAL_SECRET;
+  if (!internalSecret) {
+    throw new Error("INTERNAL_SECRET not configured");
+  }
+  return fetch(`${paymentsApiUrl}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Internal-Secret": internalSecret,
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  });
+}
+
+async function fetchPayment(checkoutId: string): Promise<Record<string, unknown>> {
+  const res = await callPaymentsWorker(`/internal/payment/${encodeURIComponent(checkoutId)}`, {
+    method: "GET",
+  });
+  const data = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    throw new Error(String(data.error || "Failed to fetch payment"));
+  }
+  return data;
+}
+
+async function getExpectedBookingAmount(
+  tableTypeId: number,
+  isMember: boolean
+): Promise<number | null> {
+  const result = await client.execute({
+    sql: "SELECT member_price, non_member_price FROM booking_table_types WHERE id = ? AND active = 1",
+    args: [tableTypeId],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
+  return isMember ? Number(row.member_price) : Number(row.non_member_price);
 }
 
 /**
@@ -775,6 +839,12 @@ async function createBooking(request: Request) {
       }, 403);
     }
 
+    const expectedAmount = await getExpectedBookingAmount(table_type_id, isMember);
+    if (expectedAmount === null) {
+      return jsonResponse({ error: "Invalid table type" }, 400);
+    }
+    const amountToCharge = expectedAmount;
+
     const schedule = await loadBookingConfig();
     const { startHour, endHour } = getEffectiveHoursForDate(
       booking_date,
@@ -827,9 +897,9 @@ async function createBooking(request: Request) {
         end_time,
         table_type_id,
         order_ref,
-        amount_paid || 0,
+        amountToCharge,
         isMember ? 1 : 0,
-        amount_paid > 0 ? 'pending' : 'confirmed', // Track payment status separately
+        amountToCharge > 0 ? 'pending' : 'confirmed', // Track payment status separately
         notes || null,
         now,
         now,
@@ -837,26 +907,27 @@ async function createBooking(request: Request) {
       ],
     });
 
-    // Send admin notification email for every new booking
-    try {
-      await sendAdminBookingNotificationEmail({
-        userEmail: user_email,
-        userName: user_name,
-        bookingDate: booking_date,
-        startTime: start_time,
-        endTime: end_time,
-        tableTypeId: table_type_id,
-        amountPaid: amount_paid || 0,
-        orderRef: order_ref,
-        isMemberBooking: isMember,
-        notes: notes || undefined,
-      });
-    } catch (e) {
-      console.error('Error sending admin notification email:', e);
+    // Free bookings: notify admin and customer immediately. Paid bookings wait until payment is verified.
+    if (amountToCharge === 0) {
+      try {
+        await sendAdminBookingNotificationEmail({
+          userEmail: user_email,
+          userName: user_name,
+          bookingDate: booking_date,
+          startTime: start_time,
+          endTime: end_time,
+          tableTypeId: table_type_id,
+          amountPaid: 0,
+          orderRef: order_ref,
+          isMemberBooking: isMember,
+          notes: notes || undefined,
+        });
+      } catch (e) {
+        console.error('Error sending admin notification email:', e);
+      }
     }
 
-    // For free bookings, send confirmation email immediately
-    if (amount_paid === 0) {
+    if (amountToCharge === 0) {
       try {
         await sendBookingConfirmationEmail({
           userEmail: user_email,
@@ -882,13 +953,6 @@ async function createBooking(request: Request) {
 
     // For paid bookings, create payment checkout
     try {
-      const paymentsApiUrl = process.env.PAYMENTS_API_URL || 'https://dicebastion-payments.ncalamaro.workers.dev';
-      const internalSecret = process.env.INTERNAL_SECRET;
-      
-      if (!internalSecret) {
-        throw new Error('INTERNAL_SECRET not configured');
-      }
-
       // Get table type name for description
       const tableTypeResult = await client.execute({
         sql: "SELECT name FROM booking_table_types WHERE id = ?",
@@ -898,24 +962,27 @@ async function createBooking(request: Request) {
       const tableTypeName = tableTypeResult.rows.length > 0 ? tableTypeResult.rows[0].name : 'Table Booking';
       const description = `${tableTypeName} - ${booking_date} ${start_time}`;
 
-      const checkoutResponse = await fetch(`${paymentsApiUrl}/internal/checkout`, {
+      const checkoutResponse = await callPaymentsWorker('/internal/checkout', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Internal-Secret': internalSecret
-        },
         body: JSON.stringify({
-          amount: amount_paid,
+          amount: amountToCharge,
           currency: 'GBP',
           orderRef: order_ref,
           description
         })
       });
 
-      const checkoutData = await checkoutResponse.json();
+      const checkoutData = await checkoutResponse.json() as { id?: string; error?: string };
 
       if (!checkoutResponse.ok) {
         throw new Error(checkoutData.error || 'Payment checkout failed');
+      }
+
+      if (checkoutData.id) {
+        await client.execute({
+          sql: "UPDATE bookings SET sumup_checkout_id = ?, updated_at = ? WHERE order_ref = ?",
+          args: [checkoutData.id, new Date().toISOString(), order_ref],
+        });
       }
 
       return jsonResponse({
@@ -944,74 +1011,143 @@ async function createBooking(request: Request) {
 }
 
 /**
- * Confirm booking after successful payment
+ * Confirm booking after SumUp payment is verified (poll from payment widget).
  */
 async function confirmBooking(orderRef: string) {
   try {
+    const bookingResult = await client.execute({
+      sql: `SELECT id, status, payment_status, amount_paid, sumup_checkout_id,
+                   user_email, user_name, booking_date, start_time, end_time,
+                   table_type_id, is_member_booking, notes
+            FROM bookings WHERE order_ref = ?`,
+      args: [orderRef],
+    });
+
+    if (bookingResult.rows.length === 0) {
+      return jsonResponse({ ok: false, error: "booking_not_found" }, 404);
+    }
+
+    const booking = bookingResult.rows[0];
+    const paymentStatus = String(booking.payment_status || "");
+    const amountPaid = Number(booking.amount_paid || 0);
+
+    if (paymentStatus === "confirmed" || amountPaid === 0) {
+      return jsonResponse({
+        ok: true,
+        status: "already_active",
+        message: "Booking already confirmed",
+        booking_id: Number(booking.id),
+      });
+    }
+
+    if (paymentStatus !== "pending") {
+      return jsonResponse({
+        ok: false,
+        error: "invalid_payment_status",
+        message: "This booking cannot be confirmed.",
+      }, 400);
+    }
+
+    const checkoutId = booking.sumup_checkout_id
+      ? String(booking.sumup_checkout_id)
+      : null;
+    if (!checkoutId) {
+      console.error("[bookings/confirm] Missing sumup_checkout_id for", orderRef);
+      return jsonResponse({ ok: false, error: "verify_failed" }, 400);
+    }
+
+    let payment: Record<string, unknown>;
+    try {
+      payment = await fetchPayment(checkoutId);
+      console.log(
+        "[bookings/confirm] SumUp status:",
+        payment.status,
+        "checkout_id:",
+        checkoutId
+      );
+    } catch (err) {
+      console.error("[bookings/confirm] Failed to fetch payment:", err);
+      return jsonResponse({ ok: false, error: "verify_failed" }, 400);
+    }
+
+    if (!isCheckoutPaid(payment)) {
+      const currentStatus = String(payment.status || "PENDING").toUpperCase();
+      const txStatuses = Array.isArray(payment.transactions)
+        ? (payment.transactions as { status?: string }[]).map((t) => t.status)
+        : [];
+      const hasFailed =
+        txStatuses.includes("FAILED") || currentStatus === "FAILED";
+      const hasDeclined =
+        txStatuses.includes("DECLINED") || currentStatus === "DECLINED";
+      return jsonResponse({
+        ok: false,
+        status: hasFailed ? "FAILED" : hasDeclined ? "DECLINED" : currentStatus,
+        message: hasFailed
+          ? "Payment failed. Please try again."
+          : hasDeclined
+            ? "Your card was declined. Please try a different payment method."
+            : "Payment is still processing.",
+      });
+    }
+
     const now = new Date().toISOString();
-    
-    // Update booking status
-    const result = await client.execute({
-      sql: `UPDATE bookings 
-            SET payment_status = 'confirmed', 
+    const updateResult = await client.execute({
+      sql: `UPDATE bookings
+            SET payment_status = 'confirmed',
                 status = 'confirmed',
                 updated_at = ?
             WHERE order_ref = ? AND payment_status = 'pending'`,
       args: [now, orderRef],
     });
 
-    if (result.rowsAffected === 0) {
-      // Check if booking exists but already confirmed
-      const checkResult = await client.execute({
-        sql: "SELECT id, status, payment_status FROM bookings WHERE order_ref = ?",
-        args: [orderRef],
+    if (updateResult.rowsAffected === 0) {
+      return jsonResponse({
+        ok: true,
+        status: "already_active",
+        message: "Booking already confirmed",
+        booking_id: Number(booking.id),
       });
-
-      if (checkResult.rows.length === 0) {
-        return jsonResponse({ error: "Booking not found" }, 404);
-      }
-
-      const booking = checkResult.rows[0];
-      if (booking.status === 'confirmed') {
-        return jsonResponse({ 
-          ok: true,
-          status: 'already_active',
-          message: "Booking already confirmed",
-          booking_id: Number(booking.id)
-        });
-      }
     }
-    
-    // Send confirmation email for paid bookings
+
+    const tableTypeId = Number(booking.table_type_id);
+    const emailParams = {
+      userEmail: String(booking.user_email),
+      userName: String(booking.user_name),
+      bookingDate: String(booking.booking_date),
+      startTime: String(booking.start_time),
+      endTime: String(booking.end_time),
+      tableTypeId,
+      amountPaid,
+    };
+
     try {
-      const booking = await client.execute({
-        sql: `SELECT b.user_email, b.user_name, b.booking_date, b.start_time, 
-                     b.end_time, b.amount_paid, b.table_type_id
-              FROM bookings b
-              WHERE b.order_ref = ?`,
-        args: [orderRef],
-      });
-      
-      if (booking.rows.length > 0) {
-        const row = booking.rows[0];
-        await sendBookingConfirmationEmail({
-          userEmail: String(row.user_email),
-          userName: String(row.user_name),
-          bookingDate: String(row.booking_date),
-          startTime: String(row.start_time),
-          endTime: String(row.end_time),
-          tableTypeId: Number(row.table_type_id),
-          amountPaid: Number(row.amount_paid)
-        });
-      }
+      await sendBookingConfirmationEmail(emailParams);
     } catch (e) {
-      console.error('Error sending confirmation email:', e);
+      console.error("Error sending confirmation email:", e);
     }
-    
-    return jsonResponse({ 
+
+    try {
+      await sendAdminBookingNotificationEmail({
+        userEmail: emailParams.userEmail,
+        userName: emailParams.userName,
+        bookingDate: emailParams.bookingDate,
+        startTime: emailParams.startTime,
+        endTime: emailParams.endTime,
+        tableTypeId,
+        amountPaid,
+        orderRef,
+        isMemberBooking: Number(booking.is_member_booking) === 1,
+        notes: booking.notes ? String(booking.notes) : undefined,
+      });
+    } catch (e) {
+      console.error("Error sending admin notification email:", e);
+    }
+
+    return jsonResponse({
       ok: true,
-      status: 'active',
-      message: "Booking confirmed successfully"
+      status: "active",
+      message: "Booking confirmed successfully",
+      booking_id: Number(booking.id),
     });
   } catch (error) {
     console.error("Error confirming booking:", error);
