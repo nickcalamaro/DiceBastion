@@ -403,6 +403,55 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 })
 
 /**
+ * Fetch the most recent payment/checkout for an order reference.
+ * GET /internal/payment-by-reference/:orderRef
+ * Used as a fallback when the SumUp checkout id was not stored on our row.
+ */
+app.get('/internal/payment-by-reference/:orderRef', async (c) => {
+	try {
+		const orderRef = c.req.param('orderRef')
+		const { access_token } = await sumupToken(c.env, 'payments')
+
+		const res = await fetch(
+			`https://api.sumup.com/v0.1/checkouts?checkout_reference=${encodeURIComponent(orderRef)}`,
+			{ headers: { Authorization: `Bearer ${access_token}` } }
+		)
+
+		if (!res.ok) {
+			const txt = await res.text()
+			console.error('[PaymentByRef] SumUp API error:', res.status, txt)
+			throw new Error(`Failed to fetch payment (${res.status}): ${txt}`)
+		}
+
+		const checkouts: any = await res.json()
+		const list = Array.isArray(checkouts) ? checkouts : []
+		if (list.length === 0) {
+			return c.json({ error: 'checkout_not_found' }, 404)
+		}
+
+		// Prefer a paid checkout if present, otherwise the most recent one.
+		const isPaid = (p: any) =>
+			p?.status === 'PAID' ||
+			p?.status === 'SUCCESSFUL' ||
+			(Array.isArray(p?.transactions) &&
+				p.transactions.some((t: any) => t?.status === 'SUCCESSFUL' || t?.status === 'PAID'))
+		const payment = list.find(isPaid) || list[list.length - 1]
+
+		console.log('[PaymentByRef] Resolved checkout:', {
+			checkout_reference: orderRef,
+			sumup_checkout_id: payment?.id || null,
+			status: payment?.status,
+			matches: list.length
+		})
+
+		return c.json(payment)
+	} catch (error: any) {
+		console.error('Fetch payment by reference error:', error)
+		return c.json({ error: error.message || 'Failed to fetch payment' }, 500)
+	}
+})
+
+/**
  * Save payment instrument (card tokenization)
  * POST /internal/payment-instrument
  */

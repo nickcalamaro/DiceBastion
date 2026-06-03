@@ -266,6 +266,21 @@ async function fetchPayment(checkoutId: string): Promise<Record<string, unknown>
   return data;
 }
 
+async function fetchPaymentByReference(
+  orderRef: string
+): Promise<Record<string, unknown> | null> {
+  const res = await callPaymentsWorker(
+    `/internal/payment-by-reference/${encodeURIComponent(orderRef)}`,
+    { method: "GET" }
+  );
+  const data = (await res.json()) as Record<string, unknown>;
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(String(data.error || "Failed to fetch payment"));
+  }
+  return data;
+}
+
 async function getExpectedBookingAmount(
   tableTypeId: number,
   isMember: boolean
@@ -979,10 +994,17 @@ async function createBooking(request: Request) {
       }
 
       if (checkoutData.id) {
-        await client.execute({
-          sql: "UPDATE bookings SET sumup_checkout_id = ?, updated_at = ? WHERE order_ref = ?",
-          args: [checkoutData.id, new Date().toISOString(), order_ref],
-        });
+        // Best-effort: store the checkout id so confirm can verify payment directly.
+        // If the column is missing (migration not yet run), fall back to lookup by
+        // checkout_reference at confirm time, so this must not break checkout.
+        try {
+          await client.execute({
+            sql: "UPDATE bookings SET sumup_checkout_id = ?, updated_at = ? WHERE order_ref = ?",
+            args: [checkoutData.id, new Date().toISOString(), order_ref],
+          });
+        } catch (storeErr) {
+          console.error('Could not store sumup_checkout_id (run migration 0007):', storeErr);
+        }
       }
 
       return jsonResponse({
@@ -1015,8 +1037,10 @@ async function createBooking(request: Request) {
  */
 async function confirmBooking(orderRef: string) {
   try {
+    // Select base columns first; sumup_checkout_id may not exist if migration 0007
+    // has not run yet, so read it separately and fall back to reference lookup.
     const bookingResult = await client.execute({
-      sql: `SELECT id, status, payment_status, amount_paid, sumup_checkout_id,
+      sql: `SELECT id, status, payment_status, amount_paid,
                    user_email, user_name, booking_date, start_time, end_time,
                    table_type_id, is_member_booking, notes
             FROM bookings WHERE order_ref = ?`,
@@ -1048,26 +1072,47 @@ async function confirmBooking(orderRef: string) {
       }, 400);
     }
 
-    const checkoutId = booking.sumup_checkout_id
-      ? String(booking.sumup_checkout_id)
-      : null;
-    if (!checkoutId) {
-      console.error("[bookings/confirm] Missing sumup_checkout_id for", orderRef);
-      return jsonResponse({ ok: false, error: "verify_failed" }, 400);
+    let checkoutId: string | null = null;
+    try {
+      const idResult = await client.execute({
+        sql: "SELECT sumup_checkout_id FROM bookings WHERE order_ref = ?",
+        args: [orderRef],
+      });
+      const stored = idResult.rows[0]?.sumup_checkout_id;
+      checkoutId = stored ? String(stored) : null;
+    } catch (colErr) {
+      console.warn("[bookings/confirm] sumup_checkout_id column unavailable, using reference lookup:", colErr);
     }
 
-    let payment: Record<string, unknown>;
+    let payment: Record<string, unknown> | null = null;
     try {
-      payment = await fetchPayment(checkoutId);
+      payment = checkoutId
+        ? await fetchPayment(checkoutId)
+        : await fetchPaymentByReference(orderRef);
       console.log(
         "[bookings/confirm] SumUp status:",
-        payment.status,
+        payment?.status,
         "checkout_id:",
-        checkoutId
+        checkoutId || payment?.id
       );
     } catch (err) {
       console.error("[bookings/confirm] Failed to fetch payment:", err);
       return jsonResponse({ ok: false, error: "verify_failed" }, 400);
+    }
+
+    // Security: when looking up by checkout id, ensure it belongs to this order.
+    if (checkoutId && payment && payment.checkout_reference &&
+        String(payment.checkout_reference) !== orderRef) {
+      console.error("[bookings/confirm] checkout_reference mismatch for", orderRef);
+      return jsonResponse({ ok: false, error: "verify_failed" }, 400);
+    }
+
+    if (!payment) {
+      return jsonResponse({
+        ok: false,
+        status: "PENDING",
+        message: "Payment is still processing.",
+      });
     }
 
     if (!isCheckoutPaid(payment)) {
