@@ -115,6 +115,12 @@ function extractImgUrlsFromHtml(html: string): string[] {
   return urls;
 }
 
+/** Hosts allowed in XML sitemaps (must be crawlable; avoid unverified third-party CDNs in GSC). */
+function isSitemapImageHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "dicebastion.b-cdn.net" || h === "dicebastion.com" || h.endsWith(".dicebastion.com");
+}
+
 /** All indexable images for a post (hero, card, inline), deduped, HTTPS. */
 export function collectPostImageUrls(post: BlogPostRow, siteUrl: string): string[] {
   const seen = new Set<string>();
@@ -133,6 +139,17 @@ export function collectPostImageUrls(post: BlogPostRow, siteUrl: string): string
     out.push(abs);
   }
   return out;
+}
+
+/** Images for sitemaps only — Bunny/site hosts (excludes legacy R2 URLs Google may reject). */
+export function collectPostImageUrlsForSitemap(post: BlogPostRow, siteUrl: string): string[] {
+  return collectPostImageUrls(post, siteUrl).filter((url) => {
+    try {
+      return isSitemapImageHost(new URL(url).hostname);
+    } catch {
+      return false;
+    }
+  });
 }
 
 function resolvePostOgImage(post: BlogPostRow, siteUrl: string): string {
@@ -1860,8 +1877,16 @@ export function renderBlogSitemap(
   for (const post of posts) {
     const lastmod = post.updated_at || post.published_at;
     const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
+    const images = collectPostImageUrlsForSitemap(post, siteUrl);
+    const imageEntries = images
+      .map(
+        (loc) =>
+          `    <image:image>\n      <image:loc>${escapeHtml(loc)}</image:loc>\n      <image:title>${escapeHtml(post.title)}</image:title>\n    </image:image>`
+      )
+      .join("\n");
+    const imageBlock = imageEntries ? `\n${imageEntries}` : "";
     urls.push(
-      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+      `  <url>\n    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>${imageBlock}\n    <lastmod>${mod}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>`
     );
   }
 
@@ -1877,7 +1902,7 @@ export function renderBlogSitemap(
     );
   }
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n${urls.join("\n")}\n</urlset>`;
 }
 
 /** Google Image Sitemap — helps Image Search discover post photos. */
@@ -1885,7 +1910,7 @@ export function renderBlogImageSitemap(posts: BlogPostRow[], siteUrl: string): s
   const urls: string[] = [];
 
   for (const post of posts) {
-    const images = collectPostImageUrls(post, siteUrl);
+    const images = collectPostImageUrlsForSitemap(post, siteUrl);
     if (!images.length) continue;
 
     const pageUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;

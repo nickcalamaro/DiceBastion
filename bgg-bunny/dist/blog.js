@@ -4800,6 +4800,10 @@ function extractImgUrlsFromHtml(html) {
   }
   return urls;
 }
+function isSitemapImageHost(hostname) {
+  const h = hostname.toLowerCase();
+  return h === "dicebastion.b-cdn.net" || h === "dicebastion.com" || h.endsWith(".dicebastion.com");
+}
 function collectPostImageUrls(post, siteUrl) {
   const seen = /* @__PURE__ */ new Set();
   const ordered = [
@@ -4818,6 +4822,15 @@ function collectPostImageUrls(post, siteUrl) {
     out.push(abs);
   }
   return out;
+}
+function collectPostImageUrlsForSitemap(post, siteUrl) {
+  return collectPostImageUrls(post, siteUrl).filter((url) => {
+    try {
+      return isSitemapImageHost(new URL(url).hostname);
+    } catch {
+      return false;
+    }
+  });
 }
 function resolvePostOgImage(post, siteUrl) {
   const images = collectPostImageUrls(post, siteUrl);
@@ -6357,9 +6370,18 @@ function renderBlogSitemap(posts, authors, siteUrl) {
   for (const post of posts) {
     const lastmod = post.updated_at || post.published_at;
     const mod = lastmod ? new Date(lastmod).toISOString().split("T")[0] : today;
+    const images = collectPostImageUrlsForSitemap(post, siteUrl);
+    const imageEntries = images.map(
+      (loc) => `    <image:image>
+      <image:loc>${escapeHtml(loc)}</image:loc>
+      <image:title>${escapeHtml(post.title)}</image:title>
+    </image:image>`
+    ).join("\n");
+    const imageBlock = imageEntries ? `
+${imageEntries}` : "";
     urls.push(
       `  <url>
-    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>
+    <loc>${siteUrl}/posts/${encodeURIComponent(post.slug)}/</loc>${imageBlock}
     <lastmod>${mod}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
@@ -6387,14 +6409,15 @@ function renderBlogSitemap(posts, authors, siteUrl) {
     );
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 ${urls.join("\n")}
 </urlset>`;
 }
 function renderBlogImageSitemap(posts, siteUrl) {
   const urls = [];
   for (const post of posts) {
-    const images = collectPostImageUrls(post, siteUrl);
+    const images = collectPostImageUrlsForSitemap(post, siteUrl);
     if (!images.length)
       continue;
     const pageUrl = `${siteUrl}/posts/${encodeURIComponent(post.slug)}/`;

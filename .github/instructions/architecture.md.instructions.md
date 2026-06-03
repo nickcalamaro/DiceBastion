@@ -291,6 +291,17 @@ Files in Bunny Storage are served publicly via the linked Pull Zone CDN:
 
 DiceBastion also has an R2 public bucket at `https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev` used for event/product images uploaded via the Cloudflare worker.
 
+### 3.4 Blog static HTML (full CDN sync)
+
+Blog posts at `dicebastion.com/posts/*` are pre-rendered HTML in Storage (`blog/posts/...`), proxied by the memberships Worker (`BUNNY_CDN_URL`).
+
+- **Source:** Bunny libSQL (`blog_posts`, `blog_authors`) via `bgg-bunny/blog-edge-script.ts`.
+- **Sync:** `syncPublishedBlogToCdn()` — **full rebuild** of every published post, tag page, author page, index, and both sitemaps on each run (no incremental sync).
+- **Triggers:** publish/edit/unpublish, author save/delete, admin **Rebuild CDN** (`POST /admin/blog/sync-cdn`).
+- **Images:** `blog/images/...` uploaded separately; not part of full sync.
+
+See **`docs/blog-cdn-sync.md`** for step-by-step behavior, scaling notes, and sitemap fallback.
+
 ---
 
 ## 4. Existing Services Inventory
@@ -303,6 +314,7 @@ DiceBastion also has an R2 public bucket at `https://pub-631ca6f207ca4661ac9cb2b
 | Bookings API | `bgg-bunny/bookings-edge-script.ts` | 63643 | Bunny DB | Table booking system with payment integration |
 | Email Service | `bgg-bunny/emails-edge-script.ts` | 63650 | None | MailerSend relay + public `/support` form |
 | Legacy BGG | `bgg-bunny/edge-script.js` | (legacy) | None | Serves cached JSON from Bunny Storage |
+| Blog API | `bgg-bunny/blog-edge-script.ts` | (blog script on Bunny) | Bunny DB | Admin CRUD + full CDN publish of `/posts/*` HTML |
 
 ### 4.2 Cloudflare Workers (to be migrated)
 
