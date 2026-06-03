@@ -5996,29 +5996,46 @@ app.get('/posts/sitemap-images.xml', async c => {
   return new Response(EMPTY_IMAGE_SITEMAP_XML, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
 })
 
-/** Blog URL sitemap — CDN snapshot with normalized XML headers (Bunny serves text/xml by default). */
+/**
+ * Blog URL sitemap — blog API first (fresh DB + image tags), then CDN snapshot.
+ * Mirrors /posts/sitemap-images.xml fetch strategy (image sitemap was CDN+API; this was CDN-only).
+ */
 app.get('/posts/sitemap.xml', async c => {
   const cdnBase = String(c.env.BUNNY_CDN_URL || 'https://dicebastion.b-cdn.net').replace(/\/+$/, '')
+  const blogApi = String(c.env.BLOG_API_URL || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '')
+  const emptyUrlset =
+    '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"></urlset>'
+
+  async function serveXmlBody(body) {
+    if (!body || !body.trimStart().startsWith('<?xml')) return null
+    return new Response(body, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
+  }
+
   try {
-    const res = await fetch(`${cdnBase}/blog/posts/sitemap.xml`, {
+    const apiRes = await fetch(`${blogApi}/posts/sitemap.xml`, {
       headers: { Accept: 'application/xml, text/xml, */*', 'User-Agent': 'DiceBastion-sitemap/1' }
     })
-    const body = await res.text()
-    if (!res.ok || !body.trimStart().startsWith('<?xml')) {
-      console.error('[posts sitemap] CDN', res.status)
-      return new Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
-        status: 200,
-        headers: XML_SITEMAP_RESPONSE_HEADERS
-      })
-    }
-    return new Response(body, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
+    const apiBody = await apiRes.text()
+    const apiOk = await serveXmlBody(apiBody)
+    if (apiRes.ok && apiOk) return apiOk
+    console.error('[posts sitemap] blog API', apiRes.status, apiBody.slice(0, 120))
   } catch (err) {
-    console.error('[posts sitemap] error:', err)
-    return new Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
-      status: 200,
-      headers: XML_SITEMAP_RESPONSE_HEADERS
-    })
+    console.error('[posts sitemap] blog API error:', err)
   }
+
+  try {
+    const cdnRes = await fetch(`${cdnBase}/blog/posts/sitemap.xml`, {
+      headers: { Accept: 'application/xml, text/xml, */*', 'User-Agent': 'DiceBastion-sitemap/1' }
+    })
+    const cdnBody = await cdnRes.text()
+    const cdnOk = await serveXmlBody(cdnBody)
+    if (cdnRes.ok && cdnOk) return cdnOk
+    console.error('[posts sitemap] CDN', cdnRes.status)
+  } catch (err) {
+    console.error('[posts sitemap] CDN error:', err)
+  }
+
+  return new Response(emptyUrlset, { status: 200, headers: XML_SITEMAP_RESPONSE_HEADERS })
 })
 
 app.get('/events/sitemap-images.xml', async c => {

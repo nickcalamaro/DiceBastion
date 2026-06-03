@@ -115,7 +115,9 @@ If storage has no file (never synced or wrong slug), the user gets 404.
 
 Post images for sitemaps use **dicebastion.b-cdn.net** only (legacy `*.r2.dev` URLs are omitted — [Google requires extra domains to be verified](https://developers.google.com/search/docs/crawling-indexing/sitemaps/image-sitemaps) in Search Console).
 
-**Recommended GSC submit:** `posts/sitemap.xml` (includes `image:image` on each post URL after sync). The separate `posts/sitemap-images.xml` is optional; events use a separate file because generation is cheap inside the Worker.
+**GSC / Worker serving:** Both `/posts/sitemap.xml` and `/posts/sitemap-images.xml` are served by the memberships Worker with **`application/xml; charset=utf-8`**. The URL sitemap is fetched from the **blog API first** (live DB, includes `image:image` on posts), then CDN if the API fails. The image-only sitemap is **CDN first**, then blog API. Deploy blog `dist/blog.js` so the public `/posts/sitemap.xml` route exists.
+
+**Recommended GSC submit:** `posts/sitemap.xml` (primary; includes image tags on post URLs). `posts/sitemap-images.xml` is optional.
 
 ---
 
