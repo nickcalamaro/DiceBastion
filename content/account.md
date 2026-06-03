@@ -127,7 +127,18 @@ Go to Login
   <div id="payment-action-message" style="display: none; margin-top: 1rem; padding: 0.75rem; border-radius: 6px; font-size: 0.875rem;"></div>
 </div>
 </div></div>
-<div id="membership-inactive" style="display: none; text-align: center; padding: 2rem;">
+<div id="membership-inactive" style="display: none;">
+<div id="membership-inactive-expired" style="display: none; text-align: center; padding: 2rem;">
+<div style="font-size: 3rem; margin-bottom: 1rem;">⏳</div>
+<h3 style="margin-top: 0; margin-bottom: 0.5rem;">Membership Expired</h3>
+<p class="text-muted" style="margin-bottom: 1.5rem;">
+    Your <span id="expired-membership-plan"></span> expired on <strong id="expired-membership-date"></strong>.
+</p>
+<a href="/memberships" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
+    Renew Membership
+</a>
+</div>
+<div id="membership-inactive-new" style="display: none; text-align: center; padding: 2rem;">
 <div style="font-size: 3rem; margin-bottom: 1rem;">🎫</div>
 <h3 style="margin-top: 0; margin-bottom: 0.5rem;">No Active Membership</h3>
 <p class="text-muted" style="margin-bottom: 1.5rem;">
@@ -136,6 +147,7 @@ Go to Login
 <a href="/memberships" style="padding: 0.75rem 1.5rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; font-weight: 600; text-decoration: none; display: inline-block;">
     Become a Member
 </a>
+</div>
 </div>
 </div>
 
@@ -240,6 +252,27 @@ const loadingState = document.getElementById('loading-state');
 const notLoggedInState = document.getElementById('not-logged-in-state');
 const accountContent = document.getElementById('account-content');
 
+const MEMBERSHIP_PLAN_NAMES = {
+monthly: 'Monthly Membership',
+quarterly: 'Quarterly Membership',
+annual: 'Annual Membership'
+};
+
+function getMostRecentExpiredMembership(history) {
+if (!Array.isArray(history)) return null;
+const expired = history.filter(m => m.status === 'expired' && m.end_date);
+if (!expired.length) return null;
+return expired.sort((a, b) => new Date(b.end_date) - new Date(a.end_date))[0];
+}
+
+function formatMembershipDate(isoDate) {
+return new Date(isoDate).toLocaleDateString('en-GB', {
+year: 'numeric',
+month: 'long',
+day: 'numeric'
+});
+}
+
 async function loadAccountData() {
 const sessionToken = utils.session.get();
 
@@ -316,11 +349,6 @@ membershipActiveEl.style.display = 'block';
 membershipInactiveEl.style.display = 'none';
 
 const isFreeTrial = data.membership.is_free_trial === 1;
-const planNames = {
-monthly: 'Monthly Membership',
-quarterly: 'Quarterly Membership',
-annual: 'Annual Membership'
-};
 
 const membershipPlanEl = document.getElementById('membership-plan');
 const membershipSubtitleEl = membershipActiveEl.querySelector('.text-muted');
@@ -328,9 +356,9 @@ const validUntilLabel = membershipActiveEl.querySelector('.card-label');
 if (membershipPlanEl) {
 if (isFreeTrial) {
     membershipPlanEl.textContent = 'Free Trial';
-    if (membershipSubtitleEl) membershipSubtitleEl.textContent = `${planNames[data.membership.plan] || data.membership.plan} — Trial`;
+    if (membershipSubtitleEl) membershipSubtitleEl.textContent = `${MEMBERSHIP_PLAN_NAMES[data.membership.plan] || data.membership.plan} — Trial`;
 } else {
-    membershipPlanEl.textContent = planNames[data.membership.plan] || data.membership.plan;
+    membershipPlanEl.textContent = MEMBERSHIP_PLAN_NAMES[data.membership.plan] || data.membership.plan;
     if (membershipSubtitleEl) membershipSubtitleEl.textContent = 'Active Member';
 }
 }
@@ -438,6 +466,26 @@ if (data.membership.renewal_attempts > 0 && data.membership.renewal_failed_at) {
 } else if (membershipActiveEl && membershipInactiveEl) {
 membershipActiveEl.style.display = 'none';
 membershipInactiveEl.style.display = 'block';
+
+const expiredSection = document.getElementById('membership-inactive-expired');
+const newSection = document.getElementById('membership-inactive-new');
+const expiredMembership = getMostRecentExpiredMembership(data.memberships_history);
+
+if (expiredMembership && expiredSection && newSection) {
+expiredSection.style.display = 'block';
+newSection.style.display = 'none';
+const planEl = document.getElementById('expired-membership-plan');
+const dateEl = document.getElementById('expired-membership-date');
+if (planEl) {
+    planEl.textContent = MEMBERSHIP_PLAN_NAMES[expiredMembership.plan] || expiredMembership.plan;
+}
+if (dateEl) {
+    dateEl.textContent = formatMembershipDate(expiredMembership.end_date);
+}
+} else if (expiredSection && newSection) {
+expiredSection.style.display = 'none';
+newSection.style.display = 'block';
+}
 
 // Hide auto-renewal controls if no active membership
 const autoRenewalControls = document.getElementById('auto-renewal-controls');
