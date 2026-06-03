@@ -43,6 +43,52 @@ function jsonResponse(data: any, status = 200): Response {
   });
 }
 
+/** Normalize HH:MM or HH:MM:SS to HH:MM for consistent comparison */
+function normalizeTime(time: string): string {
+  return time.slice(0, 5);
+}
+
+/** Midnight (00:00) as a block end time means end-of-day, not start-of-day */
+function blockEndForCompare(endTime: string): string {
+  const normalized = normalizeTime(endTime);
+  return normalized === "00:00" ? "24:00" : normalized;
+}
+
+/** Return true if a booking slot overlaps a time block */
+function slotOverlapsBlock(
+  slotStart: string,
+  slotEnd: string,
+  blockStart: string,
+  blockEnd: string
+): boolean {
+  const sStart = normalizeTime(slotStart);
+  const sEnd = normalizeTime(slotEnd);
+  const bStart = normalizeTime(blockStart);
+  const bEnd = blockEndForCompare(blockEnd);
+  return bStart < sEnd && bEnd > sStart;
+}
+
+/** Check whether a proposed booking overlaps any block on the given date */
+async function isBookingBlocked(
+  bookingDate: string,
+  startTime: string,
+  endTime: string
+): Promise<boolean> {
+  const blocksResult = await client.execute({
+    sql: `SELECT start_time, end_time FROM booking_blocks WHERE block_date = ?`,
+    args: [bookingDate],
+  });
+
+  return blocksResult.rows.some((block) =>
+    slotOverlapsBlock(
+      startTime,
+      endTime,
+      String(block.start_time),
+      String(block.end_time)
+    )
+  );
+}
+
 /**
  * Replace template placeholders with actual values
  */
@@ -421,20 +467,24 @@ async function getAvailableSlots(date: string, tableTypeId: number) {
     
     console.log('Generated time slots:', timeSlots);
 
+    const blocksResult = await client.execute({
+      sql: `SELECT start_time, end_time FROM booking_blocks WHERE block_date = ?`,
+      args: [date],
+    });
+    const dayBlocks = blocksResult.rows;
+
     // Count non-cancelled bookings for each slot across ALL table types
     // max_bookings applies to total simultaneous bookings, not per table type
     const slotsWithAvailability = await Promise.all(
       timeSlots.map(async (slot) => {
-        // Check if this slot is blocked by a time block
-        const blockCheck = await client.execute({
-          sql: `SELECT COUNT(*) as count FROM booking_blocks
-                WHERE block_date = ?
-                AND start_time < ?
-                AND end_time > ?`,
-          args: [date, slot.end, slot.start]
-        });
-        
-        const isBlocked = Number(blockCheck.rows[0]?.count || 0) > 0;
+        const isBlocked = dayBlocks.some((block) =>
+          slotOverlapsBlock(
+            slot.start,
+            slot.end,
+            String(block.start_time),
+            String(block.end_time)
+          )
+        );
         
         // If blocked, mark as unavailable with 0 spots
         if (isBlocked) {
@@ -571,6 +621,13 @@ async function createBooking(request: Request) {
       return jsonResponse({ 
         error: "Time slot fully booked",
         message: `This time slot has reached the maximum of ${maxBookings} simultaneous bookings.`
+      }, 409);
+    }
+
+    if (await isBookingBlocked(booking_date, start_time, end_time)) {
+      return jsonResponse({
+        error: "Time slot blocked",
+        message: "This time slot is not available for booking.",
       }, 409);
     }
 
@@ -951,8 +1008,11 @@ async function createTimeBlock(request: Request) {
       return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
     }
 
-    // Validate time formats
-    if (!start_time.match(/^\d{2}:\d{2}$/) || !end_time.match(/^\d{2}:\d{2}$/)) {
+    const normalizedStart = normalizeTime(start_time);
+    const normalizedEnd = normalizeTime(end_time);
+
+    // Validate time formats (accept HH:MM or HH:MM:SS from browser inputs)
+    if (!normalizedStart.match(/^\d{2}:\d{2}$/) || !normalizedEnd.match(/^\d{2}:\d{2}$/)) {
       return jsonResponse({ error: "Invalid time format. Use HH:MM" }, 400);
     }
 
@@ -963,7 +1023,7 @@ async function createTimeBlock(request: Request) {
       sql: `INSERT INTO booking_blocks 
             (block_date, start_time, end_time, reason, created_at, created_by)
             VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [block_date, start_time, end_time, reason || null, now, created_by || null],
+      args: [block_date, normalizedStart, normalizedEnd, reason || null, now, created_by || null],
     });
 
     return jsonResponse({ 
