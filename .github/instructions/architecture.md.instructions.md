@@ -523,7 +523,7 @@ Bunny DB tables (already on bunny.net):
 - `board_games` — synced from BoardGameGeek
 - `bookings` — table reservations
 - `booking_table_types` — table type config with pricing
-- `booking_config` — slot duration, capacity, hours
+- `booking_config` — slot duration, capacity, hours, `day_hour_rules` (JSON per-weekday overrides, e.g. Tuesday/Thursday from 18:00)
 - `booking_blocks` — admin time blocks
 - `email_templates` — stored email templates with `template_key`
 

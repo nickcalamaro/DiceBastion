@@ -857,9 +857,42 @@ Loading memberships...
 
 <nav class="admin-jump-links" aria-label="Bookings sections">
 <span style="color: rgb(var(--color-neutral-500));">Jump to:</span>
+<a href="#bookings-schedule">Schedule settings</a>
 <a href="#bookings-upcoming">Upcoming</a>
 <a href="#bookings-calendar">Week view</a>
 </nav>
+
+<section id="admin-section-bookings-schedule" class="card card-compact admin-mb-2">
+<h3 class="admin-section-heading admin-mt-0">Schedule settings <a href="#bookings-schedule" class="admin-permalink" aria-label="Link to schedule settings">#</a></h3>
+<p class="admin-text-small admin-mb-1">Default opening hours apply every day. Add rules to restrict certain weekdays (for example Tuesday and Thursday from 6pm only).</p>
+<div id="booking-schedule-config-status" class="admin-text-small admin-mb-1">Loading schedule settings…</div>
+<form id="booking-schedule-config-form" class="form-container" style="display: none;">
+<div class="form-row">
+<div class="form-group">
+<label for="booking-start-hour" class="form-label">Default start hour</label>
+<input type="number" id="booking-start-hour" class="form-input" min="0" max="23" required>
+</div>
+<div class="form-group">
+<label for="booking-end-hour" class="form-label">Default end hour</label>
+<input type="number" id="booking-end-hour" class="form-input" min="1" max="24" required>
+</div>
+<div class="form-group">
+<label for="booking-slot-duration" class="form-label">Slot duration (hours)</label>
+<input type="number" id="booking-slot-duration" class="form-input" min="1" max="12" required>
+</div>
+<div class="form-group">
+<label for="booking-max-bookings" class="form-label">Max simultaneous bookings</label>
+<input type="number" id="booking-max-bookings" class="form-input" min="1" max="50" required>
+</div>
+</div>
+<h4 class="admin-section-heading" style="font-size: 1rem;">Day-specific hour rules</h4>
+<div id="booking-day-rules-list"></div>
+<button type="button" class="btn btn-secondary btn-sm admin-mb-1" onclick="addBookingDayHourRuleRow()">Add day rule</button>
+<div class="form-actions">
+<button type="submit" class="btn btn-primary">Save schedule settings</button>
+</div>
+</form>
+</section>
 
 <section id="admin-section-bookings-upcoming" class="card card-compact admin-mb-2">
 <span id="admin-section-bookings-blocks" class="admin-permalink" style="position:absolute;visibility:hidden;" aria-hidden="true"></span>
@@ -4498,7 +4531,135 @@ function changeWeek(direction) {
   loadCalendarWeek();
 }
 
+const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run';
+
+const BOOKING_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+let bookingDayRulesDraft = [];
+
+function addBookingDayHourRuleRow(rule) {
+  const list = document.getElementById('booking-day-rules-list');
+  if (!list) return;
+
+  const row = document.createElement('div');
+  row.className = 'card card-compact admin-mb-1 booking-day-rule-row';
+  const days = rule?.days || [];
+  const startHour = rule?.start_hour != null ? rule.start_hour : 18;
+  const endHour = rule?.end_hour != null ? rule.end_hour : '';
+
+  row.innerHTML = `
+    <div class="form-group">
+      <span class="form-label">Days</span>
+      <div class="admin-flex" style="flex-wrap: wrap; gap: 0.5rem 1rem;">
+        ${BOOKING_WEEKDAYS.map((day) => `
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem;">
+            <input type="checkbox" class="booking-day-rule-day" value="${day}" ${days.includes(day) ? 'checked' : ''}>
+            ${day.slice(0, 3)}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Earliest start hour (24h)</label>
+        <input type="number" class="form-input booking-day-rule-start" min="0" max="23" value="${startHour}" required>
+        <p class="admin-text-small admin-m-0">Use 18 for 6pm. Slots cannot start before this hour on the selected days.</p>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Latest end hour (optional)</label>
+        <input type="number" class="form-input booking-day-rule-end" min="1" max="24" placeholder="Use default" value="${endHour}">
+      </div>
+    </div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="this.closest('.booking-day-rule-row').remove()">Remove rule</button>
+  `;
+  list.appendChild(row);
+}
+
+function collectBookingDayHourRulesFromForm() {
+  const rows = document.querySelectorAll('.booking-day-rule-row');
+  const rules = [];
+  rows.forEach((row) => {
+    const days = Array.from(row.querySelectorAll('.booking-day-rule-day:checked')).map((el) => el.value);
+    if (!days.length) return;
+    const startRaw = row.querySelector('.booking-day-rule-start')?.value;
+    const endRaw = row.querySelector('.booking-day-rule-end')?.value;
+    const rule = { days };
+    if (startRaw !== '' && startRaw != null) rule.start_hour = parseInt(startRaw, 10);
+    if (endRaw !== '' && endRaw != null) rule.end_hour = parseInt(endRaw, 10);
+    rules.push(rule);
+  });
+  return rules;
+}
+
+async function loadBookingScheduleConfig() {
+  const statusEl = document.getElementById('booking-schedule-config-status');
+  const formEl = document.getElementById('booking-schedule-config-form');
+  const rulesList = document.getElementById('booking-day-rules-list');
+  if (!statusEl || !formEl) return;
+
+  statusEl.textContent = 'Loading schedule settings…';
+  formEl.style.display = 'none';
+
+  try {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/config`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to load config');
+
+    const config = data.config || {};
+    document.getElementById('booking-start-hour').value = config.start_hour ?? 10;
+    document.getElementById('booking-end-hour').value = config.end_hour ?? 22;
+    document.getElementById('booking-slot-duration').value = config.slot_duration_hours ?? 3;
+    document.getElementById('booking-max-bookings').value = config.max_bookings ?? 4;
+
+    if (rulesList) {
+      rulesList.innerHTML = '';
+      const rules = config.day_hour_rules || [];
+      if (rules.length) {
+        rules.forEach((rule) => addBookingDayHourRuleRow(rule));
+      }
+    }
+
+    statusEl.textContent = 'Changes apply to new availability checks immediately after saving.';
+    formEl.style.display = 'block';
+  } catch (err) {
+    console.error('Error loading booking schedule config:', err);
+    statusEl.textContent = 'Could not load schedule settings. Run migration 0006_booking_day_hour_rules.sql on Bunny DB, redeploy the bookings script, then refresh.';
+  }
+}
+
+async function saveBookingScheduleConfig(event) {
+  event.preventDefault();
+  const statusEl = document.getElementById('booking-schedule-config-status');
+  const payload = {
+    start_hour: parseInt(document.getElementById('booking-start-hour').value, 10),
+    end_hour: parseInt(document.getElementById('booking-end-hour').value, 10),
+    slot_duration_hours: parseInt(document.getElementById('booking-slot-duration').value, 10),
+    max_bookings: parseInt(document.getElementById('booking-max-bookings').value, 10),
+    day_hour_rules: collectBookingDayHourRulesFromForm()
+  };
+
+  try {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/config`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || data.error || 'Save failed');
+    }
+    if (statusEl) statusEl.textContent = 'Schedule settings saved.';
+    alert('Booking schedule settings saved.');
+  } catch (err) {
+    console.error('Error saving booking schedule config:', err);
+    alert('Failed to save schedule settings: ' + err.message);
+  }
+}
+
+document.getElementById('booking-schedule-config-form')?.addEventListener('submit', saveBookingScheduleConfig);
+
 function loadBookingsAndCalendar() {
+  loadBookingScheduleConfig();
   loadBookingsSchedule();
   loadCalendarWeek();
 }

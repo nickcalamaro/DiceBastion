@@ -56,6 +56,124 @@ function parseTimeToMinutes(time: string): number {
   return hours * 60 + (minutes || 0);
 }
 
+const VALID_WEEKDAYS = new Set([
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+]);
+
+type DayHourRule = {
+  days: string[];
+  start_hour?: number;
+  end_hour?: number;
+};
+
+type BookingScheduleConfig = {
+  maxBookings: number;
+  startHour: number;
+  endHour: number;
+  slotDuration: number;
+  dayHourRules: DayHourRule[];
+};
+
+function parseDayHourRules(raw: unknown): DayHourRule[] {
+  if (raw == null || raw === "") return [];
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      console.error("Invalid day_hour_rules JSON");
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const rules: DayHourRule[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as { days?: unknown; start_hour?: unknown; end_hour?: unknown };
+    const days = Array.isArray(record.days)
+      ? record.days.filter((d): d is string => typeof d === "string" && VALID_WEEKDAYS.has(d))
+      : [];
+    if (!days.length) continue;
+
+    const rule: DayHourRule = { days };
+    if (record.start_hour != null) {
+      const hour = Number(record.start_hour);
+      if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
+        rule.start_hour = hour;
+      }
+    }
+    if (record.end_hour != null) {
+      const hour = Number(record.end_hour);
+      if (Number.isInteger(hour) && hour >= 1 && hour <= 24) {
+        rule.end_hour = hour;
+      }
+    }
+    rules.push(rule);
+  }
+  return rules;
+}
+
+function getWeekdayName(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map((part) => parseInt(part, 10));
+  const noonUtc = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return noonUtc.toLocaleDateString("en-US", { weekday: "long", timeZone: BOOKING_TZ });
+}
+
+function getEffectiveHoursForDate(
+  dateStr: string,
+  globalStart: number,
+  globalEnd: number,
+  rules: DayHourRule[]
+): { startHour: number; endHour: number } {
+  const weekday = getWeekdayName(dateStr);
+  let startHour = globalStart;
+  let endHour = globalEnd;
+
+  for (const rule of rules) {
+    if (!rule.days.includes(weekday)) continue;
+    if (rule.start_hour != null) {
+      startHour = Math.max(startHour, rule.start_hour);
+    }
+    if (rule.end_hour != null) {
+      endHour = Math.min(endHour, rule.end_hour);
+    }
+  }
+
+  return { startHour, endHour };
+}
+
+function slotWithinEffectiveHours(
+  startTime: string,
+  endTime: string,
+  startHour: number,
+  endHour: number
+): boolean {
+  const startMinutes = parseTimeToMinutes(startTime);
+  const endMinutes = parseTimeToMinutes(endTime);
+  return startMinutes >= startHour * 60 && endMinutes <= endHour * 60;
+}
+
+async function loadBookingConfig(): Promise<BookingScheduleConfig> {
+  const configResult = await client.execute(
+    "SELECT max_bookings, start_hour, end_hour, slot_duration_hours, day_hour_rules FROM booking_config WHERE id = 1"
+  );
+  const config = configResult.rows[0] || {};
+  return {
+    maxBookings: Number(config.max_bookings || 4),
+    startHour: Number(config.start_hour || 10),
+    endHour: Number(config.end_hour || 22),
+    slotDuration: Number(config.slot_duration_hours || 3),
+    dayHourRules: parseDayHourRules(config.day_hour_rules),
+  };
+}
+
 async function checkActiveMembership(email: string): Promise<boolean> {
   const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
   try {
@@ -391,6 +509,16 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await deleteTimeBlock(blockId);
     }
 
+    // GET /api/bookings/config - Booking schedule settings (admin)
+    if (path === "/api/bookings/config" && request.method === "GET") {
+      return await getBookingConfig();
+    }
+
+    // PATCH /api/bookings/config - Update booking schedule settings (admin)
+    if (path === "/api/bookings/config" && request.method === "PATCH") {
+      return await updateBookingConfig(request);
+    }
+
     // Default 404
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
@@ -473,25 +601,29 @@ async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: 
       });
     }
 
-    // Get config from booking_config table
-    const configResult = await client.execute(
-      "SELECT max_bookings, start_hour, end_hour, slot_duration_hours FROM booking_config WHERE id = 1"
+    const schedule = await loadBookingConfig();
+    const { startHour, endHour } = getEffectiveHoursForDate(
+      date,
+      schedule.startHour,
+      schedule.endHour,
+      schedule.dayHourRules
     );
-    
-    if (configResult.rows.length === 0) {
-      console.error("No booking config found, using defaults");
-      // Use defaults if config not found
+    const maxBookings = schedule.maxBookings;
+    const slotDuration = schedule.slotDuration;
+
+    console.log("Slot config:", { date, weekday: getWeekdayName(date), maxBookings, startHour, endHour, slotDuration });
+
+    if (startHour >= endHour || startHour + slotDuration > endHour) {
+      return jsonResponse({
+        date,
+        table_type_id: tableTypeId,
+        max_bookings: maxBookings,
+        slots: [],
+        message: "No bookable hours on this day with the current schedule rules.",
+      });
     }
-    
-    const config = configResult.rows[0] || {};
-    const maxBookings = Number(config.max_bookings || 4);
-    const startHour = Number(config.start_hour || 10);
-    const endHour = Number(config.end_hour || 22);
-    const slotDuration = Number(config.slot_duration_hours || 3);
 
-    console.log('Slot config:', { maxBookings, startHour, endHour, slotDuration });
-
-    // Generate time slots based on config
+    // Generate time slots based on config (including day-specific hour rules)
     const timeSlots: Array<{start: string, end: string}> = [];
     for (let hour = startHour; hour + slotDuration <= endHour; hour += slotDuration) {
       const startTime = `${hour.toString().padStart(2, '0')}:00`;
@@ -642,11 +774,22 @@ async function createBooking(request: Request) {
       }, 403);
     }
 
-    // Check max_bookings limit across ALL table types for this time slot
-    const configResult = await client.execute(
-      "SELECT max_bookings FROM booking_config WHERE id = 1"
+    const schedule = await loadBookingConfig();
+    const { startHour, endHour } = getEffectiveHoursForDate(
+      booking_date,
+      schedule.startHour,
+      schedule.endHour,
+      schedule.dayHourRules
     );
-    const maxBookings = Number(configResult.rows[0]?.max_bookings || 4);
+    if (!slotWithinEffectiveHours(start_time, end_time, startHour, endHour)) {
+      const weekday = getWeekdayName(booking_date);
+      return jsonResponse({
+        error: "outside_booking_hours",
+        message: `Bookings on ${weekday} are only available between ${String(startHour).padStart(2, "0")}:00 and ${String(endHour).padStart(2, "0")}:00.`,
+      }, 422);
+    }
+
+    const maxBookings = schedule.maxBookings;
 
     const bookingCountResult = await client.execute({
       sql: `SELECT COUNT(*) as count FROM bookings 
@@ -1000,6 +1143,97 @@ async function cancelBooking(bookingId: number) {
   } catch (error) {
     console.error("Error cancelling booking:", error);
     return jsonResponse({ error: "Failed to cancel booking" }, 500);
+  }
+}
+
+/**
+ * Get booking schedule config (global hours + per-day rules)
+ */
+async function getBookingConfig() {
+  try {
+    const schedule = await loadBookingConfig();
+    return jsonResponse({
+      config: {
+        max_bookings: schedule.maxBookings,
+        start_hour: schedule.startHour,
+        end_hour: schedule.endHour,
+        slot_duration_hours: schedule.slotDuration,
+        day_hour_rules: schedule.dayHourRules,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching booking config:", error);
+    return jsonResponse({ error: "Failed to fetch booking config" }, 500);
+  }
+}
+
+/**
+ * Update booking schedule config
+ */
+async function updateBookingConfig(request: Request) {
+  try {
+    const data = await request.json();
+    const current = await loadBookingConfig();
+
+    const maxBookings =
+      data.max_bookings != null ? Number(data.max_bookings) : current.maxBookings;
+    const startHour = data.start_hour != null ? Number(data.start_hour) : current.startHour;
+    const endHour = data.end_hour != null ? Number(data.end_hour) : current.endHour;
+    const slotDuration =
+      data.slot_duration_hours != null
+        ? Number(data.slot_duration_hours)
+        : current.slotDuration;
+    const dayHourRules =
+      data.day_hour_rules != null
+        ? parseDayHourRules(data.day_hour_rules)
+        : current.dayHourRules;
+
+    if (
+      !Number.isInteger(maxBookings) ||
+      maxBookings < 1 ||
+      !Number.isInteger(startHour) ||
+      startHour < 0 ||
+      startHour > 23 ||
+      !Number.isInteger(endHour) ||
+      endHour < 1 ||
+      endHour > 24 ||
+      !Number.isInteger(slotDuration) ||
+      slotDuration < 1 ||
+      slotDuration > 12 ||
+      startHour + slotDuration > endHour
+    ) {
+      return jsonResponse(
+        {
+          error: "invalid_config",
+          message:
+            "Check max_bookings, start_hour, end_hour, and slot_duration_hours (start + duration must fit within end).",
+        },
+        400
+      );
+    }
+
+    const dayHourRulesJson = JSON.stringify(dayHourRules);
+
+    await client.execute({
+      sql: `UPDATE booking_config
+            SET max_bookings = ?, start_hour = ?, end_hour = ?, slot_duration_hours = ?, day_hour_rules = ?
+            WHERE id = 1`,
+      args: [maxBookings, startHour, endHour, slotDuration, dayHourRulesJson],
+    });
+
+    return jsonResponse({
+      success: true,
+      config: {
+        max_bookings: maxBookings,
+        start_hour: startHour,
+        end_hour: endHour,
+        slot_duration_hours: slotDuration,
+        day_hour_rules: dayHourRules,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating booking config:", error);
+    return jsonResponse({ error: "Failed to update booking config" }, 500);
   }
 }
 
