@@ -4961,25 +4961,29 @@ function figureBackdropStyleAttr(imgSrc) {
   const safe = imgSrc.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   return ` style="--figure-bg-image: url('${safe}')"`;
 }
-function applyFigureBackdropVars(html) {
+function normalizeInlineFigures(html) {
   if (!html || !html.includes("blog-inline-figure"))
     return html;
   return html.replace(
     /<figure\b([^>]*class="[^"]*blog-inline-figure[^"]*"[^>]*)>([\s\S]*?)<\/figure>/gi,
-    (block, attrs, inner) => {
-      if (attrs.includes("--figure-bg-image"))
-        return block;
-      const src = extractImgSrcFromHtml(inner);
-      if (!src)
-        return block;
-      if (/\bstyle=/i.test(attrs)) {
-        const merged = attrs.replace(
-          /\bstyle=(["'])([\s\S]*?)\1/i,
-          (_m, quote, styles) => ` style=${quote}${styles}; --figure-bg-image: url('${src.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}')${quote}`
-        );
-        return `<figure${merged}>${inner}</figure>`;
+    (_block, attrs, inner) => {
+      const figcaptionMatch = inner.match(/<figcaption\b[^>]*>[\s\S]*?<\/figcaption>/i);
+      const caption = figcaptionMatch ? figcaptionMatch[0].replace(/\sstyle=(["'])[\s\S]*?\1/gi, "") : "";
+      let mediaPart = caption ? inner.replace(figcaptionMatch[0], "").trim() : inner;
+      if (mediaPart.includes("blog-inline-figure-media")) {
+        const src2 = extractImgSrcFromHtml(mediaPart);
+        if (src2 && !mediaPart.includes("--figure-bg-image")) {
+          mediaPart = mediaPart.replace(
+            /<div\b([^>]*class="[^"]*blog-inline-figure-media[^"]*"[^>]*)>/i,
+            (_m, divAttrs) => `<div${divAttrs}${figureBackdropStyleAttr(src2)}>`
+          );
+        }
+        const cleanFigureAttrs2 = attrs.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "");
+        return `<figure${cleanFigureAttrs2}>${mediaPart}${caption}</figure>`;
       }
-      return `<figure${attrs}${figureBackdropStyleAttr(src)}>${inner}</figure>`;
+      const src = extractImgSrcFromHtml(mediaPart);
+      const cleanFigureAttrs = attrs.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "");
+      return `<figure${cleanFigureAttrs}><div class="blog-inline-figure-media"${figureBackdropStyleAttr(src)}>${mediaPart}</div>${caption}</figure>`;
     }
   );
 }
@@ -4991,7 +4995,7 @@ function enhanceBlogBodyImages(html, postTitle = "") {
   let work = html.replace(
     /<figure\b[^>]*class="[^"]*blog-inline-figure[^"]*"[^>]*>[\s\S]*?<\/figure>/gi,
     (block) => {
-      figures.push(applyFigureBackdropVars(block));
+      figures.push(normalizeInlineFigures(block));
       return `\0BLOGFIG${figures.length - 1}\0`;
     }
   );
@@ -5009,7 +5013,7 @@ function enhanceBlogBodyImages(html, postTitle = "") {
     }
     const src = extractImgSrcFromHtml(`<img${imgAttrs}>`);
     const imgTag = `<img${imgAttrs} loading="lazy" decoding="async">`;
-    return `<figure class="blog-inline-figure"${figureBackdropStyleAttr(src)}>${imgTag}<figcaption>${escapeHtml(alt)}</figcaption></figure>`;
+    return `<figure class="blog-inline-figure"><div class="blog-inline-figure-media"${figureBackdropStyleAttr(src)}>${imgTag}</div><figcaption>${escapeHtml(alt)}</figcaption></figure>`;
   });
   return work.replace(/\x00BLOGFIG(\d+)\x00/g, (_m, index) => figures[Number(index)] || "");
 }
@@ -5028,8 +5032,8 @@ function stripConflictingInlineStyles(html) {
   return html.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, stripStyleAttr);
 }
 function prepareBlogBodyHtml(html, postTitle = "") {
-  return stripConflictingInlineStyles(
-    applyFigureBackdropVars(
+  return normalizeInlineFigures(
+    stripConflictingInlineStyles(
       enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(html), postTitle)
     )
   );
@@ -5207,10 +5211,10 @@ html.dark .blog-inline-figure img {
   box-shadow: none;
 }
 html.dark .event-card-image::before {
-  filter: blur(50px) saturate(1.1) brightness(0.6);
+  filter: blur(64px) saturate(1.15) brightness(0.72);
 }
-html.dark .blog-inline-figure::before {
-  filter: blur(44px) saturate(1.1) brightness(0.6);
+html.dark .blog-inline-figure-media::before {
+  filter: blur(56px) saturate(1.15) brightness(0.72);
 }
 html.dark .blog-article-body :where(p, li, span, div, blockquote, td, th, em, strong, b, i, u, ol, ul) {
   color: rgb(var(--color-neutral-700)) !important;
@@ -5579,13 +5583,13 @@ main.page-container {
 .event-card-image::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background-color: rgb(var(--color-neutral-100));
+  inset: -35%;
   background-image: var(--card-bg-image);
   background-size: cover;
   background-position: center;
-  filter: blur(50px) saturate(1.12) brightness(0.92);
-  transform: scale(1.25);
+  background-repeat: no-repeat;
+  filter: blur(64px) saturate(1.2);
+  transform: scale(1.6);
   z-index: 0;
 }
 .event-card-image img {
@@ -5921,34 +5925,36 @@ main.page-container {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 .blog-article-body .blog-inline-figure {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  display: block;
   width: fit-content;
   max-width: 100%;
   margin: 2rem auto;
   padding: 0;
-  border-radius: 12px;
-  overflow: hidden;
-  background: transparent;
+  background: none;
   border: none;
   outline: none;
   box-shadow: none;
 }
-.blog-article-body .blog-inline-figure::before {
+.blog-article-body .blog-inline-figure-media {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: 12px;
+  line-height: 0;
+}
+.blog-article-body .blog-inline-figure-media::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background-color: rgb(var(--color-neutral-100));
+  inset: -30%;
   background-image: var(--figure-bg-image);
   background-size: cover;
   background-position: center;
-  filter: blur(44px) saturate(1.12) brightness(0.92);
-  transform: scale(1.2);
+  background-repeat: no-repeat;
+  filter: blur(56px) saturate(1.2);
+  transform: scale(1.5);
   z-index: 0;
-  border-radius: inherit;
 }
+.blog-article-body .blog-inline-figure-media img,
 .blog-article-body .blog-inline-figure img {
   position: relative;
   z-index: 1;
@@ -5964,7 +5970,8 @@ main.page-container {
   background: transparent;
 }
 @media (min-width: 769px) {
-  .blog-article-body .blog-inline-figure {
+  .blog-article-body .blog-inline-figure,
+  .blog-article-body .blog-inline-figure-media {
     max-width: 82%;
   }
   .blog-article-body img:not(.blog-inline-figure img) {
@@ -5975,19 +5982,22 @@ main.page-container {
   }
 }
 .blog-article-body .blog-inline-figure figcaption {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  padding: 0.65rem 0.85rem 0.75rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
   font-size: 0.9rem;
   font-style: italic;
   color: rgb(var(--color-neutral-500));
   text-align: center;
   line-height: 1.5;
-  background: transparent;
+  background: none !important;
+  background-image: none !important;
   border: none;
   outline: none;
   box-shadow: none;
+}
+.blog-article-body .blog-inline-figure figcaption * {
+  background: none !important;
+  background-image: none !important;
 }
 .blog-article-body p:has(> img:only-child) {
   margin: 2rem 0;
