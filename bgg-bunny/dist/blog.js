@@ -4951,6 +4951,38 @@ function stripEmbeddedAuthorBlocks(html) {
   out = out.replace(/<p[^>]*>\s*(?:<(?:strong|b)>)?\s*Author:?\s*(?:<\/(?:strong|b)>)?\s*[^<]*<\/p>/gi, "");
   return out.trim();
 }
+function extractImgSrcFromHtml(fragment) {
+  const match = fragment.match(/\bsrc=(["'])([^"']+)\1/i);
+  return match ? match[2] : "";
+}
+function figureBackdropStyleAttr(imgSrc) {
+  if (!imgSrc)
+    return "";
+  const safe = imgSrc.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return ` style="--figure-bg-image: url('${safe}')"`;
+}
+function applyFigureBackdropVars(html) {
+  if (!html || !html.includes("blog-inline-figure"))
+    return html;
+  return html.replace(
+    /<figure\b([^>]*class="[^"]*blog-inline-figure[^"]*"[^>]*)>([\s\S]*?)<\/figure>/gi,
+    (block, attrs, inner) => {
+      if (attrs.includes("--figure-bg-image"))
+        return block;
+      const src = extractImgSrcFromHtml(inner);
+      if (!src)
+        return block;
+      if (/\bstyle=/i.test(attrs)) {
+        const merged = attrs.replace(
+          /\bstyle=(["'])([\s\S]*?)\1/i,
+          (_m, quote, styles) => ` style=${quote}${styles}; --figure-bg-image: url('${src.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}')${quote}`
+        );
+        return `<figure${merged}>${inner}</figure>`;
+      }
+      return `<figure${attrs}${figureBackdropStyleAttr(src)}>${inner}</figure>`;
+    }
+  );
+}
 function enhanceBlogBodyImages(html, postTitle = "") {
   if (!html || !html.includes("<img"))
     return html;
@@ -4959,7 +4991,7 @@ function enhanceBlogBodyImages(html, postTitle = "") {
   let work = html.replace(
     /<figure\b[^>]*class="[^"]*blog-inline-figure[^"]*"[^>]*>[\s\S]*?<\/figure>/gi,
     (block) => {
-      figures.push(block);
+      figures.push(applyFigureBackdropVars(block));
       return `\0BLOGFIG${figures.length - 1}\0`;
     }
   );
@@ -4975,8 +5007,9 @@ function enhanceBlogBodyImages(html, postTitle = "") {
         imgAttrs = `${imgAttrs} alt="${escapeHtml(alt)}"`;
       }
     }
+    const src = extractImgSrcFromHtml(`<img${imgAttrs}>`);
     const imgTag = `<img${imgAttrs} loading="lazy" decoding="async">`;
-    return `<figure class="blog-inline-figure">${imgTag}<figcaption>${escapeHtml(alt)}</figcaption></figure>`;
+    return `<figure class="blog-inline-figure"${figureBackdropStyleAttr(src)}>${imgTag}<figcaption>${escapeHtml(alt)}</figcaption></figure>`;
   });
   return work.replace(/\x00BLOGFIG(\d+)\x00/g, (_m, index) => figures[Number(index)] || "");
 }
@@ -4996,7 +5029,9 @@ function stripConflictingInlineStyles(html) {
 }
 function prepareBlogBodyHtml(html, postTitle = "") {
   return stripConflictingInlineStyles(
-    enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(html), postTitle)
+    applyFigureBackdropVars(
+      enhanceBlogBodyImages(stripEmbeddedAuthorBlocks(html), postTitle)
+    )
   );
 }
 function buildTaxonomyIndex(posts, authors) {
@@ -5167,12 +5202,15 @@ html.dark .site-nav-dropdown-menu {
 html.dark .blog-author-profile-avatar {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
-html.dark .blog-article-body .blog-inline-figure {
-  background: rgb(var(--color-neutral-100));
-}
 html.dark .blog-article-body img,
 html.dark .blog-inline-figure img {
   box-shadow: none;
+}
+html.dark .event-card-image::before {
+  filter: blur(50px) saturate(1.1) brightness(0.6);
+}
+html.dark .blog-inline-figure::before {
+  filter: blur(44px) saturate(1.1) brightness(0.6);
 }
 html.dark .blog-article-body :where(p, li, span, div, blockquote, td, th, em, strong, b, i, u, ol, ul) {
   color: rgb(var(--color-neutral-700)) !important;
@@ -5536,7 +5574,19 @@ main.page-container {
   position: relative;
   min-height: 180px;
   overflow: hidden;
-  background: rgb(var(--color-neutral-100));
+  background: transparent;
+}
+.event-card-image::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: rgb(var(--color-neutral-100));
+  background-image: var(--card-bg-image);
+  background-size: cover;
+  background-position: center;
+  filter: blur(50px) saturate(1.12) brightness(0.92);
+  transform: scale(1.25);
+  z-index: 0;
 }
 .event-card-image img {
   position: absolute;
@@ -5545,9 +5595,7 @@ main.page-container {
   height: 100%;
   object-fit: contain;
   object-position: center;
-}
-html.dark .event-card-image {
-  background: rgb(var(--color-neutral-100));
+  z-index: 1;
 }
 .event-content { flex: 1; padding: 1.5rem 1.25rem 0; display: flex; flex-direction: column; gap: 1.25rem; }
 .event-title {
@@ -5873,20 +5921,47 @@ html.dark .event-card-image {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 .blog-article-body .blog-inline-figure {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: fit-content;
+  max-width: 100%;
   margin: 2rem auto;
   padding: 0;
-  max-width: 100%;
   border-radius: 12px;
   overflow: hidden;
-  background: rgb(var(--color-neutral-100));
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+.blog-article-body .blog-inline-figure::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: rgb(var(--color-neutral-100));
+  background-image: var(--figure-bg-image);
+  background-size: cover;
+  background-position: center;
+  filter: blur(44px) saturate(1.12) brightness(0.92);
+  transform: scale(1.2);
+  z-index: 0;
+  border-radius: inherit;
 }
 .blog-article-body .blog-inline-figure img {
+  position: relative;
+  z-index: 1;
   display: block;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
   margin: 0;
   border-radius: 0;
   box-shadow: none;
+  border: none;
+  outline: none;
+  background: transparent;
 }
 @media (min-width: 769px) {
   .blog-article-body .blog-inline-figure {
@@ -5900,12 +5975,19 @@ html.dark .event-card-image {
   }
 }
 .blog-article-body .blog-inline-figure figcaption {
-  margin-top: 0.5rem;
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  padding: 0.65rem 0.85rem 0.75rem;
   font-size: 0.9rem;
   font-style: italic;
   color: rgb(var(--color-neutral-500));
   text-align: center;
   line-height: 1.5;
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
 }
 .blog-article-body p:has(> img:only-child) {
   margin: 2rem 0;
