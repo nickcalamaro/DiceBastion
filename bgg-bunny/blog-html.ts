@@ -338,7 +338,7 @@ function enhanceBlogBodyImages(html: string, postTitle = ""): string {
 /** Quill/pasted HTML often sets inline color/background that breaks dark mode. */
 function stripConflictingInlineStyles(html: string): string {
   if (!html || !html.includes("style=")) return html;
-  return html.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, (_match, quote: string, styles: string) => {
+  const stripStyleAttr = (_match: string, quote: string, styles: string) => {
     const cleaned = styles
       .split(";")
       .map((chunk) => chunk.trim())
@@ -349,7 +349,8 @@ function stripConflictingInlineStyles(html: string): string {
       })
       .join("; ");
     return cleaned ? ` style=${quote}${cleaned}${quote}` : "";
-  });
+  };
+  return html.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, stripStyleAttr);
 }
 
 function prepareBlogBodyHtml(html: string, postTitle = ""): string {
@@ -554,9 +555,12 @@ html.dark .site-nav-dropdown-menu {
 html.dark .blog-author-profile-avatar {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
+html.dark .blog-article-body .blog-inline-figure {
+  background: rgb(var(--color-neutral-100));
+}
 html.dark .blog-article-body img,
 html.dark .blog-inline-figure img {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 html.dark .blog-article-body :where(p, li, span, div, blockquote, td, th, em, strong, b, i, u, ol, ul) {
   color: rgb(var(--color-neutral-700)) !important;
@@ -906,7 +910,7 @@ main.page-container {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  min-height: 220px;
+  min-height: 180px;
   overflow: hidden;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
@@ -915,21 +919,12 @@ main.page-container {
   border-color: rgb(var(--color-neutral-400));
 }
 .event-card-image {
-  flex: 0 0 340px;
-  width: 340px;
+  flex: 0 0 280px;
+  width: 280px;
   position: relative;
-  min-height: 220px;
+  min-height: 180px;
+  overflow: hidden;
   background: rgb(var(--color-neutral-100));
-}
-.event-card-image::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--card-bg-image);
-  background-size: cover;
-  background-position: center;
-  filter: blur(60px) brightness(0.92);
-  transform: scale(1.15);
 }
 .event-card-image img {
   position: absolute;
@@ -938,7 +933,9 @@ main.page-container {
   height: 100%;
   object-fit: contain;
   object-position: center;
-  z-index: 1;
+}
+html.dark .event-card-image {
+  background: rgb(var(--color-neutral-100));
 }
 .event-content { flex: 1; padding: 1.5rem 1.25rem 0; display: flex; flex-direction: column; gap: 1.25rem; }
 .event-title {
@@ -1063,12 +1060,21 @@ main.page-container {
 }
 .blog-article { width: 100%; max-width: none; }
 .blog-hero-image {
+  display: block;
   width: 100%;
-  max-height: 420px;
+  max-width: 100%;
+  max-height: 320px;
   aspect-ratio: 885 / 300;
   object-fit: cover;
   border-radius: 12px;
-  margin-bottom: 1.25rem;
+  margin: 0 auto 1.25rem;
+}
+@media (min-width: 769px) {
+  .blog-hero-image {
+    width: 88%;
+    max-width: 720px;
+    max-height: 280px;
+  }
 }
 .blog-article-title {
   font-size: clamp(1.75rem, 5vw, 2.2rem);
@@ -1255,11 +1261,31 @@ main.page-container {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 .blog-article-body .blog-inline-figure {
-  margin: 2rem 0;
+  margin: 2rem auto;
   padding: 0;
+  max-width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgb(var(--color-neutral-100));
 }
 .blog-article-body .blog-inline-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
   margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+@media (min-width: 769px) {
+  .blog-article-body .blog-inline-figure {
+    max-width: 82%;
+  }
+  .blog-article-body img:not(.blog-inline-figure img) {
+    width: 88%;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 .blog-article-body .blog-inline-figure figcaption {
   margin-top: 0.5rem;
@@ -1327,7 +1353,7 @@ main.page-container {
     width: 100%;
     min-height: 0;
     aspect-ratio: 16 / 9;
-    max-height: 200px;
+    max-height: 180px;
   }
   .event-content { padding: 0.875rem 0.875rem 0; gap: 0.75rem; }
   .event-title { font-size: 1.15rem; line-height: 1.3; }

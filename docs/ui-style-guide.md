@@ -40,7 +40,7 @@ Shared horizontal card layout:
 
 - Grid: `.list-card-grid` inside `.list-card-scope`
 - Card link: `.event-card-link` > `.event-card`
-- Image: `.event-card-image` with `--card-bg-image` CSS variable for blurred backdrop
+- Image: `.event-card-image` — single neutral fill (`object-fit: contain`); no blurred backdrop layer on blog CDN pages
 - Content: `.event-content`, `.event-title`, `.event-description`
 - Footer band: `.event-meta` with `.event-date-label` / `.event-date-value` and `.event-location-label` / `.event-location-value`
 
