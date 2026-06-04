@@ -2353,11 +2353,42 @@ function flattenTransparentWithFill(src, rgb) {
   return c;
 }
 
+function resolveCropFillRgb(croppedCanvas, cropBgMode, cropBgPickedCol) {
+  if (cropBgMode === 'white') return { r: 255, g: 255, b: 255 };
+  if (cropBgMode === 'pick' && cropBgPickedCol) return hexToRgb(cropBgPickedCol);
+  return averageOpaqueRgb(croppedCanvas);
+}
+
+/**
+ * Export the artwork tightly at its own aspect ratio (scaled to fit within maxW×maxH), with no
+ * letterbox padding band. This is for images rendered with object-fit: contain + a CSS ::before
+ * blurred backdrop: the CSS is then the ONLY background. Baking any padding/fill here (solid or
+ * blurred) is what produced the "two backgrounds" stacked on one image. The flat fill only ever
+ * shows through genuine internal transparency in the source art (so JPEG doesn't composite on black).
+ */
+function exportTightSubjectJpeg(sourceCanvas, sx, sy, sw, sh, maxW, maxH, cropBgMode, cropBgPickedCol) {
+  const scale = Math.min(maxW / sw, maxH / sh);
+  const dw = Math.max(1, Math.round(sw * scale));
+  const dh = Math.max(1, Math.round(sh * scale));
+  const fillRgb = resolveCropFillRgb(sourceCanvas, cropBgMode, cropBgPickedCol);
+  const c = document.createElement('canvas');
+  c.width = dw;
+  c.height = dh;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = `rgb(${fillRgb.r},${fillRgb.g},${fillRgb.b})`;
+  ctx.fillRect(0, 0, dw, dh);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
+  return c.toDataURL('image/jpeg', 0.92);
+}
+
 /**
  * Compose the export over a single flat fill (no baked blurred backdrop). The blurred backdrop
  * is added exactly once, by the rendering CSS (.event-card-image::before / inline figure media).
  * Baking a second blurred layer here is what produced the "two backgrounds" (a darker solid plus a
- * lighter gradient) stacked on the same image.
+ * lighter gradient) stacked on the same image. Used only for 'fillHeight'/cover exports, which fill
+ * the frame edge-to-edge so the flat fill is not visible.
  */
 function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
   let fillRgb;
@@ -2626,16 +2657,17 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
         return;
       }
       const fitRect = getExportFitSourceRect(masterCropped);
-      const sized = containCenterOnCanvasRegion(
+      const dataUrl = exportTightSubjectJpeg(
         masterCropped,
         fitRect.sx,
         fitRect.sy,
         fitRect.sw,
         fitRect.sh,
         spec.w,
-        spec.h
+        spec.h,
+        cropBgMode,
+        cropBgPickedCol
       );
-      const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
       try {
         const url = await blogUploadImageToBunny(dataUrl, spec.filename);
         currentCropCallback(url);
@@ -2664,27 +2696,32 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       const batchId = Date.now();
       const bundle = {};
       for (const spec of exportSpecs) {
-        const sized =
-          spec.fit === 'contain'
-            ? containCenterOnCanvasRegion(
-                masterCropped,
-                fitRect.sx,
-                fitRect.sy,
-                fitRect.sw,
-                fitRect.sh,
-                spec.w,
-                spec.h
-              )
-            : fillHeightMinCenterOnCanvasRegion(
-                masterCropped,
-                fitRect.sx,
-                fitRect.sy,
-                fitRect.sw,
-                fitRect.sh,
-                spec.w,
-                spec.h
-              );
-        const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+        let dataUrl;
+        if (spec.fit === 'contain') {
+          // Tight artwork, no padding band — CSS ::before is the only background.
+          dataUrl = exportTightSubjectJpeg(
+            masterCropped,
+            fitRect.sx,
+            fitRect.sy,
+            fitRect.sw,
+            fitRect.sh,
+            spec.w,
+            spec.h,
+            cropBgMode,
+            cropBgPickedCol
+          );
+        } else {
+          const sized = fillHeightMinCenterOnCanvasRegion(
+            masterCropped,
+            fitRect.sx,
+            fitRect.sy,
+            fitRect.sw,
+            fitRect.sh,
+            spec.w,
+            spec.h
+          );
+          dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+        }
         try {
           const uploadUrl = await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
           bundle[spec.key] = uploadUrl;

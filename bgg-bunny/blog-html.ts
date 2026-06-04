@@ -1345,11 +1345,14 @@ main.page-container {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 .blog-article-body .blog-inline-figure {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   width: fit-content;
   max-width: 100%;
   margin: 2rem auto;
   padding: 0;
+  text-align: center;
   background: none;
   border: none;
   outline: none;
@@ -1358,6 +1361,7 @@ main.page-container {
 .blog-article-body .blog-inline-figure-media {
   position: relative;
   display: block;
+  max-width: 100%;
   overflow: hidden;
   border-radius: 12px;
   line-height: 0;
