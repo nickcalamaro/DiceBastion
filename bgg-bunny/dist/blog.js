@@ -4961,6 +4961,18 @@ function figureBackdropStyleAttr(imgSrc) {
   const safe = imgSrc.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   return ` style="--figure-bg-image: url('${safe}')"`;
 }
+function stripFigureAttrs(attrs) {
+  return attrs.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "").replace(/\sclass=(["'])([^"']*)\1/gi, (_m, quote, className) => {
+    const cleaned = className.split(/\s+/).filter((part) => part && !/^ql-align-/i.test(part)).join(" ");
+    return cleaned ? ` class=${quote}${cleaned}${quote}` : "";
+  });
+}
+function stripFigcaptionMarkup(figcaptionHtml) {
+  return figcaptionHtml.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "").replace(/\sclass=(["'])([^"']*)\1/gi, (_m, quote, className) => {
+    const cleaned = className.split(/\s+/).filter((part) => part && !/^ql-align-/i.test(part)).join(" ");
+    return cleaned ? ` class=${quote}${cleaned}${quote}` : "";
+  });
+}
 function normalizeInlineFigures(html) {
   if (!html || !html.includes("blog-inline-figure"))
     return html;
@@ -4968,7 +4980,7 @@ function normalizeInlineFigures(html) {
     /<figure\b([^>]*class="[^"]*blog-inline-figure[^"]*"[^>]*)>([\s\S]*?)<\/figure>/gi,
     (_block, attrs, inner) => {
       const figcaptionMatch = inner.match(/<figcaption\b[^>]*>[\s\S]*?<\/figcaption>/i);
-      const caption = figcaptionMatch ? figcaptionMatch[0].replace(/\sstyle=(["'])[\s\S]*?\1/gi, "") : "";
+      const caption = figcaptionMatch ? stripFigcaptionMarkup(figcaptionMatch[0]) : "";
       let mediaPart = caption ? inner.replace(figcaptionMatch[0], "").trim() : inner;
       if (mediaPart.includes("blog-inline-figure-media")) {
         const src2 = extractImgSrcFromHtml(mediaPart);
@@ -4978,11 +4990,11 @@ function normalizeInlineFigures(html) {
             (_m, divAttrs) => `<div${divAttrs}${figureBackdropStyleAttr(src2)}>`
           );
         }
-        const cleanFigureAttrs2 = attrs.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "");
+        const cleanFigureAttrs2 = stripFigureAttrs(attrs);
         return `<figure${cleanFigureAttrs2}>${mediaPart}${caption}</figure>`;
       }
       const src = extractImgSrcFromHtml(mediaPart);
-      const cleanFigureAttrs = attrs.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "");
+      const cleanFigureAttrs = stripFigureAttrs(attrs);
       return `<figure${cleanFigureAttrs}><div class="blog-inline-figure-media"${figureBackdropStyleAttr(src)}>${mediaPart}</div>${caption}</figure>`;
     }
   );
@@ -5982,12 +5994,14 @@ main.page-container {
   }
 }
 .blog-article-body .blog-inline-figure figcaption {
+  display: block;
+  width: 100%;
   margin: 0.5rem 0 0;
   padding: 0;
   font-size: 0.9rem;
   font-style: italic;
   color: rgb(var(--color-neutral-500));
-  text-align: center;
+  text-align: center !important;
   line-height: 1.5;
   background: none !important;
   background-image: none !important;
@@ -5995,7 +6009,10 @@ main.page-container {
   outline: none;
   box-shadow: none;
 }
-.blog-article-body .blog-inline-figure figcaption * {
+.blog-article-body .blog-inline-figure figcaption :is(p, span, div) {
+  margin: 0;
+  padding: 0;
+  text-align: center !important;
   background: none !important;
   background-image: none !important;
 }
@@ -6007,9 +6024,10 @@ main.page-container {
 }
 .blog-article-body p:has(> .blog-inline-figure:only-child) {
   margin: 2rem 0;
+  text-align: center;
 }
 .blog-article-body p:has(> .blog-inline-figure:only-child) .blog-inline-figure {
-  margin: 0;
+  margin: 0 auto;
 }
 .blog-article-body h1, .blog-article-body h2, .blog-article-body h3 {
   margin-top: 1.75rem;

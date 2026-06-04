@@ -2353,12 +2353,13 @@ function flattenTransparentWithFill(src, rgb) {
   return c;
 }
 
+/**
+ * Compose the export over a single flat fill (no baked blurred backdrop). The blurred backdrop
+ * is added exactly once, by the rendering CSS (.event-card-image::before / inline figure media).
+ * Baking a second blurred layer here is what produced the "two backgrounds" (a darker solid plus a
+ * lighter gradient) stacked on the same image.
+ */
 function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
-  const baseArea = 800 * 379;
-  const area = targetWidth * targetHeight;
-  const blurPx = Math.max(12, Math.round(28 * Math.sqrt(area / baseArea)));
-  const pad = Math.round(blurPx * 1.07);
-
   let fillRgb;
   if (cropBgMode === 'white') {
     fillRgb = { r: 255, g: 255, b: 255 };
@@ -2377,12 +2378,6 @@ function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, 
   const ctx = finalCanvas.getContext('2d');
   ctx.fillStyle = fillCol;
   ctx.fillRect(0, 0, targetWidth, targetHeight);
-  if (cropBgMode === 'auto') {
-    ctx.save();
-    ctx.filter = `blur(${blurPx}px)`;
-    ctx.drawImage(opaqueSrc, -pad, -pad, targetWidth + pad * 2, targetHeight + pad * 2);
-    ctx.restore();
-  }
   ctx.drawImage(opaqueSrc, 0, 0, targetWidth, targetHeight);
   return finalCanvas.toDataURL('image/jpeg', 0.92);
 }

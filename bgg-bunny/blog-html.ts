@@ -312,6 +312,31 @@ function figureBackdropStyleAttr(imgSrc: string): string {
   return ` style="--figure-bg-image: url('${safe}')"`;
 }
 
+function stripFigureAttrs(attrs: string): string {
+  return attrs
+    .replace(/\sstyle=(["'])[\s\S]*?\1/gi, "")
+    .replace(/\sclass=(["'])([^"']*)\1/gi, (_m, quote, className) => {
+      const cleaned = className
+        .split(/\s+/)
+        .filter((part) => part && !/^ql-align-/i.test(part))
+        .join(" ");
+      return cleaned ? ` class=${quote}${cleaned}${quote}` : "";
+    });
+}
+
+/** Remove Quill alignment classes/styles from captions so they stay centred under the image. */
+function stripFigcaptionMarkup(figcaptionHtml: string): string {
+  return figcaptionHtml
+    .replace(/\sstyle=(["'])[\s\S]*?\1/gi, "")
+    .replace(/\sclass=(["'])([^"']*)\1/gi, (_m, quote, className) => {
+      const cleaned = className
+        .split(/\s+/)
+        .filter((part) => part && !/^ql-align-/i.test(part))
+        .join(" ");
+      return cleaned ? ` class=${quote}${cleaned}${quote}` : "";
+    });
+}
+
 /** Wrap img in .blog-inline-figure-media (backdrop) and keep figcaption as plain text below. */
 function normalizeInlineFigures(html: string): string {
   if (!html || !html.includes("blog-inline-figure")) return html;
@@ -320,7 +345,7 @@ function normalizeInlineFigures(html: string): string {
     (_block, attrs, inner) => {
       const figcaptionMatch = inner.match(/<figcaption\b[^>]*>[\s\S]*?<\/figcaption>/i);
       const caption = figcaptionMatch
-        ? figcaptionMatch[0].replace(/\sstyle=(["'])[\s\S]*?\1/gi, "")
+        ? stripFigcaptionMarkup(figcaptionMatch[0])
         : "";
       let mediaPart = caption ? inner.replace(figcaptionMatch[0], "").trim() : inner;
 
@@ -332,12 +357,12 @@ function normalizeInlineFigures(html: string): string {
             (_m, divAttrs) => `<div${divAttrs}${figureBackdropStyleAttr(src)}>`
           );
         }
-        const cleanFigureAttrs = attrs.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "");
+        const cleanFigureAttrs = stripFigureAttrs(attrs);
         return `<figure${cleanFigureAttrs}>${mediaPart}${caption}</figure>`;
       }
 
       const src = extractImgSrcFromHtml(mediaPart);
-      const cleanFigureAttrs = attrs.replace(/\sstyle=(["'])[\s\S]*?\1/gi, "");
+      const cleanFigureAttrs = stripFigureAttrs(attrs);
       return `<figure${cleanFigureAttrs}><div class="blog-inline-figure-media"${figureBackdropStyleAttr(src)}>${mediaPart}</div>${caption}</figure>`;
     }
   );
@@ -1377,12 +1402,14 @@ main.page-container {
   }
 }
 .blog-article-body .blog-inline-figure figcaption {
+  display: block;
+  width: 100%;
   margin: 0.5rem 0 0;
   padding: 0;
   font-size: 0.9rem;
   font-style: italic;
   color: rgb(var(--color-neutral-500));
-  text-align: center;
+  text-align: center !important;
   line-height: 1.5;
   background: none !important;
   background-image: none !important;
@@ -1390,7 +1417,10 @@ main.page-container {
   outline: none;
   box-shadow: none;
 }
-.blog-article-body .blog-inline-figure figcaption * {
+.blog-article-body .blog-inline-figure figcaption :is(p, span, div) {
+  margin: 0;
+  padding: 0;
+  text-align: center !important;
   background: none !important;
   background-image: none !important;
 }
@@ -1402,9 +1432,10 @@ main.page-container {
 }
 .blog-article-body p:has(> .blog-inline-figure:only-child) {
   margin: 2rem 0;
+  text-align: center;
 }
 .blog-article-body p:has(> .blog-inline-figure:only-child) .blog-inline-figure {
-  margin: 0;
+  margin: 0 auto;
 }
 .blog-article-body h1, .blog-article-body h2, .blog-article-body h3 {
   margin-top: 1.75rem;
