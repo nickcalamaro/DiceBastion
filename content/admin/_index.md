@@ -5284,7 +5284,12 @@ async function loadNewsletterEvents() {
 }
 
 function nlEventImageSrc(ev) {
-  return (ev && (ev.image_url_card || ev.image_url)) || '';
+  // Prefer image_url (the 800x379 main variant): it is filled edge-to-edge at a CONSISTENT
+  // aspect ratio with the blurred backdrop baked into the file, so every event looks uniform
+  // in a flat frame. image_url_card is exported at each artwork's OWN aspect ratio (tight, no
+  // baked fill) for object-fit:contain + a CSS ::before backdrop — that context does not exist
+  // in email, so using it here made cards look different / crop weirdly.
+  return (ev && (ev.image_url || ev.image_url_card)) || '';
 }
 
 function nlEventDisplayName(ev) {
