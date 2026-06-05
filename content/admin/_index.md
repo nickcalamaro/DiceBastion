@@ -1639,6 +1639,8 @@ Loading cron job logs...
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 .nl-event-card-embed .nl-event-card-img-wrap { background: #f1f5f9; line-height: 0; font-size: 0; }
 .nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: auto; display: block; }
+/* Keep loose pasted/linked images inside the editor frame (mirrors the email shell) */
+#nl-editor .ql-editor img { max-width: 100%; height: auto; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
 .dark .nl-cal-check-card { border-color: rgb(var(--color-neutral-700)); }
@@ -5505,15 +5507,31 @@ function clearNewsletter() {
   if (result) result.style.display = 'none';
 }
 
+function nlNormalizeEmailImages(html) {
+  return String(html || '').replace(/<img\b[^>]*>/gi, function(tag) {
+    if (/object-fit\s*:/i.test(tag)) return tag;
+    var out = tag.replace(/\s(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    var responsive = 'display:block;max-width:100%;height:auto;';
+    var styleMatch = out.match(/\sstyle\s*=\s*"([^"]*)"/i);
+    if (styleMatch) {
+      var merged = styleMatch[1].replace(/\s*;?\s*$/, '') + ';' + responsive;
+      out = out.replace(/\sstyle\s*=\s*"[^"]*"/i, ' style="' + merged + '"');
+    } else {
+      out = out.replace(/<img\b/i, '<img style="' + responsive + '"');
+    }
+    return out;
+  });
+}
+
 function buildNlEmailHtml(bodyHtml, subject) {
-  const body = bodyHtml
+  const body = nlNormalizeEmailImages(bodyHtml
     .replace(/ data-card="[^"]*"/g, '')
     .replace(/ contenteditable="[^"]*"/g, '')
     .replace(/class="nl-event-card-embed"/g,
       'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
     .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
     .replace(/ class="ql-[^"]*"/g, '')
-    .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
+    .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, ''));
   // Goldmark terminates a script block on a literal closing style tag,
   // so split that string across two literals.
   const stO = '<sty' + 'le>';

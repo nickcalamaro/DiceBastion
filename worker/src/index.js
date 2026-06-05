@@ -1562,7 +1562,7 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
  * Called by wrapNewsletterHtml before the body is embedded in the template.
  */
 function cleanNewsletterBody(html) {
-  return html
+  const cleaned = html
     // data-card blobs are large redundant attribute copies Quill adds to BlockEmbeds
     .replace(/ data-card="[^"]*"/g, '')
     // contenteditable is a browser-only attribute
@@ -1570,10 +1570,36 @@ function cleanNewsletterBody(html) {
     // Replace the Quill event-card class with full inline styles for email clients
     .replace(/class="nl-event-card-embed"/g,
       'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    // Replace the calendar-embed class (no stylesheet in email) with its margin
+    .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
     // Strip Quill formatting classes (ql-align, ql-indent, etc.) — no stylesheet in email
     .replace(/ class="ql-[^"]*"/g, '')
     // Quill inserts <p><br></p> for every blank line the user types.
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
+  return normalizeEmailImages(cleaned);
+}
+
+/**
+ * Make every loose <img> in a newsletter body responsive so wide pasted/linked images cannot
+ * overflow (and get clipped by) the fixed-width email shell. Drops fixed pixel width/height
+ * attributes (which Outlook/Gmail honour and which force overflow) and caps the rendered size
+ * with max-width:100%;height:auto. Images that are part of our generated event/calendar embeds
+ * use object-fit cropping at a deliberate size and are left untouched.
+ */
+function normalizeEmailImages(html) {
+  return String(html || '').replace(/<img\b[^>]*>/gi, (tag) => {
+    if (/object-fit\s*:/i.test(tag)) return tag;
+    let out = tag.replace(/\s(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    const responsive = 'display:block;max-width:100%;height:auto;';
+    const styleMatch = out.match(/\sstyle\s*=\s*"([^"]*)"/i);
+    if (styleMatch) {
+      const merged = styleMatch[1].replace(/\s*;?\s*$/, '') + ';' + responsive;
+      out = out.replace(/\sstyle\s*=\s*"[^"]*"/i, ' style="' + merged + '"');
+    } else {
+      out = out.replace(/<img\b/i, '<img style="' + responsive + '"');
+    }
+    return out;
+  });
 }
 
 /**
