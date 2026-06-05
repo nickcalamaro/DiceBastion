@@ -1017,8 +1017,15 @@ async function handleBookingSubmit(e) {
       })
     });
     
-    const bookingData = await bookingResponse.json();
-    
+    const bookingBody = await bookingResponse.text();
+    let bookingData;
+    try {
+      bookingData = bookingBody ? JSON.parse(bookingBody) : {};
+    } catch (parseErr) {
+      console.error('Booking response was not JSON:', bookingResponse.status, bookingBody);
+      throw new Error('Invalid response from booking service');
+    }
+
     if (!bookingResponse.ok) {
       console.error('Booking creation failed:', bookingResponse.status, bookingData);
       throw new Error(bookingData.message || bookingData.error || bookingData.details || 'Booking creation failed');

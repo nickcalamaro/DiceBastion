@@ -11057,9 +11057,15 @@ export default {
 
     // Bookings API lives on Bunny Edge Script; proxy same-origin so mobile browsers
     // do not block cross-origin fetches to *.bunny.run (shows as "Failed to load table types").
+    // POST /api/bookings has no trailing segment — must match exactly, not only /api/bookings/*.
+    // /api/bookings/same-day-contacts stays on this worker (memberships), not Bunny.
+    const isBookingsBunnyRoute =
+      url.pathname === '/api/bookings' ||
+      (url.pathname.startsWith('/api/bookings/') &&
+        url.pathname !== '/api/bookings/same-day-contacts')
     if (
       (host === 'dicebastion.com' || host === 'www.dicebastion.com') &&
-      url.pathname.startsWith('/api/bookings/')
+      isBookingsBunnyRoute
     ) {
       const bookingsBase = String(env.BOOKINGS_API_URL || 'https://dicebastionbookings-ofbbu.bunny.run').replace(/\/+$/, '')
       const targetUrl = `${bookingsBase}${url.pathname}${url.search}`
