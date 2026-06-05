@@ -10982,6 +10982,17 @@ export default {
     const host = request.headers.get('Host') || ''
     const pathNorm = url.pathname.replace(/\/+$/, '') || '/'
 
+    // Same-origin API on dicebastion.com — avoids cross-origin fetches to workers.dev
+    // (Safari/Edge report those as "Load failed" when blocked by privacy tools).
+    if (
+      (host === 'dicebastion.com' || host === 'www.dicebastion.com') &&
+      url.pathname.startsWith('/api/')
+    ) {
+      const proxyUrl = new URL(request.url)
+      proxyUrl.pathname = url.pathname.slice(4) || '/'
+      return app.fetch(new Request(proxyUrl.toString(), request), env, ctx)
+    }
+
     // Hugo writes /pages-sitemap.xml to Pages; shop custom domain only routed /products/* to Worker → 404.
     // Proxy from Pages project host (see SHOP_PAGES_ORIGIN) so GSC can read the child sitemap.
     if (host.includes('shop.dicebastion.com') && pathNorm === '/pages-sitemap.xml') {

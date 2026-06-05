@@ -1636,8 +1636,8 @@ Loading cron job logs...
 }
 
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-.nl-event-card-embed .nl-event-card-img-wrap { height: 190px; background: #f1f5f9; line-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-.nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: 190px; object-fit: contain; object-position: center; display: block; }
+.nl-event-card-embed .nl-event-card-img-wrap { height: 190px; background: #f1f5f9; line-height: 0; overflow: hidden; }
+.nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: 190px; object-fit: cover; object-position: center; display: block; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
 .dark .nl-cal-check-card { border-color: rgb(var(--color-neutral-700)); }
@@ -5295,8 +5295,10 @@ function nlEventDisplayName(ev) {
 function nlEventCardImageHtml(ev, height) {
   const src = nlEventImageSrc(ev);
   if (!src) return '';
-  return '<div class="nl-event-card-img-wrap" style="height:' + height + 'px;background:#f1f5f9;line-height:0;overflow:hidden;text-align:center;">'
-    + '<img src="' + src + '" alt="" width="400" height="' + height + '" style="display:block;width:100%;height:' + height + 'px;max-height:' + height + 'px;object-fit:contain;object-position:center;margin:0 auto;">'
+  // cover fills the slot uniformly; card exports use contain (letterbox baked in) but cover
+  // crops to the artwork centre so every embed looks the same in the grid.
+  return '<div class="nl-event-card-img-wrap" style="height:' + height + 'px;background:#f1f5f9;line-height:0;overflow:hidden;">'
+    + '<img src="' + src + '" alt="" width="400" height="' + height + '" style="display:block;width:100%;height:' + height + 'px;object-fit:cover;object-position:center;border:0;">'
     + '</div>';
 }
 
@@ -5394,8 +5396,8 @@ function buildCalendarHtml(events) {
     const p = fmtDate(ev.event_datetime);
     const imgSrc = nlEventImageSrc(ev);
     const imgRow = imgSrc
-      ? '<tr><td style="padding:0;background:#f1f5f9;height:' + CAL_IMG_H + 'px;line-height:0;font-size:0;text-align:center;vertical-align:middle;">'
-        + '<img src="' + imgSrc + '" alt="" width="280" height="' + CAL_IMG_H + '" style="display:block;width:100%;height:' + CAL_IMG_H + 'px;max-height:' + CAL_IMG_H + 'px;object-fit:contain;object-position:center;margin:0 auto;border-radius:8px 8px 0 0;" />'
+      ? '<tr><td style="padding:0;height:' + CAL_IMG_H + 'px;line-height:0;font-size:0;overflow:hidden;background:#f1f5f9;">'
+        + '<img src="' + imgSrc + '" alt="" width="280" height="' + CAL_IMG_H + '" style="display:block;width:100%;height:' + CAL_IMG_H + 'px;object-fit:cover;object-position:center;border:0;" />'
         + '</td></tr>'
       : '<tr><td style="background:#e0e7ff;height:' + CAL_IMG_H + 'px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
     const href = ev.slug ? 'https://dicebastion.com/events/' + ev.slug : 'https://dicebastion.com/events';

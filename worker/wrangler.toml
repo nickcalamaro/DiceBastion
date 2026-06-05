@@ -9,6 +9,8 @@ workers_dev = true
 # Route event slug URLs through this Worker for SEO pages
 # Route product slug URLs through this Worker for shop SEO pages
 routes = [
+  { pattern = "dicebastion.com/api/*", zone_name = "dicebastion.com" },
+  { pattern = "www.dicebastion.com/api/*", zone_name = "dicebastion.com" },
   { pattern = "dicebastion.com/events/*", zone_name = "dicebastion.com" },
   { pattern = "www.dicebastion.com/events/*", zone_name = "dicebastion.com" },
   { pattern = "dicebastion.com/posts", zone_name = "dicebastion.com" },

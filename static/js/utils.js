@@ -3,8 +3,16 @@
  * Used across admin, account, events, memberships, and shop pages
  */
 
-// API Configuration
-window.__DB_API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+// API Configuration — same-origin /api on production (see worker fetch /api/* proxy)
+(function resolveApiBase() {
+  if (window.__DB_API_BASE) return;
+  const host = window.location.hostname || '';
+  if (host === 'dicebastion.com' || host === 'www.dicebastion.com') {
+    window.__DB_API_BASE = '/api';
+    return;
+  }
+  window.__DB_API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+})();
 // Blog API — Bunny Edge Script 75941
 window.__BLOG_API_BASE = window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run';
 

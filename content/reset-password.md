@@ -82,7 +82,11 @@ Request New Link
 
 <script>
 (function() {
-const API_BASE = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = window.__DB_API_BASE || (
+  (location.hostname === 'dicebastion.com' || location.hostname === 'www.dicebastion.com')
+    ? '/api'
+    : 'https://dicebastion-memberships.ncalamaro.workers.dev'
+);
 const form = document.getElementById('reset-password-form');
 const submitBtn = document.getElementById('submit-btn');
 const errorDiv = document.getElementById('error-message');
@@ -158,7 +162,10 @@ resetContainer.style.display = 'none';
 successContainer.style.display = 'block';
 } catch (error) {
 console.error('Password reset error:', error);
-showError(error.message || 'An error occurred. Please try again.');
+const msg = (error && (error.message === 'Load failed' || error.message === 'Failed to fetch'))
+  ? 'Could not reach the server. Check your connection or try disabling ad blockers, then try again.'
+  : (error.message || 'An error occurred. Please try again.');
+showError(msg);
 submitBtn.disabled = false;
 submitBtn.textContent = 'Reset Password';
 }
