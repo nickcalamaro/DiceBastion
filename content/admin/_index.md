@@ -1046,6 +1046,7 @@ Loading cron job logs...
 <button onclick="clearNewsletter()" class="btn btn-secondary">Clear</button>
 <button onclick="previewNewsletter()" class="btn btn-secondary">Preview</button>
 <button onclick="nlServerSaveDraft()" class="btn btn-secondary" id="nl-save-draft-btn">Save Draft</button>
+<button onclick="sendNewsletterTest()" class="btn btn-secondary" id="nl-test-btn">Send Test</button>
 <button onclick="nlOpenScheduleModal()" class="btn btn-secondary" id="nl-schedule-btn">Schedule</button>
 <button onclick="sendNewsletter()" class="btn btn-primary" id="nl-send-btn">Send Now</button>
 </div>
@@ -1636,8 +1637,8 @@ Loading cron job logs...
 }
 
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-.nl-event-card-embed .nl-event-card-img-wrap { height: 190px; background: #f1f5f9; line-height: 0; overflow: hidden; }
-.nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: 190px; object-fit: cover; object-position: center; display: block; }
+.nl-event-card-embed .nl-event-card-img-wrap { background: #f1f5f9; line-height: 0; font-size: 0; }
+.nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: auto; display: block; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
 .dark .nl-cal-check-card { border-color: rgb(var(--color-neutral-700)); }
@@ -5297,13 +5298,14 @@ function nlEventDisplayName(ev) {
   return ev.is_recurring === 1 ? `${name} (recurring)` : name;
 }
 
-function nlEventCardImageHtml(ev, height) {
+function nlEventCardImageHtml(ev) {
   const src = nlEventImageSrc(ev);
   if (!src) return '';
-  // cover fills the slot uniformly; card exports use contain (letterbox baked in) but cover
-  // crops to the artwork centre so every embed looks the same in the grid.
-  return '<div class="nl-event-card-img-wrap" style="height:' + height + 'px;background:#f1f5f9;line-height:0;overflow:hidden;">'
-    + '<img src="' + src + '" alt="" width="400" height="' + height + '" style="display:block;width:100%;height:' + height + 'px;object-fit:cover;object-position:center;border:0;">'
+  // image_url is always exported at a uniform 800x379 with the blurred backdrop baked into the
+  // file, so showing the WHOLE image at its natural aspect ratio (no cover crop) keeps every
+  // card identical AND never clips the artwork.
+  return '<div class="nl-event-card-img-wrap" style="background:#f1f5f9;line-height:0;font-size:0;">'
+    + '<img src="' + src + '" alt="" width="600" style="display:block;width:100%;height:auto;border:0;">'
     + '</div>';
 }
 
@@ -5355,7 +5357,7 @@ function insertNlEventBlock(idx) {
   const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-  const imgPart = nlEventCardImageHtml(ev, 190);
+  const imgPart = nlEventCardImageHtml(ev);
   const locationPart = ev.location
     ? '<p style="margin:4px 0;font-size:14px;color:#64748b;">' + ev.location + '</p>'
     : '';
@@ -5558,6 +5560,56 @@ function previewNewsletter() {
 
 function closeNlPreview() {
   document.getElementById('nl-preview-modal').style.display = 'none';
+}
+
+async function sendNewsletterTest() {
+  const subject = document.getElementById('nl-subject').value.trim();
+  const bodyHtml = nlQuill ? nlQuill.root.innerHTML.trim() : '';
+  const resultEl = document.getElementById('nl-send-result');
+
+  if (!subject) {
+    Modal.alert({ title: 'Missing Subject', message: 'Please enter a subject line before sending a test.' });
+    return;
+  }
+  if (!bodyHtml || bodyHtml === '<p><br></p>') {
+    Modal.alert({ title: 'Empty Newsletter', message: 'Please write some content before sending a test.' });
+    return;
+  }
+
+  const to = (prompt('Send a test copy to:', 'ncalamaro@gmail.com') || '').trim();
+  if (!to) return;
+
+  const btn = document.getElementById('nl-test-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending test...';
+  resultEl.style.display = 'none';
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletter/test-send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+      body: JSON.stringify({ subject, html: bodyHtml, to })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      resultEl.className = 'nl-send-result nl-success';
+      resultEl.textContent = data.skipped
+        ? `Test not delivered: email sending is not configured on this environment.`
+        : `Test newsletter sent to ${data.to}.`;
+      resultEl.style.display = 'block';
+    } else {
+      resultEl.className = 'nl-send-result nl-error';
+      resultEl.textContent = `Test send failed: ${data.error || 'Unknown error'}`;
+      resultEl.style.display = 'block';
+    }
+  } catch (err) {
+    resultEl.className = 'nl-send-result nl-error';
+    resultEl.textContent = `Network error: ${err.message}`;
+    resultEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send Test';
+  }
 }
 
 async function sendNewsletter() {

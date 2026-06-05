@@ -8351,6 +8351,53 @@ app.post('/admin/newsletters/:id/send', requireAdmin, async c => {
   }
 })
 
+/**
+ * POST /admin/newsletter/test-send
+ * Sends a single test copy of the supplied subject/body to one address (no draft,
+ * no recipient list, no unsubscribe token). Uses the same wrap + send pipeline as the
+ * real campaign so the test reflects exactly what subscribers would receive.
+ */
+app.post('/admin/newsletter/test-send', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const subject = (body.subject || '').trim()
+    const html = (body.html || '').trim()
+    const to = (body.to || '').trim().toLowerCase()
+
+    if (!subject || !html) {
+      return c.json({ error: 'A subject and body are required for a test send.' }, 400)
+    }
+    if (!to || !EMAIL_RE.test(to)) {
+      return c.json({ error: 'A valid test recipient email is required.' }, 400)
+    }
+
+    const plainText = htmlToPlainText(html)
+    const replyTo = c.env.MAILERSEND_REPLY_TO || c.env.MAILERSEND_FROM_EMAIL || 'hello@dicebastion.com'
+    // Test sends are not tied to a subscriber, so use a generic (non-functional) unsubscribe link.
+    const unsubscribeUrl = 'https://dicebastion.com/unsubscribe'
+    const testBanner = '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;font-size:13px;line-height:1.4;margin-bottom:16px;text-align:center;font-family:Arial,Helvetica,sans-serif;">TEST SEND &mdash; this is a preview copy and was not sent to subscribers.</div>'
+    const fullHtml = wrapNewsletterHtml(testBanner + html, subject, unsubscribeUrl)
+
+    const result = await sendEmail(c.env, {
+      to,
+      subject: `[TEST] ${subject}`,
+      html: fullHtml,
+      text: plainText,
+      replyTo,
+      emailType: 'newsletter',
+      metadata: JSON.stringify({ campaign: 'newsletter-test', to })
+    })
+
+    if (result.success || result.skipped) {
+      return c.json({ success: true, to, skipped: !!result.skipped })
+    }
+    return c.json({ error: result.error || 'Send failed' }, 500)
+  } catch (e) {
+    console.error('[Newsletter] test-send error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
 // ============================================================================
 // PUBLIC: Newsletter unsubscribe via magic link (no login required)
 // ============================================================================
