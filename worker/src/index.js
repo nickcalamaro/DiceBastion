@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { createHmac } from 'crypto'
-import { calculateNextOccurrence } from './utils/recurring.js'
+import { calculateNextOccurrence, processUpcomingEvents } from './utils/recurring.js'
 import { getEventReminderEmail } from './email-templates/event-reminder.js'
 import {
   createCheckout,
@@ -4265,7 +4265,7 @@ app.get('/membership/confirm', async (c) => {
     })
   }
   
-  // For tokenization checkouts (SETUP_RECURRING_PAYMENT), the payment amount is a minimal auth (0.01)
+  // For tokenization checkouts (SETUP_RECURRING_PAYMENT), the payment amount is a minimal auth (£1)
   // The real amount will be charged separately using the saved payment instrument
   const isTokenizationCheckout = payment.purpose === 'SETUP_RECURRING_PAYMENT'
   
@@ -5425,30 +5425,7 @@ app.get('/events', async c => {
       ORDER BY event_datetime ASC
     `).all()
     
-    // Calculate next occurrence for recurring events
-    const now = new Date()
-    const processedEvents = (results || []).map(event => {
-      if (event.is_recurring === 1) {
-        const nextOccurrence = calculateNextOccurrence(event, now)
-        if (!nextOccurrence) {
-          // Recurring event has ended
-          return null
-        }
-        return {
-          ...event,
-          event_datetime: nextOccurrence.toISOString(),
-          next_occurrence: nextOccurrence.toISOString()
-        }
-      }
-      return event
-    }).filter(e => e !== null)
-    
-    // Re-sort by calculated event_datetime
-    processedEvents.sort((a, b) => 
-      new Date(a.event_datetime) - new Date(b.event_datetime)
-    )
-    
-    return c.json(processedEvents)
+    return c.json(processUpcomingEvents(results))
   } catch (err) {
     console.error('Error fetching events:', err)
     return c.json({ error: 'failed_to_fetch_events' }, 500)  }
@@ -8146,13 +8123,14 @@ app.get('/admin/newsletter/events', requireAdmin, async c => {
   try {
     await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
-      SELECT event_id, event_name, description, event_datetime, location, image_url, image_url_card, slug
+      SELECT event_id, event_name, description, event_datetime, location,
+             image_url, image_url_card, slug, is_recurring, recurrence_pattern, recurrence_end_date
       FROM events
-      WHERE is_active = 1 AND event_datetime >= datetime('now')
+      WHERE is_active = 1
+        AND (event_datetime >= datetime('now') OR is_recurring = 1)
       ORDER BY event_datetime ASC
-      LIMIT 10
     `).all()
-    return c.json(results ?? [])
+    return c.json(processUpcomingEvents(results ?? [], { limit: 10 }))
   } catch (e) {
     console.error('[Newsletter] events error:', e)
     return c.json({ error: e.message }, 500)

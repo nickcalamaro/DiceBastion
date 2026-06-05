@@ -1636,6 +1636,8 @@ Loading cron job logs...
 }
 
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.nl-event-card-embed .nl-event-card-img-wrap { height: 190px; background: #f1f5f9; line-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: 190px; object-fit: contain; object-position: center; display: block; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
 .dark .nl-cal-check-card { border-color: rgb(var(--color-neutral-700)); }
@@ -5281,6 +5283,23 @@ async function loadNewsletterEvents() {
   }
 }
 
+function nlEventImageSrc(ev) {
+  return (ev && (ev.image_url_card || ev.image_url)) || '';
+}
+
+function nlEventDisplayName(ev) {
+  const name = ev.event_name || '';
+  return ev.is_recurring === 1 ? `${name} (recurring)` : name;
+}
+
+function nlEventCardImageHtml(ev, height) {
+  const src = nlEventImageSrc(ev);
+  if (!src) return '';
+  return '<div class="nl-event-card-img-wrap" style="height:' + height + 'px;background:#f1f5f9;line-height:0;overflow:hidden;text-align:center;">'
+    + '<img src="' + src + '" alt="" width="400" height="' + height + '" style="display:block;width:100%;height:' + height + 'px;max-height:' + height + 'px;object-fit:contain;object-position:center;margin:0 auto;">'
+    + '</div>';
+}
+
 function renderNlEventPickerList() {
   const list = document.getElementById('nl-event-picker-list');
   if (!list) return;
@@ -5292,16 +5311,18 @@ function renderNlEventPickerList() {
     const dt = new Date(ev.event_datetime);
     const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
     const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const imgHtml = ev.image_url
-      ? `<img class="nl-event-pick-img" src="${ev.image_url_card || ev.image_url}" alt="">`
+    const imgSrc = nlEventImageSrc(ev);
+    const imgHtml = imgSrc
+      ? `<img class="nl-event-pick-img" src="${imgSrc}" alt="">`
       : `<div class="nl-event-pick-img"></div>`;
     const locationSuffix = ev.location ? ` &middot; ${ev.location}` : '';
+    const nextLabel = ev.is_recurring === 1 ? 'Next: ' : '';
     return `
       <div class="nl-event-pick-card" onclick="insertNlEventBlock(${idx})">
         ${imgHtml}
         <div>
-          <div class="nl-event-pick-title">${ev.event_name || ''}</div>
-          <div class="nl-event-pick-date">${dateStr} at ${timeStr}${locationSuffix}</div>
+          <div class="nl-event-pick-title">${nlEventDisplayName(ev)}</div>
+          <div class="nl-event-pick-date">${nextLabel}${dateStr} at ${timeStr}${locationSuffix}</div>
         </div>
       </div>
     `;
@@ -5327,10 +5348,7 @@ function insertNlEventBlock(idx) {
   const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-  // Images are always 400x190 - use natural aspect ratio, no cropping
-  const imgPart = ev.image_url
-    ? '<img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="400" height="190" style="width:100%;height:auto;display:block;">'
-    : '';
+  const imgPart = nlEventCardImageHtml(ev, 190);
   const locationPart = ev.location
     ? '<p style="margin:4px 0;font-size:14px;color:#64748b;">' + ev.location + '</p>'
     : '';
@@ -5344,7 +5362,7 @@ function insertNlEventBlock(idx) {
   const cardHtml = imgPart
     + '<div style="padding:18px 20px 20px 20px;">'
     + '<p style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#4f46e5;margin:0 0 8px 0;">Upcoming Event</p>'
-    + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + (ev.event_name || '') + '</h3>'
+    + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + nlEventDisplayName(ev) + '</h3>'
     + '<p style="margin:0 0 4px 0;font-size:14px;color:#64748b;">' + dateStr + ' at ' + timeStr + '</p>'
     + locationPart + descPart
     + '<a href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Event</a>'
@@ -5371,11 +5389,15 @@ function buildCalendarHtml(events) {
     const dh = h % 12 || 12;
     return { dayName: DAY_NAMES[d.getDay()], dayOrdinal: ordinal(d.getDate()), month: MONTH_NAMES[d.getMonth()], time: dh + ':' + String(mn).padStart(2,'0') + ' ' + ampm };
   }
+  const CAL_IMG_H = 120;
   function buildCard(ev) {
     const p = fmtDate(ev.event_datetime);
-    const imgRow = ev.image_url
-      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
-      : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
+    const imgSrc = nlEventImageSrc(ev);
+    const imgRow = imgSrc
+      ? '<tr><td style="padding:0;background:#f1f5f9;height:' + CAL_IMG_H + 'px;line-height:0;font-size:0;text-align:center;vertical-align:middle;">'
+        + '<img src="' + imgSrc + '" alt="" width="280" height="' + CAL_IMG_H + '" style="display:block;width:100%;height:' + CAL_IMG_H + 'px;max-height:' + CAL_IMG_H + 'px;object-fit:contain;object-position:center;margin:0 auto;border-radius:8px 8px 0 0;" />'
+        + '</td></tr>'
+      : '<tr><td style="background:#e0e7ff;height:' + CAL_IMG_H + 'px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
     const href = ev.slug ? 'https://dicebastion.com/events/' + ev.slug : 'https://dicebastion.com/events';
     return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
       + imgRow
@@ -5420,11 +5442,12 @@ function renderNlCalendarPickerList() {
     const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
     const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const locationSuffix = ev.location ? ' &middot; ' + ev.location : '';
+    const nextLabel = ev.is_recurring === 1 ? 'Next: ' : '';
     return '<label class="nl-cal-check-card">'
       + '<input type="checkbox" name="nl-cal-ev" value="' + idx + '" checked>'
       + '<div>'
-      + '<div class="nl-cal-card-title">' + (ev.event_name || '') + '</div>'
-      + '<div class="nl-cal-card-date">' + dateStr + ' at ' + timeStr + locationSuffix + '</div>'
+      + '<div class="nl-cal-card-title">' + nlEventDisplayName(ev) + '</div>'
+      + '<div class="nl-cal-card-date">' + nextLabel + dateStr + ' at ' + timeStr + locationSuffix + '</div>'
       + '</div></label>';
   }).join('');
   const btn = document.getElementById('nl-cal-toggle-all-btn');
