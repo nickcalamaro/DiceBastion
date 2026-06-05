@@ -337,7 +337,9 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
 // API endpoints (MAIN_API is set globally by footer, accessed via window.MAIN_API)
-const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run'; // Bunny Edge Script
+const BOOKINGS_API = (
+  location.hostname === 'dicebastion.com' || location.hostname === 'www.dicebastion.com'
+) ? '' : 'https://dicebastionbookings-ofbbu.bunny.run'; // production uses same-origin /api/bookings/* proxy
 const PAYMENTS_API = 'https://dicebastion-payments.ncalamaro.workers.dev'; // Cloudflare Payments Worker
 const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 const IS_LOCALHOST = window.location.hostname === 'localhost' || 
@@ -770,7 +772,14 @@ async function loadTableTypes() {
     
   } catch (error) {
     console.error('Error loading table types:', error);
-    container.innerHTML = '<div class="alert alert-error">Failed to load table types</div>';
+    let message = 'Failed to load table types';
+    const errText = String(error?.message || '');
+    if (errText === 'Failed to fetch' || errText === 'Load failed' || error?.name === 'TypeError') {
+      message = 'Could not reach the booking service. Please check your connection and try again.';
+    } else if (errText) {
+      message = errText;
+    }
+    container.innerHTML = `<div class="alert alert-error">${escapeHtml(message)}</div>`;
   }
 }
 

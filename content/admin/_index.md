@@ -5594,7 +5594,7 @@ async function sendNewsletterTest() {
     return;
   }
 
-  const to = (prompt('Send a test copy to:', 'ncalamaro@gmail.com') || '').trim();
+  const to = (prompt('Send a test copy to:', '') || '').trim();
   if (!to) return;
 
   const btn = document.getElementById('nl-test-btn');

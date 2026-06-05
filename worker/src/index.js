@@ -11055,6 +11055,37 @@ export default {
     const host = request.headers.get('Host') || ''
     const pathNorm = url.pathname.replace(/\/+$/, '') || '/'
 
+    // Bookings API lives on Bunny Edge Script; proxy same-origin so mobile browsers
+    // do not block cross-origin fetches to *.bunny.run (shows as "Failed to load table types").
+    if (
+      (host === 'dicebastion.com' || host === 'www.dicebastion.com') &&
+      url.pathname.startsWith('/api/bookings/')
+    ) {
+      const bookingsBase = String(env.BOOKINGS_API_URL || 'https://dicebastionbookings-ofbbu.bunny.run').replace(/\/+$/, '')
+      const targetUrl = `${bookingsBase}${url.pathname}${url.search}`
+      const headers = new Headers(request.headers)
+      headers.delete('host')
+      try {
+        const res = await fetch(targetUrl, {
+          method: request.method,
+          headers,
+          body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+          redirect: 'manual'
+        })
+        return new Response(res.body, {
+          status: res.status,
+          statusText: res.statusText,
+          headers: res.headers
+        })
+      } catch (e) {
+        console.error('[bookings proxy]', targetUrl, e)
+        return new Response(JSON.stringify({ error: 'Booking service unavailable' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+    }
+
     // Same-origin API on dicebastion.com — avoids cross-origin fetches to workers.dev
     // (Safari/Edge report those as "Load failed" when blocked by privacy tools).
     if (
