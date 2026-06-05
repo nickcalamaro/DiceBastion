@@ -354,6 +354,33 @@ window.utils = {
   },
 
   /**
+   * Fire-and-forget beacon that reports a SumUp card-widget event to the worker.
+   * Card auth (3DS/SCA) happens entirely in the browser, so without this the server
+   * has no record when a customer's card is declined or they abandon the widget.
+   * Never throws and never blocks the payment UX.
+   *
+   * @param {Object} data - { flow, type, stage, orderRef, checkoutId, plan, message, sumupBody }
+   */
+  logPaymentEvent: (data) => {
+    try {
+      const base = window.utils.getApiBase(true);
+      const url = `${base}/client-payment-log`;
+      const payload = JSON.stringify(data || {});
+      // sendBeacon survives page unload (e.g. 3DS redirects); fall back to keepalive fetch.
+      if (navigator && typeof navigator.sendBeacon === 'function') {
+        const blob = new Blob([payload], { type: 'application/json' });
+        if (navigator.sendBeacon(url, blob)) return;
+      }
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true
+      }).catch(() => {});
+    } catch (_) { /* telemetry must never break checkout */ }
+  },
+
+  /**
    * Load Cloudflare Turnstile SDK dynamically
    * @returns {Promise<boolean>} - Resolves when SDK is loaded
    */

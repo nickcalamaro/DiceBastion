@@ -375,7 +375,8 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 		}
 
 		const payment: any = await res.json()
-		const failedTx = (payment.transactions || []).filter((t: any) => t?.status === 'FAILED')
+		const txs = (payment.transactions || []) as any[]
+		const failedTx = txs.filter((t: any) => t?.status === 'FAILED')
 		const failedDetails = failedTx.map((t: any) => ({
 			id: t.id,
 			status: t.status,
@@ -390,11 +391,30 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 			checkout_reference: payment.checkout_reference || null,
 			status: payment.status,
 			purpose: payment.purpose || 'none',
-			transactionCount: payment.transactions?.length || 0,
-			txStatuses: payment.transactions?.map((t: any) => t.status) || [],
+			transactionCount: txs.length,
+			txStatuses: txs.map((t: any) => t.status),
 			hasInstrument: !!payment.payment_instrument,
 			failedTxDetails: failedDetails
 		})
+		// When a checkout is not cleanly paid, dump the full raw transactions + top-level
+		// failure fields. SumUp surfaces decline reasons under varying keys (and sometimes
+		// only on the transaction objects), so capture everything to diagnose real-customer
+		// failures rather than guessing which field holds the reason.
+		const hasSuccess = txs.some((t: any) => t?.status === 'SUCCESSFUL' || t?.status === 'PAID')
+		const isPaid = payment.status === 'PAID' || payment.status === 'SUCCESSFUL' || hasSuccess
+		if (!isPaid) {
+			console.log('[Payment] NON-PAID checkout full detail:', JSON.stringify({
+				sumup_checkout_id: checkoutId,
+				checkout_reference: payment.checkout_reference || null,
+				status: payment.status,
+				purpose: payment.purpose || null,
+				customer_id: payment.customer_id || null,
+				date: payment.date || null,
+				valid_until: payment.valid_until || null,
+				status_reason: payment.status_reason ?? payment.statusReason ?? null,
+				transactions: txs
+			}))
+		}
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Fetch payment error:', error)

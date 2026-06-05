@@ -993,7 +993,19 @@ For those able to give a bit more, or for those of you who can't afford a member
         checkoutId,
         locale: 'en-GB',
         country: 'GB',
-        onResponse: async (type)=>{
+        onResponse: async (type, body)=>{
+          console.log('SumUp onResponse:', type, body);
+          try {
+            window.utils.logPaymentEvent({
+              flow: 'membership',
+              type: type,
+              stage: 'widget_onResponse',
+              orderRef: ref,
+              checkoutId: checkoutId,
+              message: (body && body.message) || null,
+              sumupBody: body
+            });
+          } catch (_) {}
           clearError();
           const t = String(type||'').toLowerCase();
           if (t === 'success') {

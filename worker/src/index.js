@@ -3798,6 +3798,39 @@ async function requireAdmin(c, next) {
   return c.json({ error: 'unauthorized' }, 401)
 }
 
+// Client-side payment telemetry beacon.
+// The SumUp card widget runs entirely in the browser, so card-auth failures (3DS/SCA
+// declines, cancellations, widget load errors) never reach our server unless we report
+// them. The front-end calls this on every widget onResponse so we have a server-side
+// trail in Cloudflare logs even when the customer abandons and never hits a confirm poll.
+app.post('/client-payment-log', async (c) => {
+  try {
+    const clip = (v, n = 500) => {
+      if (v == null) return v
+      const s = typeof v === 'string' ? v : JSON.stringify(v)
+      return s.length > n ? s.slice(0, n) + '…[truncated]' : s
+    }
+    let body = {}
+    try { body = await c.req.json() } catch { body = {} }
+    console.log('[ClientPaymentLog]', JSON.stringify({
+      flow: clip(body.flow, 40),
+      type: clip(body.type, 40),
+      stage: clip(body.stage, 60),
+      orderRef: clip(body.orderRef, 80),
+      checkoutId: clip(body.checkoutId, 80),
+      plan: clip(body.plan, 40),
+      message: clip(body.message, 300),
+      sumupBody: clip(body.sumupBody, 800),
+      ip: c.req.header('CF-Connecting-IP') || null,
+      ua: clip(c.req.header('User-Agent'), 200)
+    }))
+  } catch (e) {
+    console.error('[ClientPaymentLog] failed to record beacon:', e)
+  }
+  // Always 204 — telemetry must never block the payment UX.
+  return c.body(null, 204)
+})
+
 // Membership checkout with idempotency + Turnstile
 app.post('/membership/checkout', async (c) => {
   try {
