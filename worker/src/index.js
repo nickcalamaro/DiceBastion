@@ -1198,6 +1198,36 @@ async function getActivePaymentInstrument(db, userId) {
 }
 
 /**
+ * Distinguish a genuine gateway decline from a system/transport error.
+ *
+ * The payments worker returns HTTP 402 ("Payment not successful") ONLY when the
+ * card was actually presented to SumUp and declined. Anything else — 5xx, network
+ * failures, token/customer/checkout creation errors — means no charge ever reached
+ * the card, so we must never tell the member that their payment failed.
+ */
+function isGenuineDecline(err) {
+  return !!err && err.status === 402
+}
+
+/**
+ * A renewal charge could not be attempted at the gateway (system/transport error).
+ * No money was touched, so we DON'T email the member and DON'T burn a renewal
+ * attempt — we just log it so the next cron run retries cleanly.
+ * @returns {Object} {success:false, error, systemError:true}
+ */
+async function handleRenewalSystemError(db, membership, amount, currency, error) {
+  const msg = String(error?.message || error)
+  console.error(`[renewal] System error for membership ${membership.id} — no charge attempted at gateway: ${msg}`)
+  try {
+    await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(membership.id, toIso(new Date()), 'error', `system_error: ${msg}`, String(amount), currency).run()
+  } catch (e) {
+    console.error(`[renewal] Failed to log system error for membership ${membership.id}:`, e)
+  }
+  return { success: false, error: msg, systemError: true }
+}
+
+/**
  * Process automatic renewal for a membership
  * @param {Object} db - Database connection
  * @param {Object} membership - Membership record
@@ -1243,8 +1273,13 @@ async function processMembershipRenewal(db, membership, env) {
       `Renewal: Dice Bastion ${membership.plan} membership`
     )
   } catch (e) {
-    // Charge itself failed – handle as a genuine payment failure
-    return await handleRenewalFailure(db, env, membership, instrument, amount, currency, e)
+    // Only a genuine gateway decline (HTTP 402) is a real, failed payment attempt
+    // that should notify the member. System/transport errors never reached the
+    // card, so they must not produce a "payment failed" email or burn an attempt.
+    if (isGenuineDecline(e)) {
+      return await handleRenewalFailure(db, env, membership, instrument, amount, currency, e, orderRef)
+    }
+    return await handleRenewalSystemError(db, membership, amount, currency, e)
   }
 
   // Charge returned but status is not paid — use isCheckoutPaid() to also
@@ -1252,7 +1287,8 @@ async function processMembershipRenewal(db, membership, env) {
   // that carry top-level PENDING but a successful transaction inside.
   if (!payment || !isCheckoutPaid(payment)) {
     const statusErr = new Error(`Payment not successful: ${payment?.status || 'UNKNOWN'}`)
-    return await handleRenewalFailure(db, env, membership, instrument, amount, currency, statusErr)
+    statusErr.status = 402
+    return await handleRenewalFailure(db, env, membership, instrument, amount, currency, statusErr, orderRef)
   }
 
   // ── Step 2: Payment succeeded – extend membership & notify ─────────────
@@ -1321,10 +1357,13 @@ async function processMembershipRenewal(db, membership, env) {
 }
 
 /**
- * Handle a genuine renewal charge failure
- * Only called when the charge itself fails or returns a non-paid status.
+ * Handle a genuine renewal charge failure (a real, declined payment attempt).
+ * Only called when the card was actually presented to the gateway and rejected —
+ * NOT for system/transport errors (see handleRenewalSystemError). Records the
+ * failed attempt in `transactions` so every outcome email maps 1:1 to a real
+ * payment attempt.
  */
-async function handleRenewalFailure(db, env, membership, instrument, amount, currency, error) {
+async function handleRenewalFailure(db, env, membership, instrument, amount, currency, error, orderRef = null) {
   const userId = membership.user_id
   const currentAttempts = (membership.renewal_attempts || 0) + 1
   const errorMessage = String(error.message || error)
@@ -1340,6 +1379,20 @@ async function handleRenewalFailure(db, env, membership, instrument, amount, cur
     .bind(toIso(new Date()), currentAttempts, membership.id).run()
   await db.prepare('INSERT INTO renewal_log (membership_id, attempt_date, status, error_message, amount, currency) VALUES (?, ?, ?, ?, ?, ?)')
     .bind(membership.id, toIso(new Date()), 'failed', errorMessage, String(amount), currency).run()
+
+  // Record the declined attempt as a transaction so the failure email always
+  // corresponds to a real payment attempt in the transactions table.
+  try {
+    const failOrderRef = orderRef || `RENEWAL-FAIL-${membership.id}-${crypto.randomUUID()}`
+    const txUser = await db.prepare('SELECT email, name FROM users WHERE user_id = ?').bind(userId).first()
+    await db.prepare(`
+      INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
+                                amount, currency, payment_status)
+      VALUES ('renewal', ?, ?, ?, ?, ?, ?, ?, 'FAILED')
+    `).bind(membership.id, userId, txUser?.email || null, txUser?.name || null, failOrderRef, String(amount), currency).run()
+  } catch (e) {
+    console.error(`[renewal] Failed to record FAILED transaction for membership ${membership.id}:`, e)
+  }
 
   // If token error, deactivate the instrument
   if (isTokenError) {
@@ -7272,16 +7325,25 @@ app.post('/membership/retry-renewal', requireAdmin, async (c) => {
   }
 })
 
-// Test endpoint to manually trigger renewal for a specific user
+// Test endpoint to manually trigger renewal for a specific user (by email or user_id)
 app.get('/test/renew-user', requireAdmin, async (c) => {
   const email = c.req.query('email')
-  if (!email) return c.json({ error: 'email required' }, 400)
-  
-  try {    
-    
-    const ident = await findIdentityByEmail(c.env.DB, email)
-    if (!ident) return c.json({ error: 'user_not_found' }, 404)
-    
+  const userIdParam = c.req.query('user_id')
+  if (!email && !userIdParam) return c.json({ error: 'email or user_id required' }, 400)
+
+  try {
+    let userId
+    if (userIdParam) {
+      userId = Number(userIdParam)
+      if (!Number.isInteger(userId)) return c.json({ error: 'invalid_user_id' }, 400)
+      const user = await c.env.DB.prepare('SELECT user_id FROM users WHERE user_id = ?').bind(userId).first()
+      if (!user) return c.json({ error: 'user_not_found' }, 404)
+    } else {
+      const ident = await findIdentityByEmail(c.env.DB, email)
+      if (!ident) return c.json({ error: 'user_not_found' }, 404)
+      userId = ident.id
+    }
+
     // Find active membership with auto-renewal
     const membership = await c.env.DB.prepare(`
       SELECT * FROM memberships 
@@ -7289,7 +7351,7 @@ app.get('/test/renew-user', requireAdmin, async (c) => {
         AND status = 'active' 
         AND auto_renew = 1
       LIMIT 1
-    `).bind(ident.id).first()
+    `).bind(userId).first()
     
     if (!membership) {
       return c.json({ error: 'no_auto_renew_membership' }, 404)
@@ -9320,8 +9382,8 @@ async function processAutoRenewals(env) {
         WHERE m.is_free_trial = 1
           AND m.status = 'active'
           AND m.auto_renew = 1
-          AND m.trial_end_date <= ?
-          AND m.trial_end_date >= ?
+          AND DATE(m.trial_end_date) <= DATE(?)
+          AND DATE(m.trial_end_date) >= DATE(?)
           AND (m.renewal_attempts < 3 OR m.renewal_attempts IS NULL)
       `).bind(today, gracePeriodStartStr).all()
 
@@ -9359,14 +9421,21 @@ async function processAutoRenewals(env) {
               `Dice Bastion ${trial.plan} membership (post-trial)`
             )
           } catch (e) {
-            await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, e)
-            trialChargesFailed++
+            // Genuine decline → notify + count the attempt. System error → no
+            // charge reached the card, so don't email or burn an attempt; retry next run.
+            if (isGenuineDecline(e)) {
+              await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, e, orderRef)
+              trialChargesFailed++
+            } else {
+              await handleRenewalSystemError(env.DB, trial, amount, currency, e)
+            }
             continue
           }
 
           if (!payment || !isCheckoutPaid(payment)) {
             const statusErr = new Error(`Trial charge not successful: ${payment?.status || 'UNKNOWN'}`)
-            await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, statusErr)
+            statusErr.status = 402
+            await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, statusErr, orderRef)
             trialChargesFailed++
             continue
           }
@@ -9561,8 +9630,8 @@ async function processAutoRenewals(env) {
         u.name
       FROM memberships m
       JOIN users u ON m.user_id = u.user_id
-      WHERE m.end_date <= ?
-        AND m.end_date >= ?
+      WHERE DATE(m.end_date) <= DATE(?)
+        AND DATE(m.end_date) >= DATE(?)
         AND m.auto_renew = 1
         AND m.status = 'active'
         AND (m.is_free_trial = 0 OR m.is_free_trial IS NULL)

@@ -6,6 +6,20 @@
  */
 
 /**
+ * Build an Error that preserves the payments worker's HTTP status and parsed body.
+ * Callers use `.status` to tell a genuine gateway decline (402 "Payment not
+ * successful") apart from a system/transport error (5xx, network, token/customer/
+ * checkout creation failures) where no charge ever reached the card.
+ */
+function paymentsWorkerError(message, status, body) {
+	const err = new Error(message)
+	err.status = status
+	if (body !== undefined) err.body = body
+	err.isPaymentsWorkerError = true
+	return err
+}
+
+/**
  * Call payments worker internal API
  */
 async function callPaymentsWorker(env, endpoint, options = {}) {
@@ -30,9 +44,10 @@ async function callPaymentsWorker(env, endpoint, options = {}) {
 		if (!response.ok) {
 			const errorText = await response.text()
 			let errorMessage = `Payments worker error: ${response.status}`
+			let errorBody
 			try {
-				const errorJson = JSON.parse(errorText)
-				errorMessage = errorJson.error || errorMessage
+				errorBody = JSON.parse(errorText)
+				errorMessage = errorBody.error || errorMessage
 			} catch (e) {
 				if (errorText) errorMessage += ` - ${errorText}`
 			}
@@ -42,7 +57,7 @@ async function callPaymentsWorker(env, endpoint, options = {}) {
 				statusText: response.statusText,
 				error: errorMessage
 			})
-			throw new Error(errorMessage)
+			throw paymentsWorkerError(errorMessage, response.status, errorBody)
 		}
 		
 		return response.json()
@@ -70,9 +85,10 @@ async function callPaymentsWorker(env, endpoint, options = {}) {
 	if (!response.ok) {
 		const errorText = await response.text()
 		let errorMessage = `Payments worker error: ${response.status}`
+		let errorBody
 		try {
-			const errorJson = JSON.parse(errorText)
-			errorMessage = errorJson.error || errorMessage
+			errorBody = JSON.parse(errorText)
+			errorMessage = errorBody.error || errorMessage
 		} catch (e) {
 			// Not JSON, use raw text
 			if (errorText) errorMessage += ` - ${errorText}`
@@ -85,7 +101,7 @@ async function callPaymentsWorker(env, endpoint, options = {}) {
 			hasSecret: !!env.INTERNAL_SECRET,
 			hasWorkerUrl: !!env.PAYMENTS_WORKER_URL
 		})
-		throw new Error(errorMessage)
+		throw paymentsWorkerError(errorMessage, response.status, errorBody)
 	}
 
 	return response.json()
