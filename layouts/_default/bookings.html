@@ -337,7 +337,24 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
 // API endpoints (MAIN_API is set globally by footer, accessed via window.MAIN_API)
-const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run'; // Bunny Edge Script
+const IS_PRODUCTION_SITE =
+  location.hostname === 'dicebastion.com' || location.hostname === 'www.dicebastion.com';
+const BOOKINGS_BUNNY_ORIGIN = 'https://dicebastionbookings-ofbbu.bunny.run';
+
+/** Absolute bookings API URL — Safari rejects some relative fetch URLs built from an empty base. */
+function bookingsApiUrl(pathAndQuery = '') {
+  const raw = String(pathAndQuery || '');
+  const path = raw.startsWith('/') ? raw : `/${raw}`;
+  const fullPath = path === '/'
+    ? '/api/bookings'
+    : path.startsWith('/api/bookings')
+      ? path
+      : `/api/bookings${path}`;
+  if (IS_PRODUCTION_SITE) {
+    return new URL(fullPath, window.location.origin).href;
+  }
+  return `${BOOKINGS_BUNNY_ORIGIN}${fullPath}`;
+}
 const PAYMENTS_API = 'https://dicebastion-payments.ncalamaro.workers.dev'; // Cloudflare Payments Worker
 const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
 const IS_LOCALHOST = window.location.hostname === 'localhost' || 
@@ -690,7 +707,7 @@ async function loadTableTypes() {
   utils.applyVisibilityControls();
   
   try {
-    const response = await fetch(`${BOOKINGS_API}/api/bookings/table-types`);
+    const response = await fetch(bookingsApiUrl('/table-types'));
     let data;
     try {
       data = await response.json();
@@ -770,7 +787,20 @@ async function loadTableTypes() {
     
   } catch (error) {
     console.error('Error loading table types:', error);
-    container.innerHTML = '<div class="alert alert-error">Failed to load table types</div>';
+    let message = 'Failed to load table types';
+    const errText = String(error?.message || '');
+    if (
+      errText === 'Failed to fetch' ||
+      errText === 'Load failed' ||
+      errText.includes('did not match the expected pattern') ||
+      error?.name === 'TypeError' ||
+      error?.name === 'SyntaxError'
+    ) {
+      message = 'Could not reach the booking service. Please check your connection and try again.';
+    } else if (errText) {
+      message = errText;
+    }
+    container.innerHTML = `<div class="alert alert-error">${escapeHtml(message)}</div>`;
   }
 }
 
@@ -839,7 +869,7 @@ async function loadAvailableSlots(date) {
   
   try {
     // Fetch available slots from API (excludes fully booked slots)
-    let slotsUrl = `${BOOKINGS_API}/api/bookings/available-slots?date=${encodeURIComponent(date)}&table_type_id=${selectedTableType.id}`;
+    let slotsUrl = bookingsApiUrl(`/available-slots?date=${encodeURIComponent(date)}&table_type_id=${selectedTableType.id}`);
     if (userSession?.email) {
       slotsUrl += `&email=${encodeURIComponent(userSession.email)}`;
     }
@@ -970,7 +1000,7 @@ async function handleBookingSubmit(e) {
     const orderRef = `BOOK-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     // Create booking in Bunny database
-    const bookingResponse = await fetch(`${BOOKINGS_API}/api/bookings`, {
+    const bookingResponse = await fetch(bookingsApiUrl(''), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -987,8 +1017,15 @@ async function handleBookingSubmit(e) {
       })
     });
     
-    const bookingData = await bookingResponse.json();
-    
+    const bookingBody = await bookingResponse.text();
+    let bookingData;
+    try {
+      bookingData = bookingBody ? JSON.parse(bookingBody) : {};
+    } catch (parseErr) {
+      console.error('Booking response was not JSON:', bookingResponse.status, bookingBody);
+      throw new Error('Invalid response from booking service');
+    }
+
     if (!bookingResponse.ok) {
       console.error('Booking creation failed:', bookingResponse.status, bookingData);
       throw new Error(bookingData.message || bookingData.error || bookingData.details || 'Booking creation failed');
@@ -1069,9 +1106,9 @@ async function confirmBooking(orderRef) {
   // Note: pollPaymentConfirmation prepends the API base, so we pass the full URL directly
   // by setting a temporary override
   const originalApiBase = window.__DB_API_BASE;
-  window.__DB_API_BASE = BOOKINGS_API;
-  
-  const result = await utils.pollPaymentConfirmation(`/api/bookings/confirm/${orderRef}`, null, {
+  window.__DB_API_BASE = IS_PRODUCTION_SITE ? window.location.origin : BOOKINGS_BUNNY_ORIGIN;
+
+  const result = await utils.pollPaymentConfirmation(`/api/bookings/confirm/${orderRef}`, orderRef, {
     pollInterval: 3000,
     maxAttempts: 20,
     onSuccess: (data) => {
@@ -1111,7 +1148,7 @@ async function loadBookingsForDate(date) {
   container.innerHTML = '<div class="loading">Loading your bookings</div>';
   
   try {
-    const response = await fetch(`${BOOKINGS_API}/api/bookings/user/${encodeURIComponent(userSession.email)}`);
+    const response = await fetch(bookingsApiUrl(`/user/${encodeURIComponent(userSession.email)}`));
     const data = await response.json();
     userBookings = data.bookings || [];
     
@@ -1168,7 +1205,7 @@ window.cancelBooking = async function(bookingId, bookingDate, startTime) {
   }
   
   try {
-    const response = await fetch(`${BOOKINGS_API}/api/bookings/${bookingId}/cancel`, {
+    const response = await fetch(bookingsApiUrl(`/${bookingId}/cancel`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' }
     });

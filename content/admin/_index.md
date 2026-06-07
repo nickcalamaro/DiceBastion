@@ -1046,6 +1046,7 @@ Loading cron job logs...
 <button onclick="clearNewsletter()" class="btn btn-secondary">Clear</button>
 <button onclick="previewNewsletter()" class="btn btn-secondary">Preview</button>
 <button onclick="nlServerSaveDraft()" class="btn btn-secondary" id="nl-save-draft-btn">Save Draft</button>
+<button onclick="sendNewsletterTest()" class="btn btn-secondary" id="nl-test-btn">Send Test</button>
 <button onclick="nlOpenScheduleModal()" class="btn btn-secondary" id="nl-schedule-btn">Schedule</button>
 <button onclick="sendNewsletter()" class="btn btn-primary" id="nl-send-btn">Send Now</button>
 </div>
@@ -1636,6 +1637,10 @@ Loading cron job logs...
 }
 
 .nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.nl-event-card-embed .nl-event-card-img-wrap { background: #f1f5f9; line-height: 0; font-size: 0; }
+.nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: auto; display: block; }
+/* Keep loose pasted/linked images inside the editor frame (mirrors the email shell) */
+#nl-editor .ql-editor img { max-width: 100%; height: auto; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
 .dark .nl-cal-check-card { border-color: rgb(var(--color-neutral-700)); }
@@ -2353,12 +2358,44 @@ function flattenTransparentWithFill(src, rgb) {
   return c;
 }
 
-function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
-  const baseArea = 800 * 379;
-  const area = targetWidth * targetHeight;
-  const blurPx = Math.max(12, Math.round(28 * Math.sqrt(area / baseArea)));
-  const pad = Math.round(blurPx * 1.07);
+function resolveCropFillRgb(croppedCanvas, cropBgMode, cropBgPickedCol) {
+  if (cropBgMode === 'white') return { r: 255, g: 255, b: 255 };
+  if (cropBgMode === 'pick' && cropBgPickedCol) return hexToRgb(cropBgPickedCol);
+  return averageOpaqueRgb(croppedCanvas);
+}
 
+/**
+ * Export the artwork tightly at its own aspect ratio (scaled to fit within maxW×maxH), with no
+ * letterbox padding band. This is for images rendered with object-fit: contain + a CSS ::before
+ * blurred backdrop: the CSS is then the ONLY background. Baking any padding/fill here (solid or
+ * blurred) is what produced the "two backgrounds" stacked on one image. The flat fill only ever
+ * shows through genuine internal transparency in the source art (so JPEG doesn't composite on black).
+ */
+function exportTightSubjectJpeg(sourceCanvas, sx, sy, sw, sh, maxW, maxH, cropBgMode, cropBgPickedCol) {
+  const scale = Math.min(maxW / sw, maxH / sh);
+  const dw = Math.max(1, Math.round(sw * scale));
+  const dh = Math.max(1, Math.round(sh * scale));
+  const fillRgb = resolveCropFillRgb(sourceCanvas, cropBgMode, cropBgPickedCol);
+  const c = document.createElement('canvas');
+  c.width = dw;
+  c.height = dh;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = `rgb(${fillRgb.r},${fillRgb.g},${fillRgb.b})`;
+  ctx.fillRect(0, 0, dw, dh);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
+  return c.toDataURL('image/jpeg', 0.92);
+}
+
+/**
+ * Compose the export over a single flat fill (no baked blurred backdrop). The blurred backdrop
+ * is added exactly once, by the rendering CSS (.event-card-image::before / inline figure media).
+ * Baking a second blurred layer here is what produced the "two backgrounds" (a darker solid plus a
+ * lighter gradient) stacked on the same image. Used only for 'fillHeight'/cover exports, which fill
+ * the frame edge-to-edge so the flat fill is not visible.
+ */
+function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
   let fillRgb;
   if (cropBgMode === 'white') {
     fillRgb = { r: 255, g: 255, b: 255 };
@@ -2377,12 +2414,6 @@ function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, 
   const ctx = finalCanvas.getContext('2d');
   ctx.fillStyle = fillCol;
   ctx.fillRect(0, 0, targetWidth, targetHeight);
-  if (cropBgMode === 'auto') {
-    ctx.save();
-    ctx.filter = `blur(${blurPx}px)`;
-    ctx.drawImage(opaqueSrc, -pad, -pad, targetWidth + pad * 2, targetHeight + pad * 2);
-    ctx.restore();
-  }
   ctx.drawImage(opaqueSrc, 0, 0, targetWidth, targetHeight);
   return finalCanvas.toDataURL('image/jpeg', 0.92);
 }
@@ -2631,16 +2662,17 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
         return;
       }
       const fitRect = getExportFitSourceRect(masterCropped);
-      const sized = containCenterOnCanvasRegion(
+      const dataUrl = exportTightSubjectJpeg(
         masterCropped,
         fitRect.sx,
         fitRect.sy,
         fitRect.sw,
         fitRect.sh,
         spec.w,
-        spec.h
+        spec.h,
+        cropBgMode,
+        cropBgPickedCol
       );
-      const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
       try {
         const url = await blogUploadImageToBunny(dataUrl, spec.filename);
         currentCropCallback(url);
@@ -2669,27 +2701,32 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       const batchId = Date.now();
       const bundle = {};
       for (const spec of exportSpecs) {
-        const sized =
-          spec.fit === 'contain'
-            ? containCenterOnCanvasRegion(
-                masterCropped,
-                fitRect.sx,
-                fitRect.sy,
-                fitRect.sw,
-                fitRect.sh,
-                spec.w,
-                spec.h
-              )
-            : fillHeightMinCenterOnCanvasRegion(
-                masterCropped,
-                fitRect.sx,
-                fitRect.sy,
-                fitRect.sw,
-                fitRect.sh,
-                spec.w,
-                spec.h
-              );
-        const dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+        let dataUrl;
+        if (spec.fit === 'contain') {
+          // Tight artwork, no padding band — CSS ::before is the only background.
+          dataUrl = exportTightSubjectJpeg(
+            masterCropped,
+            fitRect.sx,
+            fitRect.sy,
+            fitRect.sw,
+            fitRect.sh,
+            spec.w,
+            spec.h,
+            cropBgMode,
+            cropBgPickedCol
+          );
+        } else {
+          const sized = fillHeightMinCenterOnCanvasRegion(
+            masterCropped,
+            fitRect.sx,
+            fitRect.sy,
+            fitRect.sw,
+            fitRect.sh,
+            spec.w,
+            spec.h
+          );
+          dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+        }
         try {
           const uploadUrl = await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
           bundle[spec.key] = uploadUrl;
@@ -5249,6 +5286,31 @@ async function loadNewsletterEvents() {
   }
 }
 
+function nlEventImageSrc(ev) {
+  // Prefer image_url (the 800x379 main variant): it is filled edge-to-edge at a CONSISTENT
+  // aspect ratio with the blurred backdrop baked into the file, so every event looks uniform
+  // in a flat frame. image_url_card is exported at each artwork's OWN aspect ratio (tight, no
+  // baked fill) for object-fit:contain + a CSS ::before backdrop — that context does not exist
+  // in email, so using it here made cards look different / crop weirdly.
+  return (ev && (ev.image_url || ev.image_url_card)) || '';
+}
+
+function nlEventDisplayName(ev) {
+  const name = ev.event_name || '';
+  return ev.is_recurring === 1 ? `${name} (recurring)` : name;
+}
+
+function nlEventCardImageHtml(ev) {
+  const src = nlEventImageSrc(ev);
+  if (!src) return '';
+  // image_url is always exported at a uniform 800x379 with the blurred backdrop baked into the
+  // file, so showing the WHOLE image at its natural aspect ratio (no cover crop) keeps every
+  // card identical AND never clips the artwork.
+  return '<div class="nl-event-card-img-wrap" style="background:#f1f5f9;line-height:0;font-size:0;">'
+    + '<img src="' + src + '" alt="" width="600" style="display:block;width:100%;height:auto;border:0;">'
+    + '</div>';
+}
+
 function renderNlEventPickerList() {
   const list = document.getElementById('nl-event-picker-list');
   if (!list) return;
@@ -5260,16 +5322,18 @@ function renderNlEventPickerList() {
     const dt = new Date(ev.event_datetime);
     const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
     const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const imgHtml = ev.image_url
-      ? `<img class="nl-event-pick-img" src="${ev.image_url_card || ev.image_url}" alt="">`
+    const imgSrc = nlEventImageSrc(ev);
+    const imgHtml = imgSrc
+      ? `<img class="nl-event-pick-img" src="${imgSrc}" alt="">`
       : `<div class="nl-event-pick-img"></div>`;
     const locationSuffix = ev.location ? ` &middot; ${ev.location}` : '';
+    const nextLabel = ev.is_recurring === 1 ? 'Next: ' : '';
     return `
       <div class="nl-event-pick-card" onclick="insertNlEventBlock(${idx})">
         ${imgHtml}
         <div>
-          <div class="nl-event-pick-title">${ev.event_name || ''}</div>
-          <div class="nl-event-pick-date">${dateStr} at ${timeStr}${locationSuffix}</div>
+          <div class="nl-event-pick-title">${nlEventDisplayName(ev)}</div>
+          <div class="nl-event-pick-date">${nextLabel}${dateStr} at ${timeStr}${locationSuffix}</div>
         </div>
       </div>
     `;
@@ -5295,10 +5359,7 @@ function insertNlEventBlock(idx) {
   const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-  // Images are always 400x190 - use natural aspect ratio, no cropping
-  const imgPart = ev.image_url
-    ? '<img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="400" height="190" style="width:100%;height:auto;display:block;">'
-    : '';
+  const imgPart = nlEventCardImageHtml(ev);
   const locationPart = ev.location
     ? '<p style="margin:4px 0;font-size:14px;color:#64748b;">' + ev.location + '</p>'
     : '';
@@ -5312,7 +5373,7 @@ function insertNlEventBlock(idx) {
   const cardHtml = imgPart
     + '<div style="padding:18px 20px 20px 20px;">'
     + '<p style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#4f46e5;margin:0 0 8px 0;">Upcoming Event</p>'
-    + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + (ev.event_name || '') + '</h3>'
+    + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + nlEventDisplayName(ev) + '</h3>'
     + '<p style="margin:0 0 4px 0;font-size:14px;color:#64748b;">' + dateStr + ' at ' + timeStr + '</p>'
     + locationPart + descPart
     + '<a href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Event</a>'
@@ -5339,11 +5400,15 @@ function buildCalendarHtml(events) {
     const dh = h % 12 || 12;
     return { dayName: DAY_NAMES[d.getDay()], dayOrdinal: ordinal(d.getDate()), month: MONTH_NAMES[d.getMonth()], time: dh + ':' + String(mn).padStart(2,'0') + ' ' + ampm };
   }
+  const CAL_IMG_H = 120;
   function buildCard(ev) {
     const p = fmtDate(ev.event_datetime);
-    const imgRow = ev.image_url
-      ? '<tr><td style="padding:0;line-height:0;font-size:0;"><img src="' + (ev.image_url_card || ev.image_url) + '" alt="" width="100%" style="display:block;width:100%;border-radius:8px 8px 0 0;" /></td></tr>'
-      : '<tr><td style="background:#e0e7ff;height:120px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
+    const imgSrc = nlEventImageSrc(ev);
+    const imgRow = imgSrc
+      ? '<tr><td style="padding:0;height:' + CAL_IMG_H + 'px;line-height:0;font-size:0;overflow:hidden;background:#f1f5f9;">'
+        + '<img src="' + imgSrc + '" alt="" width="280" height="' + CAL_IMG_H + '" style="display:block;width:100%;height:' + CAL_IMG_H + 'px;object-fit:cover;object-position:center;border:0;" />'
+        + '</td></tr>'
+      : '<tr><td style="background:#e0e7ff;height:' + CAL_IMG_H + 'px;border-radius:8px 8px 0 0;text-align:center;vertical-align:middle;"><p style="margin:0;font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.08em;">Event</p></td></tr>';
     const href = ev.slug ? 'https://dicebastion.com/events/' + ev.slug : 'https://dicebastion.com/events';
     return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">'
       + imgRow
@@ -5388,11 +5453,12 @@ function renderNlCalendarPickerList() {
     const dateStr = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
     const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const locationSuffix = ev.location ? ' &middot; ' + ev.location : '';
+    const nextLabel = ev.is_recurring === 1 ? 'Next: ' : '';
     return '<label class="nl-cal-check-card">'
       + '<input type="checkbox" name="nl-cal-ev" value="' + idx + '" checked>'
       + '<div>'
-      + '<div class="nl-cal-card-title">' + (ev.event_name || '') + '</div>'
-      + '<div class="nl-cal-card-date">' + dateStr + ' at ' + timeStr + locationSuffix + '</div>'
+      + '<div class="nl-cal-card-title">' + nlEventDisplayName(ev) + '</div>'
+      + '<div class="nl-cal-card-date">' + nextLabel + dateStr + ' at ' + timeStr + locationSuffix + '</div>'
       + '</div></label>';
   }).join('');
   const btn = document.getElementById('nl-cal-toggle-all-btn');
@@ -5441,15 +5507,31 @@ function clearNewsletter() {
   if (result) result.style.display = 'none';
 }
 
+function nlNormalizeEmailImages(html) {
+  return String(html || '').replace(/<img\b[^>]*>/gi, function(tag) {
+    if (/object-fit\s*:/i.test(tag)) return tag;
+    var out = tag.replace(/\s(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    var responsive = 'display:block;max-width:100%;height:auto;';
+    var styleMatch = out.match(/\sstyle\s*=\s*"([^"]*)"/i);
+    if (styleMatch) {
+      var merged = styleMatch[1].replace(/\s*;?\s*$/, '') + ';' + responsive;
+      out = out.replace(/\sstyle\s*=\s*"[^"]*"/i, ' style="' + merged + '"');
+    } else {
+      out = out.replace(/<img\b/i, '<img style="' + responsive + '"');
+    }
+    return out;
+  });
+}
+
 function buildNlEmailHtml(bodyHtml, subject) {
-  const body = bodyHtml
+  const body = nlNormalizeEmailImages(bodyHtml
     .replace(/ data-card="[^"]*"/g, '')
     .replace(/ contenteditable="[^"]*"/g, '')
     .replace(/class="nl-event-card-embed"/g,
       'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
     .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
     .replace(/ class="ql-[^"]*"/g, '')
-    .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
+    .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, ''));
   // Goldmark terminates a script block on a literal closing style tag,
   // so split that string across two literals.
   const stO = '<sty' + 'le>';
@@ -5496,6 +5578,56 @@ function previewNewsletter() {
 
 function closeNlPreview() {
   document.getElementById('nl-preview-modal').style.display = 'none';
+}
+
+async function sendNewsletterTest() {
+  const subject = document.getElementById('nl-subject').value.trim();
+  const bodyHtml = nlQuill ? nlQuill.root.innerHTML.trim() : '';
+  const resultEl = document.getElementById('nl-send-result');
+
+  if (!subject) {
+    Modal.alert({ title: 'Missing Subject', message: 'Please enter a subject line before sending a test.' });
+    return;
+  }
+  if (!bodyHtml || bodyHtml === '<p><br></p>') {
+    Modal.alert({ title: 'Empty Newsletter', message: 'Please write some content before sending a test.' });
+    return;
+  }
+
+  const to = (prompt('Send a test copy to:', '') || '').trim();
+  if (!to) return;
+
+  const btn = document.getElementById('nl-test-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending test...';
+  resultEl.style.display = 'none';
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletter/test-send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+      body: JSON.stringify({ subject, html: bodyHtml, to })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      resultEl.className = 'nl-send-result nl-success';
+      resultEl.textContent = data.skipped
+        ? `Test not delivered: email sending is not configured on this environment.`
+        : `Test newsletter sent to ${data.to}.`;
+      resultEl.style.display = 'block';
+    } else {
+      resultEl.className = 'nl-send-result nl-error';
+      resultEl.textContent = `Test send failed: ${data.error || 'Unknown error'}`;
+      resultEl.style.display = 'block';
+    }
+  } catch (err) {
+    resultEl.className = 'nl-send-result nl-error';
+    resultEl.textContent = `Network error: ${err.message}`;
+    resultEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send Test';
+  }
 }
 
 async function sendNewsletter() {

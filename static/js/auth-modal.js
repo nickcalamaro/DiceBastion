@@ -80,7 +80,11 @@
 
 class AuthModal {
   constructor(options = {}) {
-    this.mainApiUrl = options.mainApiUrl || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+    this.mainApiUrl = options.mainApiUrl || window.__DB_API_BASE || (
+      (location.hostname === 'dicebastion.com' || location.hostname === 'www.dicebastion.com')
+        ? '/api'
+        : 'https://dicebastion-memberships.ncalamaro.workers.dev'
+    );
     this.onSuccess = options.onSuccess || (() => {});
     this.modal = null;
     this.currentTab = 'login';
@@ -463,7 +467,9 @@ class AuthModal {
       this.modal.querySelector('#forgot-email').value = '';
 
     } catch (error) {
-      errorDiv.textContent = error.message;
+      errorDiv.textContent = (error && (error.message === 'Load failed' || error.message === 'Failed to fetch'))
+        ? 'Could not reach the server. Check your connection or try disabling ad blockers, then try again.'
+        : (error.message || 'Failed to send reset email');
       errorDiv.style.display = 'block';
     } finally {
       btn.disabled = false;

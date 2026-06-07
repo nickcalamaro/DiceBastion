@@ -276,10 +276,15 @@ app.post('/internal/checkout', async (c) => {
 		}
 
 		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose.
-		// Per SumUp docs, the authorization amount is "instantly reimbursed" (auth hold released).
-		// Standard memberships auth the plan price; free trials always auth £1 regardless of tier.
+		// IMPORTANT: authorize only a minimal amount (£1). The real membership amount is
+		// charged separately right after, via the saved payment instrument (a merchant-
+		// initiated charge that does not require SCA/3DS). Authorizing the full plan price
+		// here is redundant and adds card-auth friction: larger card-present (CUSTOMER_ENTRY)
+		// authorizations are far more likely to trigger a 3DS challenge or be declined by the
+		// issuer, which is what broke real-customer card setup when this was raised from £0.01
+		// to the full amount. The auth hold is instantly reimbursed by SumUp regardless.
 		if (savePaymentInstrument && customerId) {
-			const authAmount = isFreeTrialSetup ? 1.00 : (Number(amount) || 1.00)
+			const authAmount = 1.00
 			checkoutBody.amount = authAmount
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
@@ -375,7 +380,8 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 		}
 
 		const payment: any = await res.json()
-		const failedTx = (payment.transactions || []).filter((t: any) => t?.status === 'FAILED')
+		const txs = (payment.transactions || []) as any[]
+		const failedTx = txs.filter((t: any) => t?.status === 'FAILED')
 		const failedDetails = failedTx.map((t: any) => ({
 			id: t.id,
 			status: t.status,
@@ -390,11 +396,30 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 			checkout_reference: payment.checkout_reference || null,
 			status: payment.status,
 			purpose: payment.purpose || 'none',
-			transactionCount: payment.transactions?.length || 0,
-			txStatuses: payment.transactions?.map((t: any) => t.status) || [],
+			transactionCount: txs.length,
+			txStatuses: txs.map((t: any) => t.status),
 			hasInstrument: !!payment.payment_instrument,
 			failedTxDetails: failedDetails
 		})
+		// When a checkout is not cleanly paid, dump the full raw transactions + top-level
+		// failure fields. SumUp surfaces decline reasons under varying keys (and sometimes
+		// only on the transaction objects), so capture everything to diagnose real-customer
+		// failures rather than guessing which field holds the reason.
+		const hasSuccess = txs.some((t: any) => t?.status === 'SUCCESSFUL' || t?.status === 'PAID')
+		const isPaid = payment.status === 'PAID' || payment.status === 'SUCCESSFUL' || hasSuccess
+		if (!isPaid) {
+			console.log('[Payment] NON-PAID checkout full detail:', JSON.stringify({
+				sumup_checkout_id: checkoutId,
+				checkout_reference: payment.checkout_reference || null,
+				status: payment.status,
+				purpose: payment.purpose || null,
+				customer_id: payment.customer_id || null,
+				date: payment.date || null,
+				valid_until: payment.valid_until || null,
+				status_reason: payment.status_reason ?? payment.statusReason ?? null,
+				transactions: txs
+			}))
+		}
 		return c.json(payment)
 	} catch (error: any) {
 		console.error('Fetch payment error:', error)

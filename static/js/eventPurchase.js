@@ -708,11 +708,22 @@ window.initEventPurchase = function initEventPurchase(event) {
         country: 'GB',
         onResponse: async (type, body) => {
           console.log('SumUp onResponse:', type, body);
+          try {
+            window.utils.logPaymentEvent({
+              flow: 'event',
+              type: type,
+              stage: 'widget_onResponse',
+              orderRef: orderRef,
+              checkoutId: checkoutId,
+              message: (body && body.message) || null,
+              sumupBody: body
+            });
+          } catch (_) {}
           clearError();
           if (type === 'success') {
             await confirmPayment(orderRef, { pollInterval: 3000, maxAttempts: 20 });
           } else if (type === 'error' || type === 'fail') {
-            showError(body.message || 'Payment failed. Please try again.');
+            showError((body && body.message) || 'Payment failed. Please try again.');
           } else if (type === 'cancel') {
             showError('Payment cancelled. You can try again when ready.');
           } else {

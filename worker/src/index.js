@@ -1,17 +1,8 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { createHmac } from 'crypto'
-import { calculateNextOccurrence } from './utils/recurring.js'
+import { calculateNextOccurrence, processUpcomingEvents } from './utils/recurring.js'
 import { getEventReminderEmail } from './email-templates/event-reminder.js'
-import {
-  createEmailVerificationToken,
-  verifyEmailVerificationToken,
-  getUserEmailPreferences,
-  updateUserEmailPreferences,
-  validateEmailPreferencesSession,
-  checkEmailVerificationRateLimit,
-  generateVerificationLink
-} from './auth-utils.js'
 import {
   createCheckout,
   getOrCreateSumUpCustomer,
@@ -212,18 +203,6 @@ async function notifyGoogleIndexing(env, url, type = 'URL_UPDATED') {
     console.error('Google Indexing error:', err)
     return { ok: false, status: 0, body: { error: err.message || String(err) } }
   }
-}
-
-/**
- * Fire-and-forget: notify Google about a URL without blocking the caller.
- * Safe to call from any endpoint – swallows all errors.
- */
-function notifyGoogleIndexingAsync(ctx, env, url, type = 'URL_UPDATED') {
-  ctx.waitUntil(
-    notifyGoogleIndexing(env, url, type).catch(err =>
-      console.error('Async Google Indexing failed:', err)
-    )
-  )
 }
 
 /** Canonical sitemap URLs (also listed in layouts/robots.txt and shop/static/robots.txt). */
@@ -477,113 +456,6 @@ async function checkAndMarkWebhookProcessed(db, webhookId, entityType, entityId)
   }
 }
 
-// ============================================================================
-// STOCK MANAGEMENT - Inventory Reservation System
-// ============================================================================
-
-/**
- * Reserve stock for a pending order
- * @param {Object} db - Database connection
- * @param {number} productId - Product ID to reserve
- * @param {number} quantity - Quantity to reserve
- * @returns {boolean} True if reservation successful
- */
-async function reserveStock(db, productId, quantity) {
-  try {
-    // Check available stock
-    const product = await db.prepare('SELECT stock_quantity FROM products WHERE id = ?').bind(productId).first()
-    if (!product) {
-      throw new Error('Product not found')
-    }
-    
-    // Check if there's enough stock available (considering existing reservations)
-    const existingReservations = await db.prepare(
-      'SELECT SUM(quantity) as reserved FROM stock_reservations WHERE product_id = ? AND status = "reserved"'
-    ).bind(productId).first()
-    
-    const reservedQuantity = existingReservations?.reserved || 0
-    const availableStock = product.stock_quantity - reservedQuantity
-    
-    if (availableStock < quantity) {
-      throw new Error(`Insufficient available stock: ${availableStock} available, ${quantity} requested`)
-    }
-    
-    // Reserve the stock
-    const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString() // 1 hour reservation
-    await db.prepare(
-      'INSERT INTO stock_reservations (product_id, quantity, status, expires_at) VALUES (?, ?, ?, ?)'
-    ).bind(productId, quantity, 'reserved', expiresAt).run()
-    
-    return true
-  } catch (error) {
-    console.error('Stock reservation error:', error)
-    throw error
-  }
-}
-
-/**
- * Release a stock reservation (e.g., when checkout expires)
- */
-async function releaseStockReservation(db, productId, orderId) {
-  try {
-    await db.prepare(
-      'UPDATE stock_reservations SET status = "released" WHERE product_id = ? AND order_id = ? AND status = "reserved"'
-    ).bind(productId, orderId).run()
-  } catch (error) {
-    console.error('Stock release error:', error)
-  }
-}
-
-/**
- * Commit a stock reservation to actual inventory reduction
- */
-async function commitStockReservation(db, productId, orderId) {
-  try {
-    // Update reservation status
-    await db.prepare(
-      'UPDATE stock_reservations SET status = "committed" WHERE product_id = ? AND order_id = ? AND status = "reserved"'
-    ).bind(productId, orderId).run()
-    
-    // Reduce actual stock
-    const reservation = await db.prepare(
-      'SELECT quantity FROM stock_reservations WHERE product_id = ? AND order_id = ? AND status = "committed"'
-    ).bind(productId, orderId).first()
-    
-    if (reservation) {
-      await db.prepare(
-        'UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?'
-      ).bind(reservation.quantity, productId).run()
-    }
-  } catch (error) {
-    console.error('Stock commitment error:', error)
-    throw error
-  }
-}
-
-/**
- * Cleanup expired stock reservations (called by cron job)
- * @returns {number} Number of reservations cleaned up
- */
-async function cleanupExpiredStockReservations(db) {
-  try {
-    const now = new Date().toISOString()
-    const expiredReservations = await db.prepare(
-      'SELECT * FROM stock_reservations WHERE status = "reserved" AND expires_at < ?'
-    ).bind(now).all()
-    
-    for (const reservation of expiredReservations.results || []) {
-      await db.prepare(
-        'UPDATE stock_reservations SET status = "expired" WHERE id = ?'
-      ).bind(reservation.id).run()
-    }
-    
-    return expiredReservations.results?.length || 0
-  } catch (error) {
-    console.error('Stock reservation cleanup error:', error)
-    return 0
-  }
-}
-
 /**
  * Extract image key from R2 URL
  * @param {string} url - Full R2 URL
@@ -690,7 +562,11 @@ async function migrateToTransactions(db) {
 // FREE TRIAL SCHEMA MIGRATION
 // ============================================================================
 
+// Columns already exist in production. Runtime guard remains as a safety net for
+// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
+let __freeTrialColsReady = false
 async function migrateFreeTrialColumns(db) {
+  if (__freeTrialColsReady) return
   const cols = [
     { name: 'is_free_trial', def: 'INTEGER DEFAULT 0' },
     { name: 'trial_end_date', def: 'TEXT' },
@@ -706,6 +582,7 @@ async function migrateFreeTrialColumns(db) {
       }
     }
   }
+  __freeTrialColsReady = true
 }
 
 async function hasUsedFreeTrial(db, userId) {
@@ -953,6 +830,139 @@ async function activateTicket(db, { ticketId, eventId, transactionId, paymentId 
 }
 
 /**
+ * Confirm a paid single-event ticket purchase (order ref `EVT-{eventId}-{uuid}`).
+ *
+ * Single source of truth shared by the `/events/confirm` browser redirect and the
+ * SumUp webhook so both paths behave identically. Validates the SumUp payment,
+ * activates the ticket, marks the transaction PAID, increments tickets_sold and
+ * sends the customer + admin emails. Idempotent: re-running for an already-active
+ * ticket is a no-op success.
+ *
+ * @param {D1Database} db
+ * @param {object} env
+ * @param {{ orderRef: string, payment?: object|null }} opts
+ *   - payment: a pre-fetched SumUp checkout (webhook path). When omitted/null the
+ *     payment is fetched from SumUp using the transaction's checkout_id.
+ * @returns {Promise<object>} Normalised result. `ok` indicates activation/idempotent
+ *   success. On failure, `notPaid` flags a non-terminal/declined payment, while
+ *   `error` + `httpStatus` describe hard failures (not found / mismatch / sold out).
+ */
+async function confirmTicketPurchase(db, env, { orderRef, payment = null }) {
+  const transaction = await db.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "ticket"').bind(orderRef).first()
+  if (!transaction) {
+    console.log('[confirmTicket] Transaction not found for orderRef:', orderRef)
+    return { ok: false, error: 'order_not_found', httpStatus: 404 }
+  }
+
+  const ticket = await db.prepare('SELECT * FROM tickets WHERE id = ?').bind(transaction.reference_id).first()
+  if (!ticket) {
+    console.log('[confirmTicket] Ticket not found for reference_id:', transaction.reference_id)
+    return { ok: false, error: 'ticket_not_found', httpStatus: 404 }
+  }
+
+  const ev = await db.prepare('SELECT * FROM events WHERE event_id = ?').bind(ticket.event_id).first()
+  if (!ev) {
+    console.log('[confirmTicket] Event not found for event_id:', ticket.event_id)
+    return { ok: false, error: 'event_not_found', httpStatus: 404 }
+  }
+
+  // Idempotent: already activated (e.g. redirect + webhook race, or webhook retry).
+  if (ticket.status === 'active') {
+    console.log('[confirmTicket] Ticket already active:', ticket.id)
+    return { ok: true, alreadyActive: true, transaction, ticket, event: ev }
+  }
+
+  // Resolve the payment. Redirect path fetches here; webhook passes the verified payload.
+  let pmt = payment
+  if (!pmt) {
+    try {
+      pmt = await fetchPayment(env, transaction.checkout_id)
+      console.log('[confirmTicket] SumUp payment status:', pmt?.status, 'checkout_id:', transaction.checkout_id)
+    } catch (err) {
+      console.error('[confirmTicket] Failed to fetch payment from SumUp:', err)
+      return { ok: false, error: 'verify_failed', httpStatus: 400 }
+    }
+  }
+
+  // SumUp may leave checkout.status as PENDING while transactions[] holds SUCCESSFUL/PAID.
+  if (!isCheckoutPaid(pmt)) {
+    const currentStatus = pmt?.status || 'PENDING'
+    const txStatuses = pmt?.transactions?.map(t => t.status) || []
+    const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+    const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+    console.log('[confirmTicket] Payment not paid, status:', currentStatus, 'txStatuses:', txStatuses)
+    return { ok: false, notPaid: true, status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus }
+  }
+
+  // Verify amount/currency against the SumUp checkout.
+  if (pmt.amount != Number(transaction.amount) || (transaction.currency && pmt.currency !== transaction.currency)) {
+    console.log('[confirmTicket] Payment mismatch - payment:', pmt.amount, pmt.currency, 'transaction:', transaction.amount, transaction.currency)
+    return { ok: false, error: 'payment_mismatch', httpStatus: 400 }
+  }
+
+  // Capacity check
+  if (ev.capacity && ev.tickets_sold >= ev.capacity) {
+    return { ok: false, error: 'sold_out', httpStatus: 409 }
+  }
+
+  // Activate ticket + mark transaction PAID + increment tickets_sold (atomic batch).
+  await activateTicket(db, { ticketId: ticket.id, eventId: ticket.event_id, transactionId: transaction.id, paymentId: pmt.id })
+  console.log('[confirmTicket] Activated ticket', ticket.id, 'for order', orderRef)
+
+  // Confirmation email (non-blocking — payment already captured + ticket active).
+  const user = await db.prepare('SELECT * FROM users WHERE user_id = ?').bind(transaction.user_id).first()
+  let emailSent = false
+  if (user) {
+    try {
+      const eventForEmail = { ...ev }
+      if (ev.is_recurring === 1) {
+        const nextOccurrence = calculateNextOccurrence(ev, new Date())
+        if (nextOccurrence) eventForEmail.event_datetime = nextOccurrence.toISOString()
+      }
+      const emailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
+      await sendEmail(env, {
+        to: user.email,
+        ...emailContent,
+        emailType: 'event_ticket_confirmation',
+        relatedId: ticket.id,
+        relatedType: 'ticket',
+        metadata: { event_id: ev.id, event_name: ev.event_name }
+      })
+      emailSent = true
+      console.log('[confirmTicket] Confirmation email sent to:', user.email)
+    } catch (emailError) {
+      console.error('[confirmTicket] Failed to send confirmation email:', emailError)
+    }
+  }
+
+  // Admin notification (non-blocking).
+  try {
+    const adminEmailContent = getAdminNotificationEmail('event_ticket', {
+      eventName: ev.event_name,
+      customerName: user?.name || 'Customer',
+      customerEmail: user?.email || transaction.email,
+      amount: transaction.amount,
+      eventDate: ev.event_datetime,
+      ticketId: ticket.id,
+      orderRef: transaction.order_ref
+    })
+    await sendEmail(env, {
+      to: 'admin@dicebastion.com',
+      ...adminEmailContent,
+      emailType: 'admin_event_notification',
+      relatedId: ticket.id,
+      relatedType: 'ticket',
+      metadata: { event_id: ev.id, event_name: ev.event_name }
+    })
+    console.log('[confirmTicket] Admin notification sent')
+  } catch (adminEmailError) {
+    console.error('[confirmTicket] Failed to send admin notification:', adminEmailError)
+  }
+
+  return { ok: true, transaction, ticket, event: ev, user, emailSent }
+}
+
+/**
  * Send membership welcome + event ticket emails for a bundle purchase.
  * Returns true if both sent successfully.
  */
@@ -1121,70 +1131,6 @@ async function confirmBundlePurchase(db, env, { bundle, paymentId, checkoutId })
 // - savePaymentInstrument() → Now imported from payments-client.js
 // - chargePaymentInstrument() → Now imported from payments-client.js
 // ==================== END MOVED FUNCTIONS ====================
-
-/**
- * Update payment instrument card details from checkout transaction
- * @param {Object} db - Database connection
- * @param {string} instrumentId - Payment instrument ID
- * @param {Object} checkout - Checkout response from payment provider
- * @returns {boolean} True if updated successfully
- */
-async function updatePaymentInstrumentCardDetails(db, instrumentId, checkout) {
-  try {
-    // Extract card details from the transaction
-    if (checkout.card && checkout.card.last_4_digits) {
-      // Card details directly in checkout
-      const card = checkout.card
-      await db.prepare(`
-        UPDATE payment_instruments 
-        SET card_type = COALESCE(?, card_type),
-            last_4 = COALESCE(?, last_4),
-            expiry_month = COALESCE(?, expiry_month),
-            expiry_year = COALESCE(?, expiry_year),
-            updated_at = ?
-        WHERE instrument_id = ?
-      `).bind(
-        card.type || null,
-        card.last_4_digits || null,
-        card.expiry_month || null,
-        card.expiry_year || null,
-        toIso(new Date()),
-        instrumentId
-      ).run()
-      console.log('Updated card details from checkout:', { type: card.type, last4: card.last_4_digits })
-      return true
-    } else if (checkout.transactions && checkout.transactions.length > 0) {
-      // Try to get card details from transaction
-      const txn = checkout.transactions[0]
-      if (txn.card) {
-        await db.prepare(`
-          UPDATE payment_instruments 
-          SET card_type = COALESCE(?, card_type),
-              last_4 = COALESCE(?, last_4),
-              updated_at = ?
-          WHERE instrument_id = ?
-        `).bind(
-          txn.card.type || null,
-          txn.card.last_4_digits || null,
-          toIso(new Date()),
-          instrumentId
-        ).run()
-        console.log('Updated card details from transaction:', { type: txn.card?.type, last4: txn.card?.last_4_digits })
-        return true
-      }
-    }
-    console.warn('No card details found in checkout response')
-    return false
-  } catch (e) {
-    console.error('Failed to update card details:', e)
-    return false
-  }
-}
-
-// ==================== REMOVED: chargePaymentInstrument ====================
-// This function has been moved to the payments worker and is now imported
-// from payments-client.js
-// ==================== END ====================
 
 /**
  * Get user's active payment instrument
@@ -1669,7 +1615,7 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
  * Called by wrapNewsletterHtml before the body is embedded in the template.
  */
 function cleanNewsletterBody(html) {
-  return html
+  const cleaned = html
     // data-card blobs are large redundant attribute copies Quill adds to BlockEmbeds
     .replace(/ data-card="[^"]*"/g, '')
     // contenteditable is a browser-only attribute
@@ -1677,10 +1623,36 @@ function cleanNewsletterBody(html) {
     // Replace the Quill event-card class with full inline styles for email clients
     .replace(/class="nl-event-card-embed"/g,
       'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    // Replace the calendar-embed class (no stylesheet in email) with its margin
+    .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
     // Strip Quill formatting classes (ql-align, ql-indent, etc.) — no stylesheet in email
     .replace(/ class="ql-[^"]*"/g, '')
     // Quill inserts <p><br></p> for every blank line the user types.
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, '');
+  return normalizeEmailImages(cleaned);
+}
+
+/**
+ * Make every loose <img> in a newsletter body responsive so wide pasted/linked images cannot
+ * overflow (and get clipped by) the fixed-width email shell. Drops fixed pixel width/height
+ * attributes (which Outlook/Gmail honour and which force overflow) and caps the rendered size
+ * with max-width:100%;height:auto. Images that are part of our generated event/calendar embeds
+ * use object-fit cropping at a deliberate size and are left untouched.
+ */
+function normalizeEmailImages(html) {
+  return String(html || '').replace(/<img\b[^>]*>/gi, (tag) => {
+    if (/object-fit\s*:/i.test(tag)) return tag;
+    let out = tag.replace(/\s(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    const responsive = 'display:block;max-width:100%;height:auto;';
+    const styleMatch = out.match(/\sstyle\s*=\s*"([^"]*)"/i);
+    if (styleMatch) {
+      const merged = styleMatch[1].replace(/\s*;?\s*$/, '') + ';' + responsive;
+      out = out.replace(/\sstyle\s*=\s*"[^"]*"/i, ' style="' + merged + '"');
+    } else {
+      out = out.replace(/<img\b/i, '<img style="' + responsive + '"');
+    }
+    return out;
+  });
 }
 
 /**
@@ -2481,44 +2453,6 @@ function getAccountCreationInviteEmail(userName, userEmail, setupLink) {
   `
   
   return createEmailTemplate({ headerTitle: '🎉 One More Step!', content })
-}
-
-// New account welcome email (sent after account creation)
-function getNewAccountWelcomeEmail(userName) {
-  const content = `
-    <p>Hi ${userName},</p>
-    <p><strong>Your account has been created successfully!</strong></p>
-    <p>We're excited to have you as part of our gaming community. Your account gives you access to exclusive benefits and makes managing your events a breeze.</p>
-    <div class="highlight">
-      <strong>What's Next?</strong>
-      <ul style="margin: 10px 0;">
-        <li><strong>Explore Events:</strong> Browse upcoming gaming sessions and tournaments</li>
-        <li><strong>Join as a Member:</strong> Get exclusive discounts and early access</li>
-        <li><strong>Connect:</strong> Meet fellow gamers and join our community</li>
-      </ul>
-    </div>
-    <p><strong>Quick Links:</strong></p>
-    <div style="text-align: center; margin: 20px 0;">
-      <a href="${addUtmParams('https://dicebastion.com/account', 'email', 'welcome', 'new_account')}" class="button">My Account</a>
-      <a href="${addUtmParams('https://dicebastion.com/events', 'email', 'welcome', 'new_account')}" class="button">Browse Events</a>
-      <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}" class="button">View Memberships</a>
-    </div>
-    <div class="highlight">
-      <strong>💎 Consider Becoming a Member!</strong>
-      <p style="margin: 10px 0;">
-        Our memberships offer incredible value with discounts on events, priority booking, and exclusive perks. 
-        Check out our <a href="${addUtmParams('https://dicebastion.com/memberships', 'email', 'welcome', 'new_account')}">membership options</a> to save on future events!
-      </p>
-    </div>
-    <p>If you have any questions or need help getting started, don't hesitate to reach out to us at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
-    <p>Welcome to the adventure!</p>
-    <p><strong>— The Dice Bastion Team</strong></p>
-  `
-  
-  return createEmailTemplate({ 
-    headerTitle: '🎉 Welcome to Dice Bastion!', 
-    content
-  })
 }
 
 // Generate .ics calendar file content with Gibraltar timezone (Europe/Gibraltar)
@@ -3943,6 +3877,39 @@ async function requireAdmin(c, next) {
   return c.json({ error: 'unauthorized' }, 401)
 }
 
+// Client-side payment telemetry beacon.
+// The SumUp card widget runs entirely in the browser, so card-auth failures (3DS/SCA
+// declines, cancellations, widget load errors) never reach our server unless we report
+// them. The front-end calls this on every widget onResponse so we have a server-side
+// trail in Cloudflare logs even when the customer abandons and never hits a confirm poll.
+app.post('/client-payment-log', async (c) => {
+  try {
+    const clip = (v, n = 500) => {
+      if (v == null) return v
+      const s = typeof v === 'string' ? v : JSON.stringify(v)
+      return s.length > n ? s.slice(0, n) + '…[truncated]' : s
+    }
+    let body = {}
+    try { body = await c.req.json() } catch { body = {} }
+    console.log('[ClientPaymentLog]', JSON.stringify({
+      flow: clip(body.flow, 40),
+      type: clip(body.type, 40),
+      stage: clip(body.stage, 60),
+      orderRef: clip(body.orderRef, 80),
+      checkoutId: clip(body.checkoutId, 80),
+      plan: clip(body.plan, 40),
+      message: clip(body.message, 300),
+      sumupBody: clip(body.sumupBody, 800),
+      ip: c.req.header('CF-Connecting-IP') || null,
+      ua: clip(c.req.header('User-Agent'), 200)
+    }))
+  } catch (e) {
+    console.error('[ClientPaymentLog] failed to record beacon:', e)
+  }
+  // Always 204 — telemetry must never block the payment UX.
+  return c.body(null, 204)
+})
+
 // Membership checkout with idempotency + Turnstile
 app.post('/membership/checkout', async (c) => {
   try {
@@ -4377,7 +4344,7 @@ app.get('/membership/confirm', async (c) => {
     })
   }
   
-  // For tokenization checkouts (SETUP_RECURRING_PAYMENT), the payment amount is a minimal auth (0.01)
+  // For tokenization checkouts (SETUP_RECURRING_PAYMENT), the payment amount is a minimal auth (£1)
   // The real amount will be charged separately using the saved payment instrument
   const isTokenizationCheckout = payment.purpose === 'SETUP_RECURRING_PAYMENT'
   
@@ -4682,7 +4649,11 @@ app.get('/membership/free-trial/confirm', async (c) => {
 /**
  * Ensure the sponsored_memberships table exists (lazy migration).
  */
+// Table already exists in production. Runtime guard remains as a safety net for
+// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
+let __sponsoredMembershipsReady = false
 async function migrateSponsoredMemberships(db) {
+  if (__sponsoredMembershipsReady) return
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS sponsored_memberships (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4698,6 +4669,7 @@ async function migrateSponsoredMemberships(db) {
       FOREIGN KEY (claimed_by_user_id) REFERENCES users(user_id)
     )
   `).run()
+  __sponsoredMembershipsReady = true
 }
 
 /**
@@ -5054,26 +5026,31 @@ app.post('/webhooks/sumup', async (c) => {
   const isBundle = orderRef.startsWith('BUNDLE-')
   const isShopOrder = orderRef.startsWith('ORD-')
   const isDonation = orderRef.startsWith('DON-')
+  // Standalone paid event ticket (EVT-{eventId}-{uuid})
+  const isTicket = EVT_UUID_RE.test(orderRef)
 
-  const sponsorshipTx = !isBundle && !isShopOrder && !isDonation
+  const sponsorshipTx = !isBundle && !isShopOrder && !isDonation && !isTicket
     ? await c.env.DB.prepare(
         `SELECT id FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship' LIMIT 1`
       ).bind(orderRef).first()
     : null
   const isSponsorship = !!sponsorshipTx
 
-  // Check for duplicate webhook processing
+  // Fetch + verify the payment BEFORE marking the webhook processed. SumUp can emit
+  // webhooks on non-terminal states; recording those would dedupe (and drop) the later
+  // PAID event. Activation is idempotent in every branch, so deferring the mark is safe.
+  let payment
+  try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
+  if (!isCheckoutPaid(payment)) return c.json({ ok: true })
+
+  // Check for duplicate webhook processing (only paid webhooks reach here)
   const webhookId = `${paymentId}-${orderRef}`
-  const entityType = isBundle ? 'bundle' : isShopOrder ? 'shop_order' : isDonation ? 'donation' : isSponsorship ? 'sponsorship' : 'membership'
+  const entityType = isBundle ? 'bundle' : isShopOrder ? 'shop_order' : isDonation ? 'donation' : isTicket ? 'ticket' : isSponsorship ? 'sponsorship' : 'membership'
   const isDuplicate = await checkAndMarkWebhookProcessed(c.env.DB, webhookId, entityType, orderRef)
   if (isDuplicate) {
     console.log(`Duplicate ${entityType} webhook received, skipping processing`)
     return c.json({ ok: true, status: 'already_processed' })
   }
-
-  let payment
-  try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
-  if (!isCheckoutPaid(payment)) return c.json({ ok: true })
 
   // ==================== BUNDLE PURCHASE WEBHOOK ====================
   if (isBundle) {
@@ -5134,6 +5111,31 @@ app.post('/webhooks/sumup', async (c) => {
       }
     } catch (err) {
       console.error('[webhook-sponsorship] Failed to confirm sponsorship:', err)
+      return c.json({ ok: false, error: String(err?.message || err) }, 400)
+    }
+    return c.json({ ok: true })
+  }
+
+  // ==================== EVENT TICKET WEBHOOK ====================
+  // Standalone paid tickets are confirmed server-side here (independent of whether
+  // the buyer returns to the /events/confirm thank-you page). Uses the same
+  // confirmTicketPurchase() helper as the redirect, so both paths stay in sync.
+  if (isTicket) {
+    console.log('[webhook-ticket] Processing event ticket order:', orderRef)
+    try {
+      const result = await confirmTicketPurchase(c.env.DB, c.env, { orderRef, payment })
+      if (!result.ok) {
+        if (result.notPaid) {
+          // Webhook fired on a non-terminal/declined state — ack and wait for the paid event.
+          console.log('[webhook-ticket] Payment not paid yet, status:', result.status)
+          return c.json({ ok: true, status: result.status })
+        }
+        console.error('[webhook-ticket] Confirm failed:', result.error, orderRef)
+        return c.json({ ok: false, error: result.error }, result.httpStatus || 400)
+      }
+      console.log('[webhook-ticket] Ticket confirmed for order:', orderRef, result.alreadyActive ? '(already active)' : '')
+    } catch (err) {
+      console.error('[webhook-ticket] Failed to confirm ticket:', err)
       return c.json({ ok: false, error: String(err?.message || err) }, 400)
     }
     return c.json({ ok: true })
@@ -5282,116 +5284,6 @@ app.post('/webhooks/sumup', async (c) => {
   
   return c.json({ ok: true })
 })
-
-// ==================== TEMPORARY OAUTH CALLBACK ====================
-// This endpoint is used to capture the OAuth authorization code from SumUp
-// After getting the refresh token, you can remove this endpoint
-
-app.get('/oauth/callback', async (c) => {
-  const code = c.req.query('code')
-  const state = c.req.query('state')
-  const error = c.req.query('error')
-  const errorDescription = c.req.query('error_description')
-
-  if (error) {
-    return c.html(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>OAuth Error</title>
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .error { background: #fee; border: 2px solid #c00; border-radius: 8px; padding: 20px; }
-          h1 { color: #c00; }
-          code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
-        </style>
-      </head>
-      <body>
-        <div class="error">
-          <h1>❌ OAuth Authorization Failed</h1>
-          <p><strong>Error:</strong> ${error}</p>
-          <p><strong>Description:</strong> ${errorDescription || 'No description provided'}</p>
-          <p>Please check your SumUp app configuration and try again.</p>
-        </div>
-      </body>
-      </html>
-    `)
-  }
-
-  if (!code) {
-    return c.html(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>OAuth - No Code</title>
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .warning { background: #ffc; border: 2px solid #fc0; border-radius: 8px; padding: 20px; }
-        </style>
-      </head>
-      <body>
-        <div class="warning">
-          <h1>⚠️ No Authorization Code</h1>
-          <p>No authorization code was received from SumUp.</p>
-        </div>
-      </body>
-      </html>
-    `)
-  }
-
-  // Success - show the code to the user
-  return c.html(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>OAuth Success</title>
-      <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .success { background: #efe; border: 2px solid #0c0; border-radius: 8px; padding: 20px; }
-        h1 { color: #080; }
-        .code-box { background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 15px; margin: 15px 0; font-family: monospace; word-break: break-all; }
-        .copy-btn { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
-        .copy-btn:hover { background: #45a049; }
-        ol { text-align: left; }
-        li { margin: 10px 0; }
-      </style>
-    </head>
-    <body>
-      <div class="success">
-        <h1>✅ Authorization Successful!</h1>
-        <p><strong>Authorization Code:</strong></p>
-        <div class="code-box" id="code">${code}</div>
-        <button class="copy-btn" onclick="copyCode()">📋 Copy Code</button>
-        
-        <h2>Next Steps:</h2>
-        <ol>
-          <li>Copy the authorization code above</li>
-          <li>Run the PowerShell script: <code>.\get-sumup-token-manual.ps1</code></li>
-          <li>When prompted, paste the authorization code</li>
-          <li>The script will exchange it for a refresh token</li>
-          <li>Update the SUMUP_REFRESH_TOKEN secret in Cloudflare</li>
-        </ol>
-        
-        <p><strong>State:</strong> ${state || 'N/A'}</p>
-      </div>
-      
-      <script>
-        function copyCode() {
-          const codeText = document.getElementById('code').textContent;
-          navigator.clipboard.writeText(codeText).then(() => {
-            alert('✅ Code copied to clipboard!');
-          }).catch(err => {
-            console.error('Failed to copy:', err);
-            alert('❌ Failed to copy. Please select and copy manually.');
-          });
-        }
-      </script>
-    </body>
-    </html>
-  `)
-})
-
-// ==================== END TEMPORARY OAUTH CALLBACK ====================
 
 // ============================================================================
 // PUBLIC EVENT ENDPOINTS
@@ -5612,30 +5504,7 @@ app.get('/events', async c => {
       ORDER BY event_datetime ASC
     `).all()
     
-    // Calculate next occurrence for recurring events
-    const now = new Date()
-    const processedEvents = (results || []).map(event => {
-      if (event.is_recurring === 1) {
-        const nextOccurrence = calculateNextOccurrence(event, now)
-        if (!nextOccurrence) {
-          // Recurring event has ended
-          return null
-        }
-        return {
-          ...event,
-          event_datetime: nextOccurrence.toISOString(),
-          next_occurrence: nextOccurrence.toISOString()
-        }
-      }
-      return event
-    }).filter(e => e !== null)
-    
-    // Re-sort by calculated event_datetime
-    processedEvents.sort((a, b) => 
-      new Date(a.event_datetime) - new Date(b.event_datetime)
-    )
-    
-    return c.json(processedEvents)
+    return c.json(processUpcomingEvents(results))
   } catch (err) {
     console.error('Error fetching events:', err)
     return c.json({ error: 'failed_to_fetch_events' }, 500)  }
@@ -5770,177 +5639,55 @@ app.get('/events/confirm', async c => {
     
     // Handle paid ticket confirmation
     if (!EVT_UUID_RE.test(orderRef)) return c.json({ ok:false, error:'invalid_orderRef' },400)
-  
-    // Get transaction record
-    const transaction = await c.env.DB.prepare('SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = "ticket"').bind(orderRef).first()
-    if (!transaction) {
-      console.log('[events/confirm] Transaction not found for orderRef:', orderRef)
-      return c.json({ ok:false, error:'order_not_found' },404)
-    }
-    
-    console.log('[events/confirm] Transaction found:', { 
-      id: transaction.id, 
-      checkout_id: transaction.checkout_id, 
-      payment_status: transaction.payment_status,
-      reference_id: transaction.reference_id 
-    })
-    
-    // Get ticket record
-    const ticket = await c.env.DB.prepare('SELECT * FROM tickets WHERE id = ?').bind(transaction.reference_id).first()
-    if (!ticket) {
-      console.log('[events/confirm] Ticket not found for reference_id:', transaction.reference_id)
-      return c.json({ ok:false, error:'ticket_not_found' },404)
-    }
-    
-    console.log('[events/confirm] Ticket found:', { id: ticket.id, status: ticket.status, event_id: ticket.event_id })
-    
-    if (ticket.status === 'active') {
-      const ev = await c.env.DB.prepare('SELECT event_name, event_datetime FROM events WHERE event_id = ?').bind(ticket.event_id).first()
-      return c.json({ 
-        ok: true, 
-        status: 'already_active',
-        eventName: ev?.event_name,
-        eventDate: ev?.event_datetime,
-        ticketCount: 1,
-        amount: transaction.amount,
-        currency: transaction.currency || 'GBP'
-      })
-    }
-    
-    // Verify payment with SumUp
-    let payment
-    try { 
-      payment = await fetchPayment(c.env, transaction.checkout_id)
-      console.log('[events/confirm] SumUp payment status:', payment?.status, 'checkout_id:', transaction.checkout_id)
-    } 
-    catch (err) { 
-      console.error('[events/confirm] Failed to fetch payment from SumUp:', err)
-      return c.json({ ok:false, error:'verify_failed' },400) 
-    }
-    
-    // Use isCheckoutPaid (not top-level status only): SumUp may leave checkout.status as
-    // PENDING while transactions[] contains SUCCESSFUL/PAID — same pattern as membership tokenization.
-    if (!isCheckoutPaid(payment)) {
-      const currentStatus = payment?.status || 'PENDING'
-      const txStatuses = payment?.transactions?.map(t => t.status) || []
-      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
-      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
-      console.log('[events/confirm] Payment not yet paid, status:', currentStatus, 'txStatuses:', txStatuses)
-      return c.json({
-        ok: false,
-        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
-        message: hasFailed ? 'Payment failed. Please check your card details and try again.' :
-                 hasDeclined ? 'Your card was declined. Please use a different payment method.' :
-                 'Payment is still processing.'
-      })
-    }
 
-    console.log('[events/confirm] Payment verified as paid (top-level or transactions[])')
-    
-    // Verify amount/currency
-    if (payment.amount != Number(transaction.amount) || (transaction.currency && payment.currency !== transaction.currency)) {
-      console.log('[events/confirm] Payment mismatch - payment:', payment.amount, payment.currency, 'transaction:', transaction.amount, transaction.currency)
-      return c.json({ ok:false, error:'payment_mismatch' },400)
-    }
+    // Shared confirmation logic (same code path as the SumUp webhook).
+    const result = await confirmTicketPurchase(c.env.DB, c.env, { orderRef })
 
-    // Get event details
-    console.log('[events/confirm] Looking up event with event_id:', ticket.event_id)
-    const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(ticket.event_id).first()
-    console.log('[events/confirm] Event lookup result:', ev ? `Found: ${ev.event_name}` : 'NOT FOUND')
-    if (!ev) return c.json({ ok:false, error:'event_not_found' },404)
-    
-    // Capacity check
-    if (ev.capacity && ev.tickets_sold >= ev.capacity) return c.json({ ok:false, error:'sold_out' },409)
-    
-    // Update ticket and transaction status
-    await c.env.DB.batch([
-      c.env.DB.prepare('UPDATE tickets SET status = "active" WHERE id = ?').bind(ticket.id),
-      c.env.DB.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
-        .bind(payment.id, toIso(new Date()), transaction.id),
-      // Increment if not exceeded capacity
-      c.env.DB.prepare('UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)')
-        .bind(ticket.event_id)
-    ])
-    
-    // Send confirmation email (don't block success if email fails)
-    const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(transaction.user_id).first()
-    let emailSent = false
-    if (user) {
-      try {
-        // For recurring events, calculate next occurrence for calendar invite
-        const eventForEmail = { ...ev }
-        if (ev.is_recurring === 1) {
-          const nextOccurrence = calculateNextOccurrence(ev, new Date())
-          if (nextOccurrence) {
-            eventForEmail.event_datetime = nextOccurrence.toISOString()
-          }
-        }
-        
-        const emailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
-        await sendEmail(c.env, { 
-          to: user.email, 
-          ...emailContent,
-          emailType: 'event_ticket_confirmation',
-          relatedId: ticket.id,
-          relatedType: 'ticket',
-          metadata: { event_id: ev.id, event_name: ev.event_name }
+    if (!result.ok) {
+      if (result.notPaid) {
+        return c.json({
+          ok: false,
+          status: result.status,
+          message: result.status === 'FAILED' ? 'Payment failed. Please check your card details and try again.' :
+                   result.status === 'DECLINED' ? 'Your card was declined. Please use a different payment method.' :
+                   'Payment is still processing.'
         })
-        emailSent = true
-        console.log('[events/confirm] Confirmation email sent successfully to:', user.email)
-      } catch (emailError) {
-        console.error('[events/confirm] Failed to send confirmation email:', emailError)
-        // Don't fail the transaction - payment succeeded and ticket is active
       }
+      return c.json({ ok: false, error: result.error }, result.httpStatus || 400)
     }
-    
-    // Send admin notification for event tickets
-    try {
-      const adminEmailContent = getAdminNotificationEmail('event_ticket', {
-        eventName: ev.event_name,
-        customerName: user?.name || 'Customer',
-        customerEmail: user?.email || transaction.email,
-        amount: transaction.amount,
-        eventDate: ev.event_datetime,
-        ticketId: ticket.id,
-        orderRef: transaction.order_ref
-      })
-      
-      await sendEmail(c.env, { 
-        to: 'admin@dicebastion.com',
-        ...adminEmailContent,
-        emailType: 'admin_event_notification',
-        relatedId: ticket.id,
-        relatedType: 'ticket',
-        metadata: { event_id: ev.id, event_name: ev.event_name }
-      })
-      console.log('[events/confirm] Admin notification sent successfully')
-    } catch (adminEmailError) {
-      console.error('[events/confirm] Failed to send admin notification:', adminEmailError)
-      // Don't fail the main transaction if admin email fails
-    }
-    
-    // All users now have passwords from registration
-    
-    // For recurring events, calculate and return the next occurrence date
+
+    const ev = result.event
+    // For recurring events, surface the next occurrence date to the thank-you page.
     let displayDate = ev.event_datetime
     if (ev.is_recurring === 1) {
       const nextOccurrence = calculateNextOccurrence(ev, new Date())
-      if (nextOccurrence) {
-        displayDate = nextOccurrence.toISOString()
-      }
+      if (nextOccurrence) displayDate = nextOccurrence.toISOString()
     }
-    
-    return c.json({ 
-      ok: true, 
+
+    // Idempotent re-confirm (already active): return the lightweight shape.
+    if (result.alreadyActive) {
+      return c.json({
+        ok: true,
+        status: 'already_active',
+        eventName: ev.event_name,
+        eventDate: displayDate,
+        ticketCount: 1,
+        amount: result.transaction.amount,
+        currency: result.transaction.currency || 'GBP'
+      })
+    }
+
+    return c.json({
+      ok: true,
       status: 'active',
       eventName: ev.event_name,
       eventDate: displayDate,
       ticketCount: 1,
-      amount: transaction.amount,
-      currency: transaction.currency || 'GBP',
-      userEmail: user?.email || transaction.email,
-      emailSent,  // Let frontend know if confirmation email was sent
-      needsAccountSetup: !user?.password_hash
+      amount: result.transaction.amount,
+      currency: result.transaction.currency || 'GBP',
+      userEmail: result.user?.email || result.transaction.email,
+      emailSent: result.emailSent,  // Let frontend know if confirmation email was sent
+      needsAccountSetup: !result.user?.password_hash
     })
   } catch (error) {
     console.error('[events/confirm] EXCEPTION:', error)
@@ -7130,6 +6877,16 @@ app.post('/events/:id/checkout-with-membership', async c => {
   }
 })
 
+// Production guard: /_debug/* exposes schema and payment internals, so it is hidden
+// unless DEBUG mode is on or a valid admin key is supplied. Returns 404 otherwise.
+app.use('/_debug/*', async (c, next) => {
+  const debugEnabled = ['1','true','yes'].includes(String(c.env.DEBUG || '').toLowerCase())
+  const adminKey = c.req.header('X-Admin-Key')
+  const hasAdminKey = !!adminKey && !!c.env.ADMIN_KEY && adminKey === c.env.ADMIN_KEY
+  if (!debugEnabled && !hasAdminKey) return c.notFound()
+  await next()
+})
+
 // Optional tiny debug endpoint
 app.get('/_debug/ping', c => {
   const origin = c.req.header('Origin') || ''
@@ -7190,28 +6947,6 @@ app.get('/_debug/schema', async c => {
     return c.json({ ok:true, schema: s, ticketFkCol, tables: tables.results||[], memberships: memberships.results||[], tickets: tickets.results||[] })
   } catch (e) {
     return c.json({ ok:false, error: String(e) }, 500)
-  }
-})
-
-// Debug SumUp OAuth scopes
-app.get('/_debug/sumup-scopes', async c => {
-  try {
-    // Test with payment_instruments scope
-    const result = await sumupToken(c.env, 'payments payment_instruments')
-    return c.json({ 
-      ok: true, 
-      requestedScopes: 'payments payment_instruments',
-      grantedScopes: result.scope,
-      scopesArray: (result.scope || '').split(/\s+/).filter(Boolean),
-      hasPaymentInstruments: (result.scope || '').includes('payment_instruments'),
-      fullResponse: result
-    })
-  } catch (e) {
-    return c.json({ 
-      ok: false, 
-      error: String(e.message || e),
-      stack: String(e.stack || '')
-    }, 500)
   }
 })
 
@@ -8476,13 +8211,14 @@ app.get('/admin/newsletter/events', requireAdmin, async c => {
   try {
     await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
-      SELECT event_id, event_name, description, event_datetime, location, image_url, image_url_card, slug
+      SELECT event_id, event_name, description, event_datetime, location,
+             image_url, image_url_card, slug, is_recurring, recurrence_pattern, recurrence_end_date
       FROM events
-      WHERE is_active = 1 AND event_datetime >= datetime('now')
+      WHERE is_active = 1
+        AND (event_datetime >= datetime('now') OR is_recurring = 1)
       ORDER BY event_datetime ASC
-      LIMIT 10
     `).all()
-    return c.json(results ?? [])
+    return c.json(processUpcomingEvents(results ?? [], { limit: 10 }))
   } catch (e) {
     console.error('[Newsletter] events error:', e)
     return c.json({ error: e.message }, 500)
@@ -8699,6 +8435,53 @@ app.post('/admin/newsletters/:id/send', requireAdmin, async c => {
     return c.json(result)
   } catch (e) {
     console.error('[Newsletter] send-draft error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * POST /admin/newsletter/test-send
+ * Sends a single test copy of the supplied subject/body to one address (no draft,
+ * no recipient list, no unsubscribe token). Uses the same wrap + send pipeline as the
+ * real campaign so the test reflects exactly what subscribers would receive.
+ */
+app.post('/admin/newsletter/test-send', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const subject = (body.subject || '').trim()
+    const html = (body.html || '').trim()
+    const to = (body.to || '').trim().toLowerCase()
+
+    if (!subject || !html) {
+      return c.json({ error: 'A subject and body are required for a test send.' }, 400)
+    }
+    if (!to || !EMAIL_RE.test(to)) {
+      return c.json({ error: 'A valid test recipient email is required.' }, 400)
+    }
+
+    const plainText = htmlToPlainText(html)
+    const replyTo = c.env.MAILERSEND_REPLY_TO || c.env.MAILERSEND_FROM_EMAIL || 'hello@dicebastion.com'
+    // Test sends are not tied to a subscriber, so use a generic (non-functional) unsubscribe link.
+    const unsubscribeUrl = 'https://dicebastion.com/unsubscribe'
+    const testBanner = '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;font-size:13px;line-height:1.4;margin-bottom:16px;text-align:center;font-family:Arial,Helvetica,sans-serif;">TEST SEND &mdash; this is a preview copy and was not sent to subscribers.</div>'
+    const fullHtml = wrapNewsletterHtml(testBanner + html, subject, unsubscribeUrl)
+
+    const result = await sendEmail(c.env, {
+      to,
+      subject: `[TEST] ${subject}`,
+      html: fullHtml,
+      text: plainText,
+      replyTo,
+      emailType: 'newsletter',
+      metadata: JSON.stringify({ campaign: 'newsletter-test', to })
+    })
+
+    if (result.success || result.skipped) {
+      return c.json({ success: true, to, skipped: !!result.skipped })
+    }
+    return c.json({ error: result.error || 'Send failed' }, 500)
+  } catch (e) {
+    console.error('[Newsletter] test-send error:', e)
     return c.json({ error: e.message }, 500)
   }
 })
@@ -9092,10 +8875,9 @@ async function processSeoFreshness(env) {
     const sitemaps = [
       SEO_SITEMAP_URLS.main,
       SEO_SITEMAP_URLS.events,
+      SEO_SITEMAP_URLS.eventImages,
       SEO_SITEMAP_URLS.blog,
       SEO_SITEMAP_URLS.blogImages,
-      SEO_SITEMAP_URLS.events,
-      SEO_SITEMAP_URLS.eventImages,
       SEO_SITEMAP_URLS.shopIndex,
       SEO_SITEMAP_URLS.shopProducts,
       SEO_SITEMAP_URLS.shopProductImages
@@ -10516,7 +10298,7 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
   const updateResult = await db.prepare(`
     UPDATE orders
     SET status = 'completed',
-        payment_status = 'paid',
+        payment_status = 'PAID',
         payment_id = ?,
         updated_at = ?,
         completed_at = COALESCE(completed_at, ?)
@@ -10691,7 +10473,11 @@ async function emailHasActiveMembershipForShopPromo(db, email) {
   return !!m
 }
 
+// Table/columns already exist in production. Runtime guard remains as a safety net for
+// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
+let __shopPromoSchemaReady = false
 async function ensureShopPromoSchema(db) {
+  if (__shopPromoSchemaReady) return
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS promo_codes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -10725,6 +10511,7 @@ async function ensureShopPromoSchema(db) {
       }
     }
   }
+  __shopPromoSchemaReady = true
 }
 
 /**
@@ -11225,7 +11012,7 @@ app.get('/orders/confirm', async c => {
 
   const order = await c.env.DB.prepare('SELECT checkout_id, payment_status FROM orders WHERE order_number = ?').bind(ref).first()
   if (!order) return c.json({ error: 'not_found' }, 404)
-  if (order.payment_status === 'PAID') return c.json({ ok: true, status: 'active' })
+  if (String(order.payment_status || '').toUpperCase() === 'PAID') return c.json({ ok: true, status: 'active' })
 
   const payment = await fetchPayment(c.env, order.checkout_id)
   if (!isCheckoutPaid(payment)) return c.json({ ok: false, status: payment?.status || 'PENDING' })
@@ -11336,6 +11123,54 @@ export default {
     const url = new URL(request.url)
     const host = request.headers.get('Host') || ''
     const pathNorm = url.pathname.replace(/\/+$/, '') || '/'
+
+    // Bookings API lives on Bunny Edge Script; proxy same-origin so mobile browsers
+    // do not block cross-origin fetches to *.bunny.run (shows as "Failed to load table types").
+    // POST /api/bookings has no trailing segment — must match exactly, not only /api/bookings/*.
+    // /api/bookings/same-day-contacts stays on this worker (memberships), not Bunny.
+    const isBookingsBunnyRoute =
+      url.pathname === '/api/bookings' ||
+      (url.pathname.startsWith('/api/bookings/') &&
+        url.pathname !== '/api/bookings/same-day-contacts')
+    if (
+      (host === 'dicebastion.com' || host === 'www.dicebastion.com') &&
+      isBookingsBunnyRoute
+    ) {
+      const bookingsBase = String(env.BOOKINGS_API_URL || 'https://dicebastionbookings-ofbbu.bunny.run').replace(/\/+$/, '')
+      const targetUrl = `${bookingsBase}${url.pathname}${url.search}`
+      const headers = new Headers(request.headers)
+      headers.delete('host')
+      try {
+        const res = await fetch(targetUrl, {
+          method: request.method,
+          headers,
+          body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+          redirect: 'manual'
+        })
+        return new Response(res.body, {
+          status: res.status,
+          statusText: res.statusText,
+          headers: res.headers
+        })
+      } catch (e) {
+        console.error('[bookings proxy]', targetUrl, e)
+        return new Response(JSON.stringify({ error: 'Booking service unavailable' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+    }
+
+    // Same-origin API on dicebastion.com — avoids cross-origin fetches to workers.dev
+    // (Safari/Edge report those as "Load failed" when blocked by privacy tools).
+    if (
+      (host === 'dicebastion.com' || host === 'www.dicebastion.com') &&
+      url.pathname.startsWith('/api/')
+    ) {
+      const proxyUrl = new URL(request.url)
+      proxyUrl.pathname = url.pathname.slice(4) || '/'
+      return app.fetch(new Request(proxyUrl.toString(), request), env, ctx)
+    }
 
     // Hugo writes /pages-sitemap.xml to Pages; shop custom domain only routed /products/* to Worker → 404.
     // Proxy from Pages project host (see SHOP_PAGES_ORIGIN) so GSC can read the child sitemap.

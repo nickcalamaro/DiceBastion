@@ -63,16 +63,43 @@ export function calculateNextOccurrence(event, fromDate = new Date()) {
       if (baseDate > endDate) return null;
     }
 
+    const anchor = new Date(fromDate);
+    let occurrence;
     switch (pattern.type) {
       case 'weekly':
-        return getNextWeeklyOccurrence(baseDate, pattern);
+        occurrence = getNextWeeklyOccurrence(baseDate, pattern);
+        break;
       case 'monthly_day':
-        return getNextMonthlyDayOccurrence(baseDate, pattern);
+        occurrence = getNextMonthlyDayOccurrence(baseDate, pattern);
+        break;
       case 'monthly_date':
-        return getNextMonthlyDateOccurrence(baseDate, pattern);
+        occurrence = getNextMonthlyDateOccurrence(baseDate, pattern);
+        break;
       default:
         return new Date(event.event_datetime);
     }
+
+    // Day-finders use midnight anchors, so a same-day occurrence can still be in the
+    // past (e.g. weekly league at 18:00 when it is already 19:00). Bump forward.
+    if (occurrence && occurrence < anchor) {
+      if (pattern.type === 'weekly') {
+        const bumped = new Date(occurrence);
+        bumped.setUTCDate(bumped.getUTCDate() + 7);
+        if (event.recurrence_end_date) {
+          const end = new Date(event.recurrence_end_date);
+          end.setUTCHours(23, 59, 59, 999);
+          if (bumped > end) return null;
+        }
+        return bumped;
+      }
+      const nextSearch = new Date(occurrence);
+      nextSearch.setUTCDate(nextSearch.getUTCDate() + 1);
+      nextSearch.setUTCHours(0, 0, 0, 0);
+      if (event.recurrence_end_date && nextSearch > new Date(event.recurrence_end_date)) return null;
+      return calculateNextOccurrence(event, nextSearch);
+    }
+
+    return occurrence;
   } catch (e) {
     console.error('Error parsing recurrence pattern:', e);
     return new Date(event.event_datetime);
@@ -196,6 +223,32 @@ function getNextMonthlyDateOccurrence(fromDate, pattern) {
   }
   
   return result;
+}
+
+/**
+ * Normalise DB event rows for listings: resolve recurring events to their next
+ * occurrence, drop past one-offs and ended series, sort ascending.
+ */
+export function processUpcomingEvents(events, options = {}) {
+  const now = options.now ?? new Date();
+  const limit = options.limit ?? null;
+
+  const processed = (events || []).map(event => {
+    if (event.is_recurring === 1) {
+      const next = calculateNextOccurrence(event, now);
+      if (!next) return null;
+      return {
+        ...event,
+        event_datetime: next.toISOString(),
+        next_occurrence: next.toISOString(),
+      };
+    }
+    if (new Date(event.event_datetime) < now) return null;
+    return event;
+  }).filter(Boolean);
+
+  processed.sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime));
+  return limit != null ? processed.slice(0, limit) : processed;
 }
 
 export function getUpcomingOccurrences(event, count = 3) {
