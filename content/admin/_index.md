@@ -4748,9 +4748,9 @@ async function requestIndexing(type, slug, btn) {
       data = { error: 'invalid_response', rawStatus: res.status };
     }
     if (data.ok) {
-      btn.textContent = '✅ Request submitted';
+      btn.textContent = '✅ Pushed';
       btn.style.background = '#059669';
-      btn.title = 'Google received the request. Crawling and ranking are not immediate; use Search Console to verify. Product URLs may be declined if not Indexing API–eligible — sitemap ping still helps.';
+      btn.title = 'Pushed to IndexNow (Bing/Yandex/etc. — usually crawled within minutes/hours). Google is notified best-effort but discovers mainly via the sitemap lastmod + Search Console, so it can take longer. Crawling/ranking are never instant.';
       setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.removeAttribute('title'); }, 4000);
     } else {
       const detail = formatIndexingError(data);

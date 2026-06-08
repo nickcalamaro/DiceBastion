@@ -119,6 +119,26 @@ Some SumUp accounts require the authorization flow:
 
 If you're unsure which flow you need, try without `SUMUP_REFRESH_TOKEN` first.
 
+**Required scopes:** `payments`, `payment_instruments`, `transactions.history`.
+
+> A refresh token only carries the scopes granted when it was first authorized.
+> To add a scope (e.g. `transactions.history`, needed to read transaction-level
+> decline reasons via `GET /v0.1/me/transactions` and the auth-gated
+> `/internal/transaction?code=...` endpoint) you must re-run the authorization
+> code flow and replace the token.
+
+**Re-authorize with the full scope set** using the helper script:
+
+```bash
+# 1. Register this redirect URI on your SumUp OAuth app:
+#      http://localhost:8976/callback
+# 2. Run the helper (PowerShell):
+$env:SUMUP_CLIENT_ID="..."; $env:SUMUP_CLIENT_SECRET="..."; node scripts/sumup-reauth.mjs
+# 3. Approve in the browser, copy the printed refresh token, then:
+npx wrangler secret put SUMUP_REFRESH_TOKEN
+npx wrangler deploy
+```
+
 ## Database
 
 Shared D1 database with main worker:

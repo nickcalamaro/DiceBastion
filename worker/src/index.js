@@ -338,48 +338,80 @@ ${urls.join('\n')}
  * Ask Google to recrawl a sitemap (same mechanism as daily seo_freshness cron).
  * Blog does this implicitly by uploading a fresh sitemap.xml to CDN on every publish.
  */
-async function pingGoogleSitemap(sitemapUrl) {
-  try {
-    const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`
-    const res = await fetch(pingUrl)
-    console.log(`[SEO] Pinged Google sitemap: ${sitemapUrl} → ${res.status}`)
-    return { ok: res.ok, status: res.status }
-  } catch (err) {
-    console.error(`[SEO] Sitemap ping failed for ${sitemapUrl}:`, err)
-    return { ok: false, status: 0, error: err.message || String(err) }
-  }
+/**
+ * Default IndexNow key. Public (it is hosted at /{key}.txt), so a constant is fine;
+ * override per-environment with the INDEXNOW_KEY var if rotated. The hosted key file
+ * MUST contain exactly this value on every host we submit (dicebastion.com + shop).
+ */
+const DEFAULT_INDEXNOW_KEY = '4d1ce8a5701f9b2c6e3a7d0f8b1c4e92'
+
+function getIndexNowKey(env) {
+  return String(env?.INDEXNOW_KEY || DEFAULT_INDEXNOW_KEY).trim()
 }
 
 /**
- * Fire-and-forget sitemap ping + optional Indexing API (mirrors blog publish side-effects).
+ * Push URLs to IndexNow (Bing, Yandex, Seznam, Naver, and other participating engines).
+ * This is the real-time "push" protocol that replaced Google's deprecated sitemap-ping
+ * endpoint. Requests are grouped per host because IndexNow requires host + keyLocation
+ * to match the submitted URLs. Returns { ok, results } and never throws.
+ *
+ * NOTE: Google does NOT consume IndexNow. Google discovery relies on accurate sitemap
+ * <lastmod> + Search Console; the Google Indexing API only officially supports
+ * JobPosting / BroadcastEvent pages, so we treat it as best-effort only.
  */
-function notifyContentSeoAsync(ctx, env, { sitemapUrls = [], indexingUrl = null, indexingType = 'URL_UPDATED' } = {}) {
+async function submitToIndexNow(env, urls) {
+  const key = getIndexNowKey(env)
+  const clean = [...new Set((urls || []).filter(Boolean))]
+  if (!key || clean.length === 0) return { ok: false, skipped: true, results: [] }
+
+  const byHost = new Map()
+  for (const u of clean) {
+    try {
+      const host = new URL(u).host
+      if (!byHost.has(host)) byHost.set(host, [])
+      byHost.get(host).push(u)
+    } catch { /* skip invalid URL */ }
+  }
+
+  const results = []
+  for (const [host, urlList] of byHost) {
+    try {
+      const res = await fetch('https://api.indexnow.org/indexnow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({
+          host,
+          key,
+          keyLocation: `https://${host}/${key}.txt`,
+          urlList
+        })
+      })
+      console.log(`[IndexNow] ${host} (${urlList.length} url) → ${res.status}`)
+      // 200 = accepted, 202 = accepted/pending verification. Both are success.
+      results.push({ host, status: res.status, ok: res.ok, count: urlList.length })
+    } catch (err) {
+      console.error(`[IndexNow] submit failed for ${host}:`, err)
+      results.push({ host, ok: false, status: 0, error: err.message || String(err), count: urlList.length })
+    }
+  }
+  return { ok: results.length > 0 && results.every(r => r.ok), results }
+}
+
+/**
+ * Fire-and-forget content-changed notification for create/update/delete of
+ * events, products and blog posts. Pushes the real page URL(s) to IndexNow
+ * (fast, works for Bing/Yandex/etc.) and best-effort to Google's Indexing API.
+ * Google's primary discovery still comes from the accurate-lastmod sitemaps.
+ */
+function notifyContentSeoAsync(ctx, env, { urls = [], indexingUrl = null, indexingType = 'URL_UPDATED' } = {}) {
   if (!ctx?.waitUntil) return
   ctx.waitUntil((async () => {
-    for (const sitemapUrl of sitemapUrls) {
-      if (sitemapUrl) await pingGoogleSitemap(sitemapUrl)
-    }
+    const targets = [...new Set([...(urls || []), indexingUrl].filter(Boolean))]
+    if (targets.length) await submitToIndexNow(env, targets)
     if (indexingUrl && env.GOOGLE_SA_KEY) {
       await notifyGoogleIndexing(env, indexingUrl, indexingType)
     }
   })().catch(err => console.error('[SEO] Content SEO notify failed:', err)))
-}
-
-/** Map a public page URL to the sitemap(s) that should be pinged after it changes. */
-function inferSitemapUrlsForPage(pageUrl) {
-  try {
-    const u = new URL(pageUrl)
-    if (u.hostname.includes('shop.dicebastion.com')) {
-      return [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages]
-    }
-    if (u.pathname.startsWith('/posts/')) {
-      return [SEO_SITEMAP_URLS.blog, SEO_SITEMAP_URLS.blogImages, SEO_SITEMAP_URLS.main]
-    }
-    if (u.pathname.startsWith('/events/')) {
-      return [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main]
-    }
-  } catch { /* ignore invalid URLs */ }
-  return []
 }
 
 // Rate limiting storage (in-memory for this worker instance)
@@ -6418,10 +6450,10 @@ app.post('/admin/events', requireAdmin, async c => {
       end_time || null
     ).run()
 
-    notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
-      indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
-    })
+    if (slug) {
+      const eventUrl = `https://dicebastion.com/events/${encodeURIComponent(slug)}`
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [eventUrl], indexingUrl: eventUrl })
+    }
 
     return c.json({ success: true, id: result.meta.last_row_id })
   } catch (e) {
@@ -6478,10 +6510,10 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       id
     ).run()
 
-    notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
-      indexingUrl: slug ? `https://dicebastion.com/events/${encodeURIComponent(slug)}` : null
-    })
+    if (slug) {
+      const eventUrl = `https://dicebastion.com/events/${encodeURIComponent(slug)}`
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [eventUrl], indexingUrl: eventUrl })
+    }
 
     return c.json({ success: true })
   } catch (e) {
@@ -6532,11 +6564,10 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     
     await c.env.DB.prepare('DELETE FROM events WHERE event_id = ?').bind(id).run()
 
-    notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.events, SEO_SITEMAP_URLS.eventImages, SEO_SITEMAP_URLS.main],
-      indexingUrl: event.slug ? `https://dicebastion.com/events/${encodeURIComponent(event.slug)}` : null,
-      indexingType: 'URL_DELETED'
-    })
+    if (event.slug) {
+      const eventUrl = `https://dicebastion.com/events/${encodeURIComponent(event.slug)}`
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [eventUrl], indexingUrl: eventUrl, indexingType: 'URL_DELETED' })
+    }
 
     return c.json({ success: true })
   } catch (e) {
@@ -7696,10 +7727,10 @@ app.post('/admin/products', requireAdmin, async (c) => {
       now
     ).run()
 
-    notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
-      indexingUrl: slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}` : null
-    })
+    if (slug) {
+      const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl })
+    }
     
     return c.json({ success: true, product_id: result.meta.last_row_id })
   } catch (e) {
@@ -7765,10 +7796,10 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     `).bind(...binds).run()
 
     const productSlug = slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
-    notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
-      indexingUrl: productSlug ? `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}` : null
-    })
+    if (productSlug) {
+      const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}`
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl })
+    }
     
     return c.json({ success: true })
   } catch (e) {
@@ -7802,11 +7833,10 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
       .bind(toIso(new Date()), id)
       .run()
 
-    notifyContentSeoAsync(c.executionCtx, c.env, {
-      sitemapUrls: [SEO_SITEMAP_URLS.shopIndex, SEO_SITEMAP_URLS.shopProducts, SEO_SITEMAP_URLS.shopProductImages],
-      indexingUrl: product?.slug ? `https://shop.dicebastion.com/products/${encodeURIComponent(product.slug)}` : null,
-      indexingType: 'URL_DELETED'
-    })
+    if (product?.slug) {
+      const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(product.slug)}`
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl, indexingType: 'URL_DELETED' })
+    }
     
     return c.json({ success: true })
   } catch (e) {
@@ -8105,67 +8135,57 @@ app.delete('/admin/promo-codes/:id', requireAdmin, async c => {
 // GOOGLE INDEXING API - Admin Endpoints
 // ============================================================================
 
-// Manually request Google indexing for a single URL
+// Manually push a single URL to search engines.
+// Primary: IndexNow (Bing/Yandex/etc., real-time). Best-effort: Google Indexing API.
 app.post('/admin/indexing/notify', requireAdmin, async (c) => {
   try {
     const { url, type } = await c.req.json()
     if (!url) return c.json({ error: 'url_required' }, 400)
 
-    const sitemapUrls = inferSitemapUrlsForPage(url)
-    const sitemapPings = await Promise.all(sitemapUrls.map(sm => pingGoogleSitemap(sm)))
+    const indexNow = await submitToIndexNow(c.env, [url])
 
-    if (!c.env.GOOGLE_SA_KEY) {
-      return c.json({
-        ok: sitemapPings.some(p => p.ok),
-        error: 'google_sa_key_not_configured',
-        sitemap_pings: sitemapPings
-      }, 200)
+    let google = null
+    if (c.env.GOOGLE_SA_KEY) {
+      google = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
     }
 
-    const result = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
-    // Always 200 so the browser exposes JSON; client checks result.ok (502 hid details in some setups).
-    return c.json({ ...result, sitemap_pings: sitemapPings }, 200)
+    // "ok" reflects the real mechanism (IndexNow). Always 200 so the browser sees JSON.
+    return c.json({
+      ok: indexNow.ok,
+      indexnow: indexNow,
+      google: google || { skipped: true, reason: 'google_sa_key_not_configured' }
+    }, 200)
   } catch (e) {
     console.error('Admin indexing notify error:', e)
-    return c.json(
-      { ok: false, status: 0, body: { error: e.message || String(e) } },
-      200
-    )
+    return c.json({ ok: false, status: 0, body: { error: e.message || String(e) } }, 200)
   }
 })
 
-// Batch notify – accepts an array of URLs
+// Batch push – accepts an array of URLs (max 100).
 app.post('/admin/indexing/batch', requireAdmin, async (c) => {
   try {
     const { urls, type } = await c.req.json()
     if (!Array.isArray(urls) || urls.length === 0) return c.json({ error: 'urls_array_required' }, 400)
     if (urls.length > 100) return c.json({ error: 'max_100_urls_per_batch' }, 400)
-    const sitemapUrls = [...new Set(urls.flatMap(u => inferSitemapUrlsForPage(u)))]
-    const sitemapPings = await Promise.all(sitemapUrls.map(sm => pingGoogleSitemap(sm)))
 
-    if (!c.env.GOOGLE_SA_KEY) {
-      return c.json({
-        ok: sitemapPings.some(p => p.ok),
-        error: 'google_sa_key_not_configured',
-        sitemap_pings: sitemapPings
-      }, 200)
+    const indexNow = await submitToIndexNow(c.env, urls)
+
+    let google = null
+    if (c.env.GOOGLE_SA_KEY) {
+      const results = await Promise.allSettled(
+        urls.map(u => notifyGoogleIndexing(c.env, u, type || 'URL_UPDATED'))
+      )
+      google = results.map((r, i) => ({
+        url: urls[i],
+        ...(r.status === 'fulfilled' ? r.value : { ok: false, status: 0, body: { error: r.reason?.message } })
+      }))
     }
 
-    const results = await Promise.allSettled(
-      urls.map(u => notifyGoogleIndexing(c.env, u, type || 'URL_UPDATED'))
-    )
-
-    const summary = results.map((r, i) => ({
-      url: urls[i],
-      ...(r.status === 'fulfilled' ? r.value : { ok: false, status: 0, body: { error: r.reason?.message } })
-    }))
-
     return c.json({
+      ok: indexNow.ok,
       total: urls.length,
-      succeeded: summary.filter(s => s.ok).length,
-      failed: summary.filter(s => !s.ok).length,
-      results: summary,
-      sitemap_pings: sitemapPings
+      indexnow: indexNow,
+      google: google || { skipped: true, reason: 'google_sa_key_not_configured' }
     })
   } catch (e) {
     console.error('Admin batch indexing error:', e)
@@ -8863,13 +8883,17 @@ async function processScheduledNewsletters(env) {
 }
 
 // ============================================================================
-// CRON JOB: Daily SEO freshness – sitemap ping + Indexing API (events + shop products)
+// CRON JOB: Daily SEO freshness – IndexNow push + best-effort Indexing API
 // ============================================================================
 
 /**
- * Always: GET Google’s sitemap ping URL for each sitemap (asks Google to refresh crawl lists).
- * If GOOGLE_SA_KEY is set: Indexing API for events + shop products (shared daily quota; events first).
- * Cron schedule: worker wrangler.toml [triggers] crons (e.g. daily 02:00 UTC).
+ * Re-pushes recently-changed event + product URLs so freshness signals keep flowing
+ * even if a publish-time push was missed.
+ * Primary: IndexNow (Bing/Yandex/Seznam/Naver — real-time). Google discovers via the
+ * accurate-lastmod sitemaps + Search Console; the Indexing API is attempted best-effort
+ * only (it officially supports JobPosting / BroadcastEvent, so Google may ignore it).
+ * Sunday = full active sweep; other days = last 48h delta. ~200 URL/day budget, events first.
+ * Cron schedule: worker wrangler.toml [triggers] crons (daily 02:00 UTC).
  */
 async function processSeoFreshness(env) {
   const jobName = 'seo_freshness'
@@ -8884,34 +8908,6 @@ async function processSeoFreshness(env) {
   let prodFailed = 0
 
   try {
-    // 1. Ping Google sitemap endpoint (lightweight GET) — same URLs as layouts/robots.txt
-    const sitemaps = [
-      SEO_SITEMAP_URLS.main,
-      SEO_SITEMAP_URLS.events,
-      SEO_SITEMAP_URLS.eventImages,
-      SEO_SITEMAP_URLS.blog,
-      SEO_SITEMAP_URLS.blogImages,
-      SEO_SITEMAP_URLS.shopIndex,
-      SEO_SITEMAP_URLS.shopProducts,
-      SEO_SITEMAP_URLS.shopProductImages
-    ]
-    for (const sm of sitemaps) {
-      await pingGoogleSitemap(sm)
-    }
-
-    // 2. Google Indexing API (optional — requires GOOGLE_SA_KEY)
-    if (!env.GOOGLE_SA_KEY) {
-      console.log('[SEO] GOOGLE_SA_KEY not configured – skipping Indexing API')
-      await logCronJob(env.DB, jobName, 'completed', {
-        started_at: startedAt,
-        records_processed: 0,
-        records_succeeded: 0,
-        records_failed: 0,
-        extra: { note: 'sitemap_ping_only_no_GOOGLE_SA_KEY', sitemaps_pinged: sitemaps.length }
-      })
-      return
-    }
-
     const dayOfWeek = new Date().getUTCDay()
 
     // --- Events: Sunday = all active; else last 48h ---
@@ -8920,6 +8916,7 @@ async function processSeoFreshness(env) {
       const { results } = await env.DB.prepare(`
         SELECT slug FROM events
         WHERE is_active = 1
+          AND slug IS NOT NULL AND TRIM(slug) != ''
           AND (event_datetime >= datetime('now') OR is_recurring = 1)
       `).all()
       events = results || []
@@ -8928,6 +8925,7 @@ async function processSeoFreshness(env) {
       const { results } = await env.DB.prepare(`
         SELECT slug FROM events
         WHERE is_active = 1
+          AND slug IS NOT NULL AND TRIM(slug) != ''
           AND (event_datetime >= datetime('now') OR is_recurring = 1)
           AND updated_at >= datetime('now', '-48 hours')
       `).all()
@@ -8936,67 +8934,47 @@ async function processSeoFreshness(env) {
     }
 
     const eventCap = 100
-    const batch = events.slice(0, eventCap)
-    processed = batch.length
-
-    for (const e of batch) {
-      try {
-        const url = `https://dicebastion.com/events/${e.slug}`
-        const result = await notifyGoogleIndexing(env, url, 'URL_UPDATED')
-        if (result.ok) {
-          succeeded++
-        } else {
-          failed++
-          console.error(`[SEO] Index notify failed for ${e.slug}:`, result.body)
-        }
-      } catch (err) {
-        failed++
-        console.error(`[SEO] Index notify error for ${e.slug}:`, err)
-      }
-    }
-
-    console.log(`[SEO] Event indexing: ${succeeded}/${processed} succeeded`)
+    const eventBatch = events.slice(0, eventCap)
+    const eventUrls = eventBatch.map(e => `https://dicebastion.com/events/${encodeURIComponent(e.slug)}`)
+    processed = eventBatch.length
 
     // --- Shop products: remaining budget toward ~200/day total with events ---
-    const shopBudget = Math.max(0, 200 - batch.length)
+    const shopBudget = Math.max(0, 200 - eventBatch.length)
     let products = []
     if (shopBudget > 0) {
-      if (dayOfWeek === 0) {
-        const { results } = await env.DB.prepare(`
-          SELECT slug FROM products
-          WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
-          ORDER BY updated_at DESC
-        `).all()
-        products = (results || []).slice(0, shopBudget)
-        console.log(`[SEO] Sunday shop sweep: notifying up to ${shopBudget} products (pool ${(results || []).length})`)
-      } else {
-        const { results } = await env.DB.prepare(`
-          SELECT slug FROM products
-          WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
-            AND updated_at >= datetime('now', '-48 hours')
-          ORDER BY updated_at DESC
-        `).all()
-        products = (results || []).slice(0, shopBudget)
-        console.log(`[SEO] Shop product delta: ${products.length} URLs (budget ${shopBudget})`)
-      }
+      const since = dayOfWeek === 0 ? null : "AND updated_at >= datetime('now', '-48 hours')"
+      const { results } = await env.DB.prepare(`
+        SELECT slug FROM products
+        WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+          ${since || ''}
+        ORDER BY updated_at DESC
+      `).all()
+      products = (results || []).slice(0, shopBudget)
+      console.log(`[SEO] Shop products to notify: ${products.length} (budget ${shopBudget})`)
+    }
+    const productUrls = products.map(p => `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`)
+    prodProcessed = products.length
 
-      prodProcessed = products.length
-      for (const p of products) {
+    // 1. IndexNow — real-time push to Bing/Yandex/Seznam/Naver (replaces the
+    //    deprecated Google sitemap-ping endpoint, which now 404s and does nothing).
+    //    Google itself discovers via the accurate-lastmod sitemaps + Search Console.
+    const indexNowEvents = eventUrls.length ? await submitToIndexNow(env, eventUrls) : { ok: true, results: [] }
+    const indexNowProducts = productUrls.length ? await submitToIndexNow(env, productUrls) : { ok: true, results: [] }
+    if (indexNowEvents.ok) succeeded = eventBatch.length; else failed = eventBatch.length
+    if (indexNowProducts.ok) prodSucceeded = products.length; else prodFailed = products.length
+
+    // 2. Google Indexing API (best-effort only — officially supports JobPosting /
+    //    BroadcastEvent, so Google may ignore these; we still attempt it when configured).
+    let googleAttempted = 0
+    if (env.GOOGLE_SA_KEY) {
+      for (const url of [...eventUrls, ...productUrls]) {
         try {
-          const url = `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`
-          const result = await notifyGoogleIndexing(env, url, 'URL_UPDATED')
-          if (result.ok) {
-            prodSucceeded++
-          } else {
-            prodFailed++
-            console.error(`[SEO] Product index notify failed for ${p.slug}:`, result.body)
-          }
+          await notifyGoogleIndexing(env, url, 'URL_UPDATED')
+          googleAttempted++
         } catch (err) {
-          prodFailed++
-          console.error(`[SEO] Product index notify error for ${p.slug}:`, err)
+          console.error(`[SEO] Google index notify error for ${url}:`, err)
         }
       }
-      console.log(`[SEO] Product indexing: ${prodSucceeded}/${prodProcessed} succeeded`)
     }
 
     const totalProcessed = processed + prodProcessed
@@ -9010,9 +8988,10 @@ async function processSeoFreshness(env) {
       records_failed: totalFailed,
       extra: {
         day: dayOfWeek === 0 ? 'sunday_sweep' : 'daily_delta',
-        events: { processed, succeeded, failed },
-        products: { processed: prodProcessed, succeeded: prodSucceeded, failed: prodFailed },
-        sitemaps_pinged: sitemaps.length
+        mechanism: 'indexnow_primary',
+        events: { processed, indexnow_ok: indexNowEvents.ok },
+        products: { processed: prodProcessed, indexnow_ok: indexNowProducts.ok },
+        google_indexing_attempts: googleAttempted
       }
     })
   } catch (err) {

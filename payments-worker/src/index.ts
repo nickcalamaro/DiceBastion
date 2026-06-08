@@ -484,6 +484,43 @@ app.get('/internal/payment-by-reference/:orderRef', async (c) => {
 })
 
 /**
+ * Diagnostic: fetch full merchant transaction detail by transaction code or internal id.
+ * The merchant transactions API surfaces decline/status fields that the checkout object omits.
+ * GET /internal/transaction?code=TAAA3KBFXZG  (or ?id=<internal_id>)
+ */
+app.get('/internal/transaction', async (c) => {
+	try {
+		const code = c.req.query('code')
+		const internalId = c.req.query('id')
+		if (!code && !internalId) {
+			return c.json({ error: 'missing code or id query param' }, 400)
+		}
+		const { access_token } = await sumupToken(c.env, 'transactions.history payments')
+
+		const qs = code
+			? `transaction_code=${encodeURIComponent(code)}`
+			: `id=${encodeURIComponent(internalId as string)}`
+		const res = await fetch(`https://api.sumup.com/v0.1/me/transactions?${qs}`, {
+			headers: { Authorization: `Bearer ${access_token}` }
+		})
+
+		const txt = await res.text()
+		if (!res.ok) {
+			console.error('[Transaction] SumUp API error:', res.status, txt)
+			return c.json({ error: `sumup_${res.status}`, detail: txt }, 502)
+		}
+
+		let data: any
+		try { data = JSON.parse(txt) } catch { data = txt }
+		console.log('[Transaction] Detail:', JSON.stringify(data))
+		return c.json(data)
+	} catch (error: any) {
+		console.error('Transaction detail error:', error)
+		return c.json({ error: error.message || 'Failed to fetch transaction' }, 500)
+	}
+})
+
+/**
  * Save payment instrument (card tokenization)
  * POST /internal/payment-instrument
  */

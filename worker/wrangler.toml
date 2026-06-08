@@ -54,6 +54,9 @@ BLOG_API_URL = "https://dicebastionblogger-yvfyf.bunny.run"
 BOOKINGS_API_URL = "https://dicebastionbookings-ofbbu.bunny.run"
 # Fetch Hugo-built shop XML from Pages host (avoids Worker→same-URL fetch loops on custom domain).
 SHOP_PAGES_ORIGIN = "https://dicebastion-shop.pages.dev"
+# IndexNow key for real-time push to Bing/Yandex/etc. Public value; the matching key file
+# must be served at https://dicebastion.com/<KEY>.txt and https://shop.dicebastion.com/<KEY>.txt
+INDEXNOW_KEY = "4d1ce8a5701f9b2c6e3a7d0f8b1c4e92"
 
 # Production secrets (set via: wrangler secret put SECRET_NAME)
 # - SUMUP_ACCESS_TOKEN
