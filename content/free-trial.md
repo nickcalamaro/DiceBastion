@@ -379,9 +379,78 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
     showError(`You already have an active membership (valid until ${new Date(endDate).toLocaleDateString('en-GB')}). Visit your account page to manage your membership.`);
   }
 
+  function showVerifyingSpinner(){
+    const sumupCardEl = trialModal ? trialModal.querySelector('#sumup-card') : null;
+    if (!sumupCardEl) return;
+    sumupCardEl.innerHTML = `
+      <div style="text-align:center; padding: 2rem 1rem;">
+        <div class="modal-status-title">Verifying your card…</div>
+        <div class="modal-muted-text">Please wait while we confirm with our payment provider.</div>
+        <div class="spinner" style="border: 3px solid rgba(128,128,128,0.2); border-left-color: rgb(var(--color-primary-500)); border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; margin: 1rem auto 0;"></div>
+      </div>
+    `;
+  }
+
+  async function handleWidgetResponse(type, body, ref, checkoutId){
+    try {
+      window.utils.logPaymentEvent({
+        flow: 'free_trial',
+        type: type,
+        stage: 'widget_onResponse',
+        orderRef: ref,
+        checkoutId: checkoutId,
+        message: (body && body.message) || null,
+        sumupBody: body
+      });
+    } catch (_) {}
+
+    const t = String(type || '').toLowerCase();
+    // Persist context before a 3DS redirect tears down the page/modal.
+    if (t === 'auth-screen' || t === 'sent') {
+      savePendingPayment(ref, checkoutId);
+      return;
+    }
+
+    clearError();
+    if (t === 'success') {
+      // SumUp can fire `success` for the widget step even when the card setup itself FAILED.
+      const bodyStatus = String((body && body.status) || '').toUpperCase();
+      if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+        clearPendingPayment();
+        resetToContinueStep();
+        displayPaymentError('Your card could not be verified for the free trial. This often happens when the bank declines saving the card for future renewals — please try a different card.');
+        return;
+      }
+      showVerifyingSpinner();
+      savePendingPayment(ref, checkoutId);
+      const ok = await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
+      if (ok) {
+        clearPendingPayment();
+      } else {
+        clearPendingPayment();
+        resetToContinueStep();
+      }
+      return;
+    }
+    if (t === 'error' || t === 'fail') {
+      clearPendingPayment();
+      resetToContinueStep();
+      displayPaymentError((body && body.message) || 'Card verification failed. Please try again or use a different card.');
+      return;
+    }
+    if (t === 'cancel') {
+      clearPendingPayment();
+      resetToContinueStep();
+      displayPaymentError('Card verification cancelled.');
+      return;
+    }
+  }
+
   async function mountSumUpWidget(checkoutId, ref){
     try {
       clearError();
+      savePendingPayment(ref, checkoutId);
+      unmountSumUpWidget();
       const emailStepEl = trialModal ? trialModal.querySelector('#sumup-email-step') : null;
       const loggedStepEl = trialModal ? trialModal.querySelector('#sumup-logged-step') : null;
       const sumupCardEl = trialModal ? trialModal.querySelector('#sumup-card') : null;
@@ -394,32 +463,13 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         checkoutId,
         locale: 'en-GB',
         country: 'GB',
-        onResponse: async (type)=>{
-          clearError();
-          const t = String(type||'').toLowerCase();
-          if (t === 'success') {
-            if (sumupCardEl) {
-              sumupCardEl.innerHTML = `
-                <div style="text-align:center; padding: 2rem 1rem;">
-                  <div class="modal-status-title">Verifying your card…</div>
-                  <div class="modal-muted-text">Please wait while we confirm with our payment provider.</div>
-                  <div class="spinner" style="border: 3px solid rgba(128,128,128,0.2); border-left-color: rgb(var(--color-primary-500)); border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; margin: 1rem auto 0;"></div>
-                </div>
-              `;
-            }
-            const ok = await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
-            if (!ok && sumupCardEl) {
-              sumupCardEl.innerHTML = '';
-              sumupCardEl.style.display = 'none';
-            }
-          } else if (t === 'error' || t === 'fail') {
-            showError('Card verification failed. Please try again.');
-          } else if (t === 'cancel') {
-            showError('Card verification cancelled.');
-          }
-        }
+        onResponse: (type, body) => handleWidgetResponse(type, body, ref, checkoutId)
       });
-    } catch (e) { showError('Could not load card verification widget.'); }
+    } catch (e) {
+      clearPendingPayment();
+      resetToContinueStep();
+      displayPaymentError('Could not load card verification widget.');
+    }
   }
 
   function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
@@ -497,6 +547,27 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
 
   async function populatePlans(){ try { const resp = await fetch(`${API_BASE}/membership/plans`); const data = await resp.json(); const plans=(data&&data.plans)||[]; const byCode=Object.fromEntries(plans.map(p=>[p.code,p])); const sym=c=>({GBP:'£',EUR:'€',USD:'$'})[String(c||'').toUpperCase()]||''; document.querySelectorAll('[data-price-for]').forEach(span=>{ const code=span.getAttribute('data-price-for'); const svc=byCode[code]; if(!svc) return; span.textContent = svc.amount || ''; const currencyEl = span.parentElement?.querySelector('.currency'); if(currencyEl && svc.currency) currencyEl.textContent = sym(svc.currency); }); } catch(e){} }
 
-  (async()=>{ populatePlans(); if(orderRef){ await confirmOrder(orderRef); const url=new URL(window.location.href); url.searchParams.delete('orderRef'); window.history.replaceState({},'',url); } })();
+  (async()=>{
+    populatePlans();
+    const pending = getPendingPayment();
+    const resumeRef = orderRef || pending?.orderRef;
+    if (resumeRef) {
+      let resumeBanner = document.getElementById('trial-resume-banner');
+      if (!resumeBanner && plansGrid) {
+        resumeBanner = document.createElement('div');
+        resumeBanner.id = 'trial-resume-banner';
+        resumeBanner.style.cssText = 'text-align:center;padding:2rem 1rem;margin:1rem 0;background:rgb(var(--color-neutral-100));border-radius:8px;';
+        resumeBanner.innerHTML = '<p><strong>Confirming your card verification…</strong> Please wait.</p>';
+        plansGrid.parentElement.insertBefore(resumeBanner, plansGrid);
+      }
+      await confirmOrder(resumeRef, { pollInterval: 3000, maxAttempts: 20 });
+      clearPendingPayment();
+      resumeBanner?.remove();
+      const url = new URL(window.location.href);
+      url.searchParams.delete('orderRef');
+      url.searchParams.delete('checkout_id');
+      window.history.replaceState({}, '', url);
+    }
+  })();
 })();
 </script>
