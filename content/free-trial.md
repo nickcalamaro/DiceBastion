@@ -125,6 +125,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
   let pendingPlan = null;
   let trialModal = null;
   const orderRef = new URLSearchParams(window.location.search).get('orderRef');
+  const PENDING_PAYMENT_KEY = 'db_pending_free_trial_payment';
 
   function getLoggedInUser() {
     return utils.session.getUser();
@@ -138,6 +139,61 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
   function showError(msg){
     const err = trialModal ? trialModal.querySelector('#sumup-error') : null;
     if (err) { err.textContent = msg || 'An error occurred. Please try again.'; err.style.display = 'block'; }
+  }
+
+  /** Show a payment error even when the modal has been torn down (e.g. after a 3DS redirect). */
+  function displayPaymentError(msg){
+    const message = msg || 'Card verification could not be completed. Please try again.';
+    if (trialModal) {
+      showError(message);
+    } else if (window.Modal) {
+      Modal.alert({ title: 'Card verification could not be completed', message, buttonText: 'OK' });
+    } else {
+      alert(message);
+    }
+  }
+
+  function savePendingPayment(ref, checkoutId){
+    try { sessionStorage.setItem(PENDING_PAYMENT_KEY, JSON.stringify({ orderRef: ref, checkoutId, plan: pendingPlan, ts: Date.now() })); } catch (_) {}
+  }
+
+  function clearPendingPayment(){
+    try { sessionStorage.removeItem(PENDING_PAYMENT_KEY); } catch (_) {}
+  }
+
+  function getPendingPayment(){
+    try {
+      const raw = sessionStorage.getItem(PENDING_PAYMENT_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data?.orderRef || Date.now() - (data.ts || 0) > 2 * 60 * 60 * 1000) {
+        clearPendingPayment();
+        return null;
+      }
+      return data;
+    } catch (_) { return null; }
+  }
+
+  function unmountSumUpWidget(){
+    if (window.SumUpCard && window.SumUpCard.unmount) {
+      try { window.SumUpCard.unmount({ id: 'sumup-card' }); } catch (_) {}
+    }
+    const sumupCardEl = trialModal ? trialModal.querySelector('#sumup-card') : null;
+    if (sumupCardEl) sumupCardEl.innerHTML = '';
+  }
+
+  /** After a failed/cancelled card attempt, return to the Continue step so a fresh checkout can be created. */
+  function resetToContinueStep(){
+    unmountSumUpWidget();
+    if (!trialModal) return;
+    const emailStepEl = trialModal.querySelector('#sumup-email-step');
+    const loggedStepEl = trialModal.querySelector('#sumup-logged-step');
+    const sumupCardEl = trialModal.querySelector('#sumup-card');
+    const user = getLoggedInUser();
+    const isLoggedIn = !!(user && user.email);
+    if (sumupCardEl) sumupCardEl.style.display = 'none';
+    if (emailStepEl) emailStepEl.style.display = isLoggedIn ? 'none' : 'block';
+    if (loggedStepEl) loggedStepEl.style.display = isLoggedIn ? 'block' : 'none';
   }
 
   function closeModal() {
@@ -297,7 +353,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
         window.location.href = redirectUrl;
       },
       onError: (errorMsg) => {
-        showError(errorMsg);
+        displayPaymentError(errorMsg);
       },
       onTimeout: () => {
         window.location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&trial=1&processing=1';
