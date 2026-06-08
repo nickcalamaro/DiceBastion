@@ -4237,9 +4237,10 @@ app.post('/membership/free-trial/checkout', async (c) => {
     const amount = Number(svc.amount)
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'invalid_amount' }, 400)
     const currency = svc.currency || c.env.CURRENCY || 'GBP'
-    // Free trials always use a £1 card verification hold (instantly reimbursed by SumUp), not the plan price.
+    // SETUP_RECURRING auth uses the full plan price (instantly reimbursed by SumUp). Optional
+    // FREE_TRIAL_SETUP_AUTH_AMOUNT env override is for dev/testing only.
     const setupOverride = Number(c.env.FREE_TRIAL_SETUP_AUTH_AMOUNT)
-    const cardVerifyAmount = Number.isFinite(setupOverride) && setupOverride > 0 ? setupOverride : 1
+    const setupAuthAmount = Number.isFinite(setupOverride) && setupOverride > 0 ? setupOverride : amount
 
     await migrateToTransactions(c.env.DB)
 
@@ -4267,7 +4268,7 @@ app.post('/membership/free-trial/checkout', async (c) => {
     try {
       customerId = await getOrCreateSumUpCustomer(c.env, ident)
       checkout = await createCheckout(c.env, {
-        amount: cardVerifyAmount,
+        amount: setupAuthAmount,
         currency,
         orderRef: order_ref,
         title: `Dice Bastion ${plan} membership free trial`,
@@ -4277,10 +4278,10 @@ app.post('/membership/free-trial/checkout', async (c) => {
         isFreeTrialSetup: true,
         redirectUrl: `${siteUrl(c.env)}/free-trial/?orderRef=${encodeURIComponent(order_ref)}`
       })
-      console.log('[free-trial/checkout] Card verification amount:', {
+      console.log('[free-trial/checkout] Recurring setup auth amount:', {
         plan,
         planAmount: amount,
-        cardVerifyAmount,
+        setupAuthAmount,
         orderRef: order_ref
       })
     } catch (err) {
@@ -4309,7 +4310,7 @@ app.post('/membership/free-trial/checkout', async (c) => {
       membershipId,
       userId: ident.id,
       amount,
-      cardVerifyAmount,
+      setupAuthAmount,
       currency,
       customerId: customerId || null,
       isFreeTrial: true

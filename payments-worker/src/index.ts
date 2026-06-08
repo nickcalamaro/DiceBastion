@@ -285,16 +285,13 @@ app.post('/internal/checkout', async (c) => {
 		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose. The auth hold is
 		// instantly reimbursed by SumUp regardless of amount.
 		//
-		// Auth amount policy (reverted 2026-06-08): authorize the FULL plan price for
-		// auto-renew memberships, and only £1 for free trials (which have no charge to make).
-		// Background: a flat £1 was introduced 2026-06-05 on the theory that smaller auths
-		// are safer. Production data showed the opposite — multiple real Mastercards
-		// (USER-168/171/109) were declined at £1 with no auth_code, while full-price auths
-		// have a strong success history (e.g. USER-109's same card tokenized fine at £25 in
-		// Jan, and pre-Jun-5 auto-renew setups used the full price). Low-value "verification"
-		// auths are a common issuer fraud-decline trigger, so we authorize the real amount.
+		// Auth amount policy: always authorize the FULL plan price for SETUP_RECURRING_PAYMENT
+		// (memberships and free trials). SumUp reimburses instantly; the customer is not charged
+		// during a free trial. Low-value £1 "verification" auths were introduced 2026-06-05 and
+		// caused a spike in issuer declines (no auth_code, no mandate) — reverted 2026-06-08 after
+		// production data showed full-price auths succeed where £1 failed (USER-109/171/168).
 		if (savePaymentInstrument && customerId) {
-			const authAmount = isFreeTrialSetup ? 1.00 : (Number(amount) || 1.00)
+			const authAmount = Number(amount) || 1.00
 			checkoutBody.amount = authAmount
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'

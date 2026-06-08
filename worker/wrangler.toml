@@ -45,7 +45,7 @@ SITE_URL = "https://dicebastion.com"
 PAYMENTS_WORKER_URL = "https://dicebastion-payments.ncalamaro.workers.dev"
 ALLOWED_ORIGIN = "http://localhost:1313,http://localhost:1314,http://localhost:8000,https://dicebastion.com,https://www.dicebastion.com,https://shop.dicebastion.com,https://dicebastion-shop.pages.dev"
 SUMUP_MERCHANT_CODE = "MUZHYEAH"
-FREE_TRIAL_SETUP_AUTH_AMOUNT = "1"
+# FREE_TRIAL_SETUP_AUTH_AMOUNT — optional dev override for SumUp setup auth (defaults to plan price)
 SUPPORT_CONTACT_EMAIL = "contact@dicebastion.com"
 ALLOW_TEST_BYPASS = "true"
 R2_PUBLIC_URL = "https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev"
