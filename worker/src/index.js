@@ -617,6 +617,27 @@ async function migrateFreeTrialColumns(db) {
   __freeTrialColsReady = true
 }
 
+// SumUp payment diagnostics on transactions (transaction_code, 3DS/SCA flag).
+let __transactionPaymentColsReady = false
+async function migrateTransactionPaymentColumns(db) {
+  if (__transactionPaymentColsReady) return
+  const cols = [
+    { name: 'sumup_transaction_code', def: 'TEXT' },
+    { name: 'sca_fired', def: 'INTEGER DEFAULT NULL' }
+  ]
+  for (const col of cols) {
+    try {
+      await db.prepare(`ALTER TABLE transactions ADD COLUMN ${col.name} ${col.def}`).run()
+      console.log(`[migration] Added column transactions.${col.name}`)
+    } catch (e) {
+      if (!String(e).includes('duplicate column')) {
+        console.error(`[migration] Error adding column ${col.name}:`, e)
+      }
+    }
+  }
+  __transactionPaymentColsReady = true
+}
+
 async function hasUsedFreeTrial(db, userId) {
   // Only count trials that were actually activated — pending/failed checkout attempts must not block retries.
   const row = await db.prepare(`
@@ -763,6 +784,74 @@ function isCheckoutPaid(payment) {
     }
   }
   return false
+}
+
+/** Pull SumUp transaction_code from checkout response (top-level or transactions[]). */
+function extractSumUpTransactionCode(payment) {
+  if (!payment) return null
+  if (payment.transaction_code) return String(payment.transaction_code)
+  const txs = payment.transactions
+  if (!Array.isArray(txs) || !txs.length) return null
+  const paid = txs.find(t => (t.status === 'SUCCESSFUL' || t.status === 'PAID') && t.transaction_code)
+  if (paid?.transaction_code) return String(paid.transaction_code)
+  const any = txs.find(t => t.transaction_code)
+  return any?.transaction_code ? String(any.transaction_code) : null
+}
+
+/** transaction_code from widget onResponse body (available before confirm poll). */
+function transactionCodeFromSumUpBody(sumupBody) {
+  if (!sumupBody || typeof sumupBody !== 'object') return null
+  return sumupBody.transaction_code ? String(sumupBody.transaction_code) : null
+}
+
+/** Server-side SCA hint: auth_code on a transaction usually means card auth ran (incl. 3DS). */
+function inferScaFromPayment(payment) {
+  const txs = payment?.transactions
+  if (!Array.isArray(txs) || !txs.length) return null
+  return txs.some(t => t.auth_code || t.authCode) ? 1 : 0
+}
+
+async function markTransactionScaFired(db, orderRef) {
+  if (!orderRef) return
+  await migrateTransactionPaymentColumns(db)
+  await db.prepare(`
+    UPDATE transactions SET sca_fired = 1, updated_at = ? WHERE order_ref = ?
+  `).bind(toIso(new Date()), orderRef).run()
+}
+
+async function updateTransactionPaymentMeta(db, { transactionId, orderRef, payment, sumupBody } = {}) {
+  await migrateTransactionPaymentColumns(db)
+  const code = extractSumUpTransactionCode(payment) || transactionCodeFromSumUpBody(sumupBody)
+  const serverSca = payment ? inferScaFromPayment(payment) : null
+  const sets = ['updated_at = ?']
+  const binds = [toIso(new Date())]
+  if (code) {
+    sets.push('sumup_transaction_code = COALESCE(sumup_transaction_code, ?)')
+    binds.push(code)
+  }
+  if (serverSca === 1) {
+    sets.push('sca_fired = 1')
+  } else if (serverSca === 0) {
+    sets.push('sca_fired = COALESCE(sca_fired, 0)')
+  }
+  if (!code && serverSca == null) return
+  let sql
+  if (transactionId != null) {
+    binds.push(transactionId)
+    sql = `UPDATE transactions SET ${sets.join(', ')} WHERE id = ?`
+  } else if (orderRef) {
+    binds.push(orderRef)
+    sql = `UPDATE transactions SET ${sets.join(', ')} WHERE order_ref = ?`
+  } else {
+    return
+  }
+  await db.prepare(sql).bind(...binds).run()
+  console.log('[TransactionMeta]', {
+    transactionId: transactionId ?? null,
+    orderRef: orderRef ?? null,
+    sumup_transaction_code: code || null,
+    sca_fired: serverSca
+  })
 }
 
 /**
@@ -3928,14 +4017,30 @@ app.post('/client-payment-log', async (c) => {
     }
     let body = {}
     try { body = await c.req.json() } catch { body = {} }
+    const type = String(body.type || '').toLowerCase()
+    const orderRef = typeof body.orderRef === 'string' ? body.orderRef.trim() : ''
+    const txCode = transactionCodeFromSumUpBody(body.sumupBody)
+    const scaEvent = (type === 'auth-screen' || type === 'sent') ? type : null
+
+    if (orderRef && UUID_RE.test(orderRef)) {
+      try {
+        if (scaEvent) await markTransactionScaFired(c.env.DB, orderRef)
+        if (txCode) await updateTransactionPaymentMeta(c.env.DB, { orderRef, sumupBody: body.sumupBody })
+      } catch (dbErr) {
+        console.error('[ClientPaymentLog] DB update failed:', dbErr)
+      }
+    }
+
     console.log('[ClientPaymentLog]', JSON.stringify({
       flow: clip(body.flow, 40),
       type: clip(body.type, 40),
       stage: clip(body.stage, 60),
-      orderRef: clip(body.orderRef, 80),
+      orderRef: clip(orderRef, 80),
       checkoutId: clip(body.checkoutId, 80),
       plan: clip(body.plan, 40),
       message: clip(body.message, 300),
+      transaction_code: clip(txCode, 40),
+      sca_event: scaEvent,
       sumupBody: clip(body.sumupBody, 800),
       ip: c.req.header('CF-Connecting-IP') || null,
       ua: clip(c.req.header('User-Agent'), 200)
@@ -4379,7 +4484,18 @@ app.get('/membership/confirm', async (c) => {
         UPDATE transactions SET payment_status = ?, updated_at = ? WHERE id = ?
       `).bind(hasDeclined ? 'DECLINED' : 'FAILED', toIso(new Date()), transaction.id).run()
     }
-    
+    await updateTransactionPaymentMeta(c.env.DB, { transactionId: transaction.id, payment })
+    const failedMeta = await c.env.DB.prepare(
+      'SELECT sumup_transaction_code, sca_fired FROM transactions WHERE id = ?'
+    ).bind(transaction.id).first()
+    console.log('[membership/confirm] Payment failed:', {
+      orderRef,
+      status: currentStatus,
+      txStatuses,
+      sumup_transaction_code: failedMeta?.sumup_transaction_code || null,
+      sca_fired: failedMeta?.sca_fired ?? null
+    })
+
     return c.json({ 
       ok: false, 
       status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
@@ -4388,6 +4504,8 @@ app.get('/membership/confirm', async (c) => {
                'Payment is still processing.'
     })
   }
+
+  await updateTransactionPaymentMeta(c.env.DB, { transactionId: transaction.id, payment })
   
   // For tokenization checkouts (SETUP_RECURRING_PAYMENT), the payment amount is a minimal auth (£1)
   // The real amount will be charged separately using the saved payment instrument
@@ -4456,6 +4574,16 @@ app.get('/membership/confirm', async (c) => {
         updated_at = ?
     WHERE id = ?
   `).bind(actualPaymentId, toIso(new Date()), transaction.id).run()
+
+  const paidMeta = await c.env.DB.prepare(
+    'SELECT sumup_transaction_code, sca_fired FROM transactions WHERE id = ?'
+  ).bind(transaction.id).first()
+  console.log('[membership/confirm] Payment succeeded:', {
+    orderRef,
+    payment_id: actualPaymentId,
+    sumup_transaction_code: paidMeta?.sumup_transaction_code || null,
+    sca_fired: paidMeta?.sca_fired ?? null
+  })
   
   // Get user details and send welcome email (don't block if email fails)
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
@@ -4583,6 +4711,17 @@ app.get('/membership/free-trial/confirm', async (c) => {
         WHERE id = ? AND payment_status = 'pending'
       `).bind(now, transaction.id).run()
     }
+    await updateTransactionPaymentMeta(c.env.DB, { transactionId: transaction.id, payment })
+    const failedMeta = await c.env.DB.prepare(
+      'SELECT sumup_transaction_code, sca_fired FROM transactions WHERE id = ?'
+    ).bind(transaction.id).first()
+    console.log('[free-trial/confirm] Payment failed:', {
+      orderRef,
+      status: currentStatus,
+      txStatuses,
+      sumup_transaction_code: failedMeta?.sumup_transaction_code || null,
+      sca_fired: failedMeta?.sca_fired ?? null
+    })
     return c.json({
       ok: false,
       status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
@@ -4591,6 +4730,8 @@ app.get('/membership/free-trial/confirm', async (c) => {
                'Card verification is still processing.'
     })
   }
+
+  await updateTransactionPaymentMeta(c.env.DB, { transactionId: transaction.id, payment })
 
   const identityId = pending.user_id
   const svc = await getServiceForPlan(c.env.DB, pending.plan)
@@ -4622,6 +4763,16 @@ app.get('/membership/free-trial/confirm', async (c) => {
         updated_at = ?
     WHERE id = ?
   `).bind(payment.id, toIso(now), transaction.id).run()
+
+  const paidMeta = await c.env.DB.prepare(
+    'SELECT sumup_transaction_code, sca_fired FROM transactions WHERE id = ?'
+  ).bind(transaction.id).first()
+  console.log('[free-trial/confirm] Payment succeeded:', {
+    orderRef,
+    payment_id: payment.id,
+    sumup_transaction_code: paidMeta?.sumup_transaction_code || null,
+    sca_fired: paidMeta?.sca_fired ?? null
+  })
 
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
   let emailSent = false

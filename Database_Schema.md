@@ -97,7 +97,9 @@ CREATE TABLE transactions (
         idempotency_key TEXT,
         consent_at TEXT,
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        updated_at TEXT
+        updated_at TEXT,
+        sumup_transaction_code TEXT,
+        sca_fired INTEGER DEFAULT NULL
       );
 CREATE TABLE products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

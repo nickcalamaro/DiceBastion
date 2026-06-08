@@ -282,16 +282,19 @@ app.post('/internal/checkout', async (c) => {
 			checkoutBody.redirect_url = redirectUrl
 		}
 
-		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose.
-		// IMPORTANT: authorize only a minimal amount (£1). The real membership amount is
-		// charged separately right after, via the saved payment instrument (a merchant-
-		// initiated charge that does not require SCA/3DS). Authorizing the full plan price
-		// here is redundant and adds card-auth friction: larger card-present (CUSTOMER_ENTRY)
-		// authorizations are far more likely to trigger a 3DS challenge or be declined by the
-		// issuer, which is what broke real-customer card setup when this was raised from £0.01
-		// to the full amount. The auth hold is instantly reimbursed by SumUp regardless.
+		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose. The auth hold is
+		// instantly reimbursed by SumUp regardless of amount.
+		//
+		// Auth amount policy (reverted 2026-06-08): authorize the FULL plan price for
+		// auto-renew memberships, and only £1 for free trials (which have no charge to make).
+		// Background: a flat £1 was introduced 2026-06-05 on the theory that smaller auths
+		// are safer. Production data showed the opposite — multiple real Mastercards
+		// (USER-168/171/109) were declined at £1 with no auth_code, while full-price auths
+		// have a strong success history (e.g. USER-109's same card tokenized fine at £25 in
+		// Jan, and pre-Jun-5 auto-renew setups used the full price). Low-value "verification"
+		// auths are a common issuer fraud-decline trigger, so we authorize the real amount.
 		if (savePaymentInstrument && customerId) {
-			const authAmount = 1.00
+			const authAmount = isFreeTrialSetup ? 1.00 : (Number(amount) || 1.00)
 			checkoutBody.amount = authAmount
 			checkoutBody.currency = currency
 			checkoutBody.purpose = 'SETUP_RECURRING_PAYMENT'
@@ -300,6 +303,7 @@ app.post('/internal/checkout', async (c) => {
 				...checkoutBody,
 				checkout_reference: orderRef,
 				isFreeTrialSetup: !!isFreeTrialSetup,
+				authAmount,
 				note: 'checkout_reference is our orderRef; SumUp checkout id returned after create'
 			}))
 		} else {
@@ -392,12 +396,14 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 		const failedDetails = failedTx.map((t: any) => ({
 			id: t.id,
 			status: t.status,
+			transaction_code: t.transaction_code ?? null,
 			result_code: t.result_code ?? t.resultCode ?? null,
 			response_code: t.response_code ?? t.responseCode ?? null,
 			auth_code: t.auth_code ?? t.authCode ?? null,
 			error_code: t.error_code ?? t.errorCode ?? null,
 			error_message: t.error_message ?? t.errorMessage ?? null
 		}))
+		const transactionCodes = txs.map((t: any) => t.transaction_code).filter(Boolean)
 		console.log('[Payment] Retrieved checkout:', {
 			sumup_checkout_id: checkoutId,
 			checkout_reference: payment.checkout_reference || null,
@@ -405,6 +411,7 @@ app.get('/internal/payment/:checkoutId', async (c) => {
 			purpose: payment.purpose || 'none',
 			transactionCount: txs.length,
 			txStatuses: txs.map((t: any) => t.status),
+			transaction_codes: transactionCodes,
 			hasInstrument: !!payment.payment_instrument,
 			failedTxDetails: failedDetails
 		})
