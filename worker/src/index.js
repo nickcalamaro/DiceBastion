@@ -1471,6 +1471,11 @@ const EVT_UUID_RE = /^EVT-\d+-[0-9a-f\-]{36}$/i
  */
 function clampStr(v, max){ return (v||'').substring(0, max) }
 
+/** Canonical public site origin for SumUp 3DS redirect_url and email links. */
+function siteUrl(env) {
+  return String(env.SITE_URL || 'https://dicebastion.com').replace(/\/+$/, '')
+}
+
 // ============================================================================
 // EMAIL SYSTEM - MailerSend Integration & Templates
 // ============================================================================
@@ -4004,7 +4009,8 @@ app.post('/membership/checkout', async (c) => {
         title: `Dice Bastion ${plan} membership`, 
         description: autoRenewValue === 1 ? `Card setup for ${plan} membership` : `Membership for ${plan}`,
         savePaymentInstrument: autoRenewValue === 1,
-        customerId
+        customerId,
+        redirectUrl: `${siteUrl(c.env)}/memberships/?orderRef=${encodeURIComponent(order_ref)}`
       })
     } catch (err) {
       console.error('sumup checkout error', err)
@@ -4131,7 +4137,8 @@ app.post('/membership/free-trial/checkout', async (c) => {
         description: `Card setup for ${plan} membership free trial`,
         savePaymentInstrument: true,
         customerId,
-        isFreeTrialSetup: true
+        isFreeTrialSetup: true,
+        redirectUrl: `${siteUrl(c.env)}/free-trial/?orderRef=${encodeURIComponent(order_ref)}`
       })
       console.log('[free-trial/checkout] Card verification amount:', {
         plan,
@@ -4334,6 +4341,12 @@ app.get('/membership/confirm', async (c) => {
     const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
     const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
     console.log('[membership/confirm] Payment not yet paid, status:', currentStatus, 'txStatuses:', txStatuses)
+
+    if (hasFailed || hasDeclined) {
+      await c.env.DB.prepare(`
+        UPDATE transactions SET payment_status = ?, updated_at = ? WHERE id = ?
+      `).bind(hasDeclined ? 'DECLINED' : 'FAILED', toIso(new Date()), transaction.id).run()
+    }
     
     return c.json({ 
       ok: false, 

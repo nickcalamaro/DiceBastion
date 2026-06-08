@@ -713,6 +713,7 @@ For those able to give a bit more, or for those of you who can't afford a member
   const qs = new URLSearchParams(window.location.search);
   const orderRef = qs.get('orderRef');
   const plansGrid = document.getElementById('membership-plans') || document.querySelector('.plans-grid');
+  const PENDING_PAYMENT_KEY = 'db_pending_membership_payment';
 
   let membershipModal = null;
   let pendingPlan = null;
@@ -721,6 +722,76 @@ For those able to give a bit more, or for those of you who can't afford a member
   let checkoutInProgress = false;
   /** Set after checkout API succeeds; reused if Continue is clicked again before paying */
   let activeCheckout = null;
+
+  function savePendingPayment(orderRef, checkoutId) {
+    try {
+      sessionStorage.setItem(PENDING_PAYMENT_KEY, JSON.stringify({ orderRef, checkoutId, ts: Date.now() }));
+    } catch (_) {}
+  }
+
+  function clearPendingPayment() {
+    try { sessionStorage.removeItem(PENDING_PAYMENT_KEY); } catch (_) {}
+  }
+
+  function getPendingPayment() {
+    try {
+      const raw = sessionStorage.getItem(PENDING_PAYMENT_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data?.orderRef || Date.now() - (data.ts || 0) > 2 * 60 * 60 * 1000) {
+        clearPendingPayment();
+        return null;
+      }
+      return data;
+    } catch (_) { return null; }
+  }
+
+  function displayPaymentError(msg) {
+    const message = msg || 'Payment error. Please try again.';
+    if (membershipModal) {
+      showError(message);
+    } else if (window.Modal) {
+      Modal.alert({ title: 'Payment could not be completed', message, buttonText: 'OK' });
+    } else {
+      alert(message);
+    }
+  }
+
+  function unmountSumUpWidget() {
+    if (window.SumUpCard && window.SumUpCard.unmount) {
+      try { window.SumUpCard.unmount({ id: 'sumup-card' }); } catch (_) {}
+    }
+    const sumupCardEl = membershipModal ? membershipModal.querySelector('#sumup-card') : null;
+    if (sumupCardEl) sumupCardEl.innerHTML = '';
+  }
+
+  function showVerifyingSpinner() {
+    const sumupCardEl = membershipModal ? membershipModal.querySelector('#sumup-card') : null;
+    if (!sumupCardEl) return;
+    sumupCardEl.innerHTML = `
+      <div style="text-align:center; padding: 2rem 1rem;">
+        <div class="modal-status-title">Confirming your payment…</div>
+        <div class="modal-muted-text">Please wait while we verify with our payment provider.</div>
+        <div class="spinner" style="border: 3px solid rgba(128,128,128,0.2); border-left-color: rgb(var(--color-primary-500)); border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; margin: 1rem auto 0;"></div>
+      </div>
+    `;
+  }
+
+  /** After a failed/cancelled card attempt, return to the Continue step so a fresh checkout can be created. */
+  async function resetToContinueStep() {
+    regenerateCheckoutSession();
+    unmountSumUpWidget();
+    if (!membershipModal) return;
+    const emailStepEl = membershipModal.querySelector('#sumup-email-step');
+    const loggedStepEl = membershipModal.querySelector('#sumup-logged-step');
+    const sumupCardEl = membershipModal.querySelector('#sumup-card');
+    const user = getLoggedInUser();
+    const isLoggedIn = !!(user && user.email);
+    if (sumupCardEl) sumupCardEl.style.display = 'none';
+    if (emailStepEl) emailStepEl.style.display = isLoggedIn ? 'none' : 'block';
+    if (loggedStepEl) loggedStepEl.style.display = isLoggedIn ? 'block' : 'none';
+    setContinueButtonsDisabled(false);
+  }
 
   function newIdempotencyKey(){ try { return crypto.randomUUID(); } catch { return String(Date.now())+'-'+Math.random().toString(36).slice(2); } }
 
@@ -948,7 +1019,7 @@ For those able to give a bit more, or for those of you who can't afford a member
       },
       onError: (errorMsg) => {
         console.error('[confirmOrder] Payment failed:', errorMsg);
-        showError(errorMsg);
+        displayPaymentError(errorMsg);
       },
       onTimeout: () => {
         console.log('[confirmOrder] Payment polling timed out, redirecting with processing flag');
@@ -976,10 +1047,66 @@ For those able to give a bit more, or for those of you who can't afford a member
     return { active:false }; 
   }
 
+  async function handleWidgetResponse(type, body, ref, checkoutId) {
+    console.log('SumUp onResponse:', type, body);
+    try {
+      window.utils.logPaymentEvent({
+        flow: 'membership',
+        type: type,
+        stage: 'widget_onResponse',
+        orderRef: ref,
+        checkoutId: checkoutId,
+        message: (body && body.message) || null,
+        sumupBody: body
+      });
+    } catch (_) {}
+
+    const t = String(type || '').toLowerCase();
+    if (t === 'auth-screen' || t === 'sent') {
+      savePendingPayment(ref, checkoutId);
+      return;
+    }
+
+    clearError();
+    if (t === 'success') {
+      const bodyStatus = String((body && body.status) || '').toUpperCase();
+      if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+        clearPendingPayment();
+        await resetToContinueStep();
+        displayPaymentError('Payment failed. Please check your card details and try again.');
+        return;
+      }
+      showVerifyingSpinner();
+      savePendingPayment(ref, checkoutId);
+      const ok = await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
+      if (ok) {
+        clearPendingPayment();
+      } else {
+        await resetToContinueStep();
+      }
+      return;
+    }
+    if (t === 'error' || t === 'fail') {
+      clearPendingPayment();
+      await resetToContinueStep();
+      displayPaymentError((body && body.message) || 'Payment failed. Please try again.');
+      return;
+    }
+    if (t === 'cancel') {
+      clearPendingPayment();
+      await resetToContinueStep();
+      displayPaymentError('Payment cancelled.');
+      return;
+    }
+    console.log('SumUp intermediate state:', type, body);
+  }
+
   async function mountSumUpWidget(checkoutId, ref){
     try {
       clearError();
+      savePendingPayment(ref, checkoutId);
       console.log('[mountSumUpWidget] orderRef (checkout_reference):', ref, 'sumupCheckoutId:', checkoutId);
+      unmountSumUpWidget();
       const emailStepEl = membershipModal ? membershipModal.querySelector('#sumup-email-step') : null;
       const loggedStepEl = membershipModal ? membershipModal.querySelector('#sumup-logged-step') : null;
       const sumupCardEl = membershipModal ? membershipModal.querySelector('#sumup-card') : null;
@@ -993,38 +1120,12 @@ For those able to give a bit more, or for those of you who can't afford a member
         checkoutId,
         locale: 'en-GB',
         country: 'GB',
-        onResponse: async (type, body)=>{
-          console.log('SumUp onResponse:', type, body);
-          try {
-            window.utils.logPaymentEvent({
-              flow: 'membership',
-              type: type,
-              stage: 'widget_onResponse',
-              orderRef: ref,
-              checkoutId: checkoutId,
-              message: (body && body.message) || null,
-              sumupBody: body
-            });
-          } catch (_) {}
-          clearError();
-          const t = String(type||'').toLowerCase();
-          if (t === 'success') {
-            await confirmOrder(ref, { pollInterval: 3000, maxAttempts: 20 });
-          } else if (t === 'error' || t === 'fail') {
-            regenerateCheckoutSession();
-            setContinueButtonsDisabled(false);
-            showError('Payment failed. Please try again.');
-          } else if (t === 'cancel') {
-            regenerateCheckoutSession();
-            setContinueButtonsDisabled(false);
-            showError('Payment cancelled.');
-          }
-        }
+        onResponse: (type, body) => handleWidgetResponse(type, body, ref, checkoutId)
       });
     } catch (e) {
-      regenerateCheckoutSession();
-      setContinueButtonsDisabled(false);
-      showError('Could not load payment widget.');
+      clearPendingPayment();
+      await resetToContinueStep();
+      displayPaymentError('Could not load payment widget.');
     }
   }
 
@@ -1127,6 +1228,27 @@ For those able to give a bit more, or for those of you who can't afford a member
 
   async function populatePlans(){ try { const resp = await fetch(`${API_BASE}/membership/plans`); const data = await resp.json(); const plans=(data&&data.plans)||[]; const byCode=Object.fromEntries(plans.map(p=>[p.code,p])); const sym=c=>({GBP:'£',EUR:'€',USD:'$'})[String(c||'').toUpperCase()]||''; document.querySelectorAll('[data-price-for]').forEach(span=>{ const code=span.getAttribute('data-price-for'); const svc=byCode[code]; if(!svc) return; span.textContent = svc.amount || ''; const currencyEl = span.parentElement?.querySelector('.currency'); if(currencyEl && svc.currency) currencyEl.textContent = sym(svc.currency); }); } catch(e){} }
 
-  (async()=>{ populatePlans(); if(orderRef){ await confirmOrder(orderRef); const url=new URL(window.location.href); url.searchParams.delete('orderRef'); window.history.replaceState({},'',url); } })();
+  (async()=>{
+    populatePlans();
+    const pending = getPendingPayment();
+    const resumeRef = orderRef || pending?.orderRef;
+    if (resumeRef) {
+      let resumeBanner = document.getElementById('membership-resume-banner');
+      if (!resumeBanner && plansGrid) {
+        resumeBanner = document.createElement('div');
+        resumeBanner.id = 'membership-resume-banner';
+        resumeBanner.style.cssText = 'text-align:center;padding:2rem 1rem;margin:1rem 0;background:rgb(var(--color-neutral-100));border-radius:8px;';
+        resumeBanner.innerHTML = '<p><strong>Confirming your payment…</strong> Please wait.</p>';
+        plansGrid.parentElement.insertBefore(resumeBanner, plansGrid);
+      }
+      const ok = await confirmOrder(resumeRef, { pollInterval: 3000, maxAttempts: 20 });
+      if (ok) clearPendingPayment();
+      resumeBanner?.remove();
+      const url = new URL(window.location.href);
+      url.searchParams.delete('orderRef');
+      url.searchParams.delete('checkout_id');
+      window.history.replaceState({}, '', url);
+    }
+  })();
 })();
 </script>

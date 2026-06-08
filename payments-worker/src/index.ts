@@ -263,9 +263,10 @@ app.post('/internal/checkout', async (c) => {
 			savePaymentInstrument?: boolean
 			customerId?: string
 			isFreeTrialSetup?: boolean
+			redirectUrl?: string
 		}>()
 		
-		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup } = body
+		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup, redirectUrl } = body
 
 		const { access_token } = await sumupToken(c.env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
 		
@@ -273,6 +274,12 @@ app.post('/internal/checkout', async (c) => {
 			checkout_reference: orderRef,
 			merchant_code: c.env.SUMUP_MERCHANT_CODE,
 			description
+		}
+
+		// Required for 3DS browser redirects — without this, the card widget can navigate
+		// away during SCA and the customer lands back on the page with no orderRef context.
+		if (redirectUrl) {
+			checkoutBody.redirect_url = redirectUrl
 		}
 
 		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose.

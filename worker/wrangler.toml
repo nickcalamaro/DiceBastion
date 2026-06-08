@@ -41,6 +41,7 @@ service = "dicebastion-payments"
 # Environment Variables (for local development)
 [vars]
 DEBUG = "false"
+SITE_URL = "https://dicebastion.com"
 PAYMENTS_WORKER_URL = "https://dicebastion-payments.ncalamaro.workers.dev"
 ALLOWED_ORIGIN = "http://localhost:1313,http://localhost:1314,http://localhost:8000,https://dicebastion.com,https://www.dicebastion.com,https://shop.dicebastion.com,https://dicebastion-shop.pages.dev"
 SUMUP_MERCHANT_CODE = "MUZHYEAH"
