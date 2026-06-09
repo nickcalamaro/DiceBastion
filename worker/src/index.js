@@ -5507,7 +5507,7 @@ function generateEventSeoPage(event) {
   const fullDesc = e(raw);
   const url = `${site}/events/${slug}`;
   const eventsPage = `${site}/events?open=${encodeURIComponent(slug)}`;
-  const priceNum = (Number(event.non_membership_price) || 0) / 100;
+  const priceNum = Number(event.non_membership_price) || 0;
   const priceDisplay = priceNum.toFixed(2);
   const isFree = priceNum === 0;
   const organiserName = e(event.seo_organizer || event.organiser || 'Dice Bastion');
@@ -5582,7 +5582,7 @@ function generateEventSeoPage(event) {
     'url': url,
     'offers': {
       '@type': 'Offer',
-      'url': eventsPage,
+      'url': url,
       'price': priceNum,
       'priceCurrency': 'GBP',
       'availability': 'https://schema.org/InStock',
@@ -6126,35 +6126,13 @@ app.get('/events/:slug', async c => {
       event.next_occurrence = nextOccurrence.toISOString()
     }
 
-    // Public domain (dicebastion.com) → dynamic rendering
-    // Bots get the full SEO page with JSON-LD schema.
-    // Real browsers get an instant 302 redirect to the events listing
-    // which auto-opens the event modal — no flash, no delay.
-    const host = c.req.header('Host') || ''
-    if (host.includes('dicebastion.com')) {
-      const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
-
-      if (isBot) {
-        // Serve full SEO page with Event schema for indexing
-        const html = generateEventSeoPage(event)
-        return new Response(html, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'public, max-age=300, s-maxage=600',
-          }
-        })
-      }
-
-      // Human browser → instant 302 to events page with modal auto-open
-      const modalUrl = `https://dicebastion.com/events/?open=${encodeURIComponent(event.slug)}`
-      return Response.redirect(modalUrl, 302)
-    }
-
-    // Workers.dev domain → serve HTML or JSON based on Accept header
+    // Serve the full event landing page at this URL for everyone (humans + crawlers).
+    // Professional event sites always have real HTML at the shareable URL — redirecting
+    // humans to a JS modal on /events/ hid content from crawlers and broke discovery.
     const accept = c.req.header('Accept') || ''
-    if (accept.includes('text/html') && !accept.includes('application/json')) {
+    const wantsHtml = accept.includes('text/html') && !accept.includes('application/json')
+    const host = c.req.header('Host') || ''
+    if (wantsHtml || host.includes('dicebastion.com')) {
       const html = generateEventSeoPage(event)
       return new Response(html, {
         status: 200,
@@ -6164,7 +6142,7 @@ app.get('/events/:slug', async c => {
         }
       })
     }
-    
+
     return c.json(event)
   } catch (err) {
     console.error('Error fetching event:', err)

@@ -1,5 +1,20 @@
 <script src="/js/utils.js"></script>
 
+{{/* Static crawlable links for search engines (JS grid alone is invisible to many crawlers). */}}
+{{- $eventsApi := "https://dicebastion-memberships.ncalamaro.workers.dev/events" -}}
+{{- $eventsRemote := try (resources.GetRemote $eventsApi) -}}
+{{- if and $eventsRemote (not $eventsRemote.Err) $eventsRemote.Value -}}
+<nav class="event-index-crawl-links" aria-label="All upcoming events">
+  <ul>
+    {{- range $eventsRemote.Value.Content | transform.Unmarshal -}}
+      {{- if .slug -}}
+    <li><a href="/events/{{ .slug }}">{{ .title }}</a></li>
+      {{- end -}}
+    {{- end -}}
+  </ul>
+</nav>
+{{- end -}}
+
 <div id="events-container" class="list-card-scope">
   <div id="events-grid" class="events-grid">
     <div class="loading">Loading events...</div>
@@ -8,6 +23,12 @@
 
 {{ partial "eventModal.html" . }}
 {{ partial "list-card-styles.html" . }}
+
+<style>
+.event-index-crawl-links { margin-bottom: 1.5rem; }
+.event-index-crawl-links ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.event-index-crawl-links a { color: rgb(var(--color-primary-600)); text-decoration: underline; font-size: 0.95rem; }
+</style>
 
 <script>
 let allEvents = [];
@@ -97,6 +118,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+  // Crawl links are for SEO; hide once the interactive grid has loaded
+  const crawlNav = document.querySelector('.event-index-crawl-links');
+  if (crawlNav) crawlNav.style.display = 'none';
 });
 
 // Check URL for event slug to auto-open
