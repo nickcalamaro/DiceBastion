@@ -242,8 +242,10 @@ window.utils = {
     
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        const url = `${apiBase}${endpoint}?orderRef=${encodeURIComponent(orderRef)}`;
-        const response = await fetch(url);
+        // Cache-busting param + no-store: confirmation state changes between polls
+        // (PENDING -> active), so a cached response must never be reused.
+        const url = `${apiBase}${endpoint}?orderRef=${encodeURIComponent(orderRef)}&_=${Date.now()}`;
+        const response = await fetch(url, { cache: 'no-store' });
         const data = await response.json();
         
         console.log('[pollPaymentConfirmation] Response:', JSON.stringify(data, null, 2));

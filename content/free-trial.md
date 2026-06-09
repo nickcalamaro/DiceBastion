@@ -8,7 +8,7 @@ showPagination: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js?v=3"></script>
+<script src="/js/utils.js?v=4"></script>
 <script src="/js/modal.js?v=4"></script>
 
 <!-- Component Styles -->
@@ -364,7 +364,7 @@ If you're not sure whether you're ready to support us just yet, we offer a one-m
 
   async function checkActiveMembership(email){
     try {
-      const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}`);
+      const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}&_=${Date.now()}`, { cache: 'no-store' });
       const d = await r.json();
       if (d && d.active && d.endDate) {
         utils.session.setMembershipStatus(d);

@@ -41,6 +41,31 @@ app.use('*', async (c, next) => {
   await next()
 })
 
+// Payment/auth-sensitive endpoints must never be cached by the browser, the user's
+// ISP, captive-portal/corporate proxies, or any intermediary. These return dynamic
+// per-request state (e.g. a checkout that is "PENDING" then later "active"). A cached
+// "PENDING" response was being replayed to the confirmation polling loop on some
+// networks, so the client never observed the final success — which is why a signup
+// only completed after switching to mobile data (a different cache path).
+// Strict no-store also aligns with PCI-DSS guidance for cardholder/auth responses.
+function isNoStorePath(path) {
+  // Membership status lookups are per-user/live and must not be cached.
+  if (path === '/membership/status') return true
+  // Every payment/registration confirmation + card-setup endpoint returns state
+  // that transitions over time (PENDING -> active/failed). Matches the various
+  // */confirm, /confirm-payment, and /api/bookings/confirm/:ref routes.
+  if (path.includes('/confirm')) return true
+  return false
+}
+app.use('*', async (c, next) => {
+  await next()
+  if (isNoStorePath(c.req.path)) {
+    c.res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+    c.res.headers.set('Pragma', 'no-cache')
+    c.res.headers.set('Expires', '0')
+  }
+})
+
 // Helpers
 const addMonths = (date, months) => {
   const d = new Date(date)

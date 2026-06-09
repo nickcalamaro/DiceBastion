@@ -466,7 +466,7 @@ Please check your email for booking details and any additional information.
     const orderEndpoint = `/orders/confirm?orderRef=${encodeURIComponent(orderRef)}`;
     for (let attempt = 1; attempt <= 5; attempt++) {
       try {
-        const res = await fetch(API_BASE + orderEndpoint);
+        const res = await fetch(`${API_BASE}${orderEndpoint}&_=${Date.now()}`, { cache: 'no-store' });
         const data = await res.json().catch(() => ({}));
         if (data.ok && (data.status === 'active' || data.status === 'already_active')) {
           container.innerHTML = `
@@ -533,7 +533,7 @@ const delayMs = 2000;
 for (let attempt = 1; attempt <= maxAttempts; attempt++) {
   try {
     console.log(`Confirmation attempt ${attempt}/${maxAttempts}`);
-    const response = await fetch(API_BASE + endpoint);
+    const response = await fetch(`${API_BASE}${endpoint}&_=${Date.now()}`, { cache: 'no-store' });
     
     if (!response.ok) {
       console.error('Confirmation request failed:', response.status, response.statusText);

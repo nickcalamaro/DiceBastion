@@ -8,7 +8,7 @@ showPagination: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js?v=3"></script>
+<script src="/js/utils.js?v=4"></script>
 <script src="/js/modal.js?v=4"></script>
 
 <!-- Component Styles -->
@@ -1035,7 +1035,7 @@ For those able to give a bit more, or for those of you who can't afford a member
 
   async function checkActiveMembership(email){ 
     try { 
-      const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}`); 
+      const r = await fetch(`${API_BASE}/membership/status?email=${encodeURIComponent(email)}&_=${Date.now()}`, { cache: 'no-store' }); 
       const d = await r.json(); 
       if (d && d.active && d.endDate) {
         // Cache membership status for other pages
