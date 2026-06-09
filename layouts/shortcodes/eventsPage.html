@@ -2,11 +2,10 @@
 
 {{/* Static crawlable links for search engines (JS grid alone is invisible to many crawlers). */}}
 {{- $eventsApi := "https://dicebastion-memberships.ncalamaro.workers.dev/events" -}}
-{{- $eventsRemote := try (resources.GetRemote $eventsApi) -}}
-{{- if and $eventsRemote (not $eventsRemote.Err) $eventsRemote.Value -}}
+{{- with resources.GetRemote $eventsApi -}}
 <nav class="event-index-crawl-links" aria-label="All upcoming events">
   <ul>
-    {{- range $eventsRemote.Value.Content | transform.Unmarshal -}}
+    {{- range .Content | transform.Unmarshal -}}
       {{- if .slug -}}
     <li><a href="/events/{{ .slug }}">{{ .title }}</a></li>
       {{- end -}}
