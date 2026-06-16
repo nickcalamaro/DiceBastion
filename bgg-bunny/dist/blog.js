@@ -5907,6 +5907,10 @@ main.page-container {
   font-weight: 600;
   color: rgb(var(--color-neutral-500));
 }
+.blog-author-custom-html {
+  margin: 0 0 1.75rem;
+  max-width: 52rem;
+}
 .blog-author-posts-heading {
   margin: 0 0 1.25rem;
   font-size: 1.15rem;
@@ -6383,6 +6387,7 @@ function renderBlogAuthorPage(authorSlug, posts, authors, siteUrl) {
   const name = profile?.name || authorSlug.replace(/-/g, " ");
   const bio = profile?.bio || "";
   const image = profile?.image || "";
+  const customHtml = (profile?.custom_html || "").trim();
   const filtered = posts.filter((post) => (post.authors || []).includes(authorSlug));
   const postCount = filtered.length;
   const canonical = `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`;
@@ -6404,6 +6409,7 @@ function renderBlogAuthorPage(authorSlug, posts, authors, siteUrl) {
     <div class="blog-layout">
       <div class="blog-main">
         ${profileHeader}
+        ${customHtml ? `<div class="blog-author-custom-html">${customHtml}</div>` : ""}
         <h2 class="blog-author-posts-heading">Articles by ${escapeHtml(name)}</h2>
         <section class="list-card-grid">${cards}</section>
         ${renderBlogPageFooter(siteUrl, true)}
@@ -6729,6 +6735,15 @@ async function migrateBlogPosts() {
     } catch {
     }
   }
+  try {
+    await client.execute(`ALTER TABLE blog_authors ADD COLUMN custom_html TEXT`);
+  } catch {
+  }
+  const jenKofiHtml = "<script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'><\/script><script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#72a4f2', 'R2W721G7NT');kofiwidget2.draw();<\/script>";
+  await client.execute({
+    sql: `UPDATE blog_authors SET custom_html = ? WHERE slug = 'jen' AND (custom_html IS NULL OR TRIM(custom_html) = '')`,
+    args: [jenKofiHtml]
+  });
   migrated = true;
 }
 async function upsertBlogAuthors(authorMeta) {
@@ -6753,7 +6768,7 @@ async function upsertBlogAuthors(authorMeta) {
   }
 }
 async function fetchAuthorMap() {
-  const result = await client.execute("SELECT slug, name, image, bio FROM blog_authors");
+  const result = await client.execute("SELECT slug, name, image, bio, custom_html FROM blog_authors");
   const map = {};
   for (const row of result.rows) {
     const r = row;
@@ -6761,7 +6776,8 @@ async function fetchAuthorMap() {
       slug: String(r.slug),
       name: String(r.name),
       image: r.image || null,
-      bio: r.bio || null
+      bio: r.bio || null,
+      custom_html: r.custom_html || null
     };
   }
   return map;
@@ -7153,7 +7169,7 @@ async function taxonomyTerms() {
       authors.add(term);
   }
   const authorProfilesResult = await client.execute(
-    "SELECT slug, name, image, bio FROM blog_authors ORDER BY name"
+    "SELECT slug, name, image, bio, custom_html FROM blog_authors ORDER BY name"
   );
   return jsonResponse({
     tags: [...tags].sort((a, b) => a.localeCompare(b)),
@@ -7176,7 +7192,7 @@ function sanitizeBlogImageFilename(value) {
 async function listAuthorsAdmin() {
   await migrateBlogPosts();
   const result = await client.execute(
-    "SELECT slug, name, image, bio, created_at, updated_at FROM blog_authors ORDER BY name"
+    "SELECT slug, name, image, bio, custom_html, created_at, updated_at FROM blog_authors ORDER BY name"
   );
   return jsonResponse({
     authors: result.rows.map((row) => {
@@ -7186,6 +7202,7 @@ async function listAuthorsAdmin() {
         name: String(r.name),
         image: r.image || null,
         bio: r.bio || null,
+        custom_html: r.custom_html || null,
         created_at: r.created_at,
         updated_at: r.updated_at
       };
@@ -7195,7 +7212,7 @@ async function listAuthorsAdmin() {
 async function getAuthorAdmin(slug) {
   await migrateBlogPosts();
   const result = await client.execute({
-    sql: "SELECT slug, name, image, bio, created_at, updated_at FROM blog_authors WHERE slug = ?",
+    sql: "SELECT slug, name, image, bio, custom_html, created_at, updated_at FROM blog_authors WHERE slug = ?",
     args: [slug]
   });
   if (result.rows.length === 0)
@@ -7206,6 +7223,7 @@ async function getAuthorAdmin(slug) {
     name: String(r.name),
     image: r.image || null,
     bio: r.bio || null,
+    custom_html: r.custom_html || null,
     created_at: r.created_at,
     updated_at: r.updated_at
   });
@@ -7221,15 +7239,16 @@ async function saveAuthorAdmin(slug, request) {
     return jsonResponse({ error: "name_required" }, 400);
   await client.execute({
     sql: `
-      INSERT INTO blog_authors (slug, name, image, bio)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO blog_authors (slug, name, image, bio, custom_html)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(slug) DO UPDATE SET
         name = excluded.name,
         image = excluded.image,
         bio = excluded.bio,
+        custom_html = excluded.custom_html,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
     `,
-    args: [key, name, body.image ?? null, body.bio ?? null]
+    args: [key, name, body.image ?? null, body.bio ?? null, body.custom_html ?? null]
   });
   try {
     await syncPublishedBlogToCdn();

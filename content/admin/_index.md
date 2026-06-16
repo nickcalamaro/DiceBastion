@@ -1308,6 +1308,11 @@ Loading cron job logs...
 <label class="form-label">Short bio</label>
 <textarea id="blog-author-admin-bio" rows="4" class="form-textarea" placeholder="A few sentences about this author…"></textarea>
 </div>
+<div class="form-group">
+<label class="form-label">Custom HTML (author page only)</label>
+<textarea id="blog-author-admin-custom-html" rows="5" class="form-textarea" placeholder="Optional embeds (e.g. Ko-fi widget). Shown on /posts/author/slug/ below the profile." style="font-family:monospace;font-size:0.85rem;"></textarea>
+<p class="admin-text-small admin-m-0">Trusted HTML only — scripts and widgets are allowed. Leave blank to hide.</p>
+</div>
 <div class="admin-flex" style="gap:0.75rem;flex-wrap:wrap;">
 <button type="button" onclick="blogSaveAuthor()" class="btn btn-primary" id="blog-author-save-btn">Save author</button>
 <button type="button" onclick="blogCancelAuthorEdit()" class="btn btn-secondary">Cancel</button>
@@ -6048,6 +6053,7 @@ function blogNewAuthor() {
   document.getElementById('blog-author-admin-name').value = '';
   document.getElementById('blog-author-admin-image').value = '';
   document.getElementById('blog-author-admin-bio').value = '';
+  document.getElementById('blog-author-admin-custom-html').value = '';
   blogRenderAuthorAdminPreview('');
   document.getElementById('blog-author-delete-btn').style.display = 'none';
   document.getElementById('blog-author-admin-form').style.display = 'block';
@@ -6068,6 +6074,7 @@ async function blogEditAuthor(slug) {
     document.getElementById('blog-author-admin-name').value = author.name || '';
     document.getElementById('blog-author-admin-image').value = author.image || '';
     document.getElementById('blog-author-admin-bio').value = author.bio || '';
+    document.getElementById('blog-author-admin-custom-html').value = author.custom_html || '';
     blogRenderAuthorAdminPreview(author.image || '');
     document.getElementById('blog-author-delete-btn').style.display = 'inline-flex';
     document.getElementById('blog-author-admin-form').style.display = 'block';
@@ -6089,6 +6096,7 @@ async function blogSaveAuthor() {
   const name = document.getElementById('blog-author-admin-name').value.trim();
   const image = document.getElementById('blog-author-admin-image').value.trim() || null;
   const bio = document.getElementById('blog-author-admin-bio').value.trim() || null;
+  const custom_html = document.getElementById('blog-author-admin-custom-html').value.trim() || null;
 
   if (!slug || !name) {
     Modal.alert({ title: 'Missing fields', message: 'Slug and display name are required.' });
@@ -6103,7 +6111,7 @@ async function blogSaveAuthor() {
     const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
       method: 'PUT',
       headers: adminJsonHeaders(),
-      body: JSON.stringify({ name, image, bio }),
+      body: JSON.stringify({ name, image, bio, custom_html }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || data.message || 'Save failed');

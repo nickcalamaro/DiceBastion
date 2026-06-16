@@ -26,6 +26,8 @@ export interface BlogAuthorProfile {
   name: string;
   image?: string | null;
   bio?: string | null;
+  /** Trusted admin HTML (widgets, embeds) shown on /posts/author/slug/ only. */
+  custom_html?: string | null;
 }
 
 export interface BlogTaxonomyIndex {
@@ -1315,6 +1317,10 @@ main.page-container {
   font-weight: 600;
   color: rgb(var(--color-neutral-500));
 }
+.blog-author-custom-html {
+  margin: 0 0 1.75rem;
+  max-width: 52rem;
+}
 .blog-author-posts-heading {
   margin: 0 0 1.25rem;
   font-size: 1.15rem;
@@ -1887,6 +1893,7 @@ export function renderBlogAuthorPage(
   const name = profile?.name || authorSlug.replace(/-/g, " ");
   const bio = profile?.bio || "";
   const image = profile?.image || "";
+  const customHtml = (profile?.custom_html || "").trim();
   const filtered = posts.filter((post) => (post.authors || []).includes(authorSlug));
   const postCount = filtered.length;
   const canonical = `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`;
@@ -1918,6 +1925,7 @@ export function renderBlogAuthorPage(
     <div class="blog-layout">
       <div class="blog-main">
         ${profileHeader}
+        ${customHtml ? `<div class="blog-author-custom-html">${customHtml}</div>` : ""}
         <h2 class="blog-author-posts-heading">Articles by ${escapeHtml(name)}</h2>
         <section class="list-card-grid">${cards}</section>
         ${renderBlogPageFooter(siteUrl, true)}
