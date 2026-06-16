@@ -5120,6 +5120,20 @@ function renderAuthorByline(profiles, siteUrl) {
   }).join("");
   return `<aside class="blog-author-byline" aria-label="Article author">${items}</aside>`;
 }
+function renderAuthorCustomHtml(profiles) {
+  const seen = /* @__PURE__ */ new Set();
+  const blocks = [];
+  for (const profile of profiles) {
+    const html = (profile.custom_html || "").trim();
+    if (!html || seen.has(html))
+      continue;
+    seen.add(html);
+    blocks.push(`<div class="blog-author-custom-html">${html}</div>`);
+  }
+  if (!blocks.length)
+    return "";
+  return `<div class="blog-author-custom-html-group" aria-label="Author extras">${blocks.join("")}</div>`;
+}
 function renderTaxonomySidebar(taxonomy, siteUrl, active) {
   const tagItems = taxonomy.tags.map(({ slug, label, count }) => {
     const activeClass = active?.tag === slug ? " is-active" : "";
@@ -5911,6 +5925,15 @@ main.page-container {
   margin: 0 0 1.75rem;
   max-width: 52rem;
 }
+.blog-author-custom-html-group {
+  margin-bottom: 1.5rem;
+}
+.blog-author-custom-html-group .blog-author-custom-html {
+  margin-bottom: 1rem;
+}
+.blog-author-custom-html-group .blog-author-custom-html:last-child {
+  margin-bottom: 0;
+}
 .blog-author-posts-heading {
   margin: 0 0 1.25rem;
   font-size: 1.15rem;
@@ -6470,6 +6493,7 @@ function renderBlogPostPage(post, authors, siteUrl, allPosts = []) {
       </div>
       ${tags ? `<div class="blog-tag-list">${tags}</div>` : ""}
       ${renderAuthorByline(authorProfiles, siteUrl)}
+      ${renderAuthorCustomHtml(authorProfiles)}
       <div class="blog-article-body">${sanitizedBody}</div>
     </article>`;
   const body = `

@@ -516,6 +516,20 @@ function renderAuthorByline(profiles: BlogAuthorProfile[], siteUrl: string): str
   return `<aside class="blog-author-byline" aria-label="Article author">${items}</aside>`;
 }
 
+/** Widgets/embeds from author profiles (e.g. Ko-fi), shown on posts by those authors. */
+function renderAuthorCustomHtml(profiles: BlogAuthorProfile[]): string {
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  for (const profile of profiles) {
+    const html = (profile.custom_html || "").trim();
+    if (!html || seen.has(html)) continue;
+    seen.add(html);
+    blocks.push(`<div class="blog-author-custom-html">${html}</div>`);
+  }
+  if (!blocks.length) return "";
+  return `<div class="blog-author-custom-html-group" aria-label="Author extras">${blocks.join("")}</div>`;
+}
+
 function renderTaxonomySidebar(
   taxonomy: BlogTaxonomyIndex,
   siteUrl: string,
@@ -1321,6 +1335,15 @@ main.page-container {
   margin: 0 0 1.75rem;
   max-width: 52rem;
 }
+.blog-author-custom-html-group {
+  margin-bottom: 1.5rem;
+}
+.blog-author-custom-html-group .blog-author-custom-html {
+  margin-bottom: 1rem;
+}
+.blog-author-custom-html-group .blog-author-custom-html:last-child {
+  margin-bottom: 0;
+}
 .blog-author-posts-heading {
   margin: 0 0 1.25rem;
   font-size: 1.15rem;
@@ -1995,6 +2018,7 @@ export function renderBlogPostPage(
       </div>
       ${tags ? `<div class="blog-tag-list">${tags}</div>` : ""}
       ${renderAuthorByline(authorProfiles, siteUrl)}
+      ${renderAuthorCustomHtml(authorProfiles)}
       <div class="blog-article-body">${sanitizedBody}</div>
     </article>`;
 
