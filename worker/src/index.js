@@ -413,7 +413,11 @@ async function submitToIndexNow(env, urls) {
       })
       console.log(`[IndexNow] ${host} (${urlList.length} url) → ${res.status}`)
       // 200 = accepted, 202 = accepted/pending verification. Both are success.
-      results.push({ host, status: res.status, ok: res.ok, count: urlList.length })
+      // 429 = throttled: IndexNow rate-limits by IP and Cloudflare's shared egress
+      // IPs get throttled quickly; the URL was almost certainly already accepted from
+      // a recent publish/cron push, so treat it as a soft-success (not a hard failure).
+      const throttled = res.status === 429
+      results.push({ host, status: res.status, ok: res.ok || throttled, throttled, count: urlList.length })
     } catch (err) {
       console.error(`[IndexNow] submit failed for ${host}:`, err)
       results.push({ host, ok: false, status: 0, error: err.message || String(err), count: urlList.length })
@@ -8304,9 +8308,12 @@ app.post('/admin/indexing/notify', requireAdmin, async (c) => {
       google = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
     }
 
-    // "ok" reflects the real mechanism (IndexNow). Always 200 so the browser sees JSON.
+    // "ok" is true if EITHER mechanism accepted the URL. IndexNow (Bing/Yandex/etc.)
+    // is best-effort and frequently 429s on Cloudflare's shared egress IP; Google's
+    // Indexing API succeeding is what matters for Search Console. Always 200 so the
+    // browser sees JSON.
     return c.json({
-      ok: indexNow.ok,
+      ok: indexNow.ok || !!(google && google.ok),
       indexnow: indexNow,
       google: google || { skipped: true, reason: 'google_sa_key_not_configured' }
     }, 200)
@@ -8336,8 +8343,10 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
       }))
     }
 
+    // ok if IndexNow accepted OR at least one Google submission succeeded.
+    const googleAnyOk = Array.isArray(google) && google.some(g => g && g.ok)
     return c.json({
-      ok: indexNow.ok,
+      ok: indexNow.ok || googleAnyOk,
       total: urls.length,
       indexnow: indexNow,
       google: google || { skipped: true, reason: 'google_sa_key_not_configured' }
