@@ -273,11 +273,17 @@ function resolvePostAuthors(
   const seenNames = new Set<string>();
 
   for (const slug of slugs) {
-    const profile = authors[slug] || { slug, name: slug.replace(/-/g, " ") };
+    const profile = authors[slug] || { slug, name: slug.replace(/-/g, " "), custom_html: null };
     const key = profile.name.trim().toLowerCase();
     if (seenNames.has(key)) continue;
     seenNames.add(key);
-    profiles.push({ slug, name: profile.name.trim(), image: profile.image, bio: profile.bio });
+    profiles.push({
+      slug,
+      name: profile.name.trim(),
+      image: profile.image,
+      bio: profile.bio,
+      custom_html: profile.custom_html || null,
+    });
   }
 
   const people = profiles.filter((p) => !isOrgAuthorName(p.name));

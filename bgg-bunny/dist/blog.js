@@ -4929,12 +4929,18 @@ function resolvePostAuthors(post, authors) {
   const profiles = [];
   const seenNames = /* @__PURE__ */ new Set();
   for (const slug of slugs) {
-    const profile = authors[slug] || { slug, name: slug.replace(/-/g, " ") };
+    const profile = authors[slug] || { slug, name: slug.replace(/-/g, " "), custom_html: null };
     const key = profile.name.trim().toLowerCase();
     if (seenNames.has(key))
       continue;
     seenNames.add(key);
-    profiles.push({ slug, name: profile.name.trim(), image: profile.image, bio: profile.bio });
+    profiles.push({
+      slug,
+      name: profile.name.trim(),
+      image: profile.image,
+      bio: profile.bio,
+      custom_html: profile.custom_html || null
+    });
   }
   const people = profiles.filter((p) => !isOrgAuthorName(p.name));
   return people.length > 0 ? people : profiles;
