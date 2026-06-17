@@ -5539,6 +5539,11 @@ function generateEventSeoPage(event) {
   const priceNum = Number(event.non_membership_price) || 0;
   const priceDisplay = priceNum.toFixed(2);
   const isFree = priceNum === 0;
+  const memberPriceNum = Number(event.membership_price) || 0;
+  const memberPriceDisplay = memberPriceNum.toFixed(2);
+  // Only surface a distinct member price when it actually differs from the standard price.
+  const hasMemberPrice = !isFree && memberPriceNum !== priceNum;
+  const memberPriceLabel = memberPriceNum === 0 ? 'Free for members' : `£${memberPriceDisplay} members`;
   const organiserName = e(event.seo_organizer || event.organiser || 'Dice Bastion');
 
   // Gibraltar timezone: CET (UTC+1) in winter, CEST (UTC+2) in summer
@@ -5609,14 +5614,35 @@ function generateEventSeoPage(event) {
     },
     'image': eventImages.length ? eventImages : [img],
     'url': url,
-    'offers': {
-      '@type': 'Offer',
-      'url': url,
-      'price': priceNum,
-      'priceCurrency': 'GBP',
-      'availability': 'https://schema.org/InStock',
-      'validFrom': event.created_at || new Date().toISOString()
-    },
+    'offers': hasMemberPrice
+      ? [
+          {
+            '@type': 'Offer',
+            'name': 'Member',
+            'url': url,
+            'price': memberPriceNum,
+            'priceCurrency': 'GBP',
+            'availability': 'https://schema.org/InStock',
+            'validFrom': event.created_at || new Date().toISOString()
+          },
+          {
+            '@type': 'Offer',
+            'name': 'Standard',
+            'url': url,
+            'price': priceNum,
+            'priceCurrency': 'GBP',
+            'availability': 'https://schema.org/InStock',
+            'validFrom': event.created_at || new Date().toISOString()
+          }
+        ]
+      : {
+          '@type': 'Offer',
+          'url': url,
+          'price': priceNum,
+          'priceCurrency': 'GBP',
+          'availability': 'https://schema.org/InStock',
+          'validFrom': event.created_at || new Date().toISOString()
+        },
     'organizer': {
       '@type': 'Organization',
       'name': organiserName,
@@ -5670,6 +5696,7 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 .badge{display:inline-block;padding:.2rem .6rem;border-radius:6px;font-size:.8rem;font-weight:600}
 .badge-free{background:#064e3b;color:#6ee7b7}
 .badge-paid{background:#4a2c0a;color:#fbbf24}
+.badge-member{background:#1e3a5f;color:#7cc4fb}
 .cta{display:inline-block;padding:.75rem 2rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:1rem;transition:background .2s}
 .cta:hover{background:#6d28d9}
 .footer{margin-top:auto;padding:1.5rem;text-align:center;font-size:.85rem;color:#606070}
@@ -5686,7 +5713,7 @@ ${fullDesc ? `<p class="desc">${fullDesc}</p>` : ''}
 ${dateStr ? `<div class="meta-item"><span class="meta-label">Date</span><span class="meta-value">${dateStr}</span></div>` : ''}
 ${timeStr ? `<div class="meta-item"><span class="meta-label">Time</span><span class="meta-value">${timeStr}${endTimeStr ? ` – ${endTimeStr}` : ''}</span></div>` : ''}
 ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span class="meta-value">${loc}</span></div>` : ''}
-<div class="meta-item"><span class="meta-label">Price</span><span class="meta-value">${isFree ? '<span class="badge badge-free">Free</span>' : `<span class="badge badge-paid">£${priceDisplay}</span>`}</span></div>
+<div class="meta-item"><span class="meta-label">Price</span><span class="meta-value">${isFree ? '<span class="badge badge-free">Free</span>' : `<span class="badge badge-paid">£${priceDisplay}</span>${hasMemberPrice ? ` <span class="badge badge-member">${memberPriceLabel}</span>` : ''}`}</span></div>
 </div>
 <a class="cta" href="${eventsPage}">View Event &amp; Register</a>
 </div>
