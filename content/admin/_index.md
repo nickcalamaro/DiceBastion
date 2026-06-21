@@ -56,6 +56,10 @@ showDate: false
 .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-600)); color: rgb(var(--color-primary-600)); }
 .dark .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-400)); color: rgb(var(--color-primary-400)); }
 
+.activity-type-filter-solo { cursor: pointer; }
+.activity-type-filter-solo:hover,
+.activity-type-filter-solo:focus { color: rgb(var(--color-primary-600)); text-decoration: underline; text-underline-offset: 2px; outline: none; }
+
 /* Deep-link section headings (e.g. /admin#bookings-upcoming) */
 .admin-section-heading { scroll-margin-top: 5rem; margin: 0 0 1rem 0; font-size: 1.125rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .admin-section-heading .admin-permalink { font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-neutral-400)); text-decoration: none; opacity: 0.65; }
@@ -342,29 +346,41 @@ Refresh
 </div>
 <p class="admin-text-muted admin-mb-1">Memberships, event tickets, shop orders, account sign-ups, and more — newest first.</p>
 <div id="activity-type-filters" class="admin-mb-2" style="display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: center;">
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="account_created" checked> Account created
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="account_created" checked>
+<span class="activity-type-filter-solo" data-activity-type="account_created" role="button" tabindex="0">Account created</span>
 </label>
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_new" checked> New membership
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_new" checked>
+<span class="activity-type-filter-solo" data-activity-type="membership_new" role="button" tabindex="0">New membership</span>
 </label>
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_expired" checked> Membership expired
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_expired" checked>
+<span class="activity-type-filter-solo" data-activity-type="membership_expired" role="button" tabindex="0">Membership expired</span>
 </label>
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_purchase" checked> Event ticket
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_purchase" checked>
+<span class="activity-type-filter-solo" data-activity-type="event_purchase" role="button" tabindex="0">Event ticket</span>
 </label>
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_registration" checked> Event registration
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_registration" checked>
+<span class="activity-type-filter-solo" data-activity-type="event_registration" role="button" tabindex="0">Event registration</span>
 </label>
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="shop_order" checked> Shop order
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="table_booking" checked>
+<span class="activity-type-filter-solo" data-activity-type="table_booking" role="button" tabindex="0">Table booking</span>
 </label>
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="donation" checked> Donation
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="shop_order" checked>
+<span class="activity-type-filter-solo" data-activity-type="shop_order" role="button" tabindex="0">Shop order</span>
 </label>
-<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
-<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="sponsorship" checked> Sponsorship
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="donation" checked>
+<span class="activity-type-filter-solo" data-activity-type="donation" role="button" tabindex="0">Donation</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="sponsorship" checked>
+<span class="activity-type-filter-solo" data-activity-type="sponsorship" role="button" tabindex="0">Sponsorship</span>
 </label>
 </div>
 <div class="table-wrapper">
@@ -1763,6 +1779,7 @@ Loading cron job logs...
 
 <script>
 const API_BASE = utils.getApiBase();
+const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run';
 const BLOG_API_BASE = (window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '');
 let sessionToken = null;
 let currentUser = null;
@@ -3600,6 +3617,7 @@ const ACTIVITY_TYPE_LABELS = {
   membership_expired: { label: 'Membership expired', color: '#f44336' },
   event_purchase: { label: 'Event ticket', color: '#2196F3' },
   event_registration: { label: 'Event registration', color: '#0ea5e9' },
+  table_booking: { label: 'Table booking', color: '#14b8a6' },
   shop_order: { label: 'Shop order', color: '#8b5cf6' },
   donation: { label: 'Donation', color: '#ec4899' },
   sponsorship: { label: 'Sponsorship', color: '#f59e0b' }
@@ -3676,11 +3694,62 @@ function renderRecentActivityTable() {
   tableBody.innerHTML = visible.map(renderActivityRow).join('');
 }
 
+function soloActivityTypeFilter(type) {
+  document.querySelectorAll('.activity-type-filter').forEach(cb => {
+    cb.checked = cb.dataset.activityType === type;
+  });
+  renderRecentActivityTable();
+}
+
 function initActivityTypeFilters() {
   document.querySelectorAll('.activity-type-filter').forEach(cb => {
     if (cb.dataset.activityFilterBound) return;
     cb.dataset.activityFilterBound = '1';
     cb.addEventListener('change', renderRecentActivityTable);
+  });
+  document.querySelectorAll('.activity-type-filter-solo').forEach(span => {
+    if (span.dataset.activitySoloBound) return;
+    span.dataset.activitySoloBound = '1';
+    span.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const type = span.dataset.activityType;
+      if (type) soloActivityTypeFilter(type);
+    });
+    span.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      const type = span.dataset.activityType;
+      if (type) soloActivityTypeFilter(type);
+    });
+  });
+}
+
+function mapBookingToActivity(booking) {
+  const tablePart = booking.table_type || 'Table';
+  const datePart = booking.booking_date || '';
+  const timePart = [booking.start_time, booking.end_time].filter(Boolean).join('–');
+  const detail = timePart ? `${tablePart} · ${datePart}, ${timePart}` : `${tablePart} · ${datePart}`;
+  const paid = Number(booking.amount_paid);
+  const displayAmount = Number.isFinite(paid) && paid > 0 ? paid.toFixed(2) : null;
+  return {
+    activity_type: 'table_booking',
+    occurred_at: booking.created_at,
+    email: booking.user_email,
+    name: booking.user_name,
+    detail,
+    display_amount: displayAmount,
+    currency: 'GBP',
+    ref_id: booking.id
+  };
+}
+
+function mergeAndSortActivityRows(d1Activities, bookings) {
+  const bookingRows = (bookings || []).map(mapBookingToActivity);
+  return [...(d1Activities || []), ...bookingRows].sort((a, b) => {
+    const ta = Date.parse(a.occurred_at || '') || 0;
+    const tb = Date.parse(b.occurred_at || '') || 0;
+    return tb - ta;
   });
 }
 
@@ -3693,7 +3762,7 @@ function formatActivityDetail(activity) {
   if (type === 'shop_order') {
     return detail ? `Order ${detail}` : '—';
   }
-  if (type === 'event_purchase' || type === 'event_registration') {
+  if (type === 'event_purchase' || type === 'event_registration' || type === 'table_booking') {
     return detail || '—';
   }
   if (type === 'donation') {
@@ -3720,14 +3789,26 @@ async function loadRecentActivity() {
   `;
 
   try {
-    const res = await fetch(`${API_BASE}/admin/recent-activity?days=${encodeURIComponent(recentActivityDays)}&limit=100`, {
-      headers: { 'X-Session-Token': sessionToken }
-    });
+    const bookingHeaders = sessionToken ? { Authorization: 'Bearer ' + sessionToken } : {};
+    const [activityRes, bookingsRes] = await Promise.all([
+      fetch(`${API_BASE}/admin/recent-activity?days=${encodeURIComponent(recentActivityDays)}&limit=100`, {
+        headers: { 'X-Session-Token': sessionToken }
+      }),
+      fetch(`${BOOKINGS_API}/api/bookings/recent?days=${encodeURIComponent(recentActivityDays)}&limit=100`, {
+        headers: bookingHeaders
+      }).catch(() => null)
+    ]);
 
-    if (!res.ok) throw new Error('Failed to fetch activity');
+    if (!activityRes.ok) throw new Error('Failed to fetch activity');
 
-    const data = await res.json();
-    recentActivityCache = data.success && Array.isArray(data.activities) ? data.activities : [];
+    const data = await activityRes.json();
+    const d1Activities = data.success && Array.isArray(data.activities) ? data.activities : [];
+    let bookings = [];
+    if (bookingsRes && bookingsRes.ok) {
+      const bookingsData = await bookingsRes.json();
+      bookings = Array.isArray(bookingsData.bookings) ? bookingsData.bookings : [];
+    }
+    recentActivityCache = mergeAndSortActivityRows(d1Activities, bookings).slice(0, 100);
     renderRecentActivityTable();
   } catch (err) {
     console.error('Error loading recent activity:', err);
@@ -4531,8 +4612,8 @@ async function loadBookingsSchedule() {
     const headers = sessionToken ? { 'Authorization': 'Bearer ' + sessionToken } : {};
     const [eventsRes, bookingsRes, blocksRes] = await Promise.all([
       fetch(API_BASE + '/events'),
-      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', { headers }),
-      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks')
+      fetch(`${BOOKINGS_API}/api/bookings/all`, { headers }),
+      fetch(`${BOOKINGS_API}/api/bookings/blocks`)
     ]);
     const eventsRaw = eventsRes.ok ? await eventsRes.json() : [];
     const bookingsData = bookingsRes.ok ? await bookingsRes.json() : { bookings: [] };
@@ -4571,7 +4652,7 @@ async function cancelBookingAdmin(bookingId) {
   }
   
   try {
-    const response = await fetch(`https://dicebastionbookings-ofbbu.bunny.run/api/bookings/${bookingId}`, {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/${bookingId}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${sessionToken}`
@@ -4613,7 +4694,7 @@ async function deleteTimeBlock(blockId) {
   if (!confirm('Delete this time block?')) return;
   
   try {
-    const response = await fetch(`https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks/${blockId}`, {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/blocks/${blockId}`, {
       method: 'DELETE'
     });
     
@@ -4677,7 +4758,7 @@ function showCreateBlockModal() {
     };
     
     try {
-      const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks', {
+      const response = await fetch(`${BOOKINGS_API}/api/bookings/blocks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(blockData)
@@ -4711,8 +4792,8 @@ async function loadCalendarWeek() {
   
   // Load bookings and blocks for the week
   try {
-    const bookingsResponse = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all');
-    const blocksResponse = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks');
+    const bookingsResponse = await fetch(`${BOOKINGS_API}/api/bookings/all`);
+    const blocksResponse = await fetch(`${BOOKINGS_API}/api/bookings/blocks`);
     
     const bookingsData = await bookingsResponse.json();
     const blocksData = await blocksResponse.json();
@@ -4799,8 +4880,6 @@ function changeWeek(direction) {
   currentWeekStart.setDate(currentWeekStart.getDate() + (direction * 7));
   loadCalendarWeek();
 }
-
-const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run';
 
 const BOOKING_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 

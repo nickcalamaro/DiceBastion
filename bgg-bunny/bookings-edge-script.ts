@@ -618,6 +618,14 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await getAllBookings();
     }
 
+    // GET /api/bookings/recent?days=30&limit=100 - Recently created bookings (admin activity feed)
+    if (path === "/api/bookings/recent" && request.method === "GET") {
+      const url = new URL(request.url);
+      const days = Math.min(Math.max(parseInt(url.searchParams.get("days") || "30", 10) || 30, 1), 90);
+      const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 1), 200);
+      return await getRecentBookings(days, limit);
+    }
+
     // GET /api/bookings/blocks - Get all booking blocks
     if (path === "/api/bookings/blocks" && request.method === "GET") {
       return await getBlockedTimes();
@@ -1332,6 +1340,46 @@ async function getAllBookings() {
   } catch (error) {
     console.error("Error fetching all bookings:", error);
     return jsonResponse({ error: "Failed to fetch bookings" }, 500);
+  }
+}
+
+/**
+ * Get recently created bookings (admin activity feed)
+ */
+async function getRecentBookings(days: number, limit: number) {
+  try {
+    const result = await client.execute({
+      sql: `SELECT b.id, b.user_email, b.user_name, b.booking_date, b.start_time, b.end_time,
+                   b.status, b.payment_status, b.amount_paid, b.notes, b.created_at,
+                   t.name as table_type_name
+            FROM bookings b
+            LEFT JOIN booking_table_types t ON b.table_type_id = t.id
+            WHERE b.status != 'cancelled'
+              AND datetime(b.created_at) >= datetime('now', ?)
+            ORDER BY b.created_at DESC
+            LIMIT ?`,
+      args: [`-${days} days`, limit],
+    });
+
+    return jsonResponse({
+      bookings: result.rows.map((row) => ({
+        id: row.id,
+        user_email: row.user_email,
+        user_name: row.user_name,
+        booking_date: row.booking_date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        table_type: row.table_type_name,
+        status: row.status,
+        payment_status: row.payment_status,
+        amount_paid: Number(row.amount_paid),
+        notes: row.notes,
+        created_at: row.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error("Error fetching recent bookings:", error);
+    return jsonResponse({ error: "Failed to fetch recent bookings" }, 500);
   }
 }
 
