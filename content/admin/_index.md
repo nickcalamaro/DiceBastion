@@ -340,7 +340,33 @@ Refresh
 </button>
 </div>
 </div>
-<p class="admin-text-muted admin-mb-2">Memberships, event tickets, shop orders, account sign-ups, and more — newest first.</p>
+<p class="admin-text-muted admin-mb-1">Memberships, event tickets, shop orders, account sign-ups, and more — newest first.</p>
+<div id="activity-type-filters" class="admin-mb-2" style="display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: center;">
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="account_created" checked> Account created
+</label>
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_new" checked> New membership
+</label>
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_expired" checked> Membership expired
+</label>
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_purchase" checked> Event ticket
+</label>
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_registration" checked> Event registration
+</label>
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="shop_order" checked> Shop order
+</label>
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="donation" checked> Donation
+</label>
+<label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="sponsorship" checked> Sponsorship
+</label>
+</div>
 <div class="table-wrapper">
 <div style="overflow-x: auto;">
 <table>
@@ -3579,7 +3605,84 @@ const ACTIVITY_TYPE_LABELS = {
   sponsorship: { label: 'Sponsorship', color: '#f59e0b' }
 };
 
+let recentActivityCache = [];
+let recentActivityDays = '30';
+
 const PLAN_LABELS = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' };
+
+function getActivityTypeFilters() {
+  const enabled = new Set();
+  document.querySelectorAll('.activity-type-filter:checked').forEach(cb => {
+    if (cb.dataset.activityType) enabled.add(cb.dataset.activityType);
+  });
+  return enabled;
+}
+
+function renderActivityRow(activity) {
+  const occurred = new Date(activity.occurred_at);
+  const typeConfig = ACTIVITY_TYPE_LABELS[activity.activity_type] || { label: activity.activity_type, color: '#666' };
+  const amount = activity.display_amount ? `£${activity.display_amount}` : '—';
+  const person = activity.name
+    ? `<div style="font-weight: 500;">${escapeHtml(activity.name)}</div><div class="admin-text-sm admin-text-muted">${escapeHtml(activity.email || '')}</div>`
+    : `<div class="admin-text-sm">${escapeHtml(activity.email || '—')}</div>`;
+
+  return `
+    <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
+      <td style="padding: 1rem; white-space: nowrap;">
+        <div style="font-weight: 500;">${occurred.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</div>
+        <div class="admin-text-sm admin-text-muted">${occurred.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+      </td>
+      <td style="padding: 1rem;">
+        <span class="admin-text-sm" style="padding: 0.25rem 0.75rem; background: ${typeConfig.color}22; color: ${typeConfig.color}; border-radius: 4px; font-weight: 600; white-space: nowrap;">
+          ${typeConfig.label}
+        </span>
+      </td>
+      <td style="padding: 1rem;">${person}</td>
+      <td class="admin-text-sm" style="padding: 1rem;">${escapeHtml(formatActivityDetail(activity))}</td>
+      <td style="padding: 1rem; font-weight: 500;">${amount}</td>
+    </tr>
+  `;
+}
+
+function renderRecentActivityTable() {
+  const tableBody = document.getElementById('activity-list');
+  if (!tableBody) return;
+
+  if (!recentActivityCache.length) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+          No activity in the last ${recentActivityDays} days
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  const enabledTypes = getActivityTypeFilters();
+  const visible = recentActivityCache.filter(a => enabledTypes.has(a.activity_type));
+
+  if (!visible.length) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+          No activity matches the selected filters
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tableBody.innerHTML = visible.map(renderActivityRow).join('');
+}
+
+function initActivityTypeFilters() {
+  document.querySelectorAll('.activity-type-filter').forEach(cb => {
+    if (cb.dataset.activityFilterBound) return;
+    cb.dataset.activityFilterBound = '1';
+    cb.addEventListener('change', renderRecentActivityTable);
+  });
+}
 
 function formatActivityDetail(activity) {
   const type = activity.activity_type;
@@ -3606,7 +3709,8 @@ async function loadRecentActivity() {
   const tableBody = document.getElementById('activity-list');
   if (!tableBody) return;
 
-  const days = document.getElementById('activity-days-filter')?.value || '30';
+  recentActivityDays = document.getElementById('activity-days-filter')?.value || '30';
+  initActivityTypeFilters();
   tableBody.innerHTML = `
     <tr>
       <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
@@ -3616,54 +3720,18 @@ async function loadRecentActivity() {
   `;
 
   try {
-    const res = await fetch(`${API_BASE}/admin/recent-activity?days=${encodeURIComponent(days)}&limit=100`, {
+    const res = await fetch(`${API_BASE}/admin/recent-activity?days=${encodeURIComponent(recentActivityDays)}&limit=100`, {
       headers: { 'X-Session-Token': sessionToken }
     });
 
     if (!res.ok) throw new Error('Failed to fetch activity');
 
     const data = await res.json();
-
-    if (!data.success || !data.activities || data.activities.length === 0) {
-      tableBody.innerHTML = `
-        <tr>
-          <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
-            No activity in the last ${days} days
-          </td>
-        </tr>
-      `;
-      return;
-    }
-
-    tableBody.innerHTML = data.activities.map(activity => {
-      const occurred = new Date(activity.occurred_at);
-      const typeConfig = ACTIVITY_TYPE_LABELS[activity.activity_type] || { label: activity.activity_type, color: '#666' };
-      const amount = activity.display_amount
-        ? `£${activity.display_amount}`
-        : '—';
-      const person = activity.name
-        ? `<div style="font-weight: 500;">${escapeHtml(activity.name)}</div><div class="admin-text-sm admin-text-muted">${escapeHtml(activity.email || '')}</div>`
-        : `<div class="admin-text-sm">${escapeHtml(activity.email || '—')}</div>`;
-
-      return `
-        <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
-          <td style="padding: 1rem; white-space: nowrap;">
-            <div style="font-weight: 500;">${occurred.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</div>
-            <div class="admin-text-sm admin-text-muted">${occurred.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
-          </td>
-          <td style="padding: 1rem;">
-            <span class="admin-text-sm" style="padding: 0.25rem 0.75rem; background: ${typeConfig.color}22; color: ${typeConfig.color}; border-radius: 4px; font-weight: 600; white-space: nowrap;">
-              ${typeConfig.label}
-            </span>
-          </td>
-          <td style="padding: 1rem;">${person}</td>
-          <td class="admin-text-sm" style="padding: 1rem;">${escapeHtml(formatActivityDetail(activity))}</td>
-          <td style="padding: 1rem; font-weight: 500;">${amount}</td>
-        </tr>
-      `;
-    }).join('');
+    recentActivityCache = data.success && Array.isArray(data.activities) ? data.activities : [];
+    renderRecentActivityTable();
   } catch (err) {
     console.error('Error loading recent activity:', err);
+    recentActivityCache = [];
     tableBody.innerHTML = `
       <tr>
         <td colspan="5" class="admin-text-center" style="padding: 3rem; color: #c00;">

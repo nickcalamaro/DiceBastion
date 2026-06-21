@@ -620,52 +620,8 @@ async function migrateToTransactions(db) {
 }
 
 // ============================================================================
-// FREE TRIAL SCHEMA MIGRATION
+// USER & IDENTITY MANAGEMENT
 // ============================================================================
-
-// Columns already exist in production. Runtime guard remains as a safety net for
-// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
-let __freeTrialColsReady = false
-async function migrateFreeTrialColumns(db) {
-  if (__freeTrialColsReady) return
-  const cols = [
-    { name: 'is_free_trial', def: 'INTEGER DEFAULT 0' },
-    { name: 'trial_end_date', def: 'TEXT' },
-    { name: 'trial_reminder_sent', def: 'INTEGER DEFAULT 0' }
-  ]
-  for (const col of cols) {
-    try {
-      await db.prepare(`ALTER TABLE memberships ADD COLUMN ${col.name} ${col.def}`).run()
-      console.log(`[migration] Added column memberships.${col.name}`)
-    } catch (e) {
-      if (!String(e).includes('duplicate column')) {
-        console.error(`[migration] Error adding column ${col.name}:`, e)
-      }
-    }
-  }
-  __freeTrialColsReady = true
-}
-
-// SumUp payment diagnostics on transactions (transaction_code, 3DS/SCA flag).
-let __transactionPaymentColsReady = false
-async function migrateTransactionPaymentColumns(db) {
-  if (__transactionPaymentColsReady) return
-  const cols = [
-    { name: 'sumup_transaction_code', def: 'TEXT' },
-    { name: 'sca_fired', def: 'INTEGER DEFAULT NULL' }
-  ]
-  for (const col of cols) {
-    try {
-      await db.prepare(`ALTER TABLE transactions ADD COLUMN ${col.name} ${col.def}`).run()
-      console.log(`[migration] Added column transactions.${col.name}`)
-    } catch (e) {
-      if (!String(e).includes('duplicate column')) {
-        console.error(`[migration] Error adding column ${col.name}:`, e)
-      }
-    }
-  }
-  __transactionPaymentColsReady = true
-}
 
 async function hasUsedFreeTrial(db, userId) {
   // Only count trials that were actually activated — pending/failed checkout attempts must not block retries.
@@ -703,30 +659,6 @@ async function abandonPendingFreeTrialAttempts(db, userId) {
   }
   return rows.length
 }
-
-let __eventImageVariantColsReady = false
-/**
- * Add optional per-layout event image URLs (card grid vs modal hero). Safe to call repeatedly.
- */
-async function ensureEventImageVariantColumns(db) {
-  if (__eventImageVariantColsReady) return
-  for (const col of ['image_url_card', 'image_url_hero']) {
-    try {
-      await db.prepare(`ALTER TABLE events ADD COLUMN ${col} TEXT`).run()
-      console.log(`[migration] Added events.${col}`)
-    } catch (e) {
-      const msg = String(e.message || e)
-      if (!msg.includes('duplicate column') && !msg.includes('already exists')) {
-        console.error(`[migration] events.${col}:`, e)
-      }
-    }
-  }
-  __eventImageVariantColsReady = true
-}
-
-// ============================================================================
-// USER & IDENTITY MANAGEMENT
-// ============================================================================
 
 /**
  * Find user by email (case-insensitive)
@@ -842,14 +774,12 @@ function inferScaFromPayment(payment) {
 
 async function markTransactionScaFired(db, orderRef) {
   if (!orderRef) return
-  await migrateTransactionPaymentColumns(db)
   await db.prepare(`
     UPDATE transactions SET sca_fired = 1, updated_at = ? WHERE order_ref = ?
   `).bind(toIso(new Date()), orderRef).run()
 }
 
 async function updateTransactionPaymentMeta(db, { transactionId, orderRef, payment, sumupBody } = {}) {
-  await migrateTransactionPaymentColumns(db)
   const code = extractSumUpTransactionCode(payment) || transactionCodeFromSumUpBody(sumupBody)
   const serverSca = payment ? inferScaFromPayment(payment) : null
   const sets = ['updated_at = ?']
@@ -2987,22 +2917,6 @@ app.post('/login', async c => {
     const now = new Date()
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days
     
-    console.log('[User Login] Creating user_sessions table if needed...')
-    // Create user_sessions table if it doesn't exist
-    await c.env.DB.prepare(`
-      CREATE TABLE IF NOT EXISTS user_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        session_token TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        last_activity TEXT NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-      )
-    `).run().catch(err => {
-      console.log('[User Login] Table creation error (might already exist):', err.message)
-    })
-    
     console.log('[User Login] Storing session...')
     // Store session
     await c.env.DB.prepare(`
@@ -4245,8 +4159,6 @@ app.post('/membership/free-trial/checkout', async (c) => {
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
 
-    await migrateFreeTrialColumns(c.env.DB)
-
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name, 200))
 
     const alreadyTrialed = await hasUsedFreeTrial(c.env.DB, ident.id)
@@ -4773,7 +4685,6 @@ app.get('/membership/free-trial/confirm', async (c) => {
   const now = new Date()
   const trialEnd = addMonths(now, 1)
 
-  await migrateFreeTrialColumns(c.env.DB)
   await c.env.DB.prepare(`
     UPDATE memberships
     SET status = 'active',
@@ -4873,38 +4784,11 @@ app.get('/membership/free-trial/confirm', async (c) => {
 // ============================================================================
 
 /**
- * Ensure the sponsored_memberships table exists (lazy migration).
- */
-// Table already exists in production. Runtime guard remains as a safety net for
-// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
-let __sponsoredMembershipsReady = false
-async function migrateSponsoredMemberships(db) {
-  if (__sponsoredMembershipsReady) return
-  await db.prepare(`
-    CREATE TABLE IF NOT EXISTS sponsored_memberships (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      purchased_by_email TEXT NOT NULL,
-      purchased_by_name  TEXT,
-      purchased_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      order_ref TEXT UNIQUE NOT NULL,
-      amount_paid REAL NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending','available','claimed','refunded')),
-      claimed_by_user_id INTEGER,
-      claimed_at TEXT,
-      FOREIGN KEY (claimed_by_user_id) REFERENCES users(user_id)
-    )
-  `).run()
-  __sponsoredMembershipsReady = true
-}
-
-/**
  * Confirm a sponsorship payment and add it to the pool.
  * Shared by GET /membership/sponsor/confirm and the SumUp webhook.
  * @returns {{ ok: true, status: string, message: string, alreadyConfirmed?: boolean }}
  */
 async function confirmSponsorshipPayment(db, env, orderRef, paymentOverride = null) {
-  await migrateSponsoredMemberships(db)
 
   const transaction = await db.prepare(
     `SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship'`
@@ -4983,7 +4867,6 @@ async function confirmSponsorshipPayment(db, env, orderRef, paymentOverride = nu
  */
 app.get('/membership/sponsor/pool', async (c) => {
   try {
-    await migrateSponsoredMemberships(c.env.DB)
     const row = await c.env.DB.prepare(
       `SELECT COUNT(*) as available FROM sponsored_memberships WHERE status = 'available'`
     ).first()
@@ -5017,8 +4900,6 @@ app.post('/membership/sponsor/checkout', async (c) => {
 
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
-
-    await migrateSponsoredMemberships(c.env.DB)
 
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name, 200))
     if (!ident?.id) return c.json({ error: 'identity_error' }, 500)
@@ -5125,8 +5006,6 @@ app.post('/membership/sponsor/claim', async (c) => {
 
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
-
-    await migrateSponsoredMemberships(c.env.DB)
 
     // Check user doesn't already have an active membership
     const ident = await getOrCreateIdentity(c.env.DB, email, name || null)
@@ -5387,7 +5266,6 @@ app.post('/webhooks/sumup', async (c) => {
     const instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
     const trialEnd = addMonths(now, 1)
 
-    await migrateFreeTrialColumns(c.env.DB)
     await c.env.DB.prepare(`
       UPDATE memberships
       SET status = 'active', start_date = ?, end_date = ?, is_free_trial = 1,
@@ -5725,7 +5603,6 @@ ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span cl
 // Get all active events (public endpoint)
 app.get('/events', async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -6089,7 +5966,6 @@ app.get('/posts/sitemap-images.xml', async c => {
 
 app.get('/events/sitemap-images.xml', async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const site = 'https://dicebastion.com'
     const { results } = await c.env.DB.prepare(`
       SELECT slug, event_name, seo_image, image_url, image_url_card, image_url_hero
@@ -6136,7 +6012,6 @@ app.get('/events/:slug', async c => {
       return c.json({ error: 'not_found' }, 404)
     }
     
-    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -6459,7 +6334,6 @@ app.get('/admin/memberships', async c => {
 
 app.get('/admin/recent-activity', requireAdmin, async c => {
   try {
-    await migrateSponsoredMemberships(c.env.DB)
     const db = c.env.DB
     const url = new URL(c.req.url)
     const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 1), 90)
@@ -6679,7 +6553,6 @@ app.get('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
     
-    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -6724,7 +6597,6 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
@@ -6781,7 +6653,6 @@ app.post('/admin/events', requireAdmin, async c => {
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
-    await ensureEventImageVariantColumns(c.env.DB)
     const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
@@ -8275,7 +8146,6 @@ function normalizeDiscountTypeStored(t) {
 
 app.get('/admin/promo-codes', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const rows = await c.env.DB.prepare('SELECT * FROM promo_codes ORDER BY datetime(created_at) DESC').all()
     return c.json({ promo_codes: rows.results || [] })
   } catch (e) {
@@ -8286,7 +8156,6 @@ app.get('/admin/promo-codes', requireAdmin, async c => {
 
 app.post('/admin/promo-codes', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const body = await c.req.json()
     const code = normalizePromoCodeInput(body.code)
     if (!code) return c.json({ error: 'code_required' }, 400)
@@ -8347,7 +8216,6 @@ app.post('/admin/promo-codes', requireAdmin, async c => {
 
 app.put('/admin/promo-codes/:id', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const id = parseInt(c.req.param('id'), 10)
     if (!(id > 0)) return c.json({ error: 'invalid_id' }, 400)
 
@@ -8432,7 +8300,6 @@ app.put('/admin/promo-codes/:id', requireAdmin, async c => {
 
 app.delete('/admin/promo-codes/:id', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const id = parseInt(c.req.param('id'), 10)
     if (!(id > 0)) return c.json({ error: 'invalid_id' }, 400)
     await c.env.DB.prepare('DELETE FROM promo_codes WHERE id = ?').bind(id).run()
@@ -8559,7 +8426,6 @@ app.get('/admin/newsletter/recipients', requireAdmin, async c => {
  */
 app.get('/admin/newsletter/events', requireAdmin, async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
       SELECT event_id, event_name, description, event_datetime, location,
              image_url, image_url_card, slug, is_recurring, recurrence_pattern, recurrence_end_date
@@ -9402,7 +9268,6 @@ async function processAutoRenewals(env) {
     let trialRemindersSent = 0
 
     try {
-      await migrateFreeTrialColumns(env.DB)
       const trialReminderDate = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000))
       const trialReminderDateStr = toIso(trialReminderDate)
 
@@ -10782,47 +10647,6 @@ async function emailHasActiveMembershipForShopPromo(db, email) {
   return !!m
 }
 
-// Table/columns already exist in production. Runtime guard remains as a safety net for
-// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
-let __shopPromoSchemaReady = false
-async function ensureShopPromoSchema(db) {
-  if (__shopPromoSchemaReady) return
-  await db.prepare(`
-    CREATE TABLE IF NOT EXISTS promo_codes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT NOT NULL UNIQUE,
-      label TEXT,
-      discount_type TEXT NOT NULL,
-      discount_value INTEGER NOT NULL,
-      rules_json TEXT NOT NULL DEFAULT '{}',
-      active INTEGER NOT NULL DEFAULT 1,
-      starts_at TEXT,
-      ends_at TEXT,
-      max_uses INTEGER,
-      uses_count INTEGER NOT NULL DEFAULT 0,
-      min_subtotal_pence INTEGER,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `).run()
-  const alters = [
-    'ALTER TABLE orders ADD COLUMN promo_code_id INTEGER',
-    'ALTER TABLE orders ADD COLUMN discount_pence INTEGER DEFAULT 0',
-    'ALTER TABLE orders ADD COLUMN promo_code_applied TEXT'
-  ]
-  for (const sql of alters) {
-    try {
-      await db.prepare(sql).run()
-    } catch (e) {
-      const msg = String(e?.message || e)
-      if (!msg.includes('duplicate column')) {
-        console.warn('[promo/schema] ALTER skipped or failed:', msg)
-      }
-    }
-  }
-  __shopPromoSchemaReady = true
-}
-
 /**
  * Validates promo and computes discount against built line items + full subtotal.
  * @returns {Promise<{ ok: boolean, discountPence?: number, promoRow?: Object, promoCodeSnap?: string, error?: string }>}
@@ -10907,8 +10731,6 @@ app.post('/shop/promo/quote', async c => {
     if (!checkRateLimit(ip, shopPromoQuoteRateLimits, 30, 1)) {
       return c.json({ error: 'rate_limit_exceeded', message: 'Too many requests. Try again shortly.' }, 429)
     }
-
-    await ensureShopPromoSchema(c.env.DB)
 
     const body = await c.req.json().catch(() => ({}))
     const { email, items, promo_code: promoCodeRaw, delivery_method: deliveryMethod } = body
@@ -11018,8 +10840,6 @@ app.post('/shop/checkout', async c => {
     if (!checkRateLimit(ip, shopCheckoutRateLimits, 8, 1)) {
       return c.json({ error: 'rate_limit_exceeded', message: 'Too many checkout attempts. Try again shortly.' }, 429)
     }
-
-    await ensureShopPromoSchema(c.env.DB)
 
     const body = await c.req.json().catch(() => ({}))
     const {
