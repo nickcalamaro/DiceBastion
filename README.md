@@ -12,13 +12,15 @@ hugo server
 
 Open [http://localhost:1313](http://localhost:1313). The admin panel is at `/admin` (admin users only).
 
-**Worker API**
+**Worker API** (required for admin, account, events, and checkout on localhost)
 
 ```bash
 cd worker
 npm install
 wrangler dev
 ```
+
+Hugo on port **1313** talks to the worker on **8787** automatically (`static/js/utils.js`). Run both terminals together when testing `/admin` locally.
 
 See [worker/README.md](worker/README.md) for D1 setup and deployment.
 

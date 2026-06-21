@@ -3,12 +3,16 @@
  * Used across admin, account, events, memberships, and shop pages
  */
 
-// API Configuration — same-origin /api on production (see worker fetch /api/* proxy)
+// API Configuration — same-origin /api on production; local wrangler on Hugo dev
 (function resolveApiBase() {
   if (window.__DB_API_BASE) return;
   const host = window.location.hostname || '';
   if (host === 'dicebastion.com' || host === 'www.dicebastion.com') {
     window.__DB_API_BASE = '/api';
+    return;
+  }
+  if (host === 'localhost' || host === '127.0.0.1') {
+    window.__DB_API_BASE = 'http://localhost:8787';
     return;
   }
   window.__DB_API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';

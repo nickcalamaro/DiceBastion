@@ -37,7 +37,7 @@ app.use('*', async (c, next) => {
     c.res.headers.set('X-Debug-Origin', origin || '')
     c.res.headers.set('X-Debug-Allow', allowOrigin || '')
   }
-  if (c.req.method === 'OPTIONS') return new Response('', { headers: c.res.headers })
+  if (c.req.method === 'OPTIONS') return c.body(null, 204)
   await next()
 })
 
@@ -6459,152 +6459,103 @@ app.get('/admin/memberships', async c => {
 
 app.get('/admin/recent-activity', requireAdmin, async c => {
   try {
+    await migrateSponsoredMemberships(c.env.DB)
+    const db = c.env.DB
     const url = new URL(c.req.url)
     const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 1), 90)
     const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 1), 200)
     const since = `datetime('now', '-${days} days')`
 
-    const rows = await c.env.DB.prepare(`
-      SELECT * FROM (
-        SELECT
-          'account_created' AS activity_type,
-          u.created_at AS occurred_at,
-          u.email AS email,
-          u.name AS name,
-          NULL AS detail,
-          NULL AS amount,
-          NULL AS currency,
-          u.user_id AS ref_id
-        FROM users u
-        WHERE u.created_at >= ${since}
+    async function runActivityQuery(sql) {
+      try {
+        const rows = await db.prepare(sql).all()
+        return rows.results || []
+      } catch (e) {
+        console.warn('[admin/recent-activity] sub-query failed:', e.message)
+        return []
+      }
+    }
 
-        UNION ALL
-
-        SELECT
-          'membership_new' AS activity_type,
-          COALESCE(m.start_date, m.created_at) AS occurred_at,
-          u.email,
-          u.name,
-          m.plan AS detail,
-          m.amount,
-          m.currency,
-          m.id AS ref_id
-        FROM memberships m
-        JOIN users u ON m.user_id = u.user_id
-        WHERE m.status = 'active'
-          AND m.start_date IS NOT NULL
-          AND COALESCE(m.start_date, m.created_at) >= ${since}
-
-        UNION ALL
-
-        SELECT
-          'membership_expired' AS activity_type,
-          m.end_date AS occurred_at,
-          u.email,
-          u.name,
-          m.plan AS detail,
-          NULL AS amount,
-          NULL AS currency,
-          m.id AS ref_id
-        FROM memberships m
-        JOIN users u ON m.user_id = u.user_id
-        WHERE m.end_date IS NOT NULL
-          AND m.end_date < datetime('now')
-          AND m.end_date >= ${since}
-
-        UNION ALL
-
-        SELECT
-          'event_purchase' AS activity_type,
-          tr.created_at AS occurred_at,
-          COALESCE(tr.email, u.email) AS email,
-          COALESCE(tr.name, u.name) AS name,
-          e.event_name AS detail,
-          tr.amount,
-          tr.currency,
-          tr.id AS ref_id
+    // D1 limits compound SELECT to 5 UNION terms — run separate queries and merge in JS.
+    const chunks = await Promise.all([
+      runActivityQuery(`
+        SELECT 'account_created' AS activity_type, u.created_at AS occurred_at,
+          u.email AS email, u.name AS name, NULL AS detail, NULL AS amount, NULL AS currency, u.user_id AS ref_id
+        FROM users u WHERE datetime(u.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'membership_new' AS activity_type, COALESCE(m.start_date, m.created_at) AS occurred_at,
+          u.email, u.name, m.plan AS detail, m.amount, m.currency, m.id AS ref_id
+        FROM memberships m JOIN users u ON m.user_id = u.user_id
+        WHERE m.status = 'active' AND m.start_date IS NOT NULL
+          AND datetime(COALESCE(m.start_date, m.created_at)) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'membership_expired' AS activity_type, m.end_date AS occurred_at,
+          u.email, u.name, m.plan AS detail, NULL AS amount, NULL AS currency, m.id AS ref_id
+        FROM memberships m JOIN users u ON m.user_id = u.user_id
+        WHERE m.end_date IS NOT NULL AND datetime(m.end_date) < datetime('now')
+          AND datetime(m.end_date) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'event_purchase' AS activity_type, tr.created_at AS occurred_at,
+          COALESCE(tr.email, u.email) AS email, COALESCE(tr.name, u.name) AS name,
+          e.event_name AS detail, tr.amount, tr.currency, tr.id AS ref_id
         FROM transactions tr
         LEFT JOIN tickets t ON tr.reference_id = t.id
         LEFT JOIN events e ON t.event_id = e.event_id
         LEFT JOIN users u ON tr.user_id = u.user_id
         WHERE tr.transaction_type IN ('ticket', 'event_membership_bundle')
           AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
-          AND tr.created_at >= ${since}
-
-        UNION ALL
-
-        SELECT
-          'event_registration' AS activity_type,
-          t.created_at AS occurred_at,
-          u.email,
-          u.name,
-          e.event_name AS detail,
-          NULL AS amount,
-          NULL AS currency,
-          t.id AS ref_id
+          AND datetime(tr.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'event_registration' AS activity_type, t.created_at AS occurred_at,
+          u.email, u.name, e.event_name AS detail, NULL AS amount, NULL AS currency, t.id AS ref_id
         FROM tickets t
         JOIN users u ON t.user_id = u.user_id
         JOIN events e ON t.event_id = e.event_id
         LEFT JOIN transactions tr ON tr.reference_id = t.id
           AND tr.transaction_type IN ('ticket', 'event_membership_bundle')
           AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
-        WHERE t.status = 'active'
-          AND tr.id IS NULL
-          AND t.created_at >= ${since}
-
-        UNION ALL
-
-        SELECT
-          'shop_order' AS activity_type,
-          COALESCE(o.completed_at, o.created_at) AS occurred_at,
-          o.email,
-          o.name,
-          o.order_number AS detail,
-          CAST(o.total AS TEXT) AS amount,
-          o.currency,
-          o.id AS ref_id
+        WHERE t.status = 'active' AND tr.id IS NULL AND datetime(t.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'shop_order' AS activity_type, COALESCE(o.completed_at, o.created_at) AS occurred_at,
+          o.email, o.name, o.order_number AS detail, CAST(o.total AS TEXT) AS amount, o.currency, o.id AS ref_id
         FROM orders o
         WHERE UPPER(COALESCE(o.payment_status, '')) = 'PAID'
-          AND COALESCE(o.completed_at, o.created_at) >= ${since}
-
-        UNION ALL
-
-        SELECT
-          'donation' AS activity_type,
-          tr.created_at AS occurred_at,
-          tr.email,
-          tr.name,
-          d.campaign AS detail,
-          tr.amount,
-          tr.currency,
-          tr.id AS ref_id
+          AND datetime(COALESCE(o.completed_at, o.created_at)) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'donation' AS activity_type, tr.created_at AS occurred_at,
+          tr.email, tr.name, d.campaign AS detail, tr.amount, tr.currency, tr.id AS ref_id
         FROM transactions tr
         LEFT JOIN donations d ON d.order_ref = tr.order_ref
         WHERE tr.transaction_type = 'donation'
           AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
-          AND tr.created_at >= ${since}
-
-        UNION ALL
-
-        SELECT
-          'sponsorship' AS activity_type,
-          COALESCE(sm.claimed_at, sm.purchased_at) AS occurred_at,
+          AND datetime(tr.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'sponsorship' AS activity_type, COALESCE(sm.claimed_at, sm.purchased_at) AS occurred_at,
           COALESCE(u.email, sm.purchased_by_email) AS email,
           COALESCE(u.name, sm.purchased_by_name) AS name,
           CASE WHEN sm.status = 'claimed' THEN 'claimed' ELSE 'purchased' END AS detail,
-          CAST(sm.amount_paid AS TEXT) AS amount,
-          'GBP' AS currency,
-          sm.id AS ref_id
+          CAST(sm.amount_paid AS TEXT) AS amount, 'GBP' AS currency, sm.id AS ref_id
         FROM sponsored_memberships sm
         LEFT JOIN users u ON sm.claimed_by_user_id = u.user_id
         WHERE sm.status IN ('available', 'claimed')
-          AND COALESCE(sm.claimed_at, sm.purchased_at) >= ${since}
-      )
-      ORDER BY occurred_at DESC
-      LIMIT ?
-    `).bind(limit).all()
+          AND datetime(COALESCE(sm.claimed_at, sm.purchased_at)) >= ${since}
+      `)
+    ])
 
-    const activities = (rows.results || []).map(row => {
+    const merged = chunks.flat().sort((a, b) => {
+      const ta = Date.parse(a.occurred_at || '') || 0
+      const tb = Date.parse(b.occurred_at || '') || 0
+      return tb - ta
+    })
+
+    const activities = merged.slice(0, limit).map(row => {
       let displayAmount = null
       if (row.amount != null && row.amount !== '') {
         const n = parseFloat(row.amount)
