@@ -294,7 +294,8 @@ Logout
 
 <!-- Tabs -->
 <div class="admin-tab-bar">
-<button class="admin-tab-btn tab-btn active" data-tab="products">Products</button>
+<button class="admin-tab-btn tab-btn active" data-tab="activity">Recent Activity</button>
+<button class="admin-tab-btn tab-btn" data-tab="products">Products</button>
 <button class="admin-tab-btn tab-btn" data-tab="shop-promos">Shop promo codes</button>
 <button class="admin-tab-btn tab-btn" data-tab="events">Events</button>
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
@@ -308,6 +309,7 @@ Logout
 
 <nav class="admin-jump-links admin-mb-2" aria-label="Admin sections">
 <span style="color: rgb(var(--color-neutral-500));">Quick links:</span>
+<a href="#activity">Activity</a>
 <a href="#products">Products</a>
 <a href="#shop-promos">Shop promos</a>
 <a href="#events">Events</a>
@@ -322,8 +324,49 @@ Logout
 <a href="#blog-authors">Authors</a>
 </nav>
 
+<!-- Recent Activity Tab -->
+<div id="activity-tab" class="tab-content">
+<div class="admin-flex-between admin-mb-2">
+<h2 id="admin-section-activity" class="admin-section-heading admin-m-0">Recent Activity <a href="#activity" class="admin-permalink" aria-label="Link to activity">#</a></h2>
+<div class="admin-flex">
+<select id="activity-days-filter" onchange="loadRecentActivity()" class="form-select" style="padding: 0.5rem 1rem; font-size: 0.875rem;">
+<option value="7">Last 7 days</option>
+<option value="30" selected>Last 30 days</option>
+<option value="60">Last 60 days</option>
+<option value="90">Last 90 days</option>
+</select>
+<button id="refresh-activity-btn" onclick="loadRecentActivity()" class="btn btn-primary btn-sm">
+Refresh
+</button>
+</div>
+</div>
+<p class="admin-text-muted admin-mb-2">Memberships, event tickets, shop orders, account sign-ups, and more — newest first.</p>
+<div class="table-wrapper">
+<div style="overflow-x: auto;">
+<table>
+<thead>
+<tr>
+<th>When</th>
+<th>Type</th>
+<th>Person</th>
+<th>Details</th>
+<th>Amount</th>
+</tr>
+</thead>
+<tbody id="activity-list">
+<tr>
+<td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+Loading activity...
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
 <!-- Products Tab -->
-<div id="products-tab" class="tab-content">
+<div id="products-tab" class="tab-content" style="display: none;">
 <div class="card card-compact">
 <h2 id="product-form-title" class="admin-section-heading">Add New Product</h2>
 <form id="product-form">
@@ -1942,6 +1985,7 @@ document.getElementById('login-container').style.display = 'none';
 document.getElementById('non-admin-container').style.display = 'none';
 document.getElementById('admin-dashboard').style.display = 'block';
 loadProducts();
+loadRecentActivity();
 loadEvents();
 loadOrders();
 loadRegistrations();
@@ -2018,6 +2062,7 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       document.getElementById('login-container').style.display = 'none';
       document.getElementById('admin-dashboard').style.display = 'block';
       loadProducts();
+      loadRecentActivity();
       loadEvents();
       loadOrders();
 loadRegistrations();
@@ -2796,7 +2841,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 });
 
 // Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
-const ADMIN_TABS = ['products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'bookings', 'cron', 'newsletter', 'blog'];
+const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'bookings', 'cron', 'newsletter', 'blog'];
 
 function scrollToAdminSection(sectionId) {
   const el = document.getElementById(sectionId);
@@ -2817,6 +2862,7 @@ function switchAdminTab(tab, options = {}) {
   document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
   const panel = document.getElementById(tab + '-tab');
   if (panel) panel.style.display = 'block';
+  if (tab === 'activity') loadRecentActivity();
   if (tab === 'bookings') loadBookingsAndCalendar();
   if (tab === 'memberships') loadMemberships();
   if (tab === 'newsletter') {
@@ -3519,6 +3565,113 @@ async function deleteEvent(id, title) {
       }
     }
   });
+}
+
+// Recent Activity
+const ACTIVITY_TYPE_LABELS = {
+  account_created: { label: 'Account created', color: '#6366f1' },
+  membership_new: { label: 'New membership', color: '#4CAF50' },
+  membership_expired: { label: 'Membership expired', color: '#f44336' },
+  event_purchase: { label: 'Event ticket', color: '#2196F3' },
+  event_registration: { label: 'Event registration', color: '#0ea5e9' },
+  shop_order: { label: 'Shop order', color: '#8b5cf6' },
+  donation: { label: 'Donation', color: '#ec4899' },
+  sponsorship: { label: 'Sponsorship', color: '#f59e0b' }
+};
+
+const PLAN_LABELS = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' };
+
+function formatActivityDetail(activity) {
+  const type = activity.activity_type;
+  const detail = activity.detail || '';
+  if (type === 'membership_new' || type === 'membership_expired') {
+    return PLAN_LABELS[detail] || detail || '—';
+  }
+  if (type === 'shop_order') {
+    return detail ? `Order ${detail}` : '—';
+  }
+  if (type === 'event_purchase' || type === 'event_registration') {
+    return detail || '—';
+  }
+  if (type === 'donation') {
+    return detail ? `Campaign: ${detail}` : '—';
+  }
+  if (type === 'sponsorship') {
+    return detail === 'claimed' ? 'Claimed by member' : 'Purchased (pool)';
+  }
+  return '—';
+}
+
+async function loadRecentActivity() {
+  const tableBody = document.getElementById('activity-list');
+  if (!tableBody) return;
+
+  const days = document.getElementById('activity-days-filter')?.value || '30';
+  tableBody.innerHTML = `
+    <tr>
+      <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+        Loading activity...
+      </td>
+    </tr>
+  `;
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/recent-activity?days=${encodeURIComponent(days)}&limit=100`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+
+    if (!res.ok) throw new Error('Failed to fetch activity');
+
+    const data = await res.json();
+
+    if (!data.success || !data.activities || data.activities.length === 0) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+            No activity in the last ${days} days
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tableBody.innerHTML = data.activities.map(activity => {
+      const occurred = new Date(activity.occurred_at);
+      const typeConfig = ACTIVITY_TYPE_LABELS[activity.activity_type] || { label: activity.activity_type, color: '#666' };
+      const amount = activity.display_amount
+        ? `£${activity.display_amount}`
+        : '—';
+      const person = activity.name
+        ? `<div style="font-weight: 500;">${escapeHtml(activity.name)}</div><div class="admin-text-sm admin-text-muted">${escapeHtml(activity.email || '')}</div>`
+        : `<div class="admin-text-sm">${escapeHtml(activity.email || '—')}</div>`;
+
+      return `
+        <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
+          <td style="padding: 1rem; white-space: nowrap;">
+            <div style="font-weight: 500;">${occurred.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</div>
+            <div class="admin-text-sm admin-text-muted">${occurred.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+          </td>
+          <td style="padding: 1rem;">
+            <span class="admin-text-sm" style="padding: 0.25rem 0.75rem; background: ${typeConfig.color}22; color: ${typeConfig.color}; border-radius: 4px; font-weight: 600; white-space: nowrap;">
+              ${typeConfig.label}
+            </span>
+          </td>
+          <td style="padding: 1rem;">${person}</td>
+          <td class="admin-text-sm" style="padding: 1rem;">${escapeHtml(formatActivityDetail(activity))}</td>
+          <td style="padding: 1rem; font-weight: 500;">${amount}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Error loading recent activity:', err);
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="admin-text-center" style="padding: 3rem; color: #c00;">
+          Failed to load activity. Please refresh.
+        </td>
+      </tr>
+    `;
+  }
 }
 
 // Orders

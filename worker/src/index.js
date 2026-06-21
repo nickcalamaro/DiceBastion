@@ -6454,6 +6454,181 @@ app.get('/admin/memberships', async c => {
 })
 
 // ============================================================================
+// ADMIN RECENT ACTIVITY ENDPOINT
+// ============================================================================
+
+app.get('/admin/recent-activity', requireAdmin, async c => {
+  try {
+    const url = new URL(c.req.url)
+    const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 1), 90)
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 1), 200)
+    const since = `datetime('now', '-${days} days')`
+
+    const rows = await c.env.DB.prepare(`
+      SELECT * FROM (
+        SELECT
+          'account_created' AS activity_type,
+          u.created_at AS occurred_at,
+          u.email AS email,
+          u.name AS name,
+          NULL AS detail,
+          NULL AS amount,
+          NULL AS currency,
+          u.user_id AS ref_id
+        FROM users u
+        WHERE u.created_at >= ${since}
+
+        UNION ALL
+
+        SELECT
+          'membership_new' AS activity_type,
+          COALESCE(m.start_date, m.created_at) AS occurred_at,
+          u.email,
+          u.name,
+          m.plan AS detail,
+          m.amount,
+          m.currency,
+          m.id AS ref_id
+        FROM memberships m
+        JOIN users u ON m.user_id = u.user_id
+        WHERE m.status = 'active'
+          AND m.start_date IS NOT NULL
+          AND COALESCE(m.start_date, m.created_at) >= ${since}
+
+        UNION ALL
+
+        SELECT
+          'membership_expired' AS activity_type,
+          m.end_date AS occurred_at,
+          u.email,
+          u.name,
+          m.plan AS detail,
+          NULL AS amount,
+          NULL AS currency,
+          m.id AS ref_id
+        FROM memberships m
+        JOIN users u ON m.user_id = u.user_id
+        WHERE m.end_date IS NOT NULL
+          AND m.end_date < datetime('now')
+          AND m.end_date >= ${since}
+
+        UNION ALL
+
+        SELECT
+          'event_purchase' AS activity_type,
+          tr.created_at AS occurred_at,
+          COALESCE(tr.email, u.email) AS email,
+          COALESCE(tr.name, u.name) AS name,
+          e.event_name AS detail,
+          tr.amount,
+          tr.currency,
+          tr.id AS ref_id
+        FROM transactions tr
+        LEFT JOIN tickets t ON tr.reference_id = t.id
+        LEFT JOIN events e ON t.event_id = e.event_id
+        LEFT JOIN users u ON tr.user_id = u.user_id
+        WHERE tr.transaction_type IN ('ticket', 'event_membership_bundle')
+          AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
+          AND tr.created_at >= ${since}
+
+        UNION ALL
+
+        SELECT
+          'event_registration' AS activity_type,
+          t.created_at AS occurred_at,
+          u.email,
+          u.name,
+          e.event_name AS detail,
+          NULL AS amount,
+          NULL AS currency,
+          t.id AS ref_id
+        FROM tickets t
+        JOIN users u ON t.user_id = u.user_id
+        JOIN events e ON t.event_id = e.event_id
+        LEFT JOIN transactions tr ON tr.reference_id = t.id
+          AND tr.transaction_type IN ('ticket', 'event_membership_bundle')
+          AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
+        WHERE t.status = 'active'
+          AND tr.id IS NULL
+          AND t.created_at >= ${since}
+
+        UNION ALL
+
+        SELECT
+          'shop_order' AS activity_type,
+          COALESCE(o.completed_at, o.created_at) AS occurred_at,
+          o.email,
+          o.name,
+          o.order_number AS detail,
+          CAST(o.total AS TEXT) AS amount,
+          o.currency,
+          o.id AS ref_id
+        FROM orders o
+        WHERE UPPER(COALESCE(o.payment_status, '')) = 'PAID'
+          AND COALESCE(o.completed_at, o.created_at) >= ${since}
+
+        UNION ALL
+
+        SELECT
+          'donation' AS activity_type,
+          tr.created_at AS occurred_at,
+          tr.email,
+          tr.name,
+          d.campaign AS detail,
+          tr.amount,
+          tr.currency,
+          tr.id AS ref_id
+        FROM transactions tr
+        LEFT JOIN donations d ON d.order_ref = tr.order_ref
+        WHERE tr.transaction_type = 'donation'
+          AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
+          AND tr.created_at >= ${since}
+
+        UNION ALL
+
+        SELECT
+          'sponsorship' AS activity_type,
+          COALESCE(sm.claimed_at, sm.purchased_at) AS occurred_at,
+          COALESCE(u.email, sm.purchased_by_email) AS email,
+          COALESCE(u.name, sm.purchased_by_name) AS name,
+          CASE WHEN sm.status = 'claimed' THEN 'claimed' ELSE 'purchased' END AS detail,
+          CAST(sm.amount_paid AS TEXT) AS amount,
+          'GBP' AS currency,
+          sm.id AS ref_id
+        FROM sponsored_memberships sm
+        LEFT JOIN users u ON sm.claimed_by_user_id = u.user_id
+        WHERE sm.status IN ('available', 'claimed')
+          AND COALESCE(sm.claimed_at, sm.purchased_at) >= ${since}
+      )
+      ORDER BY occurred_at DESC
+      LIMIT ?
+    `).bind(limit).all()
+
+    const activities = (rows.results || []).map(row => {
+      let displayAmount = null
+      if (row.amount != null && row.amount !== '') {
+        const n = parseFloat(row.amount)
+        if (row.activity_type === 'shop_order') {
+          displayAmount = Number.isFinite(n) ? (n / 100).toFixed(2) : null
+        } else if (Number.isFinite(n)) {
+          displayAmount = n.toFixed(2)
+        }
+      }
+      return {
+        ...row,
+        display_amount: displayAmount,
+        currency: row.currency || 'GBP'
+      }
+    })
+
+    return c.json({ success: true, activities, days, limit })
+  } catch (error) {
+    console.error('[admin/recent-activity] ERROR:', error)
+    return c.json({ error: 'internal_error', message: error.message }, 500)
+  }
+})
+
+// ============================================================================
 // ADMIN CRON JOB LOGS ENDPOINT
 // ============================================================================
 
