@@ -791,6 +791,14 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </div>
 
 <div class="checkbox-group admin-mb-1">
+  <input type="checkbox" id="event-block-table-bookings" class="checkbox-input">
+  <label for="event-block-table-bookings" class="checkbox-label" style="font-weight: 600;">Block table bookings during this event</label>
+</div>
+<p id="event-block-bookings-hint" class="admin-text-small admin-mb-1" style="margin-top: -0.5rem;">
+  Uses the same blocked-time slots as Bookings &amp; Calendar. One-off events block that date; recurring events block each occurrence in the next 12 weeks (or until the recurrence end date).
+</p>
+
+<div class="checkbox-group admin-mb-1">
   <input type="checkbox" id="event-requires-purchase" checked onchange="toggleEventPricing()" class="checkbox-input">
   <label for="event-requires-purchase" class="checkbox-label" style="font-weight: 600;">Requires Ticket Purchase</label>
 </div>
@@ -2245,6 +2253,175 @@ function getRecurrencePattern() {
   return JSON.stringify(pattern);
 }
 
+function formatDateYmd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addHoursToTimeString(timeStr, hours) {
+  const parts = String(timeStr || '00:00').split(':');
+  const h = parseInt(parts[0], 10) || 0;
+  const m = parseInt(parts[1], 10) || 0;
+  const total = h * 60 + m + hours * 60;
+  const nh = Math.floor(total / 60) % 24;
+  const nm = total % 60;
+  return String(nh).padStart(2, '0') + ':' + String(nm).padStart(2, '0');
+}
+
+function getNthWeekdayOfMonth(year, month, week, dayOfWeek) {
+  if (week === 5) {
+    const last = new Date(year, month + 1, 0);
+    while (last.getDay() !== dayOfWeek) last.setDate(last.getDate() - 1);
+    return last;
+  }
+  const first = new Date(year, month, 1);
+  const offset = (dayOfWeek - first.getDay() + 7) % 7;
+  const day = 1 + offset + (week - 1) * 7;
+  const candidate = new Date(year, month, day);
+  if (candidate.getMonth() !== month) return null;
+  return candidate;
+}
+
+function listRecurringOccurrenceDates(pattern, recurrenceEndDate) {
+  const dates = [];
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const horizon = new Date(start);
+  horizon.setDate(horizon.getDate() + 84);
+  const end = recurrenceEndDate ? new Date(recurrenceEndDate + 'T23:59:59') : horizon;
+  const limit = end < horizon ? end : horizon;
+
+  if (pattern.type === 'weekly') {
+    for (let d = new Date(start); d <= limit; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() === pattern.day) dates.push(formatDateYmd(d));
+    }
+    return dates;
+  }
+
+  if (pattern.type === 'monthly_date') {
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cursor <= limit) {
+      const year = cursor.getFullYear();
+      const month = cursor.getMonth();
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      const day = Math.min(pattern.date, lastDay);
+      const occ = new Date(year, month, day);
+      if (occ >= start && occ <= limit) dates.push(formatDateYmd(occ));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return dates;
+  }
+
+  if (pattern.type === 'monthly_day') {
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cursor <= limit) {
+      const occ = getNthWeekdayOfMonth(cursor.getFullYear(), cursor.getMonth(), pattern.week, pattern.day);
+      if (occ && occ >= start && occ <= limit) dates.push(formatDateYmd(occ));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return dates;
+  }
+
+  return dates;
+}
+
+function getEventBlockSlotsFromForm() {
+  const isRecurring = document.getElementById('event-is-recurring').checked;
+  const startTime = isRecurring
+    ? document.getElementById('recurring-time').value
+    : document.getElementById('event-time').value;
+  let endTime = isRecurring
+    ? document.getElementById('recurring-end-time').value
+    : document.getElementById('event-end-time').value;
+
+  if (!startTime) {
+    return { error: 'A start time is required to block table bookings.' };
+  }
+  if (!endTime) {
+    endTime = addHoursToTimeString(startTime, 3);
+  }
+  if (endTime <= startTime) {
+    return { error: 'End time must be after start time to create a table booking block.' };
+  }
+
+  const slots = [];
+  if (!isRecurring) {
+    const block_date = document.getElementById('event-date').value;
+    if (!block_date) return { error: 'Event date is required.' };
+    slots.push({ block_date, start_time: startTime, end_time: endTime });
+    return { slots };
+  }
+
+  const recurrenceEnd = document.getElementById('recurrence-end-date').value || null;
+  const pattern = JSON.parse(getRecurrencePattern());
+  const dates = listRecurringOccurrenceDates(pattern, recurrenceEnd);
+  if (!dates.length) {
+    return { error: 'No upcoming recurring dates found to block in the next 12 weeks.' };
+  }
+  for (const block_date of dates) {
+    slots.push({ block_date, start_time: startTime, end_time: endTime });
+  }
+  return { slots };
+}
+
+function eventBookingBlockReason(eventId, title) {
+  return `Event #${eventId}: ${String(title || 'Event').trim()}`.slice(0, 240);
+}
+
+async function createBookingTimeBlock(blockData) {
+  const response = await fetch(`${BOOKINGS_API}/api/bookings/blocks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(blockData)
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create time block');
+  }
+  return response.json();
+}
+
+async function deleteBookingTimeBlock(blockId) {
+  await fetch(`${BOOKINGS_API}/api/bookings/blocks/${blockId}`, { method: 'DELETE' });
+}
+
+async function deleteBookingBlocksForEvent(eventId) {
+  const res = await fetch(`${BOOKINGS_API}/api/bookings/blocks`);
+  if (!res.ok) return;
+  const data = await res.json();
+  const prefix = `Event #${eventId}:`;
+  const matches = (data.blocks || []).filter(b => String(b.reason || '').startsWith(prefix));
+  await Promise.all(matches.map(b => deleteBookingTimeBlock(b.id)));
+}
+
+async function eventHasTableBookingBlocks(eventId) {
+  const res = await fetch(`${BOOKINGS_API}/api/bookings/blocks`);
+  if (!res.ok) return false;
+  const data = await res.json();
+  const prefix = `Event #${eventId}:`;
+  return (data.blocks || []).some(b => String(b.reason || '').startsWith(prefix));
+}
+
+async function syncEventTableBookingBlocks({ eventId, eventTitle, shouldBlock }) {
+  if (!eventId) return { created: 0 };
+  await deleteBookingBlocksForEvent(eventId);
+  if (!shouldBlock) return { created: 0 };
+
+  const schedule = getEventBlockSlotsFromForm();
+  if (schedule.error) throw new Error(schedule.error);
+
+  const userStatus = utils.session.getUserStatus();
+  const reason = eventBookingBlockReason(eventId, eventTitle);
+  const created_by = userStatus.user?.email || 'admin';
+
+  for (const slot of schedule.slots) {
+    await createBookingTimeBlock({ ...slot, reason, created_by });
+  }
+  return { created: schedule.slots.length };
+}
+
 function setRecurrencePattern(patternJson) {
   if (!patternJson) return;
   
@@ -3372,6 +3549,23 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     });
 
     if (res.ok) {
+      const saved = await res.json().catch(() => ({}));
+      const eventId = id || saved.id;
+      let blockNote = '';
+      try {
+        const shouldBlock = document.getElementById('event-block-table-bookings').checked;
+        const blockResult = await syncEventTableBookingBlocks({
+          eventId,
+          eventTitle: data.title,
+          shouldBlock
+        });
+        if (shouldBlock && blockResult.created > 0) {
+          blockNote = ` ${blockResult.created} table booking block${blockResult.created === 1 ? '' : 's'} created.`;
+        }
+      } catch (blockErr) {
+        blockNote = ' Warning: table booking blocks could not be updated — ' + blockErr.message;
+      }
+
       document.getElementById('event-form').reset();
       document.getElementById('event-id').value = '';
       document.getElementById('event-form-title').textContent = 'Add New Event';
@@ -3385,7 +3579,7 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
       document.getElementById('event-image-hero').value = '';
 uploadedEventBundle = null;
 loadEvents();
-alert('Event saved successfully!');
+alert('Event saved successfully!' + blockNote);
 } else {
 const error = await res.json();
 alert('Failed to save event: ' + (error.error || error.message || 'Unknown error'));
@@ -3415,6 +3609,7 @@ document.getElementById('event-seo-image').value = '';
 document.getElementById('event-end-time').value = '';
 document.getElementById('recurring-end-time').value = '';
 document.getElementById('event-requires-purchase').checked = true;
+document.getElementById('event-block-table-bookings').checked = false;
 document.getElementById('event-pricing-fields').style.display = 'block';
 document.getElementById('event-form-title').textContent = 'Add New Event';
 document.getElementById('event-submit-text').textContent = 'Add Event';
@@ -3519,6 +3714,7 @@ async function editEvent(id) {
     document.getElementById('event-form-title').textContent = 'Edit Event';
     document.getElementById('event-submit-text').textContent = 'Update Event';
     document.getElementById('cancel-event-edit').style.display = 'block';
+    document.getElementById('event-block-table-bookings').checked = await eventHasTableBookingBlocks(id);
     document.getElementById('event-form').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     alert('Error loading event: ' + err.message);
@@ -4758,20 +4954,10 @@ function showCreateBlockModal() {
     };
     
     try {
-      const response = await fetch(`${BOOKINGS_API}/api/bookings/blocks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(blockData)
-      });
-      
-      if (response.ok) {
-        modal.close();
-        await loadTimeBlocks();
-        await loadCalendarWeek();
-      } else {
-        const data = await response.json();
-        alert('Failed to create block: ' + (data.error || 'Unknown error'));
-      }
+      await createBookingTimeBlock(blockData);
+      modal.close();
+      await loadTimeBlocks();
+      await loadCalendarWeek();
     } catch (err) {
       console.error('Error creating block:', err);
       alert('Failed to create time block');
