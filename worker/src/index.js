@@ -661,6 +661,42 @@ async function abandonPendingFreeTrialAttempts(db, userId) {
 }
 
 /**
+ * Stop post-trial cron charges for a user. Clears trial scheduling flags on the
+ * membership that was just paid and expires any other active free-trial rows
+ * (e.g. manual checkout creates a new membership while the trial row stays active).
+ */
+async function clearFreeTrialChargeScheduling(db, { userId, activeMembershipId = null }) {
+  if (activeMembershipId) {
+    await db.prepare(`
+      UPDATE memberships
+      SET is_free_trial = 0, trial_end_date = NULL, renewal_failed_at = NULL, renewal_attempts = 0
+      WHERE id = ? AND is_free_trial = 1
+    `).bind(activeMembershipId).run()
+  }
+
+  const binds = [userId]
+  let excludeSql = ''
+  if (activeMembershipId) {
+    excludeSql = ' AND id != ?'
+    binds.push(activeMembershipId)
+  }
+  binds.push(userId)
+  // Only expire orphaned trial rows — never a membership that already has a paid charge.
+  await db.prepare(`
+    UPDATE memberships
+    SET is_free_trial = 0, trial_end_date = NULL, status = 'expired',
+        renewal_failed_at = NULL, renewal_attempts = 0
+    WHERE user_id = ? AND is_free_trial = 1 AND status = 'active'${excludeSql}
+      AND id NOT IN (
+        SELECT reference_id FROM transactions
+        WHERE user_id = ?
+          AND payment_status = 'PAID'
+          AND transaction_type IN ('renewal', 'membership_charge', 'membership')
+      )
+  `).bind(...binds).run()
+}
+
+/**
  * Find user by email (case-insensitive)
  * @param {Object} db - Database connection
  * @param {string} email - User email
@@ -891,6 +927,8 @@ async function activateMembership(db, env, { membershipId, membership, paymentId
   await db.prepare(
     'UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ?, payment_instrument_id = ? WHERE id = ?'
   ).bind(toIso(baseStart), toIso(end), actualPaymentId, instrumentId, membershipId).run()
+
+  await clearFreeTrialChargeScheduling(db, { userId: identityId, activeMembershipId: membershipId })
   
   return { startDate: toIso(baseStart), endDate: toIso(end), instrumentId, actualPaymentId }
 }
@@ -1331,7 +1369,9 @@ async function processMembershipRenewal(db, membership, env) {
       SET end_date = ?, 
           renewal_failed_at = NULL, 
           renewal_attempts = 0,
-          renewal_warning_sent = 0
+          renewal_warning_sent = 0,
+          is_free_trial = 0,
+          trial_end_date = NULL
       WHERE id = ?
     `).bind(toIso(newEnd), membership.id).run()
   } catch (e) {
@@ -4508,6 +4548,9 @@ app.get('/membership/confirm', async (c) => {
         payment_instrument_id = ?
     WHERE id = ?
   `).bind(toIso(baseStart), toIso(end), instrumentId, pending.id).run()
+
+  await clearFreeTrialChargeScheduling(c.env.DB, { userId: identityId, activeMembershipId: pending.id })
+
     // Update transaction status
   await c.env.DB.prepare(`
     UPDATE transactions 
@@ -5341,6 +5384,8 @@ app.post('/webhooks/sumup', async (c) => {
   // Activate membership with correct payment ID and instrument
   await c.env.DB.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ?, payment_instrument_id = ? WHERE id = ?')
     .bind(toIso(start), toIso(end), actualPaymentId, instrumentId, pending.id).run()
+
+  await clearFreeTrialChargeScheduling(c.env.DB, { userId: identityId, activeMembershipId: pending.id })
   
   // Send welcome email (critical - works even if user closed browser)
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
@@ -9348,6 +9393,28 @@ async function processAutoRenewals(env) {
 
       for (const trial of (trialCharges.results || [])) {
         try {
+          // User may have paid manually after a failed trial charge — don't charge again.
+          const currentActive = await getActiveMembership(env.DB, trial.user_id)
+          if (currentActive && currentActive.id !== trial.id) {
+            console.log(`[CRON] Skipping trial charge for membership ${trial.id} — user ${trial.user_id} has active membership ${currentActive.id}`)
+            await clearFreeTrialChargeScheduling(env.DB, { userId: trial.user_id, activeMembershipId: currentActive.id })
+            continue
+          }
+
+          const paidSinceTrial = await env.DB.prepare(`
+            SELECT 1 FROM transactions
+            WHERE user_id = ?
+              AND payment_status = 'PAID'
+              AND transaction_type IN ('membership', 'membership_charge', 'renewal')
+              AND datetime(created_at) >= datetime(?)
+            LIMIT 1
+          `).bind(trial.user_id, trial.trial_end_date).first()
+          if (paidSinceTrial) {
+            console.log(`[CRON] Skipping trial charge for membership ${trial.id} — user ${trial.user_id} already paid since trial end`)
+            await clearFreeTrialChargeScheduling(env.DB, { userId: trial.user_id, activeMembershipId: trial.id })
+            continue
+          }
+
           const instrument = await getActivePaymentInstrument(env.DB, trial.user_id)
           if (!instrument) {
             await env.DB.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = COALESCE(renewal_attempts, 0) + 1 WHERE id = ?')
