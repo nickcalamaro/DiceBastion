@@ -253,11 +253,10 @@
 
   <div id="alert-container"></div>
 
-  <div class="alert alert-info" id="booking-advance-notice" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
-    <span style="font-size: 1.3rem; flex-shrink: 0;">📅</span>
-    <div>
-      <strong>Advance booking required</strong> — Bookings must be made at least the day before. For same-day requests, contact our team via WhatsApp.
-    </div>
+  <div class="alert alert-info" id="booking-advance-notice" style="margin-bottom: 1.5rem;">
+    <p style="margin: 0 0 0.75rem 0;"><strong>Advance booking required.</strong> Bookings must be made at least the day before. For same-day requests, contact our team via WhatsApp.</p>
+    <p style="margin: 0 0 0.75rem 0;"><strong>Member table bookings.</strong> Members receive one table booking per session per day at member rates. If you need an additional table in the same session, standard non-member pricing applies.</p>
+    <p style="margin: 0;">Looking to book an event? Please refer to our <a href="/events-policy/">events policy</a>.</p>
   </div>
 
   <div id="membership-status-container"></div>
@@ -466,12 +465,26 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+/** Price for display and checkout: member rate when eligible, otherwise standard rate. */
+function resolveTableTypeDisplayPrice(type, slot) {
+  if (slot && slot.price !== undefined && slot.price !== null) {
+    return Number(slot.price);
+  }
+  const isMember = membershipStatus?.active || false;
+  return isMember ? type.member_price : type.non_member_price;
+}
+
 /** Safe price display — bad API data must not break the whole table-types grid. */
 function formatBookingPrice(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   if (n === 0) return 'FREE';
   return `£${n.toFixed(2)}`;
+}
+
+function formatPriceDetail(price) {
+  if (price === 0) return 'FREE';
+  return `£${Number(price).toFixed(2)}`;
 }
 
 async function fetchSameDayContacts(turnstileToken) {
@@ -696,7 +709,8 @@ async function loadTableTypes() {
   memberMessage.classList.add('menu-item');
   memberMessage.innerHTML = `
     <div class="alert alert-success" style="margin-bottom: 1.5rem;">
-      ✓ You're getting free bookings as a GWC Member. Thank you for your support!
+      <p style="margin: 0 0 0.5rem 0;">You have member pricing on your first table booking in each session.</p>
+      <p style="margin: 0;">Additional tables in the same session are charged at standard rates.</p>
     </div>
   `;
   
@@ -741,6 +755,7 @@ async function loadTableTypes() {
         Number.isFinite(memberPrice) &&
         Number.isFinite(nonMemberPrice) &&
         memberPrice < nonMemberPrice;
+      const showMemberLimitNote = isMember;
 
       const card = document.createElement('div');
       card.className = 'table-type-card';
@@ -750,9 +765,14 @@ async function loadTableTypes() {
           ${priceLabel ?? 'Price unavailable'}
         </div>
         ${type.description ? `<div class="table-type-description">${escapeHtml(type.description)}</div>` : ''}
+        ${showMemberLimitNote ? `
+          <div class="table-type-note">
+            Member rate applies to your first table in each session. Extra tables in the same session use standard pricing.
+          </div>
+        ` : ''}
         ${showMemberNote ? `
           <div class="table-type-note">
-            💡 ${memberPrice === 0 ? 'Free for members' : `Members pay only ${formatBookingPrice(memberPrice)}`}
+            ${memberPrice === 0 ? 'Free for members (one table per session)' : `Members pay only ${formatBookingPrice(memberPrice)} for their first table in each session`}
           </div>
         ` : ''}
       `;
@@ -896,7 +916,10 @@ async function loadAvailableSlots(date) {
       btn.type = 'button';
       btn.className = 'slot-btn';
       const spotsLeft = slot.spots_left !== undefined ? `<div style="font-size: 0.75rem; opacity: 0.8; margin-top: 0.25rem;">${slot.spots_left} ${slot.spots_left === 1 ? 'spot' : 'spots'} left</div>` : '';
-      btn.innerHTML = `<div style="font-size: 1.1rem;">⏰</div><div>${slot.start_time}</div><div style="font-size: 0.8rem; opacity: 0.7;">to ${slot.end_time}</div>${spotsLeft}`;
+      const memberNote = slot.member_benefit_available === false
+        ? `<div style="font-size: 0.7rem; margin-top: 0.35rem; opacity: 0.85;">Standard rate</div>`
+        : '';
+      btn.innerHTML = `<div>${slot.start_time}</div><div style="font-size: 0.8rem; opacity: 0.7;">to ${slot.end_time}</div>${spotsLeft}${memberNote}`;
       btn.onclick = () => selectSlot(slot, btn);
       grid.appendChild(btn);
     });
@@ -920,7 +943,9 @@ function selectSlot(slot, btnElement) {
   btnElement.classList.add('selected');
   selectedSlot = {
     startTime: slot.start_time,
-    endTime: slot.end_time
+    endTime: slot.end_time,
+    price: resolveTableTypeDisplayPrice(selectedTableType, slot),
+    usesMemberBenefit: slot.member_benefit_available !== false && (membershipStatus?.active || false)
   };
   
   const formSection = document.getElementById('booking-form-section');
@@ -931,15 +956,18 @@ function selectSlot(slot, btnElement) {
   document.getElementById('booking-form-instruction').style.display = 'none';
   document.getElementById('booking-form-wrapper').style.display = 'block';
   
-  const isMember = membershipStatus?.active || false;
-  const price = isMember ? selectedTableType.member_price : selectedTableType.non_member_price;
+  const price = selectedSlot.price;
+  const memberBenefitNote = membershipStatus?.active && slot.member_benefit_available === false
+    ? '<p style="margin: 0.5rem 0 0 0; font-size: 0.95rem;">You already have a member booking for this session. Standard pricing applies.</p>'
+    : '';
   
   document.getElementById('selected-details').innerHTML = `
     <div class="alert alert-success" style="font-size: 1.1rem;">
-      <strong>✓ Selected:</strong><br>
-      ${selectedTableType.name}<br>
-      ${currentDate} at ${slot.startTime}<br>
-      <strong>Price: ${price === 0 ? 'FREE' : `£${price.toFixed(2)}`}</strong>
+      <strong>Selected:</strong><br>
+      ${escapeHtml(selectedTableType.name)}<br>
+      ${escapeHtml(currentDate)} at ${escapeHtml(slot.start_time)}<br>
+      <strong>Price: ${formatPriceDetail(price)}</strong>
+      ${memberBenefitNote}
     </div>
   `;
   
@@ -995,8 +1023,8 @@ async function handleBookingSubmit(e) {
   try {
     const turnstileToken = await utils.getTurnstileToken('turnstile-container', null, IS_LOCALHOST);
     
-    const isMember = membershipStatus?.active || false;
-    const price = isMember ? selectedTableType.member_price : selectedTableType.non_member_price;
+    const price = selectedSlot.price;
+    const usesMemberBenefit = selectedSlot.usesMemberBenefit;
     const orderRef = `BOOK-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     // Create booking in Bunny database
@@ -1012,7 +1040,7 @@ async function handleBookingSubmit(e) {
         table_type_id: selectedTableType.id,
         order_ref: orderRef,
         amount_paid: price,
-        is_member_booking: isMember,
+        is_member_booking: usesMemberBenefit,
         notes: notes || null
       })
     });
