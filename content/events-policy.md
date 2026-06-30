@@ -209,10 +209,6 @@ if (!name) { showError('Please enter your name.'); return; }
 if (!email || !/^\S+@\S+\.\S+$/.test(email)) { showError('Please enter a valid email address.'); return; }
 if (!phone || phone.replace(/\D/g, '').length < 6) { showError('Please enter a valid phone number.'); return; }
 if (!eventType) { showError('Please select an event type.'); return; }
-if (eventDetails.length < 20) {
-showError('Please provide more detail about your proposed event (at least 20 characters).');
-return;
-}
 
 let turnstileToken;
 try {
