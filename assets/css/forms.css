@@ -1074,6 +1074,161 @@
   border-bottom-color: rgb(var(--color-neutral-700));
 }
 
+/* ===== POLICY / LEGAL PAGES ===== */
+/* Composes with: .page-container, .card, .card-wide, .link, .content-toc */
+
+.policy-updated {
+  max-width: 720px;
+  margin: 0 auto 0.5rem;
+  text-align: right;
+  font-size: 0.95rem;
+  color: rgb(var(--color-neutral-600));
+}
+
+.dark .policy-updated {
+  color: rgb(var(--color-neutral-400));
+}
+
+.policy-page .card-header {
+  color: rgb(var(--color-primary-600));
+  font-size: 1.35rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.policy-page .card-header:first-child {
+  margin-top: 0;
+}
+
+.policy-subheader {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 1.25rem 0 0.5rem;
+  color: rgb(var(--color-neutral-900));
+}
+
+.dark .policy-subheader {
+  color: rgb(var(--color-neutral-100));
+}
+
+.policy-page p {
+  line-height: 1.7;
+  color: rgb(var(--color-neutral-800));
+  margin: 0.6rem 0;
+}
+
+.dark .policy-page p {
+  color: rgb(var(--color-neutral-200));
+}
+
+.policy-list {
+  list-style: none;
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+}
+
+.policy-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin: 0.35rem 0;
+  line-height: 1.7;
+  color: rgb(var(--color-neutral-800));
+}
+
+.dark .policy-list li {
+  color: rgb(var(--color-neutral-200));
+}
+
+.policy-list .bullet {
+  flex-shrink: 0;
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: currentColor;
+  margin-top: 0.55em;
+}
+
+.policy-page .card-header,
+.policy-page .policy-subheader {
+  scroll-margin-top: 6rem;
+}
+
+/* ===== CONTENT TABLE OF CONTENTS ===== */
+/* Reusable TOC for policy pages, long forms, and guides. */
+
+.content-toc {
+  margin: 0;
+}
+
+.policy-toc-card {
+  margin-bottom: 0.75rem;
+}
+
+.content-toc-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-700));
+  margin: 0 0 0.35rem;
+}
+
+.dark .content-toc-title {
+  color: rgb(var(--color-neutral-300));
+}
+
+.content-toc-list,
+.content-toc-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.content-toc-list > li {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.content-toc a {
+  color: rgb(var(--color-primary-600));
+  font-size: 0.9rem;
+  font-weight: 400;
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--color-primary-500), 0.4);
+  text-underline-offset: 0.12em;
+  text-decoration-thickness: 1px;
+}
+
+.dark .content-toc a {
+  color: rgb(var(--color-primary-400));
+  text-decoration-color: rgba(var(--color-primary-400), 0.45);
+}
+
+.content-toc a:hover,
+.content-toc a:focus-visible {
+  color: rgb(var(--color-primary-700));
+  text-decoration-color: currentColor;
+  outline: none;
+}
+
+.dark .content-toc a:hover,
+.dark .content-toc a:focus-visible {
+  color: rgb(var(--color-primary-300));
+}
+
+.content-toc-sublist {
+  margin: 0;
+  padding: 0 0 0 1.1rem;
+}
+
+.content-toc-sublist > li {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.content-toc-sublist a {
+  font-size: 0.85rem;
+}
+
 /* ===== DONATION PAGE ===== */
 
 /* Hero Section */
