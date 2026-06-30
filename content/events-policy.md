@@ -150,7 +150,7 @@ const errorEl = document.getElementById('event-reg-error');
 const submitBtn = document.getElementById('event-reg-submit');
 const formState = document.getElementById('event-form-state');
 const successState = document.getElementById('event-form-success');
-const turnstileState = { widgetId: null };
+const turnstileState = { widgetId: null, token: null };
 
 function showError(msg) {
 if (!errorEl) return;
@@ -172,7 +172,8 @@ try {
 await window.utils.renderTurnstile('event-reg-ts', TS_SITE_KEY, {
 skipOnLocalhost: IS_LOCALHOST,
 widgetState: turnstileState,
-appearance: 'interaction-only'
+appearance: 'interaction-only',
+size: 'normal'
 });
 } catch (e) {
 console.warn('Turnstile failed to load:', e);
@@ -183,7 +184,7 @@ async function getTurnstileTokenWithWait() {
 const start = Date.now();
 while (Date.now() - start < 8000) {
 try {
-return await window.utils.getTurnstileToken('event-reg-ts', turnstileState.widgetId, IS_LOCALHOST);
+return await window.utils.getTurnstileToken('event-reg-ts', turnstileState.widgetId, IS_LOCALHOST, turnstileState);
 } catch (err) {
 if (!String(err?.message || '').toLowerCase().includes('security check')) throw err;
 await new Promise((resolve) => setTimeout(resolve, 300));
@@ -235,7 +236,6 @@ name_required: 'Please enter your name.',
 invalid_email: 'Please enter a valid email address.',
 invalid_phone: 'Please enter a valid phone number.',
 invalid_event_type: 'Please select an event type.',
-details_too_short: 'Please provide more detail about your proposed event (at least 20 characters).',
 turnstile_failed: 'Security check failed. Please refresh and try again.',
 rate_limit_exceeded: data.message || 'Too many submissions. Please wait a few minutes and try again.',
 send_failed: data.message || 'Could not send your registration. Please try again later.'

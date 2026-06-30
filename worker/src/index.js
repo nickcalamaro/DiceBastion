@@ -8958,12 +8958,6 @@ app.post('/events/register', async (c) => {
     if (!eventTypeLabel) {
       return c.json({ error: 'invalid_event_type', message: 'Please select an event type.' }, 400)
     }
-    if (trimmedDetails.length < 20) {
-      return c.json({
-        error: 'details_too_short',
-        message: 'Please provide more detail about your proposed event (at least 20 characters).'
-      }, 400)
-    }
 
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
     if (!tsOk) {

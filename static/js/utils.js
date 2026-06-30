@@ -402,7 +402,7 @@ window.utils = {
     if (window.turnstile) return true;
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
       script.async = true;
       script.defer = true;
       script.onload = () => resolve(true);
@@ -423,7 +423,9 @@ window.utils = {
   renderTurnstile: async (elementId, sitekey, options = {}) => {
     const {
       skipOnLocalhost = true,
-      widgetState = null
+      widgetState = null,
+      appearance = null,
+      size = null,
     } = options;
 
     // Skip on localhost if configured
@@ -437,14 +439,19 @@ window.utils = {
     
     if (!element || !window.turnstile) return null;
 
+    const resolvedSize = size || (appearance === 'interaction-only' ? 'normal' : 'flexible');
+
     // Remove existing widget if present
-    if (widgetState && widgetState.widgetId !== null && widgetState.widgetId !== undefined) {
+    if (widgetState) {
+      widgetState.token = null;
+      if (widgetState.widgetId !== null && widgetState.widgetId !== undefined) {
       try {
         window.turnstile.remove(widgetState.widgetId);
         console.log('Turnstile widget removed:', widgetState.widgetId);
         widgetState.widgetId = null;
       } catch(e) {
         console.log('Turnstile remove failed:', e);
+      }
       }
     }
 
@@ -478,8 +485,14 @@ window.utils = {
       try {
         const widgetId = window.turnstile.render(freshElement, {
           sitekey,
-          size: options.size || 'flexible',
-          ...(options.appearance ? { appearance: options.appearance } : {}),
+          size: resolvedSize,
+          ...(appearance ? { appearance } : {}),
+          callback: (token) => {
+            if (widgetState) widgetState.token = token;
+          },
+          'expired-callback': () => {
+            if (widgetState) widgetState.token = null;
+          },
         });
         
         if (widgetState) {
@@ -508,11 +521,15 @@ window.utils = {
    * @param {boolean} skipOnLocalhost - Return test token on localhost (default: true)
    * @returns {Promise<string>} - The Turnstile token
    */
-  getTurnstileToken: async (elementId, widgetId = null, skipOnLocalhost = true) => {
+  getTurnstileToken: async (elementId, widgetId = null, skipOnLocalhost = true, widgetState = null) => {
     // Bypass on localhost
     if (skipOnLocalhost && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
       console.log('Localhost detected - using test-bypass token');
       return 'test-bypass';
+    }
+
+    if (widgetState?.token) {
+      return widgetState.token;
     }
 
     await window.utils.loadTurnstileSdk();
