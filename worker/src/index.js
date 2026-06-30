@@ -449,6 +449,7 @@ const membershipCheckoutRateLimits = new Map()
 const eventCheckoutRateLimits = new Map()
 const donationCheckoutRateLimits = new Map()
 const supportContactRateLimits = new Map()
+const eventRegistrationRateLimits = new Map()
 const sameDayContactsRateLimits = new Map()
 
 // Rate limiting helper function
@@ -8914,6 +8915,123 @@ app.post('/support/contact', async (c) => {
     return c.json({ ok: true })
   } catch (e) {
     console.error('[support/contact] error:', e)
+    return c.json({ error: 'internal_error', message: 'Something went wrong. Please try again.' }, 500)
+  }
+})
+
+app.post('/events/register', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, eventRegistrationRateLimits, 3, 5)) {
+      return c.json({
+        error: 'rate_limit_exceeded',
+        message: 'Too many submissions. Please wait a few minutes and try again.'
+      }, 429)
+    }
+
+    const body = await c.req.json()
+    if (body.website) return c.json({ ok: true })
+
+    const trimmedName = clampStr(body.name, 200)
+    const trimmedEmail = clampStr(body.email, 320).toLowerCase()
+    const trimmedPhone = clampStr(body.phone, 40)
+    const trimmedEventType = clampStr(body.eventType, 20)
+    const trimmedDetails = clampStr(body.eventDetails, 8000)
+    const turnstileToken = body.turnstileToken
+
+    if (!trimmedName) {
+      return c.json({ error: 'name_required', message: 'Please enter your name.' }, 400)
+    }
+    if (!trimmedEmail || !EMAIL_RE.test(trimmedEmail)) {
+      return c.json({ error: 'invalid_email', message: 'Please enter a valid email address.' }, 400)
+    }
+    if (!trimmedPhone || trimmedPhone.replace(/\D/g, '').length < 6) {
+      return c.json({ error: 'invalid_phone', message: 'Please enter a valid phone number.' }, 400)
+    }
+
+    const eventTypeLabels = {
+      member: 'Members Event',
+      private: 'Private Event',
+      public: 'Public Event'
+    }
+    const eventTypeLabel = eventTypeLabels[trimmedEventType]
+    if (!eventTypeLabel) {
+      return c.json({ error: 'invalid_event_type', message: 'Please select an event type.' }, 400)
+    }
+    if (trimmedDetails.length < 20) {
+      return c.json({
+        error: 'details_too_short',
+        message: 'Please provide more detail about your proposed event (at least 20 characters).'
+      }, 400)
+    }
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
+    if (!tsOk) {
+      return c.json({
+        error: 'turnstile_failed',
+        message: 'Security check failed. Please refresh and try again.'
+      }, 403)
+    }
+
+    const eventsTo = c.env.EVENT_REGISTRATION_EMAIL || 'admin@dicebastion.com'
+    const submittedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Gibraltar' })
+    const subject = `[GWC Event Registration] ${eventTypeLabel} — ${trimmedName}`
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"></head>
+      <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+        <div style="background:linear-gradient(135deg,#b2c6df 0%,#5374a5 100%);color:white;padding:24px 20px;text-align:center;border-radius:8px 8px 0 0;">
+          <h1 style="margin:0;font-size:1.4rem;">New event registration</h1>
+        </div>
+        <div style="background:#ffffff;padding:24px;border:1px solid #e5e7eb;border-top:none;">
+          <p>A member has submitted an event registration from the events policy page.</p>
+          <div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:15px;margin:16px 0;">
+            <p style="margin:0 0 8px;"><strong>Name:</strong> ${escapeHtml(trimmedName)}</p>
+            <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeHtml(trimmedEmail)}</p>
+            <p style="margin:0 0 8px;"><strong>Phone:</strong> ${escapeHtml(trimmedPhone)}</p>
+            <p style="margin:0 0 8px;"><strong>Event type:</strong> ${escapeHtml(eventTypeLabel)}</p>
+            <p style="margin:0;"><strong>Submitted:</strong> ${escapeHtml(submittedAt)} (Gibraltar time)</p>
+          </div>
+          <p><strong>Event details:</strong></p>
+          <p style="white-space:pre-wrap;">${escapeHtml(trimmedDetails)}</p>
+          <p style="color:#666;font-size:0.9rem;">Reply directly to this email to respond to the organiser.</p>
+        </div>
+      </body>
+      </html>
+    `.trim()
+    const text = [
+      'New event registration from dicebastion.com/events-policy',
+      '',
+      `Name: ${trimmedName}`,
+      `Email: ${trimmedEmail}`,
+      `Phone: ${trimmedPhone}`,
+      `Event type: ${eventTypeLabel}`,
+      `Submitted: ${submittedAt} (Gibraltar time)`,
+      '',
+      'Event details:',
+      trimmedDetails
+    ].join('\n')
+
+    const sent = await sendEmail(c.env, {
+      to: eventsTo,
+      subject,
+      html,
+      text,
+      replyTo: { email: trimmedEmail, name: trimmedName },
+      emailType: 'event_registration',
+      metadata: { eventType: trimmedEventType, senderEmail: trimmedEmail }
+    })
+    if (!sent?.success) {
+      return c.json({
+        error: 'send_failed',
+        message: 'Could not send your registration. Please try again later.'
+      }, 502)
+    }
+
+    return c.json({ ok: true })
+  } catch (e) {
+    console.error('[events/register] error:', e)
     return c.json({ error: 'internal_error', message: 'Something went wrong. Please try again.' }, 500)
   }
 })

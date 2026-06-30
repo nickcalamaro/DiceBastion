@@ -478,7 +478,8 @@ window.utils = {
       try {
         const widgetId = window.turnstile.render(freshElement, {
           sitekey,
-          size: 'flexible'
+          size: options.size || 'flexible',
+          ...(options.appearance ? { appearance: options.appearance } : {}),
         });
         
         if (widgetState) {
