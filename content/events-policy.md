@@ -46,7 +46,7 @@ herostyle: "background"
 
 <h3 class="policy-subheader" id="member-events">Member Events</h3>
 
-<p>Member events are alwyys free to organise, provided all those attending are a GWC member. In special circumstances, plus-ones can be allowed if agreed with the GWC committee.</p>
+<p>Member events are always free to organise, provided all those attending are a GWC member. In special circumstances, plus-ones can be allowed if agreed with the GWC committee.</p>
 
 <p>Make sure to register your members event using the <a href="#event-registration-form" class="link">form below</a> so that we can confirm the date is available and note any special requirements, so the club can be prepared. As usual, members are expected to follow the <a href="/code-of-conduct/" class="link">club rules</a> and to leave the space as they found it.</p>
 
