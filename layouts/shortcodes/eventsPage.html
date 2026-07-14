@@ -42,7 +42,8 @@ function formatEventDate(datetime) {
 
 async function loadEvents() {
   try {
-    const res = await fetch(`${API_BASE}/events`);
+    // Always production worker (same as crawl links / events single). Do not use local wrangler.
+    const res = await fetch('https://dicebastion-memberships.ncalamaro.workers.dev/events');
     if (!res.ok) throw new Error('Failed to fetch events');
     
     allEvents = await res.json();
@@ -69,7 +70,7 @@ async function loadEvents() {
               <div class="event-organiser-ribbon">${event.organiser}</div>
             </div>
           ` : ''}
-          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url_card || event.image_url}');"><img src="${event.image_url_card || event.image_url}" alt="${event.title}" loading="lazy" decoding="async"></div>` : ''}
+          ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url}');"><img src="${event.image_url}" alt="${event.title}" width="800" height="379" loading="lazy" decoding="async"></div>` : ''}
           <div class="event-content">
             <h3 class="event-title">
               ${event.title}

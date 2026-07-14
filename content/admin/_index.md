@@ -828,7 +828,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="form-group">
 <label class="form-label">Image URL</label>
 <input type="url" id="event-image" placeholder="https://..." class="form-input">
-<small class="admin-text-small">Or upload below — one crop produces 800×379 (general), 400×238 (cards), and 885×300 (modal hero), each with the same edge treatment.</small>
+<small class="admin-text-small">Or upload below — one crop keeps the main image at upload resolution (max 4096px), plus 1200×714 (cards) and 2655×900 (modal hero).</small>
 <input type="hidden" id="event-image-card" value="">
 <input type="hidden" id="event-image-hero" value="">
 </div>
@@ -2492,16 +2492,17 @@ let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
 
-const EVENT_IMAGE_MASTER_W = 1600;
-const EVENT_IMAGE_MASTER_H = 758;
-/** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
+/** Cap long-edge of the event crop; below this we keep the upload’s native crop resolution. */
+const EVENT_IMAGE_MASTER_MAX = 4096;
+/** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout.
+ * Main uses the full master crop. Card/hero are 3× CSS slots (400×238 / 885×300) for sharp retina. */
 const EVENT_IMAGE_EXPORT_SPECS = [
-  /** At least fill target height when needed; blur fills any letterbox. */
-  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg', fit: 'fillHeight' },
-  /** Full artwork visible in 400×238; blur above/below (or sides) — never side-crop wide art. */
-  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'contain' },
+  /** Full-resolution main (same pixels as master crop after fillHeight compose). */
+  { key: 'image_url', filename: 'event-main.jpg', fit: 'fillHeight', useMasterSize: true },
+  /** Full artwork visible in card slot; never side-crop wide art. */
+  { key: 'image_url_card', w: 1200, h: 714, filename: 'event-card.jpg', fit: 'contain' },
   /** Hero stays contain so the full crop stays visible on the wide frame. */
-  { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'contain' }
+  { key: 'image_url_hero', w: 2655, h: 900, filename: 'event-hero.jpg', fit: 'contain' }
 ];
 
 const BLOG_CARD_SPEC = { w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contain' };
@@ -2956,9 +2957,11 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 
     if (currentCropKind === 'event') {
       const exportSpecs = MULTI_SIZE_CROP_SPECS.event;
+      // Preserve source crop resolution (up to EVENT_IMAGE_MASTER_MAX). Forcing a small
+      // width/height here was why event images looked softer than the uploaded file.
       const masterCropped = cropper.getCroppedCanvas({
-        width: EVENT_IMAGE_MASTER_W,
-        height: EVENT_IMAGE_MASTER_H,
+        maxWidth: EVENT_IMAGE_MASTER_MAX,
+        maxHeight: EVENT_IMAGE_MASTER_MAX,
         imageSmoothingEnabled: true,
         imageSmoothingQuality: 'high',
         fillColor: 'transparent'
@@ -2971,6 +2974,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       const batchId = Date.now();
       const bundle = {};
       for (const spec of exportSpecs) {
+        const targetW = spec.useMasterSize ? masterCropped.width : spec.w;
+        const targetH = spec.useMasterSize ? masterCropped.height : spec.h;
         let dataUrl;
         if (spec.fit === 'contain') {
           // Tight artwork, no padding band — CSS ::before is the only background.
@@ -2980,8 +2985,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
             fitRect.sy,
             fitRect.sw,
             fitRect.sh,
-            spec.w,
-            spec.h,
+            targetW,
+            targetH,
             cropBgMode,
             cropBgPickedCol
           );
@@ -2992,10 +2997,10 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
             fitRect.sy,
             fitRect.sw,
             fitRect.sh,
-            spec.w,
-            spec.h
+            targetW,
+            targetH
           );
-          dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+          dataUrl = composeBlurredBackgroundJpeg(sized, targetW, targetH, cropBgMode, cropBgPickedCol);
         }
         try {
           const uploadUrl = await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
@@ -3006,6 +3011,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
           return;
         }
       }
+      bundle._masterW = masterCropped.width;
+      bundle._masterH = masterCropped.height;
       currentCropCallback(bundle);
       closeCropModal();
       return;
@@ -3157,9 +3164,9 @@ showCropModal(file, (bundle) => {
   }
   document.getElementById('event-image-preview').innerHTML =
     `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.image_url}" alt="Main"></div></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.image_url_card}" alt="Card"></div></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.image_url_hero}" alt="Hero"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main ${bundle._masterW || '?'}×${bundle._masterH || '?'} (full)</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.image_url}" alt="Main"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 1200×714</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.image_url_card}" alt="Card"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 2655×900</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.image_url_hero}" alt="Hero"></div></div>
     </div>`;
 }, 800 / 379, 'event');
 }
@@ -5778,8 +5785,8 @@ async function loadNewsletterEvents() {
 }
 
 function nlEventImageSrc(ev) {
-  // Prefer image_url (the 800x379 main variant): it is filled edge-to-edge at a CONSISTENT
-  // aspect ratio with the blurred backdrop baked into the file, so every event looks uniform
+  // Prefer image_url (the main fillHeight variant): it is filled edge-to-edge at a CONSISTENT
+  // aspect ratio with a flat fill baked into the file, so every event looks uniform
   // in a flat frame. image_url_card is exported at each artwork's OWN aspect ratio (tight, no
   // baked fill) for object-fit:contain + a CSS ::before backdrop — that context does not exist
   // in email, so using it here made cards look different / crop weirdly.
