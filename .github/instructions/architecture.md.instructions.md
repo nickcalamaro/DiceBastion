@@ -399,6 +399,7 @@ PAYMENTS_API_URL            — URL of the payments service
 INTERNAL_SECRET             — Shared secret for service-to-service auth
 MAILERSEND_API_KEY          — MailerSend API key (email service only)
 SUPPORT_CONTACT_EMAIL       — Inbox for /support form (e.g. contact@dicebastion.com)
+PLAYMAT_COMMISSION_EMAIL    — Inbox for shop custom playmat commissions (defaults to jen@dicebastion.com)
 TURNSTILE_SECRET            — Cloudflare Turnstile secret (required for /support in production)
 ALLOW_TEST_BYPASS           — Set "true" to accept test-bypass Turnstile token on localhost
 ```

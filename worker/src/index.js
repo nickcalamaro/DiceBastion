@@ -8851,28 +8851,37 @@ app.post('/support/contact', async (c) => {
       return c.json({ error: 'turnstile_failed', message: 'Security check failed. Please refresh and try again.' }, 403)
     }
 
-    const supportTo = c.env.SUPPORT_CONTACT_EMAIL || 'contact@dicebastion.com'
+    const isPlaymatCommission = trimmedCategory === 'custom_playmat'
+    const supportTo = isPlaymatCommission
+      ? (c.env.PLAYMAT_COMMISSION_EMAIL || 'jen@dicebastion.com')
+      : (c.env.SUPPORT_CONTACT_EMAIL || 'contact@dicebastion.com')
     const categoryLabels = {
       general: 'General enquiry',
       membership: 'Membership',
       events: 'Events',
       bookings: 'Table bookings',
       website: 'Website / technical issue',
+      custom_playmat: 'Custom playmat commission',
       other: 'Other'
     }
     const categoryLabel = categoryLabels[trimmedCategory] || categoryLabels.general
     const submittedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Gibraltar' })
-    const subject = `[Dice Bastion Support] ${categoryLabel} — ${trimmedName}`
+    const subject = isPlaymatCommission
+      ? `[Custom playmat] ${trimmedName}`
+      : `[Dice Bastion Support] ${categoryLabel} - ${trimmedName}`
+    const introLine = isPlaymatCommission
+      ? 'You received a new custom playmat commission request from the shop.'
+      : 'You received a new message from the Dice Bastion support form.'
     const html = `
       <!DOCTYPE html>
       <html>
       <head><meta charset="UTF-8"></head>
       <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
         <div style="background:linear-gradient(135deg,#b2c6df 0%,#5374a5 100%);color:white;padding:24px 20px;text-align:center;border-radius:8px 8px 0 0;">
-          <h1 style="margin:0;font-size:1.4rem;">New support message</h1>
+          <h1 style="margin:0;font-size:1.4rem;">${isPlaymatCommission ? 'New playmat commission' : 'New support message'}</h1>
         </div>
         <div style="background:#ffffff;padding:24px;border:1px solid #e5e7eb;border-top:none;">
-          <p>You received a new message from the Dice Bastion support form.</p>
+          <p>${introLine}</p>
           <div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:15px;margin:16px 0;">
             <p style="margin:0 0 8px;"><strong>From:</strong> ${escapeHtml(trimmedName)} &lt;${escapeHtml(trimmedEmail)}&gt;</p>
             <p style="margin:0 0 8px;"><strong>Category:</strong> ${escapeHtml(categoryLabel)}</p>
@@ -8886,7 +8895,9 @@ app.post('/support/contact', async (c) => {
       </html>
     `.trim()
     const text = [
-      'New support message from dicebastion.com/support',
+      isPlaymatCommission
+        ? 'New custom playmat commission from shop.dicebastion.com'
+        : 'New support message from dicebastion.com/support',
       '',
       `From: ${trimmedName} <${trimmedEmail}>`,
       `Category: ${categoryLabel}`,
@@ -8902,7 +8913,7 @@ app.post('/support/contact', async (c) => {
       html,
       text,
       replyTo: { email: trimmedEmail, name: trimmedName },
-      emailType: 'support_contact',
+      emailType: isPlaymatCommission ? 'playmat_commission' : 'support_contact',
       metadata: { category: trimmedCategory, senderEmail: trimmedEmail }
     })
     if (!sent?.success) {
