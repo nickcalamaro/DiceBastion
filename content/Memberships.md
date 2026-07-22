@@ -22,6 +22,12 @@ If you'd like to support us, get free bookings for game tables, and a whole rang
 
 For those able to give a bit more, or for those of you who can't afford a membership right now, please check out our <a href="#other-options-section" id="other-options-link" class="link">other membership options</a>.
 
+<p style="margin: 1rem 0 0;">
+  <a href="#benefits" id="membership-benefits-btn" class="btn btn-secondary">
+    View local discounts
+  </a>
+</p>
+
   <div class="plans-grid" id="membership-plans">
   <!-- Monthly -->
   <div class="plan-card" data-plan="monthly">
@@ -34,11 +40,13 @@ For those able to give a bit more, or for those of you who can't afford a member
     <ul class="plan-features">
       <li>Free access to table bookings</li>
       <li>Support our events and community</li>
-    </ul>
-    <button class="plan-cta" data-plan="monthly">
-      Join Monthly
-    </button>
-  </div>
+      <li>Discounts on club events</li>
+
+  </ul>
+  <button class="plan-cta" data-plan="monthly">
+    Join Monthly
+  </button>
+</div>
 
   <!-- Quarterly (Most popular) -->
   <div class="plan-card plan-card-featured" data-plan="quarterly">
@@ -50,7 +58,7 @@ For those able to give a bit more, or for those of you who can't afford a member
     </div>
     <ul class="plan-features">
       <li>Free table bookings</li>
-      <li>Local discounts (Dominos, Imperial Newsagents, Music Corner, Euphoria)</li>
+      <li>Local discounts (see details)</li>
       <li>Discounts on club events</li>
       <li>Free drinks at selected events</li>
     </ul>
@@ -150,6 +158,24 @@ For those able to give a bit more, or for those of you who can't afford a member
 </div>
 
 </div><!-- /.plans-grid -->
+
+<div class="plan-card" id="free-trial-card" style="margin-top: 1rem;">
+  <div class="plan-label">Try first</div>
+  <h3 class="plan-name">Free Trial</h3>
+  <div class="plan-price" style="color: rgb(var(--color-success-600));">
+    1 month free
+    <span class="plan-price-period">&nbsp;</span>
+  </div>
+  <ul class="plan-features">
+    <li>One month of full membership access at no charge</li>
+    <li>Choose the plan you would continue with after the trial</li>
+    <li>No membership charge until the trial ends — cancel anytime</li>
+  </ul>
+  <a href="/free-trial/" class="plan-cta" style="display: block; text-align: center; text-decoration: none; box-sizing: border-box;">
+    Start Free Trial
+  </a>
+</div>
+
   </div><!-- /#other-options-panel -->
 </div><!-- /collapsible wrapper -->
 
@@ -181,6 +207,59 @@ For those able to give a bit more, or for those of you who can't afford a member
   const IS_LOCALHOST = window.location.hostname === 'localhost' ||
                        window.location.hostname === '127.0.0.1' ||
                        window.location.hostname === '0.0.0.0';
+
+  function openMembershipBenefitsModal() {
+    if (window.location.hash !== '#benefits') {
+      history.replaceState(null, '', '#benefits');
+    }
+    const modal = new Modal({
+      title: 'Local member discounts',
+      size: 'md',
+      content: `
+        <div class="modal-prose">
+          <p>In addition to receiving free table bookings and discounts on events, our Quarterly and Annual Members are eligible for the following discounts at participating local businesses. Once you sign up, you'll be provided with a membership card to claim these discounts.</p>
+          <ul style="margin: 1rem 0 0; padding-left: 1.25rem; color: rgb(var(--color-neutral-700)); line-height: 1.7;">
+            <li style="margin-bottom: 0.5rem;">- <strong>20% discount</strong>  at Domino's (excluding buffet and special offers)</li>
+            <li style="margin-bottom: 0.5rem;">- <strong>10% discount</strong>  on Warhammer purchases at Euphoria and Vijay</li>
+            <li style="margin-bottom: 0.5rem;">- <strong>10% discount</strong>  on modelling equipment and pre-orders at Imperial Newsagents</li>
+            <li style="margin-bottom: 0.5rem;">- <strong>5% discount</strong>  on board games at Euphoria, Vijay, Music Corner, and Toy Corner</li>
+            <li style="margin-bottom: 0.5rem;">- <strong>5% discount</strong>  on Warhammer purchases at Imperial Newsagents</li>
+          </ul>
+          <p style="margin-top: 1rem; font-size: 0.9rem; color: rgb(var(--color-neutral-600));">Discounts are subject to the terms of each participating business and may change over time.</p>
+        </div>
+      `,
+      footer: `
+        <button type="button" class="modal-btn modal-btn-primary db-benefits-ok" style="width: 100%;">
+          Close
+        </button>
+      `,
+      onClose: () => {
+        if (window.location.hash === '#benefits') {
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      }
+    });
+    modal.open();
+    modal.contentEl.querySelector('.db-benefits-ok').addEventListener('click', () => modal.close());
+  }
+
+  const benefitsBtn = document.getElementById('membership-benefits-btn');
+  if (benefitsBtn) {
+    benefitsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openMembershipBenefitsModal();
+    });
+  }
+
+  if (window.location.hash === '#benefits') {
+    openMembershipBenefitsModal();
+  }
+
+  window.addEventListener('hashchange', () => {
+    if (window.location.hash === '#benefits') {
+      openMembershipBenefitsModal();
+    }
+  });
 
   // ── Collapsible toggle ──────────────────────────────────────────────────
   const toggleBtn = document.getElementById('other-options-toggle');
