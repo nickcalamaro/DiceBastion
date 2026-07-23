@@ -1592,6 +1592,87 @@ const EVT_UUID_RE = /^EVT-\d+-[0-9a-f\-]{36}$/i
  */
 function clampStr(v, max){ return (v||'').substring(0, max) }
 
+const PLAYMAT_ATTACHMENT_MAX_FILES = 5
+const PLAYMAT_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024
+const PLAYMAT_ATTACHMENT_MAX_TOTAL_BYTES = 15 * 1024 * 1024
+const PLAYMAT_ATTACHMENT_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf'])
+const PLAYMAT_ATTACHMENT_EXT = /\.(png|jpe?g|pdf)$/i
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
+
+function estimateBase64Bytes(b64) {
+  const len = String(b64 || '').replace(/\s+/g, '').length
+  if (!len) return 0
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
+  return Math.max(0, Math.floor((len * 3) / 4) - padding)
+}
+
+function sanitizeAttachmentFilename(name, index) {
+  const cleaned = String(name || '')
+    .replace(/[^\w.\- ()[\]]+/g, '_')
+    .replace(/^\.+/, '')
+    .slice(0, 120)
+  return cleaned || `attachment-${index + 1}`
+}
+
+/**
+ * Validate playmat commission attachments for MailerSend.
+ * Expects [{ filename, content (base64), contentType? }].
+ */
+function parsePlaymatAttachments(rawList) {
+  if (!Array.isArray(rawList)) {
+    return { error: 'invalid_attachment', message: 'Attachments must be sent as a list.' }
+  }
+  if (rawList.length > PLAYMAT_ATTACHMENT_MAX_FILES) {
+    return {
+      error: 'too_many_attachments',
+      message: `Please attach no more than ${PLAYMAT_ATTACHMENT_MAX_FILES} files.`
+    }
+  }
+
+  const attachments = []
+  let totalBytes = 0
+
+  for (let i = 0; i < rawList.length; i++) {
+    const item = rawList[i] || {}
+    const filename = sanitizeAttachmentFilename(item.filename, i)
+    const content = String(item.content || '').replace(/\s+/g, '')
+    const contentType = String(item.contentType || '').toLowerCase()
+
+    if (!content || !BASE64_RE.test(content) || content.length % 4 !== 0) {
+      return { error: 'invalid_attachment', message: `"${filename}" could not be read.` }
+    }
+    if (!PLAYMAT_ATTACHMENT_TYPES.has(contentType) && !PLAYMAT_ATTACHMENT_EXT.test(filename)) {
+      return {
+        error: 'invalid_attachment',
+        message: `"${filename}" is not supported. Use PNG, JPG, or PDF.`
+      }
+    }
+
+    const byteLength = estimateBase64Bytes(content)
+    if (byteLength <= 0 || byteLength > PLAYMAT_ATTACHMENT_MAX_BYTES) {
+      return {
+        error: 'attachment_too_large',
+        message: `"${filename}" is over 5 MB. Please choose a smaller file.`
+      }
+    }
+    totalBytes += byteLength
+    if (totalBytes > PLAYMAT_ATTACHMENT_MAX_TOTAL_BYTES) {
+      return {
+        error: 'attachment_too_large',
+        message: 'Attachments total more than 15 MB. Please remove some files.'
+      }
+    }
+
+    attachments.push({
+      filename,
+      content,
+      disposition: 'attachment'
+    })
+  }
+
+  return { attachments }
+}
+
 /** Canonical public site origin for SumUp 3DS redirect_url and email links. */
 function siteUrl(env) {
   return String(env.SITE_URL || 'https://dicebastion.com').replace(/\/+$/, '')
@@ -1666,9 +1747,14 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
       body.send_at = sendAt
     }
     
-    // Add attachments if provided
+    // Add attachments if provided (MailerSend: filename + base64 content)
     if (attachments && Array.isArray(attachments) && attachments.length > 0) {
-      body.attachments = attachments
+      body.attachments = attachments.map((att) => ({
+        filename: att.filename,
+        content: att.content,
+        disposition: att.disposition || 'attachment',
+        ...(att.id ? { id: att.id } : {})
+      }))
     }
     
     const res = await fetch('https://api.mailersend.com/v1/email', {
@@ -8846,12 +8932,21 @@ app.post('/support/contact', async (c) => {
       return c.json({ error: 'message_too_short', message: 'Please enter a message of at least 10 characters.' }, 400)
     }
 
+    const isPlaymatCommission = trimmedCategory === 'custom_playmat'
+    let mailAttachments = null
+    if (isPlaymatCommission && Array.isArray(body.attachments) && body.attachments.length) {
+      const parsed = parsePlaymatAttachments(body.attachments)
+      if (parsed.error) {
+        return c.json({ error: parsed.error, message: parsed.message }, 400)
+      }
+      mailAttachments = parsed.attachments
+    }
+
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
     if (!tsOk) {
       return c.json({ error: 'turnstile_failed', message: 'Security check failed. Please refresh and try again.' }, 403)
     }
 
-    const isPlaymatCommission = trimmedCategory === 'custom_playmat'
     const supportTo = isPlaymatCommission
       ? (c.env.PLAYMAT_COMMISSION_EMAIL || 'jen@dicebastion.com')
       : (c.env.SUPPORT_CONTACT_EMAIL || 'contact@dicebastion.com')
@@ -8872,6 +8967,9 @@ app.post('/support/contact', async (c) => {
     const introLine = isPlaymatCommission
       ? 'You received a new custom playmat commission request from the shop.'
       : 'You received a new message from the Dice Bastion support form.'
+    const attachmentNote = mailAttachments?.length
+      ? `<p><strong>Attachments:</strong> ${mailAttachments.length} file${mailAttachments.length === 1 ? '' : 's'} included with this email.</p>`
+      : ''
     const html = `
       <!DOCTYPE html>
       <html>
@@ -8889,6 +8987,7 @@ app.post('/support/contact', async (c) => {
           </div>
           <p><strong>Message:</strong></p>
           <p style="white-space:pre-wrap;">${escapeHtml(trimmedMessage)}</p>
+          ${attachmentNote}
           <p style="color:#666;font-size:0.9rem;">Reply directly to this email to respond to the sender.</p>
         </div>
       </body>
@@ -8904,7 +9003,10 @@ app.post('/support/contact', async (c) => {
       `Submitted: ${submittedAt} (Gibraltar time)`,
       '',
       'Message:',
-      trimmedMessage
+      trimmedMessage,
+      ...(mailAttachments?.length
+        ? ['', `Attachments: ${mailAttachments.map((a) => a.filename).join(', ')}`]
+        : [])
     ].join('\n')
 
     const sent = await sendEmail(c.env, {
@@ -8912,9 +9014,14 @@ app.post('/support/contact', async (c) => {
       subject,
       html,
       text,
+      attachments: mailAttachments,
       replyTo: { email: trimmedEmail, name: trimmedName },
       emailType: isPlaymatCommission ? 'playmat_commission' : 'support_contact',
-      metadata: { category: trimmedCategory, senderEmail: trimmedEmail }
+      metadata: {
+        category: trimmedCategory,
+        senderEmail: trimmedEmail,
+        attachmentCount: mailAttachments?.length || 0
+      }
     })
     if (!sent?.success) {
       return c.json({

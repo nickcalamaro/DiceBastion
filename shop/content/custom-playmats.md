@@ -3,7 +3,7 @@ title: "Custom playmats by Jen"
 description: "Commission a custom playmat designed by Jen. About two weeks turnaround with two rounds of feedback."
 ---
 
-<link rel="stylesheet" href="/css/forms.css?v=playmat-banner-2">
+<link rel="stylesheet" href="/css/forms.css?v=playmat-mobile-1">
 <link rel="stylesheet" href="/lib/splide/splide.min.css">
 <section id="custom-playmats" class="playmat-section playmat-section--page" aria-labelledby="playmat-heading">
 <div class="playmat-intro">
@@ -41,18 +41,7 @@ description: "Commission a custom playmat designed by Jen. About two weeks turna
 <div class="playmat-portfolio">
 <h2>Recent work</h2>
 <p class="playmat-portfolio-lead">A selection of finished mats. More examples will appear here as new commissions are completed.</p>
-<div class="playmat-carousel-wrap">
-<div id="playmat-carousel" class="splide" aria-label="Playmat portfolio">
-<div class="splide__track">
-<ul class="splide__list">
-<li class="splide__slide"><figure class="playmat-slide"><div class="playmat-slide-frame"><img src="/img/playmats/01.jpg" alt="Custom playmat by Jen" width="1134" height="756" loading="eager" decoding="async"></div></figure></li>
-<li class="splide__slide"><figure class="playmat-slide"><div class="playmat-slide-frame"><img src="/img/playmats/02.jpg" alt="Custom playmat by Jen" width="1134" height="756" loading="lazy" decoding="async"></div></figure></li>
-<li class="splide__slide"><figure class="playmat-slide"><div class="playmat-slide-frame"><img src="/img/playmats/03.jpg" alt="Custom playmat by Jen" width="1134" height="756" loading="lazy" decoding="async"></div></figure></li>
-<li class="splide__slide"><figure class="playmat-slide"><div class="playmat-slide-frame"><img src="/img/playmats/04.jpg" alt="Custom playmat by Jen" width="1134" height="756" loading="lazy" decoding="async"></div></figure></li>
-</ul>
-</div>
-</div>
-</div>
+{{< playmat-carousel >}}
 </div>
 <div class="playmat-form-wrap">
 <div id="playmat-form-state" class="card">
@@ -60,6 +49,9 @@ description: "Commission a custom playmat designed by Jen. About two weeks turna
 <p class="playmat-form-lead">Tell us about your project. We will get back to you by email to confirm the brief, talk through pricing, and agree a start date.</p>
 <div class="playmat-timeline-note">Please allow about two weeks from a confirmed brief. Each commission includes two rounds of feedback before the final design is sent to print.</div>
 <form id="playmat-form" novalidate>
+
+<div class="playmat-form-block">
+<h3 class="playmat-form-block-title">Your details</h3>
 <div class="form-row">
 <div class="form-group">
 <label class="form-label" for="playmat-name">Your name</label>
@@ -70,11 +62,41 @@ description: "Commission a custom playmat designed by Jen. About two weeks turna
 <input type="email" id="playmat-email" class="form-input" required autocomplete="email" placeholder="you@example.com">
 </div>
 </div>
-<div class="form-group">
-<label class="form-label" for="playmat-brief">Project details</label>
-<textarea id="playmat-brief" class="form-textarea" rows="7" required placeholder="Please include anything that helps us get started: what game the mat is for, what characters or designs you would like it to have, whether you want the mat to have zones for your chosen game, approximate size if you know it, colours or motifs, text or logos to include, and links to reference images."></textarea>
-<p class="form-hint">The more context you share, the easier it is to reply with a clear quote and timeline.</p>
 </div>
+
+<div class="playmat-form-block">
+<h3 class="playmat-form-block-title">The game</h3>
+<div class="form-group">
+<label class="form-label" for="playmat-game">What is the playmat for?</label>
+<input type="text" id="playmat-game" class="form-input" required placeholder="e.g. Magic: The Gathering, Cardfight!! Vanguard, desk mat">
+<p class="form-hint">Name the game or how you plan to use the mat.</p>
+</div>
+</div>
+
+<div class="playmat-form-block">
+<h3 class="playmat-form-block-title">Design</h3>
+<div class="form-group">
+<label class="form-label" for="playmat-design">Characters, scenes, and overall look</label>
+<textarea id="playmat-design" class="form-textarea" rows="5" required placeholder="Describe the characters, artwork, colours, or mood you want."></textarea>
+</div>
+<div class="form-group">
+<label class="form-label" for="playmat-layout">Layout and extras</label>
+<textarea id="playmat-layout" class="form-textarea" rows="4" placeholder="Zones for your game, text or logos to include, borders, or anything else about how the mat should be arranged."></textarea>
+<p class="form-hint">Optional, but helpful if you already have preferences.</p>
+</div>
+</div>
+
+<div class="playmat-form-block">
+<h3 class="playmat-form-block-title">Reference files</h3>
+<div class="form-group">
+<label class="form-label" for="playmat-files">Attachments</label>
+<input type="file" id="playmat-files" class="form-input form-file" accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf" multiple>
+<p class="form-hint">PNG, JPG, or PDF. Up to 5 files, 5&nbsp;MB each, 15&nbsp;MB in total.</p>
+<ul id="playmat-file-list" class="playmat-file-list" hidden></ul>
+</div>
+</div>
+
+<div class="playmat-form-block">
 <div class="form-group checkbox-group">
 <input type="checkbox" id="playmat-timeline" class="checkbox-input" required>
 <label class="checkbox-label" for="playmat-timeline">I agree to pay half the amount before starting the design and the other half on delivery.</label>
@@ -86,6 +108,8 @@ description: "Commission a custom playmat designed by Jen. About two weeks turna
 </div>
 <div id="playmat-error" class="alert alert-error" style="display:none; margin-bottom: 1rem;"></div>
 <button type="submit" id="playmat-submit" class="btn btn-primary btn-full">Send commission request</button>
+</div>
+
 </form>
 </div>
 <div id="playmat-success-state" class="card" style="display:none;">
@@ -95,4 +119,4 @@ description: "Commission a custom playmat designed by Jen. About two weeks turna
 </div>
 </section>
 <script src="/lib/splide/splide.min.js"></script>
-<script src="/js/custom-playmats.js"></script>
+<script src="/js/custom-playmats.js?v=mobile-1"></script>

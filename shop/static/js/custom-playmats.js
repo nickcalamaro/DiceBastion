@@ -4,6 +4,16 @@
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   const IS_LOCALHOST = ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);
 
+  const MAX_FILES = 5;
+  const MAX_FILE_BYTES = 5 * 1024 * 1024;
+  const MAX_TOTAL_BYTES = 15 * 1024 * 1024;
+  const ALLOWED_TYPES = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'application/pdf': 'pdf'
+  };
+  const ALLOWED_EXT = /\.(png|jpe?g|pdf)$/i;
+
   if (window.Splide && document.getElementById('playmat-carousel')) {
     new Splide('#playmat-carousel', {
       type: 'loop',
@@ -14,8 +24,16 @@
       arrows: true,
       speed: 450,
       breakpoints: {
-        900: { perPage: 2 },
-        560: { perPage: 1 }
+        900: {
+          perPage: 2,
+          gap: '0.65rem'
+        },
+        640: {
+          perPage: 1,
+          gap: '0.5rem',
+          arrows: false,
+          padding: { left: '0.35rem', right: '0.35rem' }
+        }
       }
     }).mount();
   }
@@ -89,12 +107,117 @@
   const submitBtn = document.getElementById('playmat-submit');
   const formState = document.getElementById('playmat-form-state');
   const successState = document.getElementById('playmat-success-state');
+  const filesInput = document.getElementById('playmat-files');
+  const fileListEl = document.getElementById('playmat-file-list');
   let turnstileWidgetId = null;
 
   function showError(msg) {
     if (!errorEl) return;
     errorEl.textContent = msg || 'Something went wrong. Please try again.';
     errorEl.style.display = msg ? 'block' : 'none';
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function isAllowedFile(file) {
+    if (ALLOWED_TYPES[file.type]) return true;
+    return ALLOWED_EXT.test(file.name || '');
+  }
+
+  function validateSelectedFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length > MAX_FILES) {
+      return { error: 'Please attach no more than ' + MAX_FILES + ' files.' };
+    }
+    let total = 0;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!isAllowedFile(file)) {
+        return { error: '"' + file.name + '" is not supported. Use PNG, JPG, or PDF.' };
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        return { error: '"' + file.name + '" is over 5 MB. Please choose a smaller file.' };
+      }
+      total += file.size;
+    }
+    if (total > MAX_TOTAL_BYTES) {
+      return { error: 'Attachments total more than 15 MB. Please remove some files.' };
+    }
+    return { files: files };
+  }
+
+  function renderFileList(files) {
+    if (!fileListEl) return;
+    if (!files.length) {
+      fileListEl.hidden = true;
+      fileListEl.innerHTML = '';
+      return;
+    }
+    fileListEl.hidden = false;
+    fileListEl.innerHTML = files.map(function (file) {
+      return '<li><span class="playmat-file-name">' + escapeHtml(file.name) + '</span>' +
+        '<span class="playmat-file-size">' + formatBytes(file.size) + '</span></li>';
+    }).join('');
+  }
+
+  function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text == null ? '' : String(text);
+    return d.innerHTML;
+  }
+
+  function readFileAsBase64(file) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        const result = String(reader.result || '');
+        const comma = result.indexOf(',');
+        if (comma < 0) {
+          reject(new Error('encode_failed'));
+          return;
+        }
+        resolve(result.slice(comma + 1));
+      };
+      reader.onerror = function () {
+        reject(new Error('read_failed'));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function buildAttachments(files) {
+    const attachments = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const content = await readFileAsBase64(file);
+      attachments.push({
+        filename: file.name.replace(/[^\w.\- ()[\]]+/g, '_').slice(0, 120) || ('attachment-' + (i + 1)),
+        content: content,
+        contentType: ALLOWED_TYPES[file.type] ? file.type : (
+          /\.pdf$/i.test(file.name) ? 'application/pdf' :
+          /\.png$/i.test(file.name) ? 'image/png' : 'image/jpeg'
+        )
+      });
+    }
+    return attachments;
+  }
+
+  if (filesInput) {
+    filesInput.addEventListener('change', function () {
+      showError('');
+      const result = validateSelectedFiles(filesInput.files);
+      if (result.error) {
+        showError(result.error);
+        filesInput.value = '';
+        renderFileList([]);
+        return;
+      }
+      renderFileList(result.files);
+    });
   }
 
   function loadTurnstileSdk() {
@@ -152,7 +275,9 @@
 
       const name = document.getElementById('playmat-name').value.trim();
       const email = document.getElementById('playmat-email').value.trim();
-      const brief = document.getElementById('playmat-brief').value.trim();
+      const game = document.getElementById('playmat-game').value.trim();
+      const design = document.getElementById('playmat-design').value.trim();
+      const layout = document.getElementById('playmat-layout').value.trim();
       const timelineOk = document.getElementById('playmat-timeline').checked;
 
       if (!name) {
@@ -163,23 +288,41 @@
         showError('Please enter a valid email address.');
         return;
       }
-      if (brief.length < 10) {
-        showError('Please add a bit more detail about your project.');
+      if (!game) {
+        showError('Please tell us what the playmat is for.');
+        return;
+      }
+      if (design.length < 10) {
+        showError('Please add a bit more detail about the design you want.');
         return;
       }
       if (!timelineOk) {
-        showError('Please confirm you understand the two-week timeline and two rounds of feedback.');
+        showError('Please confirm the payment schedule before sending.');
         return;
       }
 
-      const message = [
+      const fileCheck = validateSelectedFiles(filesInput ? filesInput.files : []);
+      if (fileCheck.error) {
+        showError(fileCheck.error);
+        return;
+      }
+
+      const messageParts = [
         'Custom playmat commission request',
         '',
-        'Project details:',
-        brief,
+        'Game / use: ' + game,
         '',
-        'Customer confirmed: ~2 weeks turnaround and two rounds of feedback.'
-      ].join('\n');
+        'Design:',
+        design
+      ];
+      if (layout) {
+        messageParts.push('', 'Layout and extras:', layout);
+      }
+      messageParts.push('', 'Customer confirmed: 50% before design starts, 50% on delivery.');
+      if (fileCheck.files.length) {
+        messageParts.push('', 'Attachments included: ' + fileCheck.files.map(function (f) { return f.name; }).join(', '));
+      }
+      const message = messageParts.join('\n');
 
       let turnstileToken;
       try {
@@ -190,6 +333,20 @@
       }
 
       submitBtn.disabled = true;
+      submitBtn.textContent = fileCheck.files.length ? 'Preparing files...' : 'Sending...';
+
+      let attachments = [];
+      try {
+        if (fileCheck.files.length) {
+          attachments = await buildAttachments(fileCheck.files);
+        }
+      } catch (err) {
+        showError('Could not read one of the attached files. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Send commission request';
+        return;
+      }
+
       submitBtn.textContent = 'Sending...';
 
       try {
@@ -201,7 +358,8 @@
             email: email,
             category: 'custom_playmat',
             message: message,
-            turnstileToken: turnstileToken
+            turnstileToken: turnstileToken,
+            attachments: attachments
           })
         });
         const data = await res.json();
@@ -214,7 +372,10 @@
             turnstile_failed: 'Security check failed. Please refresh and try again.',
             rate_limit_exceeded: data.message || 'Too many messages sent. Please wait a minute and try again.',
             service_unavailable: data.message || 'The form is temporarily unavailable.',
-            send_failed: data.message || 'Could not send your request. Please try again later.'
+            send_failed: data.message || 'Could not send your request. Please try again later.',
+            invalid_attachment: data.message || 'One or more attachments could not be accepted.',
+            attachment_too_large: data.message || 'One or more attachments are too large.',
+            too_many_attachments: data.message || 'Please attach fewer files.'
           };
           showError(msgs[data.error] || data.message || 'Something went wrong. Please try again.');
           submitBtn.disabled = false;
