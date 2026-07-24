@@ -24,7 +24,7 @@ Nothing is changing for the GWC. The club will still have the same name as it al
 Setting up Dice Bastion just means that when we run non-warhammer events as we have been doing, we will be going by a different name for a clearer distinction. This also means our Warhammer players will have an easier time finding Warhammer-specific events and information, without being overwhelmed by unrelated game types.
 
 ## Do you still plan to host Warhammer Events?
-Yes! SN Battle Reports and will be running the annual 40k league. We'd also like to get back to running Age of Sigmar or Old World events, so if anyone wants to volunteer to help organise those, please get in touch! We hadn’t run these lately because there hasn't been as much interest but we’d love to help make it happen! We'll also be having our annual Christmas Apocalypse game and are open to any other suggestions/requests that our members may have!
+Yes! SN Battle Reports and the GWC will be running regular events such as the popular annual 40k league. We'd also like to get back to running Age of Sigmar or Old World events, so if anyone wants to volunteer to help organise those, please get in touch! We hadn’t run these lately because there hasn't been as much interest but we’d love to help make it happen! We'll also be having our annual Christmas Apocalypse game and are open to any other suggestions/requests that our members may have!
 
 ## Is my membership still valid? 
 Yes, your membership will still give you the same benefits as always. It will also continue to give you discounts for all events run by Dice Bastion, SN Battle Reports, and any other eligible events organised by the Gibraltar Warhammer Club.

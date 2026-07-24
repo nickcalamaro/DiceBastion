@@ -3,7 +3,7 @@ title: Home
 description: Gibraltar's premier location for board games, wargames, card games and RPGs. Open every Friday and available to book for RPG campaigns, board game meetups, Magic the Gathering and more!
 ---
 
-<p class="homepage-tagline">Gibraltar's premier space for board games, wargames, card games and RPGs. Open every Friday and available to book for RPG campaigns, board game meetups, Magic the Gathering and more!</p>
+<p class="homepage-tagline">Gibraltar's premier organiser for board games, wargames, card games and RPGs. Open every Friday and available to book for RPG campaigns, board game meetups, Magic the Gathering and more! <br><br>Dice Bastion is part of the <a href=/FAQs>Gibraltar Warhammer Club</a>, who provide a space where we run the majority of our events.</p>
 
 <div class="not-prose" style="width: 100%; text-align: left;">
 
