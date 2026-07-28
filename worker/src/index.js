@@ -298,6 +298,45 @@ function resolveEventPrimaryImage(event, siteUrl) {
   return `${siteUrl}/img/default-event.jpg`
 }
 
+/**
+ * When event artwork is replaced, keep seo_image in sync if it was empty or still
+ * pointed at previous/auto-filled main/card/hero URLs. Custom seo_image URLs that
+ * are not event export filenames are left alone.
+ */
+function looksLikeEventArtworkExportUrl(url) {
+  return /(?:^|[\/_-])event-(?:main|card|hero)\.(?:jpe?g|png|webp)(?:$|\?)/i.test(String(url || ''))
+}
+
+function resolveSeoImageOnArtworkChange(current, incomingSeoImage, imageUrl, imageUrlCard, imageUrlHero) {
+  let finalSeo = (incomingSeoImage || '').trim() || null
+  const newHero = (imageUrlHero || '').trim() || null
+  const artworkNow = [imageUrl, imageUrlCard, imageUrlHero]
+    .map((u) => (u || '').trim())
+    .filter(Boolean)
+
+  if (!finalSeo && newHero) return newHero
+
+  // Already-broken rows: seo_image still points at an old auto-filled export URL
+  // while main/card/hero have moved on. Fix on save without requiring a re-upload.
+  if (finalSeo && newHero && !artworkNow.includes(finalSeo) && looksLikeEventArtworkExportUrl(finalSeo)) {
+    return newHero
+  }
+
+  if (!current || !newHero) return finalSeo
+
+  const oldHero = (current.image_url_hero || '').trim() || null
+  if (newHero === oldHero) return finalSeo
+
+  const previousArtwork = [current.image_url, current.image_url_card, current.image_url_hero]
+    .map((u) => (u || '').trim())
+    .filter(Boolean)
+
+  if (!finalSeo || previousArtwork.includes(finalSeo)) {
+    return newHero
+  }
+  return finalSeo
+}
+
 function collectProductImageUrls(product, shopUrl) {
   const seen = new Set()
   const out = []
@@ -6737,6 +6776,13 @@ app.post('/admin/events', requireAdmin, async c => {
     
     // Combine date and time
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
+    const resolvedSeoImage = resolveSeoImageOnArtworkChange(
+      null,
+      seo_image,
+      image_url,
+      image_url_card,
+      image_url_hero
+    )
     
     const result = await c.env.DB.prepare(`
       INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date, end_time)
@@ -6749,7 +6795,7 @@ app.post('/admin/events', requireAdmin, async c => {
       full_description || null,
       seo_description || null,
       seo_organizer || null,
-      seo_image || null,
+      resolvedSeoImage,
       datetime,
       location || null,
       membership_price || 0,
@@ -6793,6 +6839,17 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     // Combine date and time
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
+
+    const current = await c.env.DB.prepare(
+      'SELECT seo_image, image_url, image_url_card, image_url_hero FROM events WHERE event_id = ?'
+    ).bind(id).first()
+    const resolvedSeoImage = resolveSeoImageOnArtworkChange(
+      current,
+      seo_image,
+      image_url,
+      image_url_card,
+      image_url_hero
+    )
     
     await c.env.DB.prepare(`
       UPDATE events 
@@ -6806,7 +6863,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       full_description || null,
       seo_description || null,
       seo_organizer || null,
-      seo_image || null,
+      resolvedSeoImage,
       datetime,
       location || null,
       membership_price || 0,

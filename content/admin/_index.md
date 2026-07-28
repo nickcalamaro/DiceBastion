@@ -3154,13 +3154,23 @@ document.getElementById('event-image-upload').addEventListener('change', (e) => 
 const file = e.target.files[0];
 if (file) {
 showCropModal(file, (bundle) => {
+  // Capture previous artwork URLs before overwriting — used to refresh seo_image
+  // when it was auto-filled from the old hero/main/card (SEO pages prefer seo_image).
+  const prevMain = (document.getElementById('event-image')?.value || '').trim();
+  const prevCard = (document.getElementById('event-image-card')?.value || '').trim();
+  const prevHero = (document.getElementById('event-image-hero')?.value || '').trim();
   uploadedEventBundle = bundle;
   document.getElementById('event-image').value = bundle.image_url || '';
   document.getElementById('event-image-card').value = bundle.image_url_card || '';
   document.getElementById('event-image-hero').value = bundle.image_url_hero || '';
   const eventSeoImage = document.getElementById('event-seo-image');
-  if (eventSeoImage && !eventSeoImage.value.trim() && bundle.image_url_hero) {
-    eventSeoImage.value = bundle.image_url_hero;
+  if (eventSeoImage && bundle.image_url_hero) {
+    const currentSeo = eventSeoImage.value.trim();
+    const previousArtwork = [prevMain, prevCard, prevHero].filter(Boolean);
+    const seoWasEmptyOrPreviousArtwork = !currentSeo || previousArtwork.includes(currentSeo);
+    if (seoWasEmptyOrPreviousArtwork) {
+      eventSeoImage.value = bundle.image_url_hero;
+    }
   }
   document.getElementById('event-image-preview').innerHTML =
     `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
