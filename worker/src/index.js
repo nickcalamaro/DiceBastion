@@ -7114,7 +7114,16 @@ app.post('/events/:id/checkout', async c => {
 
     let checkout
     try {
-      checkout = await createCheckout(c.env, { amount, currency, orderRef: order_ref, title: ev.event_name, description: `Ticket for ${ev.event_name}` })
+      // redirectUrl recovers activation if the SumUp widget is unmounted mid-3DS
+      // (e.g. user switches email and starts a second checkout while the first charges).
+      checkout = await createCheckout(c.env, {
+        amount,
+        currency,
+        orderRef: order_ref,
+        title: ev.event_name,
+        description: `Ticket for ${ev.event_name}`,
+        redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`
+      })
     } catch (e) {
       console.error('SumUp checkout failed for event', evId, e)
       return c.json({ error:'sumup_checkout_failed', message:String(e?.message||e) },502)
