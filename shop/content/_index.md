@@ -278,7 +278,13 @@ color: rgb(var(--color-neutral-800));
 .product-image {
   width: 100%;
   height: 220px;
-  object-fit: cover;
+  object-fit: contain;
+  background: rgb(var(--color-neutral-100));
+}
+
+.product-image-placeholder {
+  width: 100%;
+  height: 220px;
   background: rgb(var(--color-neutral-100));
 }
 
@@ -654,6 +660,47 @@ function escapeHtml(text) {
   const d = document.createElement('div');
   d.textContent = text;
   return d.innerHTML;
+}
+
+function stripHtmlToText(html) {
+  if (!html) return '';
+  const d = document.createElement('div');
+  d.innerHTML = String(html);
+  return (d.textContent || d.innerText || '').replace(/\s+/g, ' ').trim();
+}
+
+function productCardPreview(product) {
+  const summary = typeof product.summary === 'string' ? product.summary.trim() : '';
+  if (summary) return escapeHtml(summary);
+
+  const fromFull = stripHtmlToText(product.full_description);
+  const fromShort =
+    typeof product.description === 'string' ? product.description.trim() : '';
+  const raw = fromFull || fromShort;
+  if (!raw) return '';
+
+  const maxLen = 140;
+  if (raw.length <= maxLen) return escapeHtml(raw);
+  const sliced = raw.slice(0, maxLen);
+  const lastSpace = sliced.lastIndexOf(' ');
+  const truncated = (lastSpace > 80 ? sliced.slice(0, lastSpace) : sliced).trim();
+  return escapeHtml(truncated) + '...';
+}
+
+function productImageSrc(url) {
+  if (url == null) return '';
+  const trimmed = String(url).trim();
+  return trimmed;
+}
+
+function productImageHtml(url, altHtml, className, extraStyle) {
+  const src = productImageSrc(url);
+  if (!src) {
+    return `<div class="${className || 'product-image'} product-image-placeholder" aria-hidden="true"></div>`;
+  }
+  const styleAttr = extraStyle ? ` style="${extraStyle}"` : '';
+  const cls = className ? ` class="${className}"` : '';
+  return `<img src="${escapeHtml(src)}" alt="${altHtml || ''}"${cls}${styleAttr} loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.removeAttribute('src');this.classList.add('product-image-placeholder');">`;
 }
 
 let toastHideTimer = null;
@@ -1131,8 +1178,7 @@ function renderProducts(products) {
         : null;
 
       const nameHtml = escapeHtml(product.name || '');
-      const summaryHtml =
-        typeof product.summary === 'string' ? product.summary : '';
+      const summaryHtml = productCardPreview(product);
 
       const quickAdd = renderQuickAddBlock(product);
 
@@ -1143,11 +1189,7 @@ function renderProducts(products) {
     }" class="product-card-link" onclick="event.preventDefault(); showProductDetail(${
       product.id
     }, ${JSON.stringify(product.slug || '')});">
-    ${
-      product.image_url
-        ? `<img src="${escapeHtml(product.image_url)}" alt="${nameHtml}" class="product-image">`
-        : '<div class="product-image"></div>'
-    }
+    ${productImageHtml(product.image_url, nameHtml, 'product-image')}
       ${
         isPreorder
           ? `<div style="position: absolute; top: 10px; left: 10px; background: rgb(var(--color-primary-600)); color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">PRE-ORDER</div>`
@@ -1225,8 +1267,15 @@ window.showProductDetail = async function (productId, slug, skipPushState) {
     const modal = document.getElementById('product-modal');
     const modalBody = document.getElementById('modal-body');
     const nameHtml = escapeHtml(product.name || '');
-    const imgUrl = escapeHtml(product.image_url || '');
     const room = remainingForProduct(product);
+    const modalImageHtml = productImageSrc(product.image_url)
+      ? productImageHtml(
+          product.image_url,
+          nameHtml,
+          '',
+          'width: 100%; max-height: 400px; object-fit: contain; border-radius: 8px; margin-bottom: 1.5rem; background: rgb(var(--color-neutral-100));'
+        )
+      : '';
 
     let actionsHtml;
     if (product.stock_quantity === 0) {
@@ -1254,7 +1303,7 @@ window.showProductDetail = async function (productId, slug, skipPushState) {
 
     modalBody.innerHTML = `
 <div style="padding: 2rem;">
-${product.image_url ? `<img src="${imgUrl}" alt="${nameHtml}" style="width: 100%; max-height: 400px; object-fit: cover; border-radius: 8px; margin-bottom: 1.5rem;">` : ''}
+${modalImageHtml}
 ${isPreorder ? `<div style="display: inline-block; background: rgb(var(--color-primary-600)); color: white; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem;">PRE-ORDER</div>` : ''}
 <h2 style="margin: 0 0 1rem 0; color: rgb(var(--color-neutral-800));">${nameHtml}</h2>
 ${isPreorder ? `<div style="font-size: 1rem; color: rgb(var(--color-primary-600)); margin-bottom: 1rem; font-weight: 500;">Available from ${releaseDate}</div>` : ''}
