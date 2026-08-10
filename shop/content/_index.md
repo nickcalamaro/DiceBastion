@@ -22,6 +22,7 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
   <div id="category-filter" class="category-filter">
     <button type="button" class="category-btn active" onclick="filterByCategory(null, this)">All Products</button>
   </div>
+  <nav id="seo-category-links" class="seo-crawl-links" aria-label="Shop categories"></nav>
   
   <div id="product-grid" class="product-grid">
     <div class="loading">Loading products...</div>
@@ -120,6 +121,9 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
   font-size: 0.9375rem;
   transition: all 0.2s ease;
   white-space: nowrap;
+  text-decoration: none;
+  display: inline-block;
+  box-sizing: border-box;
 }
 
 .category-btn:hover {
@@ -136,6 +140,48 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
 .category-btn.active:hover {
   background: rgb(var(--color-primary-700));
   border-color: rgb(var(--color-primary-700));
+  color: white;
+}
+
+.seo-crawl-links {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.category-filter-extra {
+  display: none;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.category-filter-extra.is-open {
+  display: flex;
+}
+
+.category-toggle-btn {
+  padding: 0.625rem 1.25rem;
+  background: transparent;
+  color: rgb(var(--color-primary-700));
+  border: 1px dashed rgb(var(--color-primary-300));
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.category-toggle-btn:hover {
+  background: rgba(var(--color-primary-50), 0.5);
+  border-color: rgb(var(--color-primary-400));
 }
 
 .modal {
@@ -894,36 +940,128 @@ async function loadProducts() {
   }
 }
 
-// Build category filter menu
+function escapeJsString(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function categoryButtonHtml(cat) {
+  const safe = escapeJsString(cat);
+  const label = escapeHtml(cat);
+  const href = `/products/category/${encodeURIComponent(cat)}`;
+  return `<a href="${href}" class="category-btn" data-category="${label}" onclick="event.preventDefault(); filterByCategory('${safe}', this);">${label}</a>`;
+}
+
+function buildSeoCategoryLinks(categories) {
+  const nav = document.getElementById('seo-category-links');
+  if (!nav) return;
+  nav.innerHTML = categories
+    .map(cat => {
+      const label = escapeHtml(cat);
+      return `<a href="/products/category/${encodeURIComponent(cat)}">${label}</a>`;
+    })
+    .join('');
+}
+
+// Build category filter menu (top 5 visible; rest behind Show more)
 function buildCategoryFilter(products) {
   const categoryCount = {};
-  
-  // Count products per category
+
   products.forEach(product => {
     if (product.category) {
       product.category.split(',').forEach(cat => {
         const trimmedCat = cat.trim();
-        categoryCount[trimmedCat] = (categoryCount[trimmedCat] || 0) + 1;
+        if (trimmedCat) {
+          categoryCount[trimmedCat] = (categoryCount[trimmedCat] || 0) + 1;
+        }
       });
     }
   });
-  
-  // Get top 5 categories by count
-  const topCategories = Object.entries(categoryCount)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
+
+  const sortedCategories = Object.entries(categoryCount)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([cat]) => cat);
-  
+
+  const topCategories = sortedCategories.slice(0, 5);
+  const extraCategories = sortedCategories.slice(5);
+
+  buildSeoCategoryLinks(sortedCategories);
+
   const filterContainer = document.getElementById('category-filter');
-  
-  // Build filter buttons
-  const buttons = ['<button type="button" class="category-btn active" onclick="filterByCategory(null, this)">All Products</button>'];
+  const parts = [
+    '<a href="/" class="category-btn active" data-category="" onclick="event.preventDefault(); filterByCategory(null, this);">All Products</a>'
+  ];
+
   topCategories.forEach(cat => {
-    const safe = cat.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    buttons.push(`<button type="button" class="category-btn" onclick="filterByCategory('${safe}', this)">${cat}</button>`);
+    parts.push(categoryButtonHtml(cat));
   });
-  
-  filterContainer.innerHTML = buttons.join('');
+
+  if (extraCategories.length > 0) {
+    parts.push(
+      `<button type="button" class="category-toggle-btn" id="category-toggle-btn" aria-expanded="false" aria-controls="category-filter-extra" onclick="toggleCategoryExtras()">Show more</button>`
+    );
+    parts.push(
+      `<div id="category-filter-extra" class="category-filter-extra" hidden>${extraCategories.map(categoryButtonHtml).join('')}</div>`
+    );
+  }
+
+  filterContainer.innerHTML = parts.join('');
+}
+
+function toggleCategoryExtras(forceOpen) {
+  const extra = document.getElementById('category-filter-extra');
+  const toggle = document.getElementById('category-toggle-btn');
+  if (!extra || !toggle) return;
+
+  const shouldOpen = typeof forceOpen === 'boolean'
+    ? forceOpen
+    : !extra.classList.contains('is-open');
+
+  extra.classList.toggle('is-open', shouldOpen);
+  extra.hidden = !shouldOpen;
+  toggle.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  toggle.textContent = shouldOpen ? 'Show less' : 'Show more';
+}
+
+function setActiveCategoryButton(category) {
+  const target = category || '';
+  document.querySelectorAll('.category-btn').forEach(btn => {
+    const btnCat = btn.getAttribute('data-category') || '';
+    btn.classList.toggle('active', btnCat === target);
+  });
+
+  if (category) {
+    const activeBtn = document.querySelector(`.category-btn[data-category="${CSS.escape(category)}"]`);
+    if (activeBtn && activeBtn.closest('#category-filter-extra')) {
+      toggleCategoryExtras(true);
+    }
+  }
+}
+
+function syncCategoryUrl(category, { replace = false } = {}) {
+  const params = new URLSearchParams(window.location.search);
+  if (category) {
+    params.set('category', category);
+  } else {
+    params.delete('category');
+  }
+  // Keep product modal deep-links intact when changing filters while open
+  const qs = params.toString();
+  const nextUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+  const method = replace ? 'replaceState' : 'pushState';
+  history[method]({}, '', nextUrl);
+}
+
+function shopQueryUrl(updates = {}) {
+  const params = new URLSearchParams(window.location.search);
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value == null || value === '') {
+      params.delete(key);
+    } else {
+      params.set(key, value);
+    }
+  });
+  const qs = params.toString();
+  return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
 }
 
 // Handle search input
@@ -935,34 +1073,35 @@ function handleSearch() {
 // Apply both search and category filters
 function applyFilters() {
   let filteredProducts = [...allProducts];
-  
-  // Apply search filter
+
   if (currentSearchTerm) {
-    filteredProducts = filteredProducts.filter(product => 
+    filteredProducts = filteredProducts.filter(product =>
       product.name.toLowerCase().includes(currentSearchTerm)
     );
   }
-  
-  // Apply category filter
+
   if (currentFilter) {
-    filteredProducts = filteredProducts.filter(product => 
+    filteredProducts = filteredProducts.filter(product =>
       product.category && product.category.split(',').map(c => c.trim()).includes(currentFilter)
     );
   }
-  
+
   renderProducts(filteredProducts);
 }
 
-// Filter products by category
-function filterByCategory(category, btnElement) {
-  currentFilter = category;
-  document.querySelectorAll('.category-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
+// Filter products by category (updates shareable ?category= URL)
+function filterByCategory(category, btnElement, { syncUrl = true } = {}) {
+  currentFilter = category || null;
   if (btnElement) {
+    document.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
     btnElement.classList.add('active');
+  } else {
+    setActiveCategoryButton(currentFilter);
   }
   applyFilters();
+  if (syncUrl) {
+    syncCategoryUrl(currentFilter);
+  }
 }
 
 // Render products
@@ -1065,8 +1204,11 @@ window.showProductDetail = async function (productId, slug, skipPushState) {
     if (!skipPushState) {
       const productSlug = slug || product.slug;
       if (productSlug) {
-        const newUrl = `${window.location.pathname}?product=${encodeURIComponent(productSlug)}`;
-        history.pushState({ product: productSlug }, '', newUrl);
+        history.pushState(
+          { product: productSlug },
+          '',
+          shopQueryUrl({ product: productSlug })
+        );
       }
     }
 
@@ -1135,15 +1277,20 @@ ${actionsHtml}
 };
 window.closeProductModal = function() {
 document.getElementById('product-modal').classList.remove('active');
-// Restore clean URL
 const params = new URLSearchParams(window.location.search);
 if (params.has('product')) {
-  const cleanUrl = params.has('category')
-    ? `${window.location.pathname}?category=${encodeURIComponent(params.get('category'))}`
-    : window.location.pathname;
-  history.pushState({}, '', cleanUrl);
+  history.pushState({}, '', shopQueryUrl({ product: null }));
 }
 };
+
+function applyCategoryFromUrl(categoryParam, { syncUrl = false } = {}) {
+  currentFilter = categoryParam || null;
+  setActiveCategoryButton(currentFilter);
+  applyFilters();
+  if (syncUrl) {
+    syncCategoryUrl(currentFilter, { replace: true });
+  }
+}
 
 // Close modal on background click
 document.addEventListener('click', function(e) {
@@ -1153,39 +1300,36 @@ closeProductModal();
 });
 
 // Handle browser back/forward button
-window.addEventListener('popstate', function(e) {
-const params = new URLSearchParams(window.location.search);
-const productSlug = params.get('product');
-if (productSlug && allProducts.length > 0) {
-  const match = allProducts.find(p => p.slug === productSlug);
-  if (match) showProductDetail(match.id, match.slug, true);
-} else {
-  document.getElementById('product-modal').classList.remove('active');
-}
+window.addEventListener('popstate', function() {
+  const params = new URLSearchParams(window.location.search);
+  const productSlug = params.get('product');
+  const categoryParam = params.get('category');
+
+  if (allProducts.length > 0) {
+    applyCategoryFromUrl(categoryParam);
+  }
+
+  if (productSlug && allProducts.length > 0) {
+    const match = allProducts.find(p => p.slug === productSlug);
+    if (match) showProductDetail(match.id, match.slug, true);
+  } else {
+    document.getElementById('product-modal').classList.remove('active');
+  }
 });
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async function() {
   bindProductGridActions();
-  // Check for ?category= param to auto-filter
   const params = new URLSearchParams(window.location.search);
   const categoryParam = params.get('category');
 
   await loadProducts();
   updateCartBadge();
 
-  // Auto-filter by category if specified in URL
   if (categoryParam && allProducts.length > 0) {
-    currentFilter = categoryParam;
-    applyFilters();
-    // Activate matching category button
-    document.querySelectorAll('.category-btn').forEach(btn => {
-      btn.classList.remove('active');
-      if (btn.textContent.trim() === categoryParam) btn.classList.add('active');
-    });
+    applyCategoryFromUrl(categoryParam);
   }
 
-  // Auto-open product modal if ?product=slug is set
   const productSlug = params.get('product');
   if (productSlug && allProducts.length > 0) {
     const match = allProducts.find(p => p.slug === productSlug);
