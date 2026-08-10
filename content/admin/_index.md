@@ -409,6 +409,37 @@ Loading activity...
 
 <!-- Products Tab -->
 <div id="products-tab" class="tab-content" style="display: none;">
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-section-heading admin-mt-0">Import products from CSV</h2>
+<p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
+Expects BNW-style columns:
+<code>Title</code>,
+<code>Price</code> (pounds),
+<code>Manufacturer</code>,
+<code>Type</code>,
+<code>Description</code>,
+<code>Image_URL</code>.
+Type and Manufacturer become category labels (up to 3). Existing slugs are skipped (create-only).
+</p>
+<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
+<div>
+<label class="form-label" for="csv-import-file">CSV file</label>
+<input type="file" id="csv-import-file" accept=".csv,text/csv" class="form-input">
+</div>
+<div>
+<label class="form-label" for="csv-import-stock">Default stock</label>
+<input type="number" id="csv-import-stock" value="0" min="0" class="form-input">
+</div>
+</div>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap;">
+<button type="button" id="csv-preview-btn" class="btn btn-secondary">Parse / preview</button>
+<button type="button" id="csv-import-btn" class="btn btn-primary" disabled>Import products</button>
+</div>
+<div id="csv-import-status" class="admin-mb-1" style="display: none; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9375rem;"></div>
+<div id="csv-import-preview" style="overflow-x: auto;"></div>
+<div id="csv-import-results" class="admin-mb-1"></div>
+</div>
+
 <div class="card card-compact">
 <h2 id="product-form-title" class="admin-section-heading">Add New Product</h2>
 <form id="product-form">
@@ -3183,12 +3214,393 @@ showCropModal(file, (bundle) => {
 });
 
 // Products
+let adminProductsList = [];
+let csvImportRows = [];
+
+function slugifyProductName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function parseCsvText(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        field += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n' || (ch === '\r' && next === '\n')) {
+      if (ch === '\r') i++;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else if (ch === '\r') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += ch;
+    }
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows.filter(r => r.some(cell => String(cell || '').trim() !== ''));
+}
+
+function csvRowsToObjects(rows) {
+  if (!rows.length) return [];
+  const headers = rows[0].map(h => String(h || '').trim());
+  return rows.slice(1).map(cells => {
+    const obj = {};
+    headers.forEach((h, idx) => {
+      obj[h] = cells[idx] != null ? String(cells[idx]) : '';
+    });
+    return obj;
+  });
+}
+
+function escapeCsvHtml(s) {
+  if (typeof utils !== 'undefined' && utils.escapeHtml) return utils.escapeHtml(s);
+  return escapeHtmlPromo(s);
+}
+
+function buildCategoryFromCsv(row) {
+  const tags = [];
+  const seen = new Set();
+  [row.Type, row.Manufacturer].forEach(raw => {
+    const tag = String(raw || '').trim();
+    if (!tag || seen.has(tag)) return;
+    seen.add(tag);
+    tags.push(tag);
+  });
+  // Main admin product form allows up to 3 categories
+  return tags.slice(0, 3);
+}
+
+function mapCsvRowToProduct(row, defaults) {
+  const name = String(row.Title || '').trim();
+  const pounds = parseFloat(String(row.Price || '').replace(/,/g, '').trim());
+  const notes = [];
+
+  if (!name) notes.push('Missing Title');
+  if (!Number.isFinite(pounds)) notes.push('Invalid Price');
+
+  const description = String(row.Description || '').trim();
+  const imageUrl = String(row.Image_URL || row.Image_Url || row.image_url || '').trim();
+  const categoryTags = buildCategoryFromCsv(row);
+  const category = categoryTags.length ? categoryTags.join(', ') : null;
+  const slug = slugifyProductName(name);
+  const pricePence = Number.isFinite(pounds) ? Math.round(pounds * 100) : null;
+
+  if (!description) notes.push('Empty description');
+  if (!imageUrl) notes.push('No image URL');
+  if (!category) notes.push('No categories');
+  if (adminProductsList.some(p => p.slug === slug)) notes.push('Slug already exists (will skip)');
+
+  const fullDescription = description
+    ? `<p>${escapeCsvHtml(description).replace(/\n/g, '<br>')}</p>`
+    : null;
+
+  return {
+    valid: !!name && pricePence != null && pricePence >= 0,
+    notes,
+    payload: {
+      name,
+      slug,
+      summary: '',
+      full_description: fullDescription,
+      price: pricePence,
+      currency: 'GBP',
+      stock_quantity: defaults.stock,
+      category,
+      image_url: imageUrl || null,
+      is_active: 1,
+      release_date: null
+    },
+    preview: {
+      name,
+      slug,
+      category: category || '',
+      pricePence,
+      priceLabel: pricePence != null ? `£${(pricePence / 100).toFixed(2)}` : '—',
+      imageUrl,
+      pounds
+    }
+  };
+}
+
+function setCsvStatus(message, kind) {
+  const el = document.getElementById('csv-import-status');
+  if (!el) return;
+  el.style.display = message ? 'block' : 'none';
+  el.textContent = message || '';
+  const colors = {
+    info: { bg: 'rgba(var(--color-primary-50), 0.5)', color: 'rgb(var(--color-neutral-800))' },
+    ok: { bg: '#ecfdf5', color: '#065f46' },
+    err: { bg: '#fee2e2', color: '#991b1b' }
+  };
+  const c = colors[kind] || colors.info;
+  el.style.background = c.bg;
+  el.style.color = c.color;
+}
+
+function renderCsvPreview(mappedRows) {
+  const host = document.getElementById('csv-import-preview');
+  const importBtn = document.getElementById('csv-import-btn');
+  if (!host) return;
+
+  const validCount = mappedRows.filter(r => r.valid).length;
+  const importableCount = mappedRows.filter(
+    r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+  ).length;
+
+  if (!mappedRows.length) {
+    host.innerHTML = '<p class="admin-text-muted">No data rows found.</p>';
+    if (importBtn) {
+      importBtn.disabled = true;
+      importBtn.textContent = 'Import products';
+    }
+    return;
+  }
+
+  const rowsHtml = mappedRows.map((r, idx) => {
+    const img = r.preview.imageUrl
+      ? `<img src="${escapeCsvHtml(r.preview.imageUrl)}" alt="" referrerpolicy="no-referrer" loading="lazy" style="width:48px;height:48px;object-fit:contain;background:rgb(var(--color-neutral-100));border-radius:4px;" onerror="this.style.display='none'">`
+      : '<span class="admin-text-muted">—</span>';
+    return `<tr style="border-bottom:1px solid rgb(var(--color-neutral-200));">
+      <td style="padding:0.5rem;vertical-align:top;">${idx + 1}</td>
+      <td style="padding:0.5rem;vertical-align:top;">${img}</td>
+      <td style="padding:0.5rem;vertical-align:top;"><strong>${escapeCsvHtml(r.preview.name)}</strong><div class="admin-text-small">${escapeCsvHtml(r.preview.slug)}</div></td>
+      <td style="padding:0.5rem;vertical-align:top;font-size:0.875rem;">${escapeCsvHtml(r.preview.category || '—')}</td>
+      <td style="padding:0.5rem;vertical-align:top;">${escapeCsvHtml(r.preview.priceLabel)}</td>
+      <td style="padding:0.5rem;vertical-align:top;font-size:0.8rem;color:${r.valid ? 'rgb(var(--color-neutral-600))' : '#991b1b'};">${escapeCsvHtml(r.notes.join('; ') || 'Ready')}</td>
+    </tr>`;
+  }).join('');
+
+  host.innerHTML = `
+    <p class="admin-text-muted" style="margin:0 0 0.75rem;font-size:0.9375rem;">
+      ${mappedRows.length} row(s) parsed · ${validCount} valid · ${importableCount} new to import
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:0.9375rem;">
+      <thead>
+        <tr style="text-align:left;border-bottom:2px solid rgb(var(--color-neutral-300));">
+          <th style="padding:0.5rem;">#</th>
+          <th style="padding:0.5rem;">Image</th>
+          <th style="padding:0.5rem;">Product</th>
+          <th style="padding:0.5rem;">Categories</th>
+          <th style="padding:0.5rem;">Price</th>
+          <th style="padding:0.5rem;">Notes</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>`;
+
+  if (importBtn) {
+    importBtn.disabled = importableCount === 0;
+    importBtn.textContent = importableCount
+      ? `Import ${importableCount} product${importableCount === 1 ? '' : 's'}`
+      : 'Import products';
+  }
+}
+
+async function previewCsvImport() {
+  const fileInput = document.getElementById('csv-import-file');
+  const file = fileInput?.files?.[0];
+  const results = document.getElementById('csv-import-results');
+  if (results) results.innerHTML = '';
+
+  if (!file) {
+    setCsvStatus('Choose a CSV file first.', 'err');
+    csvImportRows = [];
+    renderCsvPreview([]);
+    return;
+  }
+
+  const stock = parseInt(document.getElementById('csv-import-stock')?.value || '0', 10);
+  const defaults = { stock: Number.isFinite(stock) && stock >= 0 ? stock : 0 };
+
+  try {
+    const text = await file.text();
+    const objects = csvRowsToObjects(parseCsvText(text));
+    const headers = objects[0] ? Object.keys(objects[0]) : [];
+    const missing = ['Title', 'Price'].filter(h => !headers.includes(h));
+    if (missing.length) {
+      setCsvStatus(`Missing required column(s): ${missing.join(', ')}. Found: ${headers.join(', ') || '(none)'}`, 'err');
+      csvImportRows = [];
+      renderCsvPreview([]);
+      return;
+    }
+
+    csvImportRows = objects.map(row => mapCsvRowToProduct(row, defaults));
+    setCsvStatus(`Parsed ${csvImportRows.length} product row(s). Review the preview, then import.`, 'info');
+    renderCsvPreview(csvImportRows);
+  } catch (err) {
+    console.error(err);
+    setCsvStatus('Failed to parse CSV file.', 'err');
+    csvImportRows = [];
+    renderCsvPreview([]);
+  }
+}
+
+async function runCsvImport() {
+  const importBtn = document.getElementById('csv-import-btn');
+  const previewBtn = document.getElementById('csv-preview-btn');
+  const results = document.getElementById('csv-import-results');
+  if (!csvImportRows.length) {
+    setCsvStatus('Parse a CSV file before importing.', 'err');
+    return;
+  }
+
+  const existingSlugs = new Set(adminProductsList.map(p => p.slug));
+  const toImport = csvImportRows.filter(r => r.valid);
+  let created = 0;
+  let skipped = 0;
+  let failed = 0;
+  const detailLines = [];
+
+  if (importBtn) {
+    importBtn.disabled = true;
+    importBtn.textContent = 'Importing...';
+  }
+  if (previewBtn) previewBtn.disabled = true;
+
+  for (let i = 0; i < toImport.length; i++) {
+    const row = toImport[i];
+    const { payload } = row;
+    setCsvStatus(`Importing ${i + 1} of ${toImport.length}: ${payload.name}`, 'info');
+
+    if (existingSlugs.has(payload.slug)) {
+      skipped++;
+      detailLines.push(`Skipped ${payload.name} (slug exists)`);
+      continue;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/admin/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        created++;
+        existingSlugs.add(payload.slug);
+        detailLines.push(`Created ${payload.name}`);
+        if (payload.category) {
+          payload.category.split(',').forEach(cat => {
+            const t = cat.trim();
+            if (t) allCategories.add(t);
+          });
+        }
+      } else {
+        const error = await response.json().catch(() => ({}));
+        if (error.error === 'slug_already_exists') {
+          skipped++;
+          existingSlugs.add(payload.slug);
+          detailLines.push(`Skipped ${payload.name} (slug exists)`);
+        } else {
+          failed++;
+          detailLines.push(`Failed ${payload.name}: ${error.error || response.status}`);
+        }
+      }
+    } catch (err) {
+      failed++;
+      detailLines.push(`Failed ${payload.name}: network error`);
+      console.error(err);
+    }
+  }
+
+  setCsvStatus(`Import finished: ${created} created, ${skipped} skipped, ${failed} failed.`, failed ? 'err' : 'ok');
+  if (results) {
+    results.innerHTML = `<ul style="margin:0;padding-left:1.25rem;color:rgb(var(--color-neutral-700));font-size:0.875rem;">${
+      detailLines.map(line => `<li>${escapeCsvHtml(line)}</li>`).join('')
+    }</ul>`;
+  }
+
+  await loadProducts();
+  renderExistingCategories();
+
+  const stock = parseInt(document.getElementById('csv-import-stock')?.value || '0', 10) || 0;
+  const file = document.getElementById('csv-import-file')?.files?.[0];
+  if (file) {
+    try {
+      const text = await file.text();
+      const objects = csvRowsToObjects(parseCsvText(text));
+      csvImportRows = objects.map(row => mapCsvRowToProduct(row, { stock }));
+      renderCsvPreview(csvImportRows);
+    } catch (_) {
+      /* keep previous preview */
+    }
+  }
+
+  if (importBtn) {
+    const remaining = csvImportRows.filter(
+      r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+    ).length;
+    importBtn.disabled = remaining === 0;
+    importBtn.textContent = remaining
+      ? `Import ${remaining} product${remaining === 1 ? '' : 's'}`
+      : 'Import products';
+  }
+  if (previewBtn) previewBtn.disabled = false;
+}
+
 document.getElementById('product-name').addEventListener('input', (e) => {
-const slug = e.target.value
-.toLowerCase()
-.replace(/[^a-z0-9]+/g, '-')
-.replace(/^-+|-+$/g, '');
+const slug = slugifyProductName(e.target.value);
 document.getElementById('product-slug').value = slug;
+});
+
+document.getElementById('csv-preview-btn')?.addEventListener('click', () => {
+  previewCsvImport();
+});
+
+document.getElementById('csv-import-btn')?.addEventListener('click', () => {
+  runCsvImport();
+});
+
+document.getElementById('csv-import-file')?.addEventListener('change', () => {
+  csvImportRows = [];
+  const preview = document.getElementById('csv-import-preview');
+  const results = document.getElementById('csv-import-results');
+  if (preview) preview.innerHTML = '';
+  if (results) results.innerHTML = '';
+  const importBtn = document.getElementById('csv-import-btn');
+  if (importBtn) {
+    importBtn.disabled = true;
+    importBtn.textContent = 'Import products';
+  }
+  setCsvStatus('', 'info');
 });
 
 // Category management
@@ -3290,36 +3702,37 @@ async function loadProducts() {
 try {
 const res = await fetch(`${API_BASE}/products`);
 const products = await res.json();
+adminProductsList = Array.isArray(products) ? products : [];
 const list = document.getElementById('products-list');
 
 // Collect all categories
-products.forEach(p => {
+adminProductsList.forEach(p => {
 if (p.category) {
 p.category.split(',').forEach(cat => allCategories.add(cat.trim()));
 }
 });
 renderExistingCategories();
 
-if (products.length === 0) {
+if (adminProductsList.length === 0) {
 list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No products yet</p>';
 return;
 }
 
-list.innerHTML = products.map(p => {
+list.innerHTML = adminProductsList.map(p => {
 const categories = p.category ? p.category.split(',').map(c => c.trim()).join(', ') : 'N/A';
 return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
-${p.image_url ? `<img src="${p.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
+${p.image_url ? `<img src="${escapeCsvHtml(p.image_url)}" alt="" referrerpolicy="no-referrer" loading="lazy" style="width: 80px; height: 80px; object-fit: contain; border-radius: 6px; background: rgb(var(--color-neutral-100));" onerror="this.style.display='none'">` : ''}
 <div style="flex: 1;">
-<h3>${p.name} ${p.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'}</h3>
-<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${p.summary || ''}</p>
-<p style="margin: 0.5rem 0;"><strong>£${(p.price / 100).toFixed(2)}</strong> | Stock: ${p.stock_quantity} | Categories: ${categories}</p>
+<h3>${escapeCsvHtml(p.name)} ${p.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'}</h3>
+<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${escapeCsvHtml(p.summary || '')}</p>
+<p style="margin: 0.5rem 0;"><strong>£${(p.price / 100).toFixed(2)}</strong> | Stock: ${p.stock_quantity} | Categories: ${escapeCsvHtml(categories)}</p>
 </div>
 </div>
 <div class="item-actions">
 <button class="btn-edit" onclick="editProduct(${p.id})">Edit</button>
-<button class="btn-delete" onclick="deleteProduct(${p.id}, '${p.name}')">Delete</button>
+<button class="btn-delete" onclick="deleteProduct(${p.id}, '${String(p.name || '').replace(/'/g, "\\'")}')">Delete</button>
 ${p.slug ? `<button class="btn-index" onclick="requestIndexing('product', '${p.slug}', this)">📡 Index</button>` : ''}
 </div>
 </div>
