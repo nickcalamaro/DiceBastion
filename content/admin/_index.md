@@ -8,6 +8,7 @@ showDate: false
 <!-- Shared Utilities -->
 <script src="/js/utils.js"></script>
 <script src="/js/modal.js"></script>
+<script src="/js/productCsvImport.js"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -420,6 +421,7 @@ Expects BNW-style columns:
 <code>Description</code>,
 <code>Image_URL</code>.
 Type and Manufacturer become category labels (up to 3). Existing slugs are skipped (create-only).
+Each import is saved as a batch so you can remove unsold items later without touching sold order history.
 </p>
 <div class="admin-grid-2 admin-mb-1" style="align-items: end;">
 <div>
@@ -431,6 +433,11 @@ Type and Manufacturer become category labels (up to 3). Existing slugs are skipp
 <input type="number" id="csv-import-stock" value="0" min="0" class="form-input">
 </div>
 </div>
+<div class="admin-mb-1">
+<label class="form-label" for="csv-import-label">Import label</label>
+<input type="text" id="csv-import-label" class="form-input" placeholder="e.g. BNW Free League week — March">
+<small class="admin-text-small">Used in Manage imports when cleaning up after the sale period</small>
+</div>
 <div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap;">
 <button type="button" id="csv-preview-btn" class="btn btn-secondary">Parse / preview</button>
 <button type="button" id="csv-import-btn" class="btn btn-primary" disabled>Import products</button>
@@ -438,6 +445,17 @@ Type and Manufacturer become category labels (up to 3). Existing slugs are skipp
 <div id="csv-import-status" class="admin-mb-1" style="display: none; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9375rem;"></div>
 <div id="csv-import-preview" style="overflow-x: auto;"></div>
 <div id="csv-import-results" class="admin-mb-1"></div>
+</div>
+
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-section-heading admin-mt-0">Manage imports</h2>
+<p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
+Cleanup hard-deletes products from a batch that were never ordered. Products that appear on any order are kept inactive so purchase records stay intact.
+</p>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem;">
+<button type="button" id="csv-imports-refresh-btn" class="btn btn-secondary">Refresh imports</button>
+</div>
+<div id="product-imports-list"><p class="admin-text-muted">Loading…</p></div>
 </div>
 
 <div class="card card-compact">
@@ -2067,6 +2085,7 @@ document.getElementById('login-container').style.display = 'none';
 document.getElementById('non-admin-container').style.display = 'none';
 document.getElementById('admin-dashboard').style.display = 'block';
 loadProducts();
+loadProductImports();
 loadRecentActivity();
 loadEvents();
 loadOrders();
@@ -2144,6 +2163,7 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       document.getElementById('login-container').style.display = 'none';
       document.getElementById('admin-dashboard').style.display = 'block';
       loadProducts();
+      loadProductImports();
       loadRecentActivity();
       loadEvents();
       loadOrders();
@@ -3214,394 +3234,826 @@ showCropModal(file, (bundle) => {
 });
 
 // Products
+
 let adminProductsList = [];
+
 let csvImportRows = [];
 
+
+
 function slugifyProductName(name) {
+
+  if (window.ProductCsvImport) return ProductCsvImport.slugifyProductName(name);
+
   return String(name || '')
+
     .toLowerCase()
+
     .replace(/[^a-z0-9]+/g, '-')
+
     .replace(/^-+|-+$/g, '');
+
 }
 
-function parseCsvText(text) {
-  const rows = [];
-  let row = [];
-  let field = '';
-  let inQuotes = false;
 
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-
-    if (inQuotes) {
-      if (ch === '"' && next === '"') {
-        field += '"';
-        i++;
-      } else if (ch === '"') {
-        inQuotes = false;
-      } else {
-        field += ch;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === ',') {
-      row.push(field);
-      field = '';
-    } else if (ch === '\n' || (ch === '\r' && next === '\n')) {
-      if (ch === '\r') i++;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = '';
-    } else if (ch === '\r') {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = '';
-    } else {
-      field += ch;
-    }
-  }
-
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-
-  return rows.filter(r => r.some(cell => String(cell || '').trim() !== ''));
-}
-
-function csvRowsToObjects(rows) {
-  if (!rows.length) return [];
-  const headers = rows[0].map(h => String(h || '').trim());
-  return rows.slice(1).map(cells => {
-    const obj = {};
-    headers.forEach((h, idx) => {
-      obj[h] = cells[idx] != null ? String(cells[idx]) : '';
-    });
-    return obj;
-  });
-}
 
 function escapeCsvHtml(s) {
+
+  if (window.ProductCsvImport) return ProductCsvImport.escapeHtml(s);
+
   if (typeof utils !== 'undefined' && utils.escapeHtml) return utils.escapeHtml(s);
+
   return escapeHtmlPromo(s);
+
 }
 
-function buildCategoryFromCsv(row) {
-  const tags = [];
-  const seen = new Set();
-  [row.Type, row.Manufacturer].forEach(raw => {
-    const tag = String(raw || '').trim();
-    if (!tag || seen.has(tag)) return;
-    seen.add(tag);
-    tags.push(tag);
-  });
-  // Main admin product form allows up to 3 categories
-  return tags.slice(0, 3);
-}
+
 
 function mapCsvRowToProduct(row, defaults) {
-  const name = String(row.Title || '').trim();
-  const pounds = parseFloat(String(row.Price || '').replace(/,/g, '').trim());
-  const notes = [];
 
-  if (!name) notes.push('Missing Title');
-  if (!Number.isFinite(pounds)) notes.push('Invalid Price');
+  const mapped = ProductCsvImport.mapBnwRowToProduct(row, defaults);
 
-  const description = String(row.Description || '').trim();
-  const imageUrl = String(row.Image_URL || row.Image_Url || row.image_url || '').trim();
-  const categoryTags = buildCategoryFromCsv(row);
-  const category = categoryTags.length ? categoryTags.join(', ') : null;
-  const slug = slugifyProductName(name);
-  const pricePence = Number.isFinite(pounds) ? Math.round(pounds * 100) : null;
+  if (adminProductsList.some(p => p.slug === mapped.payload.slug)) {
 
-  if (!description) notes.push('Empty description');
-  if (!imageUrl) notes.push('No image URL');
-  if (!category) notes.push('No categories');
-  if (adminProductsList.some(p => p.slug === slug)) notes.push('Slug already exists (will skip)');
+    mapped.notes.push('Slug already exists (will skip)');
 
-  const fullDescription = description
-    ? `<p>${escapeCsvHtml(description).replace(/\n/g, '<br>')}</p>`
-    : null;
+  }
 
-  return {
-    valid: !!name && pricePence != null && pricePence >= 0,
-    notes,
-    payload: {
-      name,
-      slug,
-      summary: '',
-      full_description: fullDescription,
-      price: pricePence,
-      currency: 'GBP',
-      stock_quantity: defaults.stock,
-      category,
-      image_url: imageUrl || null,
-      is_active: 1,
-      release_date: null
-    },
-    preview: {
-      name,
-      slug,
-      category: category || '',
-      pricePence,
-      priceLabel: pricePence != null ? `£${(pricePence / 100).toFixed(2)}` : '—',
-      imageUrl,
-      pounds
-    }
-  };
+  return mapped;
+
 }
+
+
 
 function setCsvStatus(message, kind) {
+
   const el = document.getElementById('csv-import-status');
+
   if (!el) return;
+
   el.style.display = message ? 'block' : 'none';
+
   el.textContent = message || '';
+
   const colors = {
+
     info: { bg: 'rgba(var(--color-primary-50), 0.5)', color: 'rgb(var(--color-neutral-800))' },
+
     ok: { bg: '#ecfdf5', color: '#065f46' },
+
     err: { bg: '#fee2e2', color: '#991b1b' }
+
   };
+
   const c = colors[kind] || colors.info;
+
   el.style.background = c.bg;
+
   el.style.color = c.color;
+
 }
+
+
 
 function renderCsvPreview(mappedRows) {
+
   const host = document.getElementById('csv-import-preview');
+
   const importBtn = document.getElementById('csv-import-btn');
+
   if (!host) return;
 
+
+
   const validCount = mappedRows.filter(r => r.valid).length;
+
   const importableCount = mappedRows.filter(
+
     r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+
   ).length;
 
+
+
   if (!mappedRows.length) {
+
     host.innerHTML = '<p class="admin-text-muted">No data rows found.</p>';
+
     if (importBtn) {
+
       importBtn.disabled = true;
+
       importBtn.textContent = 'Import products';
+
     }
+
     return;
+
   }
+
+
 
   const rowsHtml = mappedRows.map((r, idx) => {
+
     const img = r.preview.imageUrl
+
       ? `<img src="${escapeCsvHtml(r.preview.imageUrl)}" alt="" referrerpolicy="no-referrer" loading="lazy" style="width:48px;height:48px;object-fit:contain;background:rgb(var(--color-neutral-100));border-radius:4px;" onerror="this.style.display='none'">`
+
       : '<span class="admin-text-muted">—</span>';
+
     return `<tr style="border-bottom:1px solid rgb(var(--color-neutral-200));">
+
       <td style="padding:0.5rem;vertical-align:top;">${idx + 1}</td>
+
       <td style="padding:0.5rem;vertical-align:top;">${img}</td>
+
       <td style="padding:0.5rem;vertical-align:top;"><strong>${escapeCsvHtml(r.preview.name)}</strong><div class="admin-text-small">${escapeCsvHtml(r.preview.slug)}</div></td>
+
       <td style="padding:0.5rem;vertical-align:top;font-size:0.875rem;">${escapeCsvHtml(r.preview.category || '—')}</td>
+
       <td style="padding:0.5rem;vertical-align:top;">${escapeCsvHtml(r.preview.priceLabel)}</td>
+
       <td style="padding:0.5rem;vertical-align:top;font-size:0.8rem;color:${r.valid ? 'rgb(var(--color-neutral-600))' : '#991b1b'};">${escapeCsvHtml(r.notes.join('; ') || 'Ready')}</td>
+
     </tr>`;
+
   }).join('');
 
+
+
   host.innerHTML = `
+
     <p class="admin-text-muted" style="margin:0 0 0.75rem;font-size:0.9375rem;">
+
       ${mappedRows.length} row(s) parsed · ${validCount} valid · ${importableCount} new to import
+
     </p>
+
     <table style="width:100%;border-collapse:collapse;font-size:0.9375rem;">
+
       <thead>
+
         <tr style="text-align:left;border-bottom:2px solid rgb(var(--color-neutral-300));">
+
           <th style="padding:0.5rem;">#</th>
+
           <th style="padding:0.5rem;">Image</th>
+
           <th style="padding:0.5rem;">Product</th>
+
           <th style="padding:0.5rem;">Categories</th>
+
           <th style="padding:0.5rem;">Price</th>
+
           <th style="padding:0.5rem;">Notes</th>
+
         </tr>
+
       </thead>
+
       <tbody>${rowsHtml}</tbody>
+
     </table>`;
 
+
+
   if (importBtn) {
+
     importBtn.disabled = importableCount === 0;
+
     importBtn.textContent = importableCount
+
       ? `Import ${importableCount} product${importableCount === 1 ? '' : 's'}`
+
       : 'Import products';
+
   }
+
 }
+
+
 
 async function previewCsvImport() {
+
+  if (!window.ProductCsvImport) {
+
+    setCsvStatus('CSV helper failed to load. Refresh the page.', 'err');
+
+    return;
+
+  }
+
   const fileInput = document.getElementById('csv-import-file');
+
   const file = fileInput?.files?.[0];
+
   const results = document.getElementById('csv-import-results');
+
   if (results) results.innerHTML = '';
+
+
 
   if (!file) {
+
     setCsvStatus('Choose a CSV file first.', 'err');
+
     csvImportRows = [];
+
     renderCsvPreview([]);
+
     return;
+
   }
+
+
 
   const stock = parseInt(document.getElementById('csv-import-stock')?.value || '0', 10);
+
   const defaults = { stock: Number.isFinite(stock) && stock >= 0 ? stock : 0 };
 
+
+
   try {
+
     const text = await file.text();
-    const objects = csvRowsToObjects(parseCsvText(text));
+
+    const objects = ProductCsvImport.csvRowsToObjects(ProductCsvImport.parseCsvText(text));
+
     const headers = objects[0] ? Object.keys(objects[0]) : [];
+
     const missing = ['Title', 'Price'].filter(h => !headers.includes(h));
+
     if (missing.length) {
+
       setCsvStatus(`Missing required column(s): ${missing.join(', ')}. Found: ${headers.join(', ') || '(none)'}`, 'err');
+
       csvImportRows = [];
+
       renderCsvPreview([]);
+
       return;
+
     }
+
+
 
     csvImportRows = objects.map(row => mapCsvRowToProduct(row, defaults));
-    setCsvStatus(`Parsed ${csvImportRows.length} product row(s). Review the preview, then import.`, 'info');
+
+    const sample = csvImportRows[0]?.preview?.name || '';
+
+    setCsvStatus(`Parsed ${csvImportRows.length} product row(s). First title: "${sample}". Review the preview, then import.`, 'info');
+
     renderCsvPreview(csvImportRows);
+
+
+
+    const labelEl = document.getElementById('csv-import-label');
+
+    if (labelEl && !labelEl.value.trim()) {
+
+      labelEl.value = file.name.replace(/\.csv$/i, '') + ' — ' + new Date().toISOString().slice(0, 10);
+
+    }
+
   } catch (err) {
+
     console.error(err);
+
     setCsvStatus('Failed to parse CSV file.', 'err');
+
     csvImportRows = [];
+
     renderCsvPreview([]);
+
   }
+
 }
+
+
 
 async function runCsvImport() {
-  const importBtn = document.getElementById('csv-import-btn');
-  const previewBtn = document.getElementById('csv-preview-btn');
-  const results = document.getElementById('csv-import-results');
-  if (!csvImportRows.length) {
-    setCsvStatus('Parse a CSV file before importing.', 'err');
+
+  if (!window.ProductCsvImport) {
+
+    setCsvStatus('CSV helper failed to load. Refresh the page.', 'err');
+
     return;
+
   }
 
-  const existingSlugs = new Set(adminProductsList.map(p => p.slug));
-  const toImport = csvImportRows.filter(r => r.valid);
-  let created = 0;
-  let skipped = 0;
-  let failed = 0;
-  const detailLines = [];
+  const importBtn = document.getElementById('csv-import-btn');
+
+  const previewBtn = document.getElementById('csv-preview-btn');
+
+  const results = document.getElementById('csv-import-results');
+
+  if (!csvImportRows.length) {
+
+    setCsvStatus('Parse a CSV file before importing.', 'err');
+
+    return;
+
+  }
+
+
+
+  const file = document.getElementById('csv-import-file')?.files?.[0];
+
+  const label =
+
+    document.getElementById('csv-import-label')?.value?.trim() ||
+
+    (file ? file.name : 'CSV import');
+
+
 
   if (importBtn) {
+
     importBtn.disabled = true;
-    importBtn.textContent = 'Importing...';
+
+    importBtn.textContent = 'Creating import batch...';
+
   }
+
   if (previewBtn) previewBtn.disabled = true;
 
+
+
+  let batchId = null;
+
+  try {
+
+    const batchRes = await fetch(`${API_BASE}/admin/product-imports`, {
+
+      method: 'POST',
+
+      headers: {
+
+        'Content-Type': 'application/json',
+
+        'X-Session-Token': sessionToken
+
+      },
+
+      body: JSON.stringify({
+
+        label,
+
+        source_filename: file?.name || null
+
+      })
+
+    });
+
+    const batchData = await batchRes.json().catch(() => ({}));
+
+    if (!batchRes.ok || !batchData.id) {
+
+      setCsvStatus('Failed to create import batch: ' + (batchData.error || batchRes.status), 'err');
+
+      if (importBtn) {
+
+        importBtn.disabled = false;
+
+        importBtn.textContent = 'Import products';
+
+      }
+
+      if (previewBtn) previewBtn.disabled = false;
+
+      return;
+
+    }
+
+    batchId = batchData.id;
+
+  } catch (err) {
+
+    console.error(err);
+
+    setCsvStatus('Failed to create import batch (network error). Is the Worker deployed?', 'err');
+
+    if (importBtn) {
+
+      importBtn.disabled = false;
+
+      importBtn.textContent = 'Import products';
+
+    }
+
+    if (previewBtn) previewBtn.disabled = false;
+
+    return;
+
+  }
+
+
+
+  const existingSlugs = new Set(adminProductsList.map(p => p.slug));
+
+  const toImport = csvImportRows.filter(r => r.valid);
+
+  let created = 0;
+
+  let skipped = 0;
+
+  let failed = 0;
+
+  const detailLines = [];
+
+
+
   for (let i = 0; i < toImport.length; i++) {
+
     const row = toImport[i];
-    const { payload } = row;
+
+    const payload = { ...row.payload, import_batch_id: batchId };
+
     setCsvStatus(`Importing ${i + 1} of ${toImport.length}: ${payload.name}`, 'info');
 
+
+
     if (existingSlugs.has(payload.slug)) {
+
       skipped++;
+
       detailLines.push(`Skipped ${payload.name} (slug exists)`);
+
       continue;
+
     }
 
+
+
     try {
+
       const response = await fetch(`${API_BASE}/admin/products`, {
+
         method: 'POST',
+
         headers: {
+
           'Content-Type': 'application/json',
+
           'X-Session-Token': sessionToken
+
         },
+
         body: JSON.stringify(payload)
+
       });
 
+
+
       if (response.ok) {
+
         created++;
+
         existingSlugs.add(payload.slug);
+
         detailLines.push(`Created ${payload.name}`);
+
         if (payload.category) {
+
           payload.category.split(',').forEach(cat => {
+
             const t = cat.trim();
+
             if (t) allCategories.add(t);
+
           });
+
         }
+
       } else {
+
         const error = await response.json().catch(() => ({}));
+
         if (error.error === 'slug_already_exists') {
+
           skipped++;
+
           existingSlugs.add(payload.slug);
+
           detailLines.push(`Skipped ${payload.name} (slug exists)`);
+
         } else {
+
           failed++;
+
           detailLines.push(`Failed ${payload.name}: ${error.error || response.status}`);
+
         }
+
       }
+
     } catch (err) {
+
       failed++;
+
       detailLines.push(`Failed ${payload.name}: network error`);
+
       console.error(err);
+
     }
+
   }
 
-  setCsvStatus(`Import finished: ${created} created, ${skipped} skipped, ${failed} failed.`, failed ? 'err' : 'ok');
+
+
+  setCsvStatus(
+
+    `Import #${batchId} finished: ${created} created, ${skipped} skipped, ${failed} failed.`,
+
+    failed ? 'err' : 'ok'
+
+  );
+
   if (results) {
+
     results.innerHTML = `<ul style="margin:0;padding-left:1.25rem;color:rgb(var(--color-neutral-700));font-size:0.875rem;">${
+
       detailLines.map(line => `<li>${escapeCsvHtml(line)}</li>`).join('')
+
     }</ul>`;
+
   }
+
+
 
   await loadProducts();
+
   renderExistingCategories();
 
+  await loadProductImports();
+
+
+
   const stock = parseInt(document.getElementById('csv-import-stock')?.value || '0', 10) || 0;
-  const file = document.getElementById('csv-import-file')?.files?.[0];
+
   if (file) {
+
     try {
+
       const text = await file.text();
-      const objects = csvRowsToObjects(parseCsvText(text));
+
+      const objects = ProductCsvImport.csvRowsToObjects(ProductCsvImport.parseCsvText(text));
+
       csvImportRows = objects.map(row => mapCsvRowToProduct(row, { stock }));
+
       renderCsvPreview(csvImportRows);
+
     } catch (_) {
+
       /* keep previous preview */
+
     }
+
   }
 
+
+
   if (importBtn) {
+
     const remaining = csvImportRows.filter(
+
       r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+
     ).length;
+
     importBtn.disabled = remaining === 0;
+
     importBtn.textContent = remaining
+
       ? `Import ${remaining} product${remaining === 1 ? '' : 's'}`
+
       : 'Import products';
+
   }
+
   if (previewBtn) previewBtn.disabled = false;
+
 }
 
+
+
+async function loadProductImports() {
+
+  const host = document.getElementById('product-imports-list');
+
+  if (!host) return;
+
+  try {
+
+    const res = await fetch(`${API_BASE}/admin/product-imports`, {
+
+      headers: { 'X-Session-Token': sessionToken }
+
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+
+      host.innerHTML = `<p class="admin-text-muted">Could not load imports (${escapeCsvHtml(data.error || res.status)}). Deploy the Worker if this is a new endpoint.</p>`;
+
+      return;
+
+    }
+
+    const imports = data.imports || [];
+
+    if (!imports.length) {
+
+      host.innerHTML = '<p class="admin-text-muted">No CSV import batches yet.</p>';
+
+      return;
+
+    }
+
+    host.innerHTML = imports.map(batch => {
+
+      const cleaned = batch.cleaned_at
+
+        ? `Cleaned ${escapeCsvHtml(String(batch.cleaned_at).slice(0, 10))}`
+
+        : 'Not cleaned';
+
+      const canCleanup = Number(batch.unsold_count) > 0 || Number(batch.active_count) > 0;
+
+      return `<div class="item-card" style="margin-bottom:0.75rem;">
+
+        <div style="flex:1;">
+
+          <h3 style="margin:0 0 0.35rem;">${escapeCsvHtml(batch.label)} <span class="admin-text-small">#${batch.id}</span></h3>
+
+          <p class="admin-text-muted" style="margin:0;font-size:0.875rem;">
+
+            Created ${escapeCsvHtml(String(batch.created_at || '').slice(0, 10))}
+
+            ${batch.source_filename ? ' · ' + escapeCsvHtml(batch.source_filename) : ''}
+
+            · ${Number(batch.total_products) || 0} products
+
+            · ${Number(batch.sold_count) || 0} sold (kept on cleanup)
+
+            · ${Number(batch.unsold_count) || 0} unsold
+
+            · ${cleaned}
+
+          </p>
+
+        </div>
+
+        <div class="item-actions">
+
+          <button type="button" class="btn-delete" ${canCleanup ? '' : 'disabled'}
+
+            onclick="cleanupProductImport(${batch.id}, ${JSON.stringify(batch.label || '')}, ${Number(batch.unsold_count) || 0}, ${Number(batch.sold_count) || 0})">
+
+            Clean up import
+
+          </button>
+
+        </div>
+
+      </div>`;
+
+    }).join('');
+
+  } catch (err) {
+
+    console.error(err);
+
+    host.innerHTML = '<p class="admin-text-muted">Failed to load import batches.</p>';
+
+  }
+
+}
+
+
+
+async function cleanupProductImport(id, label, unsoldCount, soldCount) {
+
+  const ok = confirm(
+
+    'Clean up import "' + label + '"?\n\n' +
+
+    unsoldCount + ' unsold product(s) will be permanently deleted.\n' +
+
+    soldCount + ' sold product(s) will be kept inactive (order history preserved).\n\n' +
+
+    'This cannot be undone for deleted products.'
+
+  );
+
+  if (!ok) return;
+
+  try {
+
+    const res = await fetch(`${API_BASE}/admin/product-imports/${id}/cleanup`, {
+
+      method: 'POST',
+
+      headers: { 'X-Session-Token': sessionToken }
+
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+
+      alert('Cleanup failed: ' + (data.error || data.message || res.status));
+
+      return;
+
+    }
+
+    alert(
+
+      'Cleanup done.\nDeleted unsold: ' + (data.deleted_unsold || 0) +
+
+      '\nKept sold (inactive): ' + (data.kept_sold_inactive || 0)
+
+    );
+
+    await loadProducts();
+
+    await loadProductImports();
+
+  } catch (err) {
+
+    console.error(err);
+
+    alert('Cleanup failed (network error)');
+
+  }
+
+}
+
+
+
 document.getElementById('product-name').addEventListener('input', (e) => {
+
 const slug = slugifyProductName(e.target.value);
+
 document.getElementById('product-slug').value = slug;
+
 });
+
+
 
 document.getElementById('csv-preview-btn')?.addEventListener('click', () => {
+
   previewCsvImport();
+
 });
+
+
 
 document.getElementById('csv-import-btn')?.addEventListener('click', () => {
+
   runCsvImport();
+
 });
 
-document.getElementById('csv-import-file')?.addEventListener('change', () => {
-  csvImportRows = [];
-  const preview = document.getElementById('csv-import-preview');
-  const results = document.getElementById('csv-import-results');
-  if (preview) preview.innerHTML = '';
-  if (results) results.innerHTML = '';
-  const importBtn = document.getElementById('csv-import-btn');
-  if (importBtn) {
-    importBtn.disabled = true;
-    importBtn.textContent = 'Import products';
-  }
-  setCsvStatus('', 'info');
+
+
+document.getElementById('csv-imports-refresh-btn')?.addEventListener('click', () => {
+
+  loadProductImports();
+
 });
+
+
+
+document.getElementById('csv-import-file')?.addEventListener('change', () => {
+
+  csvImportRows = [];
+
+  const preview = document.getElementById('csv-import-preview');
+
+  const results = document.getElementById('csv-import-results');
+
+  if (preview) preview.innerHTML = '';
+
+  if (results) results.innerHTML = '';
+
+  const importBtn = document.getElementById('csv-import-btn');
+
+  if (importBtn) {
+
+    importBtn.disabled = true;
+
+    importBtn.textContent = 'Import products';
+
+  }
+
+  setCsvStatus('', 'info');
+
+});
+
+
 
 // Category management
 let selectedCategories = [];

@@ -8079,19 +8079,191 @@ app.get('/products/:id', async (c) => {
   }
 })
 
+async function ensureProductImportSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS product_imports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      source_filename TEXT,
+      created_at TEXT NOT NULL,
+      created_by TEXT,
+      product_count INTEGER DEFAULT 0,
+      cleaned_at TEXT
+    )
+  `).run()
+  try {
+    await db.prepare('ALTER TABLE products ADD COLUMN import_batch_id INTEGER').run()
+  } catch (_) {
+    // Column already exists
+  }
+}
+
+async function getImportBatchSaleStats(db, batchId) {
+  const products = await db.prepare(`
+    SELECT id, name, slug, is_active
+    FROM products
+    WHERE import_batch_id = ?
+  `).bind(batchId).all()
+  const list = products.results || []
+  if (!list.length) {
+    return { products: [], soldIds: new Set(), unsoldIds: [] }
+  }
+
+  const soldRows = await db.prepare(`
+    SELECT DISTINCT oi.product_id AS product_id
+    FROM order_items oi
+    WHERE oi.product_id IN (
+      SELECT id FROM products WHERE import_batch_id = ?
+    )
+  `).bind(batchId).all()
+  const soldIds = new Set((soldRows.results || []).map(r => Number(r.product_id)))
+  const unsoldIds = list.filter(p => !soldIds.has(Number(p.id))).map(p => Number(p.id))
+  return { products: list, soldIds, unsoldIds }
+}
+
+// Create a CSV import batch so products can be cleaned up later
+app.post('/admin/product-imports', requireAdmin, async (c) => {
+  try {
+    await ensureProductImportSchema(c.env.DB)
+    const body = await c.req.json().catch(() => ({}))
+    const label = String(body.label || '').trim() || `Import ${new Date().toISOString().slice(0, 10)}`
+    const sourceFilename = String(body.source_filename || '').trim() || null
+    const now = toIso(new Date())
+    const result = await c.env.DB.prepare(`
+      INSERT INTO product_imports (label, source_filename, created_at, created_by, product_count)
+      VALUES (?, ?, ?, ?, 0)
+    `).bind(label, sourceFilename, now, null).run()
+    return c.json({ success: true, id: result.meta.last_row_id, label })
+  } catch (e) {
+    console.error('Create product import error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// List import batches with sold / unsold counts
+app.get('/admin/product-imports', requireAdmin, async (c) => {
+  try {
+    await ensureProductImportSchema(c.env.DB)
+    const batches = await c.env.DB.prepare(`
+      SELECT id, label, source_filename, created_at, product_count, cleaned_at
+      FROM product_imports
+      ORDER BY id DESC
+      LIMIT 100
+    `).all()
+    const rows = batches.results || []
+    const enriched = []
+    for (const batch of rows) {
+      const stats = await getImportBatchSaleStats(c.env.DB, batch.id)
+      enriched.push({
+        ...batch,
+        total_products: stats.products.length,
+        sold_count: stats.soldIds.size,
+        unsold_count: stats.unsoldIds.length,
+        active_count: stats.products.filter(p => Number(p.is_active) === 1).length
+      })
+    }
+    return c.json({ imports: enriched })
+  } catch (e) {
+    console.error('List product imports error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Cleanup an import: hard-delete unsold products; keep sold products inactive
+app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
+  try {
+    await ensureProductImportSchema(c.env.DB)
+    const batchId = parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(batchId)) {
+      return c.json({ error: 'invalid_id' }, 400)
+    }
+
+    const batch = await c.env.DB.prepare('SELECT * FROM product_imports WHERE id = ?').bind(batchId).first()
+    if (!batch) {
+      return c.json({ error: 'not_found' }, 404)
+    }
+
+    const stats = await getImportBatchSaleStats(c.env.DB, batchId)
+    const soldIds = [...stats.soldIds]
+    const unsoldIds = stats.unsoldIds
+    const now = toIso(new Date())
+
+    // Keep sold products for order_items FK + history; hide from shop
+    if (soldIds.length) {
+      const placeholders = soldIds.map(() => '?').join(',')
+      await c.env.DB.prepare(`
+        UPDATE products
+        SET is_active = 0, updated_at = ?
+        WHERE id IN (${placeholders})
+      `).bind(now, ...soldIds).run()
+    }
+
+    // Hard-delete unsold (and clear carts)
+    let deleted = 0
+    if (unsoldIds.length) {
+      const placeholders = unsoldIds.map(() => '?').join(',')
+      await c.env.DB.prepare(`
+        DELETE FROM cart_items WHERE product_id IN (${placeholders})
+      `).bind(...unsoldIds).run().catch(() => {})
+
+      // SEO notify before delete
+      const toDelete = stats.products.filter(p => unsoldIds.includes(Number(p.id)))
+      for (const p of toDelete) {
+        if (p.slug) {
+          const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`
+          notifyContentSeoAsync(c.executionCtx, c.env, {
+            urls: [productUrl],
+            indexingUrl: productUrl,
+            indexingType: 'URL_DELETED'
+          })
+        }
+      }
+
+      const del = await c.env.DB.prepare(`
+        DELETE FROM products WHERE id IN (${placeholders})
+      `).bind(...unsoldIds).run()
+      deleted = del.meta?.changes || unsoldIds.length
+    }
+
+    const remaining = await c.env.DB.prepare(`
+      SELECT COUNT(*) AS c FROM products WHERE import_batch_id = ?
+    `).bind(batchId).first()
+
+    await c.env.DB.prepare(`
+      UPDATE product_imports
+      SET cleaned_at = ?, product_count = ?
+      WHERE id = ?
+    `).bind(now, Number(remaining?.c) || 0, batchId).run()
+
+    return c.json({
+      success: true,
+      deleted_unsold: deleted,
+      kept_sold_inactive: soldIds.length,
+      remaining_products: Number(remaining?.c) || 0
+    })
+  } catch (e) {
+    console.error('Cleanup product import error:', e)
+    return c.json({ error: 'internal_error', message: e.message }, 500)
+  }
+})
+
 // Create new product (admin only - TODO: add authentication)
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date } = await c.req.json()
+    await ensureProductImportSchema(c.env.DB)
+    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id } = await c.req.json()
     
     if (!name || !slug || price === undefined) {
       return c.json({ error: 'missing_required_fields' }, 400)
     }
     
     const now = toIso(new Date())
+    const batchId = import_batch_id != null && import_batch_id !== ''
+      ? parseInt(String(import_batch_id), 10)
+      : null
     const result = await c.env.DB.prepare(`
-      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       name, 
       slug, 
@@ -8104,9 +8276,20 @@ app.post('/admin/products', requireAdmin, async (c) => {
       image_url || null, 
       category || null,
       release_date || null,
+      Number.isFinite(batchId) ? batchId : null,
       now,
       now
     ).run()
+
+    if (Number.isFinite(batchId)) {
+      await c.env.DB.prepare(`
+        UPDATE product_imports
+        SET product_count = (
+          SELECT COUNT(*) FROM products WHERE import_batch_id = ?
+        )
+        WHERE id = ?
+      `).bind(batchId, batchId).run().catch(() => {})
+    }
 
     if (slug) {
       const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`
