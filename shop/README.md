@@ -14,7 +14,7 @@ Separate e-commerce site for shop.dicebastion.com
 
 The shop site includes a GDPR-compliant cookie consent banner:
 - **Essential cookies**: Shopping cart TTL marker (`db_shop_basket_v1`), session management (always active). Cart **line items** are stored in `localStorage` (`shop_cart`), not in the cookie body.
-- **Analytics cookies**: Optional, user can opt-in/out
+- **Analytics**: Optional. When analytics consent is granted, the shop loads [Cloudflare Web Analytics](https://developers.cloudflare.com/web-analytics/) (`beacon.min.js`) using `params.cloudflareWebAnalyticsToken` in `hugo.toml`. Do **not** enable automatic beacon injection on the zone or Pages project — that would bypass the banner.
 - Main site (dicebastion.com) remains cookie-free
 
 ## Shopping cart (current design)

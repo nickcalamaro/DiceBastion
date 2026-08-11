@@ -8,6 +8,9 @@ disableKinds = ["taxonomy", "term"]
 
 [params]
   description = "Shop board games, Magic: The Gathering (MTG), trading cards, and accessories in Gibraltar."
+  # Cloudflare Web Analytics site token (Manage site → JS snippet). Loaded only after analytics consent.
+  # Do not enable automatic beacon injection on the zone/Pages project — consent gates the manual snippet.
+  cloudflareWebAnalyticsToken = "e50216d0fa47433f9fdbae148fc61265"
 
 [markup.goldmark.renderer]
   unsafe = true
