@@ -13,9 +13,21 @@ Separate e-commerce site for shop.dicebastion.com
 ## Cookie Compliance
 
 The shop site includes a GDPR-compliant cookie consent banner:
-- **Essential cookies**: Shopping cart, session management (always active)
+- **Essential cookies**: Shopping cart TTL marker (`db_shop_basket_v1`), session management (always active). Cart **line items** are stored in `localStorage` (`shop_cart`), not in the cookie body.
 - **Analytics cookies**: Optional, user can opt-in/out
 - Main site (dicebastion.com) remains cookie-free
+
+## Shopping cart (current design)
+
+Client-side only — intentional for a small guest-checkout shop:
+
+| Storage | Role |
+|---------|------|
+| `localStorage` `shop_cart` | Cart line items (product id, qty, etc.) |
+| `localStorage` `shop_cart_expires_at` | Sliding expiry timestamp |
+| Cookie `db_shop_basket_v1` | Essential TTL/presence marker (not the cart JSON) |
+
+Implemented in `shop/static/js/shopCartStorage.js`. Checkout creates `orders` / `order_items` in D1 on payment. The D1 `cart_items` table is **reserved and unused** (empty is expected). Revisit DB-backed carts only for abandoned-cart emails, cross-device sync when logged in, or server-side inventory holds.
 
 ## Database Schema
 
@@ -60,7 +72,10 @@ The shop site includes a GDPR-compliant cookie consent banner:
 - subtotal: INTEGER
 ```
 
-### Cart Items Table (temporary carts)
+### Cart Items Table (reserved / unused)
+
+Schema exists for a possible future DB-backed cart. **Not written by the live shop.** Active baskets use `ShopCartStorage` (localStorage + TTL cookie). See “Shopping cart (current design)” above.
+
 ```sql
 - id: INTEGER PRIMARY KEY
 - session_id: TEXT (client-generated UUID)
@@ -191,10 +206,9 @@ curl https://dicebastion-memberships.ncalamaro.workers.dev/products
 ## Next Steps (TODO)
 
 ### Shopping Cart
-- [ ] Implement session-based cart (localStorage + API sync)
-- [ ] Add/remove items
-- [ ] Update quantities
-- [ ] Cart persistence
+- [x] Client-side cart (`ShopCartStorage`: localStorage + TTL cookie)
+- [x] Add/remove items and quantities (shop UI)
+- [ ] DB-backed / abandoned-cart sync — only if cross-device or email recovery is required
 
 ### Checkout
 - [ ] Create order from cart

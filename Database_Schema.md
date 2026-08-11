@@ -149,6 +149,10 @@ CREATE TABLE order_items (
         FOREIGN KEY (product_id) REFERENCES products(id)
       );
 CREATE TABLE cart_items (
+        -- Reserved / unused for now. Active shop baskets are client-side only:
+        -- localStorage key shop_cart + TTL cookie db_shop_basket_v1
+        -- (see shop/static/js/shopCartStorage.js). Checkout writes orders/order_items.
+        -- Wire this table only if adding abandoned-cart recovery or cross-device carts.
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
         product_id INTEGER NOT NULL,
