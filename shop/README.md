@@ -29,6 +29,10 @@ Client-side only — intentional for a small guest-checkout shop:
 
 Implemented in `shop/static/js/shopCartStorage.js`. Checkout creates `orders` / `order_items` in D1 on payment. The D1 `cart_items` table is **reserved and unused** (empty is expected). Revisit DB-backed carts only for abandoned-cart emails, cross-device sync when logged in, or server-side inventory holds.
 
+## Product share previews (`/?product=slug`)
+
+Pages Function [`functions/_middleware.js`](functions/_middleware.js) detects social/SEO bots and returns minimal HTML with `og:title`, `og:description` (summary → description → stripped full description), and `og:image`. Humans always receive the Hugo homepage + product modal. Worker SEO at `/products/:slug` is unchanged for Google.
+
 ## Database Schema
 
 ### Products Table
@@ -137,8 +141,11 @@ hugo --minify
 **Option A: Via Wrangler**
 ```powershell
 cd C:\Users\nickc\Dev\DiceBastion\shop
+hugo --minify
 wrangler pages deploy public --project-name=dicebastion-shop
 ```
+
+`shop/functions/` (Pages Functions) sits beside the Hugo `public/` output. Deploying from the `shop/` directory picks up `_middleware.js` so bots that hit `/?product=slug` (WhatsApp, Facebook, Discord, etc.) receive product Open Graph tags (image + summary/description). Humans still get the normal Hugo shop. Redeploy **Pages** after changing Functions; Worker deploy is not required for share previews.
 
 **Option B: Via Cloudflare Dashboard**
 1. Go to Cloudflare Pages
