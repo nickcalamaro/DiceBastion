@@ -965,6 +965,22 @@ function bindProductGridActions() {
         if (row) clampGridQtyInput(row, product);
         applyFilters();
       }
+      return;
+    }
+
+    // Soft-open product modal (no full reload). Keep href="/products/slug" for SEO
+    // and for ctrl/cmd/middle-click → real Worker SEO URL.
+    const link = e.target.closest('a.product-card-link');
+    if (link && grid.contains(link)) {
+      if (e.defaultPrevented) return;
+      if (e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      const pid = parseInt(link.getAttribute('data-product-id'), 10);
+      const slug = link.getAttribute('data-product-slug') || '';
+      if (Number.isFinite(pid) && pid > 0) {
+        showProductDetail(pid, slug);
+      }
     }
   });
 }
@@ -1182,13 +1198,16 @@ function renderProducts(products) {
 
       const quickAdd = renderQuickAddBlock(product);
 
+      const slugRaw = product.slug || '';
+      const slugAttr = escapeHtml(slugRaw);
+      const slugHref = encodeURIComponent(slugRaw);
+
       return `
 <div class="product-card">
-    <a href="/products/${
-      product.slug
-    }" class="product-card-link" onclick="event.preventDefault(); showProductDetail(${
-      product.id
-    }, ${JSON.stringify(product.slug || '')});">
+    <a href="/products/${slugHref}"
+       class="product-card-link"
+       data-product-id="${product.id}"
+       data-product-slug="${slugAttr}">
     ${productImageHtml(product.image_url, nameHtml, 'product-image')}
       ${
         isPreorder
