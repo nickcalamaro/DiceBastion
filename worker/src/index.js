@@ -7599,7 +7599,7 @@ function generateProductSeoPage(product, allCategories) {
   const rawDesc = product.full_description || product.summary || product.description || '';
   const plainDesc = stripHtml(rawDesc);
   const fallbackBlurb =
-    'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local pickup at Gibraltar Warhammer Club.';
+    'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local collection available.';
   const plainForMeta = plainDesc || fallbackBlurb;
   const descTrunc = plainForMeta.length > 160 ? plainForMeta.substring(0, 157) + '...' : plainForMeta;
   const desc = e(descTrunc);
@@ -7747,7 +7747,7 @@ ${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a cla
 ${fullDescHtml ? `<div class="desc">${fullDescHtml}</div>` : `<div class="desc">${e(plainForMeta)}</div>`}
 <div class="meta">
 <div class="meta-item"><span class="meta-label">Availability</span><span class="meta-value">${isPreorder ? `<span class="badge badge-preorder">Pre-order · ${releaseDateStr}</span>` : inStock ? `<span class="badge badge-stock">${product.stock_quantity} in stock</span>` : '<span class="badge badge-out">Out of stock</span>'}</span></div>
-<div class="meta-item"><span class="meta-label">Pickup</span><span class="meta-value">Gibraltar Warhammer Club</span></div>
+<div class="meta-item"><span class="meta-label">Pickup</span><span class="meta-value">Local collection</span></div>
 </div>
 <a class="${inStock || isPreorder ? 'cta' : 'cta cta-disabled'}" href="${shop}/?product=${slug}">${isPreorder ? 'Pre-order Now' : inStock ? 'View in Shop' : 'Out of Stock'}</a>
 </div>
@@ -7762,7 +7762,7 @@ function generateCategorySeoPage(categoryName, products) {
   const shop = 'https://shop.dicebastion.com';
   const catDisplay = e(categoryName);
   const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
-  const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local pickup at Gibraltar Warhammer Club.`;
+  const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`;
 
   // CollectionPage + ItemList schema
   const schema = {
@@ -10935,7 +10935,9 @@ function formatPlainShipping(raw) {
 
 function buildShopBuyerEmail(order, items) {
   const isDelivery = !!order.shipping_address
-  const deliveryLabel = isDelivery ? 'Local delivery (£4)' : 'Collection (free) — Gibraltar Warhammer Club'
+  const deliveryLabel = isDelivery
+    ? 'Local delivery (£4)'
+    : 'Local collection (free). We\'ll arrange a time with you, usually within 24 hours.'
   const disc = Number(order.discount_pence || 0)
 
   const itemsRows = (items || []).map(item => `
@@ -10977,7 +10979,10 @@ function buildShopBuyerEmail(order, items) {
     <p style="margin:0.25rem 0;"><strong>Shipping:</strong> ${order.shipping ? pennyToMoneyLine(order.shipping) : 'FREE'}</p>
     <p style="margin:0.25rem 0;"><strong>Total:</strong> ${pennyToMoneyLine(order.total)}</p>
 
-    <p>We'll email when your items are ready. Questions? Reply to this email or contact <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+    <p>${isDelivery
+      ? 'We\'ll be in touch about delivery.'
+      : 'We\'ll arrange a collection time with you, usually within 24 hours.'
+    } Questions? Reply to this email or contact <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
     <p>— The Dice Bastion Team</p>
   `
 
@@ -10985,7 +10990,7 @@ function buildShopBuyerEmail(order, items) {
     `Hi ${order.name || 'there'},`,
     '',
     `Your order ${order.order_number} is confirmed.`,
-    `Delivery: ${isDelivery ? 'Local delivery' : 'Collection'}`,
+    `Delivery: ${isDelivery ? 'Local delivery' : 'Local collection (we\'ll arrange a time with you, usually within 24 hours)'}`,
     ...(plainShip ? ['', plainShip] : []),
     ...(humanNotes ? ['', humanNotes.slice(0, 800)] : []),
     '',
@@ -11080,7 +11085,7 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
       total: Number(refreshed.total || 0) / 100,
       discountPence: Number(refreshed.discount_pence || 0),
       promoCodeApplied: refreshed.promo_code_applied || '',
-      deliveryMethod: refreshed.shipping_address ? 'Local delivery' : 'Collection',
+      deliveryMethod: refreshed.shipping_address ? 'Local delivery' : 'Local collection',
       orderNotes: String(refreshed.notes || '').replace(/^\[delivery:[^\]]+\]\s*/, '').trim(),
       shippingPlain,
       items: items.results || []

@@ -34,7 +34,7 @@ description: "Commission a custom playmat designed by Jen. About two weeks turna
 <div class="playmat-phase">
 <span class="playmat-phase-label">Step 4</span>
 <h3>Print</h3>
-<p>Once you sign off, the mat goes to print! Collect from the Gibraltar Warhammer Club or arrange for local delivery.</p>
+<p>Once you sign off, the mat goes to print! Local collection (we'll arrange a time with you, usually within 24 hours) or arrange for local delivery.</p>
 </div>
 </div>
 </div>
