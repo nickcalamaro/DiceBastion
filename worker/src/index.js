@@ -6834,26 +6834,15 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
           AND ${paidSql('t')}
           AND ${dateSql('t')}
       `),
+      // /drinks checkout stores name 'Walk-in' / email 'walk-in' (single or mixed baskets).
+      // Online shop.dicebastion.com orders are intentionally excluded from this report.
       runLines(`
         SELECT o.id AS id, o.created_at AS created_at,
-          CASE
-            WHEN o.total = 100 THEN 'Soft Drink / Water'
-            WHEN o.total = 200 THEN 'Beer / Energy Drink'
-          END AS category,
-          o.total / 100.0 AS amount_pounds
-        FROM orders o
-        WHERE o.name = 'Walk-in'
-          AND ${paidSql('o')}
-          AND o.total IN (100, 200)
-          AND ${dateSql('o')}
-      `),
-      runLines(`
-        SELECT o.id AS id, o.created_at AS created_at,
-          'shop' AS category,
+          'drinks' AS category,
           o.total / 100.0 AS amount_pounds
         FROM orders o
         WHERE ${paidSql('o')}
-          AND NOT (o.name = 'Walk-in' AND o.total IN (100, 200))
+          AND (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
           AND ${dateSql('o')}
       `)
     ])

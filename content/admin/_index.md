@@ -926,7 +926,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Walk-in drinks are listed separately from shop orders.</p>
+<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Includes memberships, renewals, donations, event bundles, and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="accounts-from">From</label>
@@ -3256,9 +3256,7 @@ function accountsCategoryLabel(raw) {
     bundle: 'Event + membership bundle',
     renewal: 'Renewal',
     donation: 'Donation',
-    shop: 'Shop order',
-    'Soft Drink / Water': 'Soft drink / water',
-    'Beer / Energy Drink': 'Beer / energy drink'
+    drinks: 'Drinks'
   };
   return map[raw] || raw;
 }
