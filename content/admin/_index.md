@@ -926,7 +926,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Includes memberships, renewals, donations, event bundles, and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
+<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Includes memberships, renewals, donations, event+membership bundles (membership portion only — event ticket fees are excluded), and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="accounts-from">From</label>
@@ -3250,10 +3250,10 @@ function accountsCategoryLabel(raw) {
     membership_quarterly: 'Membership (quarterly)',
     membership_annual: 'Membership (annual)',
     membership: 'Membership',
-    bundle_monthly: 'Event + membership bundle (monthly)',
-    bundle_quarterly: 'Event + membership bundle (quarterly)',
-    bundle_annual: 'Event + membership bundle (annual)',
-    bundle: 'Event + membership bundle',
+    bundle_monthly: 'Bundle membership only (monthly)',
+    bundle_quarterly: 'Bundle membership only (quarterly)',
+    bundle_annual: 'Bundle membership only (annual)',
+    bundle: 'Bundle membership only',
     renewal: 'Renewal',
     donation: 'Donation',
     drinks: 'Drinks'

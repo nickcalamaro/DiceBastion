@@ -6814,6 +6814,7 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
           AND ${paidSql('t')}
           AND ${dateSql('t')}
       `),
+      // Event+membership bundles: count membership plan price only (£10/£25/£90), not the event ticket.
       runLines(`
         SELECT t.id AS id, t.created_at AS created_at,
           CASE m.plan
