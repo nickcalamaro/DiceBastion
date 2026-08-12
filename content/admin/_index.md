@@ -306,6 +306,7 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
+<button class="admin-tab-btn tab-btn" data-tab="accounts" id="accounts-tab-btn" style="display: none;">Accounts</button>
 <button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings & Calendar</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 <button class="admin-tab-btn tab-btn" data-tab="newsletter">Newsletter</button>
@@ -321,6 +322,7 @@ Logout
 <a href="#registrations">Registrations</a>
 <a href="#orders">Orders</a>
 <a href="#memberships">Memberships</a>
+<a href="#accounts" id="accounts-jump-link" style="display: none;">Accounts</a>
 <a href="#bookings">Bookings</a>
 <a href="#bookings-upcoming">Upcoming</a>
 <a href="#cron">Cron</a>
@@ -917,6 +919,81 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div id="orders-tab" class="tab-content" style="display: none;">
 <h2 id="admin-section-orders" class="admin-section-heading">Recent Orders <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
 <div id="orders-list"></div>
+</div>
+
+<!-- Accounts Tab (owner-only) -->
+<div id="accounts-tab" class="tab-content" style="display: none;">
+<div class="admin-flex-between admin-mb-2">
+<h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
+</div>
+<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Walk-in drinks are listed separately from shop orders.</p>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="accounts-from">From</label>
+<input type="date" id="accounts-from" class="form-input">
+</div>
+<div>
+<label class="form-label" for="accounts-to">To</label>
+<input type="date" id="accounts-to" class="form-input">
+</div>
+<button type="button" id="accounts-run-btn" class="btn btn-primary">Run report</button>
+<button type="button" id="accounts-csv-btn" class="btn btn-secondary" disabled>Download CSV</button>
+</div>
+<p id="accounts-status" class="admin-text-small admin-mb-1"></p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+<div class="stat-card" style="background: rgb(var(--color-primary-700));">
+<div class="stat-card-label">Line items</div>
+<div class="stat-card-value" id="accounts-stat-qty">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-primary-600));">
+<div class="stat-card-label">Gross</div>
+<div class="stat-card-value" id="accounts-stat-gross">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-700));">
+<div class="stat-card-label">Net payout</div>
+<div class="stat-card-value" id="accounts-stat-net">-</div>
+</div>
+</div>
+<h3 class="admin-section-heading">Sales by category</h3>
+<div class="table-wrapper admin-mb-2">
+<div style="overflow-x: auto;">
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th style="text-align: right;">Qty</th>
+<th style="text-align: right;">Gross</th>
+<th style="text-align: right;">Net</th>
+</tr>
+</thead>
+<tbody id="accounts-category-list">
+<tr>
+<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<h3 class="admin-section-heading">Line items</h3>
+<div class="table-wrapper">
+<div style="overflow-x: auto;">
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Category</th>
+<th style="text-align: right;">Amount</th>
+<th style="text-align: right;">Net</th>
+</tr>
+</thead>
+<tbody id="accounts-line-list">
+<tr>
+<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
 </div>
 
 <!-- Memberships Tab -->
@@ -2092,6 +2169,7 @@ loadOrders();
 loadRegistrations();
 loadCronLogs();
 loadShopPromoCodes();
+revealAccountsTabIfOwner();
 handleAdminHash();
 // Verify session is still valid in background
 verifySession();
@@ -2127,6 +2205,13 @@ sessionToken = null;
 currentUser = null;
 document.getElementById('login-container').style.display = 'block';
 document.getElementById('admin-dashboard').style.display = 'none';
+} else {
+const data = await res.json().catch(() => ({}));
+if (data.user) {
+currentUser = data.user;
+localStorage.setItem('admin_user', JSON.stringify(currentUser));
+}
+revealAccountsTabIfOwner();
 }
 // If OK, dashboard is already showing - do nothing
 } catch (err) {
@@ -2170,6 +2255,7 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
 loadRegistrations();
 loadCronLogs();
       loadShopPromoCodes();
+      revealAccountsTabIfOwner();
       handleAdminHash();
 } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
@@ -3119,7 +3205,181 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 });
 
 // Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
-const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'bookings', 'cron', 'newsletter', 'blog'];
+const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'accounts', 'bookings', 'cron', 'newsletter', 'blog'];
+const ACCOUNTS_OWNER_EMAIL = 'ncalamaro@gmail.com';
+let accountsReportRows = [];
+
+function isAccountsOwnerClient() {
+  const email = (currentUser && currentUser.email ? currentUser.email : '').trim().toLowerCase();
+  return email === ACCOUNTS_OWNER_EMAIL;
+}
+
+function revealAccountsTabIfOwner() {
+  const show = isAccountsOwnerClient();
+  const btn = document.getElementById('accounts-tab-btn');
+  const jump = document.getElementById('accounts-jump-link');
+  if (btn) btn.style.display = show ? '' : 'none';
+  if (jump) jump.style.display = show ? '' : 'none';
+  if (show) setDefaultAccountsDates();
+}
+
+function padAccountsDate(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatAccountsIsoDate(d) {
+  return `${d.getFullYear()}-${padAccountsDate(d.getMonth() + 1)}-${padAccountsDate(d.getDate())}`;
+}
+
+function setDefaultAccountsDates() {
+  const fromEl = document.getElementById('accounts-from');
+  const toEl = document.getElementById('accounts-to');
+  if (!fromEl || !toEl) return;
+  if (fromEl.value && toEl.value) return;
+  const now = new Date();
+  const firstThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastPrev = new Date(firstThisMonth.getTime() - 1);
+  const firstPrev = new Date(lastPrev.getFullYear(), lastPrev.getMonth(), 1);
+  fromEl.value = formatAccountsIsoDate(firstPrev);
+  toEl.value = formatAccountsIsoDate(lastPrev);
+}
+
+function accountsCategoryLabel(raw) {
+  const map = {
+    membership_monthly: 'Membership (monthly)',
+    membership_quarterly: 'Membership (quarterly)',
+    membership_annual: 'Membership (annual)',
+    membership: 'Membership',
+    bundle_monthly: 'Event + membership bundle (monthly)',
+    bundle_quarterly: 'Event + membership bundle (quarterly)',
+    bundle_annual: 'Event + membership bundle (annual)',
+    bundle: 'Event + membership bundle',
+    renewal: 'Renewal',
+    donation: 'Donation',
+    shop: 'Shop order',
+    'Soft Drink / Water': 'Soft drink / water',
+    'Beer / Energy Drink': 'Beer / energy drink'
+  };
+  return map[raw] || raw;
+}
+
+function formatAccountsGbp(n) {
+  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(Number(n) || 0);
+}
+
+function formatAccountsWhen(iso) {
+  const d = new Date(String(iso || '').includes('T') || String(iso || '').includes(' ') ? String(iso).replace(' ', 'T') : iso);
+  if (Number.isNaN(d.getTime())) return String(iso || '').slice(0, 16);
+  return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function escapeAccountsHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadAccountsReport() {
+  if (!isAccountsOwnerClient() || !sessionToken) return;
+  const from = document.getElementById('accounts-from')?.value;
+  const to = document.getElementById('accounts-to')?.value;
+  const status = document.getElementById('accounts-status');
+  const runBtn = document.getElementById('accounts-run-btn');
+  const csvBtn = document.getElementById('accounts-csv-btn');
+  if (!from || !to) {
+    if (status) status.textContent = 'Choose a from and to date.';
+    return;
+  }
+  if (runBtn) runBtn.disabled = true;
+  if (status) status.textContent = 'Loading…';
+  try {
+    const res = await fetch(`${API_BASE}/admin/accounts/sales?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      revealAccountsTabIfOwner();
+      if (status) status.textContent = 'This report is not available for this account.';
+      return;
+    }
+    if (!res.ok) throw new Error(data.error || res.statusText);
+
+    const categories = data.categories || [];
+    const lines = data.line_items || [];
+    accountsReportRows = lines;
+    const totals = data.totals || {};
+
+    document.getElementById('accounts-stat-qty').textContent = String(totals.quantity || 0);
+    document.getElementById('accounts-stat-gross').textContent = formatAccountsGbp(totals.total_pounds);
+    document.getElementById('accounts-stat-net').textContent = formatAccountsGbp(totals.net_payout);
+
+    const catBody = document.getElementById('accounts-category-list');
+    if (!categories.length) {
+      catBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+    } else {
+      catBody.innerHTML = categories.map(row => `
+        <tr>
+          <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(row.quantity)}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.total_pounds))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
+        </tr>
+      `).join('') + `
+        <tr>
+          <td><strong>Total</strong></td>
+          <td style="text-align: right;"><strong>${escapeAccountsHtml(totals.quantity || 0)}</strong></td>
+          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.total_pounds))}</strong></td>
+          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.net_payout))}</strong></td>
+        </tr>`;
+    }
+
+    const lineBody = document.getElementById('accounts-line-list');
+    if (!lines.length) {
+      lineBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+    } else {
+      lineBody.innerHTML = lines.map(row => `
+        <tr>
+          <td>${escapeAccountsHtml(formatAccountsWhen(row.created_at))}</td>
+          <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.amount_pounds))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
+        </tr>
+      `).join('');
+    }
+
+    if (csvBtn) csvBtn.disabled = !lines.length;
+    if (status) status.textContent = `${lines.length} line item${lines.length === 1 ? '' : 's'} from ${from} to ${to}.`;
+  } catch (err) {
+    console.error('Accounts report error:', err);
+    if (status) status.textContent = 'Could not load the report. ' + String(err.message || err);
+  } finally {
+    if (runBtn) runBtn.disabled = false;
+  }
+}
+
+function downloadAccountsCsv() {
+  if (!accountsReportRows.length) return;
+  const header = ['date', 'category', 'amount_pounds', 'net_payout'];
+  const lines = [header.join(',')].concat(accountsReportRows.map(row => {
+    const cells = [
+      row.created_at,
+      accountsCategoryLabel(row.category),
+      Number(row.amount_pounds).toFixed(2),
+      Number(row.net_payout).toFixed(2)
+    ];
+    return cells.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+  }));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  const from = document.getElementById('accounts-from')?.value || 'from';
+  const to = document.getElementById('accounts-to')?.value || 'to';
+  a.href = URL.createObjectURL(blob);
+  a.download = `dicebastion-accounts-${from}-to-${to}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 function scrollToAdminSection(sectionId) {
   const el = document.getElementById(sectionId);
@@ -3127,6 +3387,7 @@ function scrollToAdminSection(sectionId) {
 }
 
 function switchAdminTab(tab, options = {}) {
+  if (tab === 'accounts' && !isAccountsOwnerClient()) return false;
   const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
   if (!btn) return false;
   document.querySelectorAll('.tab-btn').forEach(b => {
@@ -3143,6 +3404,7 @@ function switchAdminTab(tab, options = {}) {
   if (tab === 'activity') loadRecentActivity();
   if (tab === 'bookings') loadBookingsAndCalendar();
   if (tab === 'memberships') loadMemberships();
+  if (tab === 'accounts') loadAccountsReport();
   if (tab === 'newsletter') {
     loadNewsletterRecipients();
     loadNewsletterEvents();
@@ -3188,6 +3450,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     switchAdminTab(tab);
   });
 });
+
+document.getElementById('accounts-run-btn')?.addEventListener('click', () => loadAccountsReport());
+document.getElementById('accounts-csv-btn')?.addEventListener('click', () => downloadAccountsCsv());
 
 // Image Upload Handlers
 document.getElementById('product-image-upload').addEventListener('change', (e) => {

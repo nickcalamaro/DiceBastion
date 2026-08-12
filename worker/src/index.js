@@ -4112,6 +4112,35 @@ async function requireAdmin(c, next) {
   return c.json({ error: 'unauthorized' }, 401)
 }
 
+const ACCOUNTS_OWNER_EMAIL = 'ncalamaro@gmail.com'
+const ACCOUNTS_ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function isAccountsOwnerEmail(email) {
+  return String(email || '').trim().toLowerCase() === ACCOUNTS_OWNER_EMAIL
+}
+
+async function requireAccountsOwner(c, next) {
+  const user = c.get('adminUser')
+  if (!isAccountsOwnerEmail(user?.email)) {
+    return c.json({ error: 'forbidden' }, 403)
+  }
+  return next()
+}
+
+function parseAccountsIsoDate(value) {
+  const s = String(value || '').trim()
+  if (!ACCOUNTS_ISO_DATE_RE.test(s)) return null
+  const [y, m, d] = s.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null
+  return s
+}
+
+function accountsPounds(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
 // Client-side payment telemetry beacon.
 // The SumUp card widget runs entirely in the browser, so card-auth failures (3DS/SCA
 // declines, cancellations, widget load errors) never reach our server unless we report
@@ -6713,6 +6742,168 @@ app.get('/admin/cron-logs', async c => {
   } catch (error) {
     console.error('[Cron Logs] ERROR:', error)
     return c.json({ error: 'internal_error', message: error.message }, 500)  }
+})
+
+// ============================================================================
+// ADMIN ACCOUNTS (owner-only sales report)
+// ============================================================================
+
+app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const url = new URL(c.req.url)
+    const from = parseAccountsIsoDate(url.searchParams.get('from'))
+    const to = parseAccountsIsoDate(url.searchParams.get('to'))
+    if (!from || !to) {
+      return c.json({ error: 'invalid_date_range' }, 400)
+    }
+    if (from > to) {
+      return c.json({ error: 'from_after_to' }, 400)
+    }
+    const fromMs = Date.parse(`${from}T00:00:00Z`)
+    const toMs = Date.parse(`${to}T00:00:00Z`)
+    if (toMs - fromMs > 400 * 24 * 60 * 60 * 1000) {
+      return c.json({ error: 'range_too_long' }, 400)
+    }
+
+    const db = c.env.DB
+    const dateSql = (alias) =>
+      `strftime('%Y-%m-%d', ${alias}.created_at) >= ? AND strftime('%Y-%m-%d', ${alias}.created_at) <= ?`
+    const paidSql = (alias) => `UPPER(COALESCE(${alias}.payment_status, '')) = 'PAID'`
+
+    async function runLines(sql) {
+      try {
+        const rows = await db.prepare(sql).bind(from, to).all()
+        return rows.results || []
+      } catch (e) {
+        console.warn('[admin/accounts/sales] query failed:', e.message)
+        return []
+      }
+    }
+
+    const chunks = await Promise.all([
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          CASE m.plan
+            WHEN 'monthly' THEN 'membership_monthly'
+            WHEN 'quarterly' THEN 'membership_quarterly'
+            WHEN 'annual' THEN 'membership_annual'
+            ELSE 'membership'
+          END AS category,
+          t.amount * 1.0 AS amount_pounds
+        FROM memberships m
+        JOIN transactions t ON t.order_ref = m.order_ref
+        WHERE t.transaction_type = 'membership'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          'renewal' AS category,
+          t.amount * 1.0 AS amount_pounds
+        FROM transactions t
+        WHERE t.transaction_type = 'renewal'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          'donation' AS category,
+          t.amount * 1.0 AS amount_pounds
+        FROM transactions t
+        WHERE t.transaction_type = 'donation'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          CASE m.plan
+            WHEN 'monthly' THEN 'bundle_monthly'
+            WHEN 'quarterly' THEN 'bundle_quarterly'
+            WHEN 'annual' THEN 'bundle_annual'
+            ELSE 'bundle'
+          END AS category,
+          CASE m.plan
+            WHEN 'monthly' THEN 10
+            WHEN 'quarterly' THEN 25
+            WHEN 'annual' THEN 90
+            ELSE t.amount * 1.0
+          END AS amount_pounds
+        FROM memberships m
+        JOIN transactions t ON t.order_ref = m.order_ref
+        WHERE t.transaction_type = 'event_membership_bundle'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      runLines(`
+        SELECT o.id AS id, o.created_at AS created_at,
+          CASE
+            WHEN o.total = 100 THEN 'Soft Drink / Water'
+            WHEN o.total = 200 THEN 'Beer / Energy Drink'
+          END AS category,
+          o.total / 100.0 AS amount_pounds
+        FROM orders o
+        WHERE o.name = 'Walk-in'
+          AND ${paidSql('o')}
+          AND o.total IN (100, 200)
+          AND ${dateSql('o')}
+      `),
+      runLines(`
+        SELECT o.id AS id, o.created_at AS created_at,
+          'shop' AS category,
+          o.total / 100.0 AS amount_pounds
+        FROM orders o
+        WHERE ${paidSql('o')}
+          AND NOT (o.name = 'Walk-in' AND o.total IN (100, 200))
+          AND ${dateSql('o')}
+      `)
+    ])
+
+    const lineItems = chunks.flat().map(row => {
+      const amount = accountsPounds(row.amount_pounds)
+      return {
+        id: row.id,
+        created_at: row.created_at,
+        category: row.category || 'other',
+        amount_pounds: Math.round(amount * 100) / 100,
+        net_payout: Math.round(amount * 0.95 * 100) / 100
+      }
+    }).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+
+    const grouped = new Map()
+    for (const item of lineItems) {
+      const prev = grouped.get(item.category) || { category: item.category, quantity: 0, total_pounds: 0, net_payout: 0 }
+      prev.quantity += 1
+      prev.total_pounds += item.amount_pounds
+      prev.net_payout += item.net_payout
+      grouped.set(item.category, prev)
+    }
+
+    const categories = [...grouped.values()]
+      .map(row => ({
+        ...row,
+        total_pounds: Math.round(row.total_pounds * 100) / 100,
+        net_payout: Math.round(row.net_payout * 100) / 100
+      }))
+      .sort((a, b) => a.category.localeCompare(b.category))
+
+    const gross = lineItems.reduce((sum, row) => sum + row.amount_pounds, 0)
+    const net = lineItems.reduce((sum, row) => sum + row.net_payout, 0)
+
+    return c.json({
+      from,
+      to,
+      categories,
+      line_items: lineItems,
+      totals: {
+        quantity: lineItems.length,
+        total_pounds: Math.round(gross * 100) / 100,
+        net_payout: Math.round(net * 100) / 100
+      }
+    })
+  } catch (error) {
+    console.error('[admin/accounts/sales] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
 })
 
 // ============================================================================
