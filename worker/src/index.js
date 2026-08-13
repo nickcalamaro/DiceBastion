@@ -7777,15 +7777,17 @@ function generateProductSeoPage(product, allCategories) {
   const slug = product.slug || '';
   const productImages = collectProductImageUrls(product, shop);
   const img = resolveProductPrimaryImage(product, shop);
-  const rawDesc = product.full_description || product.summary || product.description || '';
-  const plainDesc = stripHtml(rawDesc);
-  const fallbackBlurb =
+  // Meta/snippets prefer summary (short); body can still show full HTML description.
+  const summaryPlain = stripHtml(product.summary || '');
+  const descriptionPlain = stripHtml(product.description || '');
+  const fullPlain = stripHtml(product.full_description || '');
+  const plainForMeta = summaryPlain || descriptionPlain || fullPlain ||
     'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local collection available.';
-  const plainForMeta = plainDesc || fallbackBlurb;
   const descTrunc = plainForMeta.length > 160 ? plainForMeta.substring(0, 157) + '...' : plainForMeta;
   const desc = e(descTrunc);
-  const fullDescHtml = rawDesc;  // Keep HTML for visual display
-  const url = `${shop}/products/${slug}`;
+  const bodyHtml = product.full_description || product.description || product.summary || '';
+  const shopModalUrl = `${shop}/?product=${encodeURIComponent(slug)}`;
+  const url = `${shop}/products/${encodeURIComponent(slug)}`;
   const priceNum = (Number(product.price) || 0) / 100;
   const priceDisplay = priceNum.toFixed(2);
   const inStock = (product.stock_quantity || 0) > 0;
@@ -7925,15 +7927,16 @@ ${img ? `<img src="${img}" alt="${name}" loading="eager" decoding="async" fetchp
 <h1>${name}</h1>
 ${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${shop}/products/category/${encodeURIComponent(c)}">${e(c)}</a>`).join('')}</div>` : ''}
 <div class="price">£${priceDisplay}</div>
-${fullDescHtml ? `<div class="desc">${fullDescHtml}</div>` : `<div class="desc">${e(plainForMeta)}</div>`}
+${bodyHtml ? `<div class="desc">${bodyHtml}</div>` : `<div class="desc">${e(plainForMeta)}</div>`}
 <div class="meta">
 <div class="meta-item"><span class="meta-label">Availability</span><span class="meta-value">${isPreorder ? `<span class="badge badge-preorder">Pre-order · ${releaseDateStr}</span>` : inStock ? `<span class="badge badge-stock">${product.stock_quantity} in stock</span>` : '<span class="badge badge-out">Out of stock</span>'}</span></div>
 <div class="meta-item"><span class="meta-label">Pickup</span><span class="meta-value">Local collection</span></div>
 </div>
-<a class="${inStock || isPreorder ? 'cta' : 'cta cta-disabled'}" href="${shop}/?product=${slug}">${isPreorder ? 'Pre-order Now' : inStock ? 'View in Shop' : 'Out of Stock'}</a>
+<p class="desc" style="margin-top:0.5rem;font-size:0.9rem;">Opens this product in the Dice Bastion shop.</p>
+<a class="${inStock || isPreorder ? 'cta' : 'cta cta-disabled'}" href="${shopModalUrl}">${isPreorder ? 'Pre-order in shop' : inStock ? 'Open in shop' : 'Out of Stock'}</a>
 </div>
 </div>
-<div class="footer"><a href="${shop}">← Back to Shop</a></div>
+<div class="footer"><a href="${shop}">Back to Shop</a></div>
 </body></html>`;
 }
 
@@ -7943,7 +7946,9 @@ function generateCategorySeoPage(categoryName, products) {
   const shop = 'https://shop.dicebastion.com';
   const catDisplay = e(categoryName);
   const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
+  const shopFilterUrl = `${shop}/?category=${encodeURIComponent(categoryName)}`;
   const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`;
+  const ogImage = products.map(p => ensureAbsoluteImageUrl(p.image_url, shop)).find(Boolean) || '';
 
   // CollectionPage + ItemList schema
   const schema = {
@@ -7958,7 +7963,7 @@ function generateCategorySeoPage(categoryName, products) {
       'itemListElement': products.map((p, i) => ({
         '@type': 'ListItem',
         'position': i + 1,
-        'url': `${shop}/products/${p.slug}`,
+        'url': `${shop}/products/${encodeURIComponent(p.slug)}`,
         'name': p.name
       }))
     }
@@ -7976,10 +7981,14 @@ function generateCategorySeoPage(categoryName, products) {
   const productCards = products.map(p => {
     const price = ((Number(p.price) || 0) / 100).toFixed(2);
     const cardImg = p.image_url ? ensureAbsoluteImageUrl(p.image_url, shop) : '';
-    return `<a href="${shop}/products/${p.slug}" class="cat-product-card">
+    return `<a href="${shop}/products/${encodeURIComponent(p.slug)}" class="cat-product-card">
 ${cardImg ? `<img src="${cardImg}" alt="${e(p.name)}" loading="lazy" decoding="async">` : '<div class="cat-product-img-placeholder"></div>'}
 <div class="cat-product-info"><span class="cat-product-name">${e(p.name)}</span><span class="cat-product-price">£${price}</span></div></a>`;
   }).join('\n');
+
+  const ogImageMeta = ogImage
+    ? `<meta property="og:image" content="${e(ogImage)}"><meta name="twitter:image" content="${e(ogImage)}">`
+    : '';
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -7988,7 +7997,8 @@ ${cardImg ? `<img src="${cardImg}" alt="${e(p.name)}" loading="lazy" decoding="a
 <meta property="og:type" content="website"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar"><meta property="og:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
 <meta property="og:site_name" content="Dice Bastion Shop">
-<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
+${ogImageMeta}
+<meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
 <meta name="twitter:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
@@ -8003,6 +8013,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .cat-heading{max-width:900px;width:100%;margin:1rem auto;padding:0 1rem}
 .cat-heading h1{font-size:2rem;color:#fff}
 .cat-heading p{color:#808090;margin-top:.25rem}
+.cta{display:inline-block;margin-top:1rem;padding:.65rem 1.5rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600}
 .cat-grid{max-width:900px;width:100%;margin:1rem auto 2rem;padding:0 1rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1.25rem}
 .cat-product-card{background:#16162a;border:1px solid #2a2a4a;border-radius:12px;overflow:hidden;text-decoration:none;color:#e0e0e0;transition:transform .2s,border-color .2s}
 .cat-product-card:hover{transform:translateY(-4px);border-color:#7c3aed}
@@ -8017,9 +8028,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </head><body>
 <div class="header"><a href="${shop}">Dice Bastion Shop</a></div>
 <div class="breadcrumb"><a href="${shop}">Shop</a> › ${catDisplay}</div>
-<div class="cat-heading"><h1>${catDisplay}</h1><p>${products.length} product${products.length !== 1 ? 's' : ''}</p></div>
+<div class="cat-heading">
+<h1>${catDisplay}</h1>
+<p>${products.length} product${products.length !== 1 ? 's' : ''}</p>
+<a class="cta" href="${shopFilterUrl}">Open category in shop</a>
+</div>
 <div class="cat-grid">${productCards}</div>
-<div class="footer"><a href="${shop}">← Back to Shop</a></div>
+<div class="footer"><a href="${shop}">Back to Shop</a></div>
 </body></html>`;
 }
 
@@ -8042,16 +8057,24 @@ app.get('/products/sitemap.xml', async c => {
   try {
     const { results } = await c.env.DB.prepare(`
       SELECT slug, updated_at, category FROM products
-      WHERE is_active = 1 AND slug IS NOT NULL
+      WHERE is_active = 1
+        AND slug IS NOT NULL AND TRIM(slug) != ''
+        AND COALESCE(show_in_shop, 1) = 1
       ORDER BY updated_at DESC
     `).all()
 
     const shop = 'https://shop.dicebastion.com'
 
-    // Collect unique categories
-    const categories = new Set()
+    // Collect unique categories + newest product update per category for lastmod
+    const categoryLastMod = new Map()
     ;(results || []).forEach(p => {
-      if (p.category) p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => categories.add(c))
+      if (!p.category) return
+      p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => {
+        const prev = categoryLastMod.get(c)
+        if (!prev || String(p.updated_at || '') > String(prev)) {
+          categoryLastMod.set(c, p.updated_at)
+        }
+      })
     })
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -8065,8 +8088,9 @@ app.get('/products/sitemap.xml', async c => {
     }
 
     // Category pages
-    for (const cat of categories) {
-      xml += `\n<url><loc>${shop}/products/category/${encodeURIComponent(cat)}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`
+    for (const [cat, updatedAt] of categoryLastMod) {
+      const lastmod = formatProductSitemapLastMod(updatedAt)
+      xml += `\n<url><loc>${shop}/products/category/${encodeURIComponent(cat)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.6</priority></url>`
     }
 
     xml += '\n</urlset>'
@@ -8091,7 +8115,9 @@ app.get('/products/sitemap-images.xml', async c => {
     const { results } = await c.env.DB.prepare(`
       SELECT slug, name, image_url, summary, description, full_description
       FROM products
-      WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+      WHERE is_active = 1
+        AND slug IS NOT NULL AND TRIM(slug) != ''
+        AND COALESCE(show_in_shop, 1) = 1
       ORDER BY updated_at DESC
     `).all()
 
@@ -8132,7 +8158,8 @@ app.get('/products/:slug', async (c, next) => {
       return Response.redirect('https://shop.dicebastion.com/', 302)
     }
 
-    // Server-side dynamic rendering: bots get SEO page, humans get 302
+    // Shop UX: humans get the real shop + product modal. Bots get the SEO HTML
+    // at this canonical URL (same pattern as sitemap / Indexing API targets).
     const host = c.req.header('Host') || ''
     if (host.includes('shop.dicebastion.com')) {
       const ua = (c.req.header('User-Agent') || '').toLowerCase()
@@ -8146,7 +8173,7 @@ app.get('/products/:slug', async (c, next) => {
         })
       }
 
-      // Human → redirect to shop with product modal
+      // Human → shop homepage with product modal (not a standalone product design)
       return Response.redirect(`https://shop.dicebastion.com/?product=${encodeURIComponent(product.slug)}`, 302)
     }
 

@@ -31,7 +31,13 @@ Implemented in `shop/static/js/shopCartStorage.js`. Checkout creates `orders` / 
 
 ## Product share previews (`/?product=slug`)
 
-Pages Function [`functions/_middleware.js`](functions/_middleware.js) detects social/SEO bots and returns minimal HTML with `og:title`, `og:description` (summary → description → stripped full description), and `og:image`. Humans always receive the Hugo homepage + product modal. Worker SEO at `/products/:slug` is unchanged for Google.
+Pages Function [`functions/_middleware.js`](functions/_middleware.js):
+
+- Social bots on `/?product=` get OG HTML (canonical points at `/products/:slug`).
+- Homepage responses inject crawlable product/category links for Google (footer nav).
+- Humans always get the Hugo shop; product cards and `/products/:slug` open the modal via `/?product=`.
+
+Worker SEO at `/products/:slug` remains the canonical URL for sitemaps and crawlers (bots get Product JSON-LD HTML; people are redirected to the modal).
 
 ## Database Schema
 

@@ -369,7 +369,7 @@ Triggered daily at 2 AM UTC via Cloudflare `scheduled` event:
 - Auto-renewals (3-day warnings, charge attempts, expiry)
 - Event reminders (24-hour advance)
 - Delayed account setup emails
-- SEO indexing (Google Indexing API, sitemap pings)
+- SEO indexing (IndexNow + Google Indexing API; live D1 sitemaps)
 
 These will need a new trigger mechanism on Bunny (external cron service or Bunny's scheduled tasks).
 
