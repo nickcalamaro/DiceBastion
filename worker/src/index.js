@@ -12190,10 +12190,12 @@ export default {
       }
     }
 
-    // Same-origin API on dicebastion.com — avoids cross-origin fetches to workers.dev
-    // (Safari/Edge report those as "Load failed" when blocked by privacy tools).
+    // Same-origin API on site + shop — avoids cross-origin fetches to workers.dev
+    // (workers.dev currently 404s; Safari/Edge also block some cross-origin cases).
     if (
-      (host === 'dicebastion.com' || host === 'www.dicebastion.com') &&
+      (host === 'dicebastion.com' ||
+        host === 'www.dicebastion.com' ||
+        host === 'shop.dicebastion.com') &&
       url.pathname.startsWith('/api/')
     ) {
       const proxyUrl = new URL(request.url)

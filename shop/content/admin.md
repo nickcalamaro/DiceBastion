@@ -500,7 +500,7 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 </style>
 
 <script>
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = 'https://dicebastion.com/api';
 let adminKey = '';
 let editingProductId = null;
 let editingPromoId = null;

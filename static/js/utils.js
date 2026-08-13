@@ -11,11 +11,16 @@
     window.__DB_API_BASE = '/api';
     return;
   }
+  if (host === 'shop.dicebastion.com') {
+    window.__DB_API_BASE = '/api';
+    return;
+  }
   if (host === 'localhost' || host === '127.0.0.1') {
     window.__DB_API_BASE = 'http://localhost:8787';
     return;
   }
-  window.__DB_API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+  // workers.dev subdomain is unreliable; custom-domain /api proxy is canonical
+  window.__DB_API_BASE = 'https://dicebastion.com/api';
 })();
 // Blog API — Bunny Edge Script 75941
 window.__BLOG_API_BASE = window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run';
@@ -38,7 +43,7 @@ window.utils = {
    * Get API base URL (with optional trailing slash removal)
    */
   getApiBase: (removeTrailingSlash = false) => {
-    const base = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+    const base = window.__DB_API_BASE || 'https://dicebastion.com/api';
     return removeTrailingSlash ? base.replace(/\/+$/, '') : base;
   },
 

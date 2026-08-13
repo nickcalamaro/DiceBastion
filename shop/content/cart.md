@@ -291,7 +291,7 @@ position: static;
 </style>
 
 <script>
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = 'https://dicebastion.com/api';
 let cart = [];
 
 // Get or create session ID

@@ -124,7 +124,7 @@
     if (sessionToken) {
       // Call logout endpoint
       try {
-        const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+        const API_BASE = 'https://dicebastion.com/api';
         await fetch(`${API_BASE}/logout`, {
           method: 'POST',
           headers: {

@@ -1,5 +1,5 @@
 (function () {
-  const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+  const API_BASE = 'https://dicebastion.com/api';
   const PLAYMAT_API = API_BASE + '/support/contact';
   const TS_SITE_KEY = '0x4AAAAAACAB4xlOnW3S8K0k';
   const IS_LOCALHOST = ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);

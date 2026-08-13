@@ -612,7 +612,7 @@ color: rgb(var(--color-neutral-800));
 
 <script>
 // Shop initialization
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = 'https://dicebastion.com/api';
 
 let allProducts = [];
 let categoryMeta = [];

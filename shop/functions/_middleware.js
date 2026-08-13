@@ -5,7 +5,8 @@
  * Humans still use the shop UI + product modal; /products/:slug 302s humans to /?product=.
  */
 
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+// workers.dev currently 404s; custom-domain /api proxy is the live API
+const API_BASE = 'https://dicebastion.com/api';
 const SHOP_ORIGIN = 'https://shop.dicebastion.com';
 
 const BOT_UA =

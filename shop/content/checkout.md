@@ -472,7 +472,7 @@ grid-template-columns: 1fr;
 
 <script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
 <script>
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = 'https://dicebastion.com/api';
 let cart = [];
 let currentOrderNumber = null;
 let appliedDiscountPence = 0;
