@@ -43,7 +43,10 @@ jobs:
         env:
           HUGO_CACHEDIR: ${{ runner.temp }}/hugo_cache
           HUGO_ENVIRONMENT: production
-        run: hugo --minify --baseURL "${{ steps.pages.outputs.base_url }}/"
+        # Never use configure-pages base_url: if GitHub Pages "Enforce HTTPS" is off,
+        # that value is http://dicebastion.com and every canonical/og:url becomes HTTP,
+        # which security filters (OpenText/Webroot) treat as a risk.
+        run: hugo --minify --baseURL "https://dicebastion.com/"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

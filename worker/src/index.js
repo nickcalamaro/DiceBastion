@@ -57,8 +57,17 @@ function isNoStorePath(path) {
   if (path.includes('/confirm')) return true
   return false
 }
+function applyBrowserSecurityHeaders(headers) {
+  headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  headers.set('X-Content-Type-Options', 'nosniff')
+  headers.set('X-Frame-Options', 'SAMEORIGIN')
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+}
+
 app.use('*', async (c, next) => {
   await next()
+  applyBrowserSecurityHeaders(c.res.headers)
   if (isNoStorePath(c.req.path)) {
     c.res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
     c.res.headers.set('Pragma', 'no-cache')
@@ -12152,6 +12161,12 @@ export default {
     const url = new URL(request.url)
     const host = request.headers.get('Host') || ''
     const pathNorm = url.pathname.replace(/\/+$/, '') || '/'
+
+    // OpenText/Webroot (and similar filters) flag sites that serve HTML/APIs over HTTP.
+    if (url.protocol === 'http:') {
+      url.protocol = 'https:'
+      return Response.redirect(url.toString(), 301)
+    }
 
     // Bookings API lives on Bunny Edge Script; proxy same-origin so mobile browsers
     // do not block cross-origin fetches to *.bunny.run (shows as "Failed to load table types").
