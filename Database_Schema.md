@@ -361,3 +361,19 @@ CREATE TABLE newsletter_drafts (
   updated_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 ```
+
+### Product categories (shop filter / search metadata)
+
+Optional metadata for tags that appear on `products.category`. Does not replace product tags — only controls featured ordering on the shop chips and keyword aliases for search (e.g. `mtg` → Magic: The Gathering).
+
+```sql
+CREATE TABLE product_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,           -- must match a product category tag exactly
+  featured INTEGER NOT NULL DEFAULT 0, -- 1 = pin to front of category chip list
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  keywords TEXT,                      -- comma-separated aliases (e.g. "mtg, magic")
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```

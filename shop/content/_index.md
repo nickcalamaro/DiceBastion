@@ -12,8 +12,8 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
   <!-- Search Bar -->
   <div class="search-container">
     <div class="search-input-wrapper">
-      <input type="text" id="search-input" placeholder="Search products by name..." 
-             oninput="handleSearch()" 
+      <input type="text" id="search-input" placeholder="Search products by name or keyword..."
+             oninput="handleSearch()"
              class="search-input">
       <span class="search-icon">🔍</span>
     </div>
@@ -615,6 +615,8 @@ color: rgb(var(--color-neutral-800));
 const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
 
 let allProducts = [];
+let categoryMeta = [];
+let categoryMetaByName = new Map();
 let currentFilter = null;
 let currentSearchTerm = '';
 
@@ -988,17 +990,30 @@ function bindProductGridActions() {
 // Load products from API
 async function loadProducts() {
   try {
-    const response = await fetch(`${API_BASE}/products`);
-    allProducts = await response.json();
-    
-    // Build category filter
+    const [productsRes, categoriesRes] = await Promise.all([
+      fetch(`${API_BASE}/products`),
+      fetch(`${API_BASE}/product-categories`)
+    ]);
+    allProducts = await productsRes.json();
+    if (!Array.isArray(allProducts)) allProducts = [];
+
+    let meta = [];
+    try {
+      const catData = await categoriesRes.json();
+      meta = Array.isArray(catData.categories) ? catData.categories : [];
+    } catch (_) {
+      meta = [];
+    }
+    categoryMeta = meta;
+    categoryMetaByName = new Map(
+      meta.map(row => [String(row.name || '').toLowerCase(), row])
+    );
+
     buildCategoryFilter(allProducts);
-    
-    // Apply filters (initially no search term, no category filter)
     applyFilters();
   } catch (error) {
     console.error('Failed to load products:', error);
-    document.getElementById('product-grid').innerHTML = 
+    document.getElementById('product-grid').innerHTML =
       '<div class="loading">Failed to load products. Please try again later.</div>';
   }
 }
@@ -1025,7 +1040,7 @@ function buildSeoCategoryLinks(categories) {
     .join('');
 }
 
-// Build category filter menu (top 5 visible; rest behind Show more)
+// Build category filter menu (featured first; top 5 visible; rest behind Show more)
 function buildCategoryFilter(products) {
   const categoryCount = {};
 
@@ -1040,9 +1055,26 @@ function buildCategoryFilter(products) {
     }
   });
 
-  const sortedCategories = Object.entries(categoryCount)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([cat]) => cat);
+  const discovered = Object.keys(categoryCount);
+  const metaNames = categoryMeta.map(m => m.name).filter(Boolean);
+  const allNames = [...new Set([...discovered, ...metaNames])].filter(name => categoryCount[name] > 0);
+
+  const sortedCategories = allNames.sort((a, b) => {
+    const ma = categoryMetaByName.get(a.toLowerCase());
+    const mb = categoryMetaByName.get(b.toLowerCase());
+    const fa = !!(ma && ma.featured);
+    const fb = !!(mb && mb.featured);
+    if (fa !== fb) return fa ? -1 : 1;
+    if (fa && fb) {
+      const oa = Number(ma.sort_order) || 0;
+      const ob = Number(mb.sort_order) || 0;
+      if (oa !== ob) return oa - ob;
+    }
+    const ca = categoryCount[a] || 0;
+    const cb = categoryCount[b] || 0;
+    if (ca !== cb) return cb - ca;
+    return a.localeCompare(b);
+  });
 
   const topCategories = sortedCategories.slice(0, 5);
   const extraCategories = sortedCategories.slice(5);
@@ -1068,6 +1100,61 @@ function buildCategoryFilter(products) {
   }
 
   filterContainer.innerHTML = parts.join('');
+}
+
+function parseCategoryKeywords(raw) {
+  return String(raw || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function productMatchesSearch(product, term) {
+  if (!term) return true;
+  const name = String(product.name || '').toLowerCase();
+  if (name.includes(term)) return true;
+
+  const cats = String(product.category || '')
+    .split(',')
+    .map(c => c.trim())
+    .filter(Boolean);
+
+  if (cats.some(c => c.toLowerCase().includes(term))) return true;
+
+  for (const cat of cats) {
+    const meta = categoryMetaByName.get(cat.toLowerCase());
+    if (!meta) continue;
+    const keywords = parseCategoryKeywords(meta.keywords);
+    if (keywords.some(kw => kw.startsWith(term) || (term.length >= kw.length && term.startsWith(kw)))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Handle search input
+function handleSearch() {
+  currentSearchTerm = document.getElementById('search-input').value.toLowerCase().trim();
+  applyFilters();
+}
+
+// Apply both search and category filters
+function applyFilters() {
+  let filteredProducts = [...allProducts];
+
+  if (currentSearchTerm) {
+    filteredProducts = filteredProducts.filter(product =>
+      productMatchesSearch(product, currentSearchTerm)
+    );
+  }
+
+  if (currentFilter) {
+    filteredProducts = filteredProducts.filter(product =>
+      product.category && product.category.split(',').map(c => c.trim()).includes(currentFilter)
+    );
+  }
+
+  renderProducts(filteredProducts);
 }
 
 function toggleCategoryExtras(forceOpen) {
@@ -1125,31 +1212,6 @@ function shopQueryUrl(updates = {}) {
   });
   const qs = params.toString();
   return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-}
-
-// Handle search input
-function handleSearch() {
-  currentSearchTerm = document.getElementById('search-input').value.toLowerCase();
-  applyFilters();
-}
-
-// Apply both search and category filters
-function applyFilters() {
-  let filteredProducts = [...allProducts];
-
-  if (currentSearchTerm) {
-    filteredProducts = filteredProducts.filter(product =>
-      product.name.toLowerCase().includes(currentSearchTerm)
-    );
-  }
-
-  if (currentFilter) {
-    filteredProducts = filteredProducts.filter(product =>
-      product.category && product.category.split(',').map(c => c.trim()).includes(currentFilter)
-    );
-  }
-
-  renderProducts(filteredProducts);
 }
 
 // Filter products by category (updates shareable ?category= URL)

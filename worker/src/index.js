@@ -8234,6 +8234,147 @@ app.get('/products', async (c) => {
   }
 })
 
+async function ensureProductCategoriesSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS product_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      featured INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      keywords TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )
+  `).run()
+}
+
+function normalizeCategoryKeywords(raw) {
+  const parts = String(raw || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+  const seen = new Set()
+  const out = []
+  for (const part of parts) {
+    const key = part.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(part)
+  }
+  return out.join(', ')
+}
+
+function collectProductCategoryNames(productRows) {
+  const counts = new Map()
+  for (const product of productRows || []) {
+    const raw = product.category || ''
+    for (const part of raw.split(',')) {
+      const name = part.trim()
+      if (!name) continue
+      counts.set(name, (counts.get(name) || 0) + 1)
+    }
+  }
+  return counts
+}
+
+async function listProductCategoryMeta(db) {
+  await ensureProductCategoriesSchema(db)
+  const products = await db.prepare(`
+    SELECT category FROM products
+    WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
+  `).all()
+  const counts = collectProductCategoryNames(products.results || [])
+  const metaRows = await db.prepare(`
+    SELECT id, name, featured, sort_order, keywords, created_at, updated_at
+    FROM product_categories
+    ORDER BY featured DESC, sort_order ASC, name COLLATE NOCASE ASC
+  `).all()
+  const metaByLower = new Map()
+  for (const row of metaRows.results || []) {
+    metaByLower.set(String(row.name || '').toLowerCase(), row)
+  }
+
+  const names = new Set([...counts.keys(), ...(metaRows.results || []).map(r => r.name)])
+  const categories = [...names].map(name => {
+    const meta = metaByLower.get(String(name).toLowerCase())
+    return {
+      name,
+      product_count: counts.get(name) || 0,
+      featured: meta ? !!Number(meta.featured) : false,
+      sort_order: meta ? Number(meta.sort_order) || 0 : 0,
+      keywords: meta?.keywords || '',
+      id: meta?.id || null
+    }
+  }).sort((a, b) => {
+    if (a.featured !== b.featured) return a.featured ? -1 : 1
+    if (a.featured && b.featured && a.sort_order !== b.sort_order) return a.sort_order - b.sort_order
+    if (a.product_count !== b.product_count) return b.product_count - a.product_count
+    return a.name.localeCompare(b.name)
+  })
+
+  return categories
+}
+
+// Public category metadata for shop chips + keyword search
+app.get('/product-categories', async (c) => {
+  try {
+    const categories = await listProductCategoryMeta(c.env.DB)
+    return c.json({
+      categories: categories.map(({ name, featured, sort_order, keywords, product_count }) => ({
+        name,
+        featured,
+        sort_order,
+        keywords,
+        product_count
+      }))
+    })
+  } catch (e) {
+    console.error('[product-categories] list:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/product-categories', requireAdmin, async (c) => {
+  try {
+    const categories = await listProductCategoryMeta(c.env.DB)
+    return c.json({ categories })
+  } catch (e) {
+    console.error('[admin/product-categories] list:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/product-categories', requireAdmin, async (c) => {
+  try {
+    await ensureProductCategoriesSchema(c.env.DB)
+    const body = await c.req.json()
+    const name = String(body.name || '').trim()
+    if (!name || name.length > 120) {
+      return c.json({ error: 'invalid_name' }, 400)
+    }
+    const featured = body.featured ? 1 : 0
+    const sortOrder = Math.max(0, Math.min(9999, parseInt(body.sort_order, 10) || 0))
+    const keywords = normalizeCategoryKeywords(body.keywords)
+    const now = toIso(new Date())
+
+    await c.env.DB.prepare(`
+      INSERT INTO product_categories (name, featured, sort_order, keywords, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        featured = excluded.featured,
+        sort_order = excluded.sort_order,
+        keywords = excluded.keywords,
+        updated_at = excluded.updated_at
+    `).bind(name, featured, sortOrder, keywords || null, now, now).run()
+
+    const categories = await listProductCategoryMeta(c.env.DB)
+    return c.json({ success: true, categories })
+  } catch (e) {
+    console.error('[admin/product-categories] upsert:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // Get single product by ID or slug (public)
 app.get('/products/:id', async (c) => {
   try {

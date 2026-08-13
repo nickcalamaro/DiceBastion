@@ -460,6 +460,17 @@ Cleanup hard-deletes products from a batch that were never ordered. Products tha
 <div id="product-imports-list"><p class="admin-text-muted">Loading…</p></div>
 </div>
 
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-section-heading admin-mt-0">Shop categories</h2>
+<p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
+Feature categories to pin them to the front of the shop filter chips. Add search keywords (comma-separated) so typing those terms shows every product in that category — for example keywords <code>mtg, magic</code> on Magic: The Gathering.
+</p>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem;">
+<button type="button" id="shop-categories-refresh-btn" class="btn btn-secondary">Refresh categories</button>
+</div>
+<div id="shop-categories-list"><p class="admin-text-muted">Loading…</p></div>
+</div>
+
 <div class="card card-compact">
 <h2 id="product-form-title" class="admin-section-heading">Add New Product</h2>
 <form id="product-form">
@@ -2163,6 +2174,7 @@ document.getElementById('non-admin-container').style.display = 'none';
 document.getElementById('admin-dashboard').style.display = 'block';
 loadProducts();
 loadProductImports();
+loadShopCategories();
 loadRecentActivity();
 loadEvents();
 loadOrders();
@@ -2249,6 +2261,7 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       document.getElementById('admin-dashboard').style.display = 'block';
       loadProducts();
       loadProductImports();
+      loadShopCategories();
       loadRecentActivity();
       loadEvents();
       loadOrders();
@@ -3412,6 +3425,9 @@ function switchAdminTab(tab, options = {}) {
     blogInitTab();
   }
   if (tab === 'shop-promos') loadShopPromoCodes();
+  if (tab === 'products') {
+    loadShopCategories();
+  }
   if (options.sectionId) {
     setTimeout(() => scrollToAdminSection(options.sectionId), 80);
   }
@@ -4283,12 +4299,105 @@ document.getElementById('csv-import-btn')?.addEventListener('click', () => {
 
 
 document.getElementById('csv-imports-refresh-btn')?.addEventListener('click', () => {
-
   loadProductImports();
-
 });
 
+document.getElementById('shop-categories-refresh-btn')?.addEventListener('click', () => {
+  loadShopCategories();
+});
 
+async function loadShopCategories() {
+  const host = document.getElementById('shop-categories-list');
+  if (!host || !sessionToken) return;
+  try {
+    const res = await fetch(`${API_BASE}/admin/product-categories`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      host.innerHTML = `<p class="admin-text-muted">Could not load categories (${escapeCsvHtml(data.error || res.status)}). Deploy the Worker if this is a new endpoint.</p>`;
+      return;
+    }
+    const rows = data.categories || [];
+    if (!rows.length) {
+      host.innerHTML = '<p class="admin-text-muted">No product categories yet. Add categories on products first.</p>';
+      return;
+    }
+    host.innerHTML = `
+      <div class="table-wrapper">
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Products</th>
+                <th>Featured</th>
+                <th>Order</th>
+                <th>Search keywords</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(row => {
+                const name = escapeCsvHtml(row.name);
+                const nameAttr = escapeCsvHtml(row.name).replace(/'/g, '&#39;');
+                return `
+                  <tr data-category-name="${name}">
+                    <td><strong>${name}</strong></td>
+                    <td>${Number(row.product_count) || 0}</td>
+                    <td>
+                      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                        <input type="checkbox" class="shop-cat-featured" ${row.featured ? 'checked' : ''}>
+                        <span class="admin-text-small">Pin front</span>
+                      </label>
+                    </td>
+                    <td>
+                      <input type="number" class="form-input shop-cat-order" min="0" max="9999" value="${Number(row.sort_order) || 0}" style="width:5rem;padding:0.4rem 0.5rem;">
+                    </td>
+                    <td>
+                      <input type="text" class="form-input shop-cat-keywords" value="${escapeCsvHtml(row.keywords || '')}" placeholder="e.g. mtg, magic" style="min-width:12rem;">
+                    </td>
+                    <td>
+                      <button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="${nameAttr}">Save</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    console.error(err);
+    host.innerHTML = '<p class="admin-text-muted">Could not load categories (network error).</p>';
+  }
+}
+
+document.getElementById('shop-categories-list')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.shop-cat-save');
+  if (!btn) return;
+  const row = btn.closest('tr');
+  if (!row) return;
+  const name = btn.getAttribute('data-name');
+  const featured = !!row.querySelector('.shop-cat-featured')?.checked;
+  const sort_order = parseInt(row.querySelector('.shop-cat-order')?.value, 10) || 0;
+  const keywords = row.querySelector('.shop-cat-keywords')?.value || '';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/admin/product-categories`, {
+      method: 'PUT',
+      headers: adminJsonHeaders(),
+      body: JSON.stringify({ name, featured, sort_order, keywords })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    await loadShopCategories();
+  } catch (err) {
+    alert('Save failed: ' + String(err.message || err));
+    btn.disabled = false;
+  }
+});
 
 document.getElementById('csv-import-file')?.addEventListener('change', () => {
 
