@@ -83,7 +83,11 @@ class AuthModal {
     this.mainApiUrl = options.mainApiUrl || window.__DB_API_BASE || (
       (location.hostname === 'dicebastion.com' || location.hostname === 'www.dicebastion.com')
         ? '/api'
-        : 'https://dicebastion-memberships.ncalamaro.workers.dev'
+        : (location.hostname === 'shop.dicebastion.com')
+          ? 'https://dicebastion.com/api'
+        : (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+          ? 'http://localhost:8787'
+          : 'https://dicebastion.com/api'
     );
     this.onSuccess = options.onSuccess || (() => {});
     this.modal = null;

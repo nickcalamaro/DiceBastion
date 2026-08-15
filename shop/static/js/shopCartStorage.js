@@ -4,6 +4,9 @@
  *
  * Sliding window: each save() extends expiry by MAX_AGE_SECONDS.
  * Cookies blocked: TTL still enforced via localStorage expiry only.
+ *
+ * D1 `cart_items` is unused on purpose — do not sync here unless building abandoned-cart /
+ * cross-device carts. Checkout persists purchases as orders / order_items only.
  */
 (function () {
   var LS_CART = 'shop_cart';

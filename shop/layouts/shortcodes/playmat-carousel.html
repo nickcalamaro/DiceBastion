@@ -1,0 +1,32 @@
+{{/*
+  Auto-builds the playmat portfolio carousel from static/img/playmats/.
+  Includes jpg/jpeg/png/webp/gif; skips banner.png and non-images.
+*/}}
+{{- $dir := "static/img/playmats" -}}
+{{- $names := slice -}}
+{{- range sort (readDir $dir) "Name" -}}
+  {{- if not .IsDir -}}
+    {{- $lower := lower .Name -}}
+    {{- if and
+      (ne $lower "banner.png")
+      (ne $lower "readme.md")
+      (findRE `(?i)\.(jpe?g|png|webp|gif)$` .Name)
+    -}}
+      {{- $names = $names | append .Name -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- if gt (len $names) 0 -}}
+<div class="playmat-carousel-wrap">
+<div id="playmat-carousel" class="splide" aria-label="Playmat portfolio">
+<div class="splide__track">
+<ul class="splide__list">
+{{- range $i, $name := $names -}}
+<li class="splide__slide"><figure class="playmat-slide"><div class="playmat-slide-frame"><img src="{{ printf "/img/playmats/%s" $name }}" alt="Custom playmat by Jen" width="1134" height="756" loading="{{ if eq $i 0 }}eager{{ else }}lazy{{ end }}" decoding="async"></div></figure></li>
+{{- end -}}
+</ul>
+</div>
+</div>
+</div>
+{{- end -}}

@@ -37,7 +37,7 @@ app.use('*', async (c, next) => {
     c.res.headers.set('X-Debug-Origin', origin || '')
     c.res.headers.set('X-Debug-Allow', allowOrigin || '')
   }
-  if (c.req.method === 'OPTIONS') return new Response('', { headers: c.res.headers })
+  if (c.req.method === 'OPTIONS') return c.body(null, 204)
   await next()
 })
 
@@ -57,8 +57,17 @@ function isNoStorePath(path) {
   if (path.includes('/confirm')) return true
   return false
 }
+function applyBrowserSecurityHeaders(headers) {
+  headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  headers.set('X-Content-Type-Options', 'nosniff')
+  headers.set('X-Frame-Options', 'SAMEORIGIN')
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+}
+
 app.use('*', async (c, next) => {
   await next()
+  applyBrowserSecurityHeaders(c.res.headers)
   if (isNoStorePath(c.req.path)) {
     c.res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
     c.res.headers.set('Pragma', 'no-cache')
@@ -298,6 +307,45 @@ function resolveEventPrimaryImage(event, siteUrl) {
   return `${siteUrl}/img/default-event.jpg`
 }
 
+/**
+ * When event artwork is replaced, keep seo_image in sync if it was empty or still
+ * pointed at previous/auto-filled main/card/hero URLs. Custom seo_image URLs that
+ * are not event export filenames are left alone.
+ */
+function looksLikeEventArtworkExportUrl(url) {
+  return /(?:^|[\/_-])event-(?:main|card|hero)\.(?:jpe?g|png|webp)(?:$|\?)/i.test(String(url || ''))
+}
+
+function resolveSeoImageOnArtworkChange(current, incomingSeoImage, imageUrl, imageUrlCard, imageUrlHero) {
+  let finalSeo = (incomingSeoImage || '').trim() || null
+  const newHero = (imageUrlHero || '').trim() || null
+  const artworkNow = [imageUrl, imageUrlCard, imageUrlHero]
+    .map((u) => (u || '').trim())
+    .filter(Boolean)
+
+  if (!finalSeo && newHero) return newHero
+
+  // Already-broken rows: seo_image still points at an old auto-filled export URL
+  // while main/card/hero have moved on. Fix on save without requiring a re-upload.
+  if (finalSeo && newHero && !artworkNow.includes(finalSeo) && looksLikeEventArtworkExportUrl(finalSeo)) {
+    return newHero
+  }
+
+  if (!current || !newHero) return finalSeo
+
+  const oldHero = (current.image_url_hero || '').trim() || null
+  if (newHero === oldHero) return finalSeo
+
+  const previousArtwork = [current.image_url, current.image_url_card, current.image_url_hero]
+    .map((u) => (u || '').trim())
+    .filter(Boolean)
+
+  if (!finalSeo || previousArtwork.includes(finalSeo)) {
+    return newHero
+  }
+  return finalSeo
+}
+
 function collectProductImageUrls(product, shopUrl) {
   const seen = new Set()
   const out = []
@@ -413,7 +461,11 @@ async function submitToIndexNow(env, urls) {
       })
       console.log(`[IndexNow] ${host} (${urlList.length} url) → ${res.status}`)
       // 200 = accepted, 202 = accepted/pending verification. Both are success.
-      results.push({ host, status: res.status, ok: res.ok, count: urlList.length })
+      // 429 = throttled: IndexNow rate-limits by IP and Cloudflare's shared egress
+      // IPs get throttled quickly; the URL was almost certainly already accepted from
+      // a recent publish/cron push, so treat it as a soft-success (not a hard failure).
+      const throttled = res.status === 429
+      results.push({ host, status: res.status, ok: res.ok || throttled, throttled, count: urlList.length })
     } catch (err) {
       console.error(`[IndexNow] submit failed for ${host}:`, err)
       results.push({ host, ok: false, status: 0, error: err.message || String(err), count: urlList.length })
@@ -445,6 +497,7 @@ const membershipCheckoutRateLimits = new Map()
 const eventCheckoutRateLimits = new Map()
 const donationCheckoutRateLimits = new Map()
 const supportContactRateLimits = new Map()
+const eventRegistrationRateLimits = new Map()
 const sameDayContactsRateLimits = new Map()
 
 // Rate limiting helper function
@@ -616,52 +669,8 @@ async function migrateToTransactions(db) {
 }
 
 // ============================================================================
-// FREE TRIAL SCHEMA MIGRATION
+// USER & IDENTITY MANAGEMENT
 // ============================================================================
-
-// Columns already exist in production. Runtime guard remains as a safety net for
-// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
-let __freeTrialColsReady = false
-async function migrateFreeTrialColumns(db) {
-  if (__freeTrialColsReady) return
-  const cols = [
-    { name: 'is_free_trial', def: 'INTEGER DEFAULT 0' },
-    { name: 'trial_end_date', def: 'TEXT' },
-    { name: 'trial_reminder_sent', def: 'INTEGER DEFAULT 0' }
-  ]
-  for (const col of cols) {
-    try {
-      await db.prepare(`ALTER TABLE memberships ADD COLUMN ${col.name} ${col.def}`).run()
-      console.log(`[migration] Added column memberships.${col.name}`)
-    } catch (e) {
-      if (!String(e).includes('duplicate column')) {
-        console.error(`[migration] Error adding column ${col.name}:`, e)
-      }
-    }
-  }
-  __freeTrialColsReady = true
-}
-
-// SumUp payment diagnostics on transactions (transaction_code, 3DS/SCA flag).
-let __transactionPaymentColsReady = false
-async function migrateTransactionPaymentColumns(db) {
-  if (__transactionPaymentColsReady) return
-  const cols = [
-    { name: 'sumup_transaction_code', def: 'TEXT' },
-    { name: 'sca_fired', def: 'INTEGER DEFAULT NULL' }
-  ]
-  for (const col of cols) {
-    try {
-      await db.prepare(`ALTER TABLE transactions ADD COLUMN ${col.name} ${col.def}`).run()
-      console.log(`[migration] Added column transactions.${col.name}`)
-    } catch (e) {
-      if (!String(e).includes('duplicate column')) {
-        console.error(`[migration] Error adding column ${col.name}:`, e)
-      }
-    }
-  }
-  __transactionPaymentColsReady = true
-}
 
 async function hasUsedFreeTrial(db, userId) {
   // Only count trials that were actually activated — pending/failed checkout attempts must not block retries.
@@ -700,29 +709,41 @@ async function abandonPendingFreeTrialAttempts(db, userId) {
   return rows.length
 }
 
-let __eventImageVariantColsReady = false
 /**
- * Add optional per-layout event image URLs (card grid vs modal hero). Safe to call repeatedly.
+ * Stop post-trial cron charges for a user. Clears trial scheduling flags on the
+ * membership that was just paid and expires any other active free-trial rows
+ * (e.g. manual checkout creates a new membership while the trial row stays active).
  */
-async function ensureEventImageVariantColumns(db) {
-  if (__eventImageVariantColsReady) return
-  for (const col of ['image_url_card', 'image_url_hero']) {
-    try {
-      await db.prepare(`ALTER TABLE events ADD COLUMN ${col} TEXT`).run()
-      console.log(`[migration] Added events.${col}`)
-    } catch (e) {
-      const msg = String(e.message || e)
-      if (!msg.includes('duplicate column') && !msg.includes('already exists')) {
-        console.error(`[migration] events.${col}:`, e)
-      }
-    }
+async function clearFreeTrialChargeScheduling(db, { userId, activeMembershipId = null }) {
+  if (activeMembershipId) {
+    await db.prepare(`
+      UPDATE memberships
+      SET is_free_trial = 0, trial_end_date = NULL, renewal_failed_at = NULL, renewal_attempts = 0
+      WHERE id = ? AND is_free_trial = 1
+    `).bind(activeMembershipId).run()
   }
-  __eventImageVariantColsReady = true
-}
 
-// ============================================================================
-// USER & IDENTITY MANAGEMENT
-// ============================================================================
+  const binds = [userId]
+  let excludeSql = ''
+  if (activeMembershipId) {
+    excludeSql = ' AND id != ?'
+    binds.push(activeMembershipId)
+  }
+  binds.push(userId)
+  // Only expire orphaned trial rows — never a membership that already has a paid charge.
+  await db.prepare(`
+    UPDATE memberships
+    SET is_free_trial = 0, trial_end_date = NULL, status = 'expired',
+        renewal_failed_at = NULL, renewal_attempts = 0
+    WHERE user_id = ? AND is_free_trial = 1 AND status = 'active'${excludeSql}
+      AND id NOT IN (
+        SELECT reference_id FROM transactions
+        WHERE user_id = ?
+          AND payment_status = 'PAID'
+          AND transaction_type IN ('renewal', 'membership_charge', 'membership')
+      )
+  `).bind(...binds).run()
+}
 
 /**
  * Find user by email (case-insensitive)
@@ -838,14 +859,12 @@ function inferScaFromPayment(payment) {
 
 async function markTransactionScaFired(db, orderRef) {
   if (!orderRef) return
-  await migrateTransactionPaymentColumns(db)
   await db.prepare(`
     UPDATE transactions SET sca_fired = 1, updated_at = ? WHERE order_ref = ?
   `).bind(toIso(new Date()), orderRef).run()
 }
 
 async function updateTransactionPaymentMeta(db, { transactionId, orderRef, payment, sumupBody } = {}) {
-  await migrateTransactionPaymentColumns(db)
   const code = extractSumUpTransactionCode(payment) || transactionCodeFromSumUpBody(sumupBody)
   const serverSca = payment ? inferScaFromPayment(payment) : null
   const sets = ['updated_at = ?']
@@ -957,6 +976,8 @@ async function activateMembership(db, env, { membershipId, membership, paymentId
   await db.prepare(
     'UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ?, payment_instrument_id = ? WHERE id = ?'
   ).bind(toIso(baseStart), toIso(end), actualPaymentId, instrumentId, membershipId).run()
+
+  await clearFreeTrialChargeScheduling(db, { userId: identityId, activeMembershipId: membershipId })
   
   return { startDate: toIso(baseStart), endDate: toIso(end), instrumentId, actualPaymentId }
 }
@@ -1397,7 +1418,9 @@ async function processMembershipRenewal(db, membership, env) {
       SET end_date = ?, 
           renewal_failed_at = NULL, 
           renewal_attempts = 0,
-          renewal_warning_sent = 0
+          renewal_warning_sent = 0,
+          is_free_trial = 0,
+          trial_end_date = NULL
       WHERE id = ?
     `).bind(toIso(newEnd), membership.id).run()
   } catch (e) {
@@ -1617,6 +1640,87 @@ const EVT_UUID_RE = /^EVT-\d+-[0-9a-f\-]{36}$/i
  */
 function clampStr(v, max){ return (v||'').substring(0, max) }
 
+const PLAYMAT_ATTACHMENT_MAX_FILES = 5
+const PLAYMAT_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024
+const PLAYMAT_ATTACHMENT_MAX_TOTAL_BYTES = 15 * 1024 * 1024
+const PLAYMAT_ATTACHMENT_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf'])
+const PLAYMAT_ATTACHMENT_EXT = /\.(png|jpe?g|pdf)$/i
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
+
+function estimateBase64Bytes(b64) {
+  const len = String(b64 || '').replace(/\s+/g, '').length
+  if (!len) return 0
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
+  return Math.max(0, Math.floor((len * 3) / 4) - padding)
+}
+
+function sanitizeAttachmentFilename(name, index) {
+  const cleaned = String(name || '')
+    .replace(/[^\w.\- ()[\]]+/g, '_')
+    .replace(/^\.+/, '')
+    .slice(0, 120)
+  return cleaned || `attachment-${index + 1}`
+}
+
+/**
+ * Validate playmat commission attachments for MailerSend.
+ * Expects [{ filename, content (base64), contentType? }].
+ */
+function parsePlaymatAttachments(rawList) {
+  if (!Array.isArray(rawList)) {
+    return { error: 'invalid_attachment', message: 'Attachments must be sent as a list.' }
+  }
+  if (rawList.length > PLAYMAT_ATTACHMENT_MAX_FILES) {
+    return {
+      error: 'too_many_attachments',
+      message: `Please attach no more than ${PLAYMAT_ATTACHMENT_MAX_FILES} files.`
+    }
+  }
+
+  const attachments = []
+  let totalBytes = 0
+
+  for (let i = 0; i < rawList.length; i++) {
+    const item = rawList[i] || {}
+    const filename = sanitizeAttachmentFilename(item.filename, i)
+    const content = String(item.content || '').replace(/\s+/g, '')
+    const contentType = String(item.contentType || '').toLowerCase()
+
+    if (!content || !BASE64_RE.test(content) || content.length % 4 !== 0) {
+      return { error: 'invalid_attachment', message: `"${filename}" could not be read.` }
+    }
+    if (!PLAYMAT_ATTACHMENT_TYPES.has(contentType) && !PLAYMAT_ATTACHMENT_EXT.test(filename)) {
+      return {
+        error: 'invalid_attachment',
+        message: `"${filename}" is not supported. Use PNG, JPG, or PDF.`
+      }
+    }
+
+    const byteLength = estimateBase64Bytes(content)
+    if (byteLength <= 0 || byteLength > PLAYMAT_ATTACHMENT_MAX_BYTES) {
+      return {
+        error: 'attachment_too_large',
+        message: `"${filename}" is over 5 MB. Please choose a smaller file.`
+      }
+    }
+    totalBytes += byteLength
+    if (totalBytes > PLAYMAT_ATTACHMENT_MAX_TOTAL_BYTES) {
+      return {
+        error: 'attachment_too_large',
+        message: 'Attachments total more than 15 MB. Please remove some files.'
+      }
+    }
+
+    attachments.push({
+      filename,
+      content,
+      disposition: 'attachment'
+    })
+  }
+
+  return { attachments }
+}
+
 /** Canonical public site origin for SumUp 3DS redirect_url and email links. */
 function siteUrl(env) {
   return String(env.SITE_URL || 'https://dicebastion.com').replace(/\/+$/, '')
@@ -1691,9 +1795,14 @@ async function sendEmail(env, { to, subject, html, text, attachments = null, ema
       body.send_at = sendAt
     }
     
-    // Add attachments if provided
+    // Add attachments if provided (MailerSend: filename + base64 content)
     if (attachments && Array.isArray(attachments) && attachments.length > 0) {
-      body.attachments = attachments
+      body.attachments = attachments.map((att) => ({
+        filename: att.filename,
+        content: att.content,
+        disposition: att.disposition || 'attachment',
+        ...(att.id ? { id: att.id } : {})
+      }))
     }
     
     const res = await fetch('https://api.mailersend.com/v1/email', {
@@ -2983,22 +3092,6 @@ app.post('/login', async c => {
     const now = new Date()
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days
     
-    console.log('[User Login] Creating user_sessions table if needed...')
-    // Create user_sessions table if it doesn't exist
-    await c.env.DB.prepare(`
-      CREATE TABLE IF NOT EXISTS user_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        session_token TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        last_activity TEXT NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-      )
-    `).run().catch(err => {
-      console.log('[User Login] Table creation error (might already exist):', err.message)
-    })
-    
     console.log('[User Login] Storing session...')
     // Store session
     await c.env.DB.prepare(`
@@ -4028,6 +4121,35 @@ async function requireAdmin(c, next) {
   return c.json({ error: 'unauthorized' }, 401)
 }
 
+const ACCOUNTS_OWNER_EMAIL = 'ncalamaro@gmail.com'
+const ACCOUNTS_ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function isAccountsOwnerEmail(email) {
+  return String(email || '').trim().toLowerCase() === ACCOUNTS_OWNER_EMAIL
+}
+
+async function requireAccountsOwner(c, next) {
+  const user = c.get('adminUser')
+  if (!isAccountsOwnerEmail(user?.email)) {
+    return c.json({ error: 'forbidden' }, 403)
+  }
+  return next()
+}
+
+function parseAccountsIsoDate(value) {
+  const s = String(value || '').trim()
+  if (!ACCOUNTS_ISO_DATE_RE.test(s)) return null
+  const [y, m, d] = s.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null
+  return s
+}
+
+function accountsPounds(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
 // Client-side payment telemetry beacon.
 // The SumUp card widget runs entirely in the browser, so card-auth failures (3DS/SCA
 // declines, cancellations, widget load errors) never reach our server unless we report
@@ -4240,8 +4362,6 @@ app.post('/membership/free-trial/checkout', async (c) => {
     if (name && name.length > 200) return c.json({ error: 'name_too_long' }, 400)
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
-
-    await migrateFreeTrialColumns(c.env.DB)
 
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name, 200))
 
@@ -4592,6 +4712,9 @@ app.get('/membership/confirm', async (c) => {
         payment_instrument_id = ?
     WHERE id = ?
   `).bind(toIso(baseStart), toIso(end), instrumentId, pending.id).run()
+
+  await clearFreeTrialChargeScheduling(c.env.DB, { userId: identityId, activeMembershipId: pending.id })
+
     // Update transaction status
   await c.env.DB.prepare(`
     UPDATE transactions 
@@ -4769,7 +4892,6 @@ app.get('/membership/free-trial/confirm', async (c) => {
   const now = new Date()
   const trialEnd = addMonths(now, 1)
 
-  await migrateFreeTrialColumns(c.env.DB)
   await c.env.DB.prepare(`
     UPDATE memberships
     SET status = 'active',
@@ -4869,38 +4991,11 @@ app.get('/membership/free-trial/confirm', async (c) => {
 // ============================================================================
 
 /**
- * Ensure the sponsored_memberships table exists (lazy migration).
- */
-// Table already exists in production. Runtime guard remains as a safety net for
-// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
-let __sponsoredMembershipsReady = false
-async function migrateSponsoredMemberships(db) {
-  if (__sponsoredMembershipsReady) return
-  await db.prepare(`
-    CREATE TABLE IF NOT EXISTS sponsored_memberships (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      purchased_by_email TEXT NOT NULL,
-      purchased_by_name  TEXT,
-      purchased_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      order_ref TEXT UNIQUE NOT NULL,
-      amount_paid REAL NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending','available','claimed','refunded')),
-      claimed_by_user_id INTEGER,
-      claimed_at TEXT,
-      FOREIGN KEY (claimed_by_user_id) REFERENCES users(user_id)
-    )
-  `).run()
-  __sponsoredMembershipsReady = true
-}
-
-/**
  * Confirm a sponsorship payment and add it to the pool.
  * Shared by GET /membership/sponsor/confirm and the SumUp webhook.
  * @returns {{ ok: true, status: string, message: string, alreadyConfirmed?: boolean }}
  */
 async function confirmSponsorshipPayment(db, env, orderRef, paymentOverride = null) {
-  await migrateSponsoredMemberships(db)
 
   const transaction = await db.prepare(
     `SELECT * FROM transactions WHERE order_ref = ? AND transaction_type = 'sponsorship'`
@@ -4979,7 +5074,6 @@ async function confirmSponsorshipPayment(db, env, orderRef, paymentOverride = nu
  */
 app.get('/membership/sponsor/pool', async (c) => {
   try {
-    await migrateSponsoredMemberships(c.env.DB)
     const row = await c.env.DB.prepare(
       `SELECT COUNT(*) as available FROM sponsored_memberships WHERE status = 'available'`
     ).first()
@@ -5013,8 +5107,6 @@ app.post('/membership/sponsor/checkout', async (c) => {
 
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
-
-    await migrateSponsoredMemberships(c.env.DB)
 
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name, 200))
     if (!ident?.id) return c.json({ error: 'identity_error' }, 500)
@@ -5121,8 +5213,6 @@ app.post('/membership/sponsor/claim', async (c) => {
 
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, debugMode, c)
     if (!tsOk) return c.json({ error: 'turnstile_failed' }, 403)
-
-    await migrateSponsoredMemberships(c.env.DB)
 
     // Check user doesn't already have an active membership
     const ident = await getOrCreateIdentity(c.env.DB, email, name || null)
@@ -5383,7 +5473,6 @@ app.post('/webhooks/sumup', async (c) => {
     const instrumentId = await savePaymentInstrument(c.env.DB, identityId, paymentId, c.env)
     const trialEnd = addMonths(now, 1)
 
-    await migrateFreeTrialColumns(c.env.DB)
     await c.env.DB.prepare(`
       UPDATE memberships
       SET status = 'active', start_date = ?, end_date = ?, is_free_trial = 1,
@@ -5459,6 +5548,8 @@ app.post('/webhooks/sumup', async (c) => {
   // Activate membership with correct payment ID and instrument
   await c.env.DB.prepare('UPDATE memberships SET status = "active", start_date = ?, end_date = ?, payment_id = ?, payment_instrument_id = ? WHERE id = ?')
     .bind(toIso(start), toIso(end), actualPaymentId, instrumentId, pending.id).run()
+
+  await clearFreeTrialChargeScheduling(c.env.DB, { userId: identityId, activeMembershipId: pending.id })
   
   // Send welcome email (critical - works even if user closed browser)
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(identityId).first()
@@ -5535,6 +5626,11 @@ function generateEventSeoPage(event) {
   const priceNum = Number(event.non_membership_price) || 0;
   const priceDisplay = priceNum.toFixed(2);
   const isFree = priceNum === 0;
+  const memberPriceNum = Number(event.membership_price) || 0;
+  const memberPriceDisplay = memberPriceNum.toFixed(2);
+  // Only surface a distinct member price when it actually differs from the standard price.
+  const hasMemberPrice = !isFree && memberPriceNum !== priceNum;
+  const memberPriceLabel = memberPriceNum === 0 ? 'Free for members' : `£${memberPriceDisplay} members`;
   const organiserName = e(event.seo_organizer || event.organiser || 'Dice Bastion');
 
   // Gibraltar timezone: CET (UTC+1) in winter, CEST (UTC+2) in summer
@@ -5605,14 +5701,35 @@ function generateEventSeoPage(event) {
     },
     'image': eventImages.length ? eventImages : [img],
     'url': url,
-    'offers': {
-      '@type': 'Offer',
-      'url': url,
-      'price': priceNum,
-      'priceCurrency': 'GBP',
-      'availability': 'https://schema.org/InStock',
-      'validFrom': event.created_at || new Date().toISOString()
-    },
+    'offers': hasMemberPrice
+      ? [
+          {
+            '@type': 'Offer',
+            'name': 'Member',
+            'url': url,
+            'price': memberPriceNum,
+            'priceCurrency': 'GBP',
+            'availability': 'https://schema.org/InStock',
+            'validFrom': event.created_at || new Date().toISOString()
+          },
+          {
+            '@type': 'Offer',
+            'name': 'Standard',
+            'url': url,
+            'price': priceNum,
+            'priceCurrency': 'GBP',
+            'availability': 'https://schema.org/InStock',
+            'validFrom': event.created_at || new Date().toISOString()
+          }
+        ]
+      : {
+          '@type': 'Offer',
+          'url': url,
+          'price': priceNum,
+          'priceCurrency': 'GBP',
+          'availability': 'https://schema.org/InStock',
+          'validFrom': event.created_at || new Date().toISOString()
+        },
     'organizer': {
       '@type': 'Organization',
       'name': organiserName,
@@ -5666,6 +5783,7 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 .badge{display:inline-block;padding:.2rem .6rem;border-radius:6px;font-size:.8rem;font-weight:600}
 .badge-free{background:#064e3b;color:#6ee7b7}
 .badge-paid{background:#4a2c0a;color:#fbbf24}
+.badge-member{background:#1e3a5f;color:#7cc4fb}
 .cta{display:inline-block;padding:.75rem 2rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:1rem;transition:background .2s}
 .cta:hover{background:#6d28d9}
 .footer{margin-top:auto;padding:1.5rem;text-align:center;font-size:.85rem;color:#606070}
@@ -5682,7 +5800,7 @@ ${fullDesc ? `<p class="desc">${fullDesc}</p>` : ''}
 ${dateStr ? `<div class="meta-item"><span class="meta-label">Date</span><span class="meta-value">${dateStr}</span></div>` : ''}
 ${timeStr ? `<div class="meta-item"><span class="meta-label">Time</span><span class="meta-value">${timeStr}${endTimeStr ? ` – ${endTimeStr}` : ''}</span></div>` : ''}
 ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span class="meta-value">${loc}</span></div>` : ''}
-<div class="meta-item"><span class="meta-label">Price</span><span class="meta-value">${isFree ? '<span class="badge badge-free">Free</span>' : `<span class="badge badge-paid">£${priceDisplay}</span>`}</span></div>
+<div class="meta-item"><span class="meta-label">Price</span><span class="meta-value">${isFree ? '<span class="badge badge-free">Free</span>' : `<span class="badge badge-paid">£${priceDisplay}</span>${hasMemberPrice ? ` <span class="badge badge-member">${memberPriceLabel}</span>` : ''}`}</span></div>
 </div>
 <a class="cta" href="${eventsPage}">View Event &amp; Register</a>
 </div>
@@ -5694,7 +5812,6 @@ ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span cl
 // Get all active events (public endpoint)
 app.get('/events', async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -6058,7 +6175,6 @@ app.get('/posts/sitemap-images.xml', async c => {
 
 app.get('/events/sitemap-images.xml', async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const site = 'https://dicebastion.com'
     const { results } = await c.env.DB.prepare(`
       SELECT slug, event_name, seo_image, image_url, image_url_card, image_url_hero
@@ -6105,7 +6221,6 @@ app.get('/events/:slug', async c => {
       return c.json({ error: 'not_found' }, 404)
     }
     
-    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -6423,6 +6538,131 @@ app.get('/admin/memberships', async c => {
 })
 
 // ============================================================================
+// ADMIN RECENT ACTIVITY ENDPOINT
+// ============================================================================
+
+app.get('/admin/recent-activity', requireAdmin, async c => {
+  try {
+    const db = c.env.DB
+    const url = new URL(c.req.url)
+    const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '30', 10) || 30, 1), 90)
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 1), 200)
+    const since = `datetime('now', '-${days} days')`
+
+    async function runActivityQuery(sql) {
+      try {
+        const rows = await db.prepare(sql).all()
+        return rows.results || []
+      } catch (e) {
+        console.warn('[admin/recent-activity] sub-query failed:', e.message)
+        return []
+      }
+    }
+
+    // D1 limits compound SELECT to 5 UNION terms — run separate queries and merge in JS.
+    const chunks = await Promise.all([
+      runActivityQuery(`
+        SELECT 'account_created' AS activity_type, u.created_at AS occurred_at,
+          u.email AS email, u.name AS name, NULL AS detail, NULL AS amount, NULL AS currency, u.user_id AS ref_id
+        FROM users u WHERE datetime(u.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'membership_new' AS activity_type, COALESCE(m.start_date, m.created_at) AS occurred_at,
+          u.email, u.name, m.plan AS detail, m.amount, m.currency, m.id AS ref_id
+        FROM memberships m JOIN users u ON m.user_id = u.user_id
+        WHERE m.status = 'active' AND m.start_date IS NOT NULL
+          AND datetime(COALESCE(m.start_date, m.created_at)) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'membership_expired' AS activity_type, m.end_date AS occurred_at,
+          u.email, u.name, m.plan AS detail, NULL AS amount, NULL AS currency, m.id AS ref_id
+        FROM memberships m JOIN users u ON m.user_id = u.user_id
+        WHERE m.end_date IS NOT NULL AND datetime(m.end_date) < datetime('now')
+          AND datetime(m.end_date) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'event_purchase' AS activity_type, tr.created_at AS occurred_at,
+          COALESCE(tr.email, u.email) AS email, COALESCE(tr.name, u.name) AS name,
+          e.event_name AS detail, tr.amount, tr.currency, tr.id AS ref_id
+        FROM transactions tr
+        LEFT JOIN tickets t ON tr.reference_id = t.id
+        LEFT JOIN events e ON t.event_id = e.event_id
+        LEFT JOIN users u ON tr.user_id = u.user_id
+        WHERE tr.transaction_type IN ('ticket', 'event_membership_bundle')
+          AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
+          AND datetime(tr.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'event_registration' AS activity_type, t.created_at AS occurred_at,
+          u.email, u.name, e.event_name AS detail, NULL AS amount, NULL AS currency, t.id AS ref_id
+        FROM tickets t
+        JOIN users u ON t.user_id = u.user_id
+        JOIN events e ON t.event_id = e.event_id
+        LEFT JOIN transactions tr ON tr.reference_id = t.id
+          AND tr.transaction_type IN ('ticket', 'event_membership_bundle')
+          AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
+        WHERE t.status = 'active' AND tr.id IS NULL AND datetime(t.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'shop_order' AS activity_type, COALESCE(o.completed_at, o.created_at) AS occurred_at,
+          o.email, o.name, o.order_number AS detail, CAST(o.total AS TEXT) AS amount, o.currency, o.id AS ref_id
+        FROM orders o
+        WHERE UPPER(COALESCE(o.payment_status, '')) = 'PAID'
+          AND datetime(COALESCE(o.completed_at, o.created_at)) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'donation' AS activity_type, tr.created_at AS occurred_at,
+          tr.email, tr.name, d.campaign AS detail, tr.amount, tr.currency, tr.id AS ref_id
+        FROM transactions tr
+        LEFT JOIN donations d ON d.order_ref = tr.order_ref
+        WHERE tr.transaction_type = 'donation'
+          AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
+          AND datetime(tr.created_at) >= ${since}
+      `),
+      runActivityQuery(`
+        SELECT 'sponsorship' AS activity_type, COALESCE(sm.claimed_at, sm.purchased_at) AS occurred_at,
+          COALESCE(u.email, sm.purchased_by_email) AS email,
+          COALESCE(u.name, sm.purchased_by_name) AS name,
+          CASE WHEN sm.status = 'claimed' THEN 'claimed' ELSE 'purchased' END AS detail,
+          CAST(sm.amount_paid AS TEXT) AS amount, 'GBP' AS currency, sm.id AS ref_id
+        FROM sponsored_memberships sm
+        LEFT JOIN users u ON sm.claimed_by_user_id = u.user_id
+        WHERE sm.status IN ('available', 'claimed')
+          AND datetime(COALESCE(sm.claimed_at, sm.purchased_at)) >= ${since}
+      `)
+    ])
+
+    const merged = chunks.flat().sort((a, b) => {
+      const ta = Date.parse(a.occurred_at || '') || 0
+      const tb = Date.parse(b.occurred_at || '') || 0
+      return tb - ta
+    })
+
+    const activities = merged.slice(0, limit).map(row => {
+      let displayAmount = null
+      if (row.amount != null && row.amount !== '') {
+        const n = parseFloat(row.amount)
+        if (row.activity_type === 'shop_order') {
+          displayAmount = Number.isFinite(n) ? (n / 100).toFixed(2) : null
+        } else if (Number.isFinite(n)) {
+          displayAmount = n.toFixed(2)
+        }
+      }
+      return {
+        ...row,
+        display_amount: displayAmount,
+        currency: row.currency || 'GBP'
+      }
+    })
+
+    return c.json({ success: true, activities, days, limit })
+  } catch (error) {
+    console.error('[admin/recent-activity] ERROR:', error)
+    return c.json({ error: 'internal_error', message: error.message }, 500)
+  }
+})
+
+// ============================================================================
 // ADMIN CRON JOB LOGS ENDPOINT
 // ============================================================================
 
@@ -6514,6 +6754,158 @@ app.get('/admin/cron-logs', async c => {
 })
 
 // ============================================================================
+// ADMIN ACCOUNTS (owner-only sales report)
+// ============================================================================
+
+app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const url = new URL(c.req.url)
+    const from = parseAccountsIsoDate(url.searchParams.get('from'))
+    const to = parseAccountsIsoDate(url.searchParams.get('to'))
+    if (!from || !to) {
+      return c.json({ error: 'invalid_date_range' }, 400)
+    }
+    if (from > to) {
+      return c.json({ error: 'from_after_to' }, 400)
+    }
+    const fromMs = Date.parse(`${from}T00:00:00Z`)
+    const toMs = Date.parse(`${to}T00:00:00Z`)
+    if (toMs - fromMs > 400 * 24 * 60 * 60 * 1000) {
+      return c.json({ error: 'range_too_long' }, 400)
+    }
+
+    const db = c.env.DB
+    const dateSql = (alias) =>
+      `strftime('%Y-%m-%d', ${alias}.created_at) >= ? AND strftime('%Y-%m-%d', ${alias}.created_at) <= ?`
+    const paidSql = (alias) => `UPPER(COALESCE(${alias}.payment_status, '')) = 'PAID'`
+
+    async function runLines(sql) {
+      try {
+        const rows = await db.prepare(sql).bind(from, to).all()
+        return rows.results || []
+      } catch (e) {
+        console.warn('[admin/accounts/sales] query failed:', e.message)
+        return []
+      }
+    }
+
+    const chunks = await Promise.all([
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          CASE m.plan
+            WHEN 'monthly' THEN 'membership_monthly'
+            WHEN 'quarterly' THEN 'membership_quarterly'
+            WHEN 'annual' THEN 'membership_annual'
+            ELSE 'membership'
+          END AS category,
+          t.amount * 1.0 AS amount_pounds
+        FROM memberships m
+        JOIN transactions t ON t.order_ref = m.order_ref
+        WHERE t.transaction_type = 'membership'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          'renewal' AS category,
+          t.amount * 1.0 AS amount_pounds
+        FROM transactions t
+        WHERE t.transaction_type = 'renewal'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          'donation' AS category,
+          t.amount * 1.0 AS amount_pounds
+        FROM transactions t
+        WHERE t.transaction_type = 'donation'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      // Event+membership bundles: count membership plan price only (£10/£25/£90), not the event ticket.
+      runLines(`
+        SELECT t.id AS id, t.created_at AS created_at,
+          CASE m.plan
+            WHEN 'monthly' THEN 'bundle_monthly'
+            WHEN 'quarterly' THEN 'bundle_quarterly'
+            WHEN 'annual' THEN 'bundle_annual'
+            ELSE 'bundle'
+          END AS category,
+          CASE m.plan
+            WHEN 'monthly' THEN 10
+            WHEN 'quarterly' THEN 25
+            WHEN 'annual' THEN 90
+            ELSE t.amount * 1.0
+          END AS amount_pounds
+        FROM memberships m
+        JOIN transactions t ON t.order_ref = m.order_ref
+        WHERE t.transaction_type = 'event_membership_bundle'
+          AND ${paidSql('t')}
+          AND ${dateSql('t')}
+      `),
+      // /drinks checkout stores name 'Walk-in' / email 'walk-in' (single or mixed baskets).
+      // Online shop.dicebastion.com orders are intentionally excluded from this report.
+      runLines(`
+        SELECT o.id AS id, o.created_at AS created_at,
+          'drinks' AS category,
+          o.total / 100.0 AS amount_pounds
+        FROM orders o
+        WHERE ${paidSql('o')}
+          AND (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
+          AND ${dateSql('o')}
+      `)
+    ])
+
+    const lineItems = chunks.flat().map(row => {
+      const amount = accountsPounds(row.amount_pounds)
+      return {
+        id: row.id,
+        created_at: row.created_at,
+        category: row.category || 'other',
+        amount_pounds: Math.round(amount * 100) / 100,
+        net_payout: Math.round(amount * 0.95 * 100) / 100
+      }
+    }).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+
+    const grouped = new Map()
+    for (const item of lineItems) {
+      const prev = grouped.get(item.category) || { category: item.category, quantity: 0, total_pounds: 0, net_payout: 0 }
+      prev.quantity += 1
+      prev.total_pounds += item.amount_pounds
+      prev.net_payout += item.net_payout
+      grouped.set(item.category, prev)
+    }
+
+    const categories = [...grouped.values()]
+      .map(row => ({
+        ...row,
+        total_pounds: Math.round(row.total_pounds * 100) / 100,
+        net_payout: Math.round(row.net_payout * 100) / 100
+      }))
+      .sort((a, b) => a.category.localeCompare(b.category))
+
+    const gross = lineItems.reduce((sum, row) => sum + row.amount_pounds, 0)
+    const net = lineItems.reduce((sum, row) => sum + row.net_payout, 0)
+
+    return c.json({
+      from,
+      to,
+      categories,
+      line_items: lineItems,
+      totals: {
+        quantity: lineItems.length,
+        total_pounds: Math.round(gross * 100) / 100,
+        net_payout: Math.round(net * 100) / 100
+      }
+    })
+  } catch (error) {
+    console.error('[admin/accounts/sales] ERROR:', error)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// ============================================================================
 // ADMIN EVENT MANAGEMENT ENDPOINTS
 // ============================================================================
 
@@ -6522,7 +6914,6 @@ app.get('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
     
-    await ensureEventImageVariantColumns(c.env.DB)
     const event = await c.env.DB.prepare(`
       SELECT 
         event_id as id,
@@ -6567,7 +6958,6 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
@@ -6576,6 +6966,13 @@ app.post('/admin/events', requireAdmin, async c => {
     
     // Combine date and time
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
+    const resolvedSeoImage = resolveSeoImageOnArtworkChange(
+      null,
+      seo_image,
+      image_url,
+      image_url_card,
+      image_url_hero
+    )
     
     const result = await c.env.DB.prepare(`
       INSERT INTO events (event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date, end_time)
@@ -6588,7 +6985,7 @@ app.post('/admin/events', requireAdmin, async c => {
       full_description || null,
       seo_description || null,
       seo_organizer || null,
-      seo_image || null,
+      resolvedSeoImage,
       datetime,
       location || null,
       membership_price || 0,
@@ -6624,7 +7021,6 @@ app.post('/admin/events', requireAdmin, async c => {
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
     const id = c.req.param('id')
-    await ensureEventImageVariantColumns(c.env.DB)
     const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
@@ -6633,6 +7029,17 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     
     // Combine date and time
     const datetime = time ? `${event_date}T${time}:00` : `${event_date}T00:00:00`
+
+    const current = await c.env.DB.prepare(
+      'SELECT seo_image, image_url, image_url_card, image_url_hero FROM events WHERE event_id = ?'
+    ).bind(id).first()
+    const resolvedSeoImage = resolveSeoImageOnArtworkChange(
+      current,
+      seo_image,
+      image_url,
+      image_url_card,
+      image_url_hero
+    )
     
     await c.env.DB.prepare(`
       UPDATE events 
@@ -6646,7 +7053,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
       full_description || null,
       seo_description || null,
       seo_organizer || null,
-      seo_image || null,
+      resolvedSeoImage,
       datetime,
       location || null,
       membership_price || 0,
@@ -6897,7 +7304,16 @@ app.post('/events/:id/checkout', async c => {
 
     let checkout
     try {
-      checkout = await createCheckout(c.env, { amount, currency, orderRef: order_ref, title: ev.event_name, description: `Ticket for ${ev.event_name}` })
+      // redirectUrl recovers activation if the SumUp widget is unmounted mid-3DS
+      // (e.g. user switches email and starts a second checkout while the first charges).
+      checkout = await createCheckout(c.env, {
+        amount,
+        currency,
+        orderRef: order_ref,
+        title: ev.event_name,
+        description: `Ticket for ${ev.event_name}`,
+        redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`
+      })
     } catch (e) {
       console.error('SumUp checkout failed for event', evId, e)
       return c.json({ error:'sumup_checkout_failed', message:String(e?.message||e) },502)
@@ -7370,15 +7786,17 @@ function generateProductSeoPage(product, allCategories) {
   const slug = product.slug || '';
   const productImages = collectProductImageUrls(product, shop);
   const img = resolveProductPrimaryImage(product, shop);
-  const rawDesc = product.full_description || product.summary || product.description || '';
-  const plainDesc = stripHtml(rawDesc);
-  const fallbackBlurb =
-    'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local pickup at Gibraltar Warhammer Club.';
-  const plainForMeta = plainDesc || fallbackBlurb;
+  // Meta/snippets prefer summary (short); body can still show full HTML description.
+  const summaryPlain = stripHtml(product.summary || '');
+  const descriptionPlain = stripHtml(product.description || '');
+  const fullPlain = stripHtml(product.full_description || '');
+  const plainForMeta = summaryPlain || descriptionPlain || fullPlain ||
+    'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local collection available.';
   const descTrunc = plainForMeta.length > 160 ? plainForMeta.substring(0, 157) + '...' : plainForMeta;
   const desc = e(descTrunc);
-  const fullDescHtml = rawDesc;  // Keep HTML for visual display
-  const url = `${shop}/products/${slug}`;
+  const bodyHtml = product.full_description || product.description || product.summary || '';
+  const shopModalUrl = `${shop}/?product=${encodeURIComponent(slug)}`;
+  const url = `${shop}/products/${encodeURIComponent(slug)}`;
   const priceNum = (Number(product.price) || 0) / 100;
   const priceDisplay = priceNum.toFixed(2);
   const inStock = (product.stock_quantity || 0) > 0;
@@ -7518,15 +7936,16 @@ ${img ? `<img src="${img}" alt="${name}" loading="eager" decoding="async" fetchp
 <h1>${name}</h1>
 ${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${shop}/products/category/${encodeURIComponent(c)}">${e(c)}</a>`).join('')}</div>` : ''}
 <div class="price">£${priceDisplay}</div>
-${fullDescHtml ? `<div class="desc">${fullDescHtml}</div>` : `<div class="desc">${e(plainForMeta)}</div>`}
+${bodyHtml ? `<div class="desc">${bodyHtml}</div>` : `<div class="desc">${e(plainForMeta)}</div>`}
 <div class="meta">
 <div class="meta-item"><span class="meta-label">Availability</span><span class="meta-value">${isPreorder ? `<span class="badge badge-preorder">Pre-order · ${releaseDateStr}</span>` : inStock ? `<span class="badge badge-stock">${product.stock_quantity} in stock</span>` : '<span class="badge badge-out">Out of stock</span>'}</span></div>
-<div class="meta-item"><span class="meta-label">Pickup</span><span class="meta-value">Gibraltar Warhammer Club</span></div>
+<div class="meta-item"><span class="meta-label">Pickup</span><span class="meta-value">Local collection</span></div>
 </div>
-<a class="${inStock || isPreorder ? 'cta' : 'cta cta-disabled'}" href="${shop}/?product=${slug}">${isPreorder ? 'Pre-order Now' : inStock ? 'View in Shop' : 'Out of Stock'}</a>
+<p class="desc" style="margin-top:0.5rem;font-size:0.9rem;">Opens this product in the Dice Bastion shop.</p>
+<a class="${inStock || isPreorder ? 'cta' : 'cta cta-disabled'}" href="${shopModalUrl}">${isPreorder ? 'Pre-order in shop' : inStock ? 'Open in shop' : 'Out of Stock'}</a>
 </div>
 </div>
-<div class="footer"><a href="${shop}">← Back to Shop</a></div>
+<div class="footer"><a href="${shop}">Back to Shop</a></div>
 </body></html>`;
 }
 
@@ -7536,7 +7955,9 @@ function generateCategorySeoPage(categoryName, products) {
   const shop = 'https://shop.dicebastion.com';
   const catDisplay = e(categoryName);
   const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
-  const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local pickup at Gibraltar Warhammer Club.`;
+  const shopFilterUrl = `${shop}/?category=${encodeURIComponent(categoryName)}`;
+  const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`;
+  const ogImage = products.map(p => ensureAbsoluteImageUrl(p.image_url, shop)).find(Boolean) || '';
 
   // CollectionPage + ItemList schema
   const schema = {
@@ -7551,7 +7972,7 @@ function generateCategorySeoPage(categoryName, products) {
       'itemListElement': products.map((p, i) => ({
         '@type': 'ListItem',
         'position': i + 1,
-        'url': `${shop}/products/${p.slug}`,
+        'url': `${shop}/products/${encodeURIComponent(p.slug)}`,
         'name': p.name
       }))
     }
@@ -7569,10 +7990,14 @@ function generateCategorySeoPage(categoryName, products) {
   const productCards = products.map(p => {
     const price = ((Number(p.price) || 0) / 100).toFixed(2);
     const cardImg = p.image_url ? ensureAbsoluteImageUrl(p.image_url, shop) : '';
-    return `<a href="${shop}/products/${p.slug}" class="cat-product-card">
+    return `<a href="${shop}/products/${encodeURIComponent(p.slug)}" class="cat-product-card">
 ${cardImg ? `<img src="${cardImg}" alt="${e(p.name)}" loading="lazy" decoding="async">` : '<div class="cat-product-img-placeholder"></div>'}
 <div class="cat-product-info"><span class="cat-product-name">${e(p.name)}</span><span class="cat-product-price">£${price}</span></div></a>`;
   }).join('\n');
+
+  const ogImageMeta = ogImage
+    ? `<meta property="og:image" content="${e(ogImage)}"><meta name="twitter:image" content="${e(ogImage)}">`
+    : '';
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -7581,7 +8006,8 @@ ${cardImg ? `<img src="${cardImg}" alt="${e(p.name)}" loading="lazy" decoding="a
 <meta property="og:type" content="website"><meta property="og:url" content="${url}">
 <meta property="og:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar"><meta property="og:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
 <meta property="og:site_name" content="Dice Bastion Shop">
-<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
+${ogImageMeta}
+<meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
 <meta name="twitter:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
@@ -7596,6 +8022,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .cat-heading{max-width:900px;width:100%;margin:1rem auto;padding:0 1rem}
 .cat-heading h1{font-size:2rem;color:#fff}
 .cat-heading p{color:#808090;margin-top:.25rem}
+.cta{display:inline-block;margin-top:1rem;padding:.65rem 1.5rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600}
 .cat-grid{max-width:900px;width:100%;margin:1rem auto 2rem;padding:0 1rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1.25rem}
 .cat-product-card{background:#16162a;border:1px solid #2a2a4a;border-radius:12px;overflow:hidden;text-decoration:none;color:#e0e0e0;transition:transform .2s,border-color .2s}
 .cat-product-card:hover{transform:translateY(-4px);border-color:#7c3aed}
@@ -7610,9 +8037,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </head><body>
 <div class="header"><a href="${shop}">Dice Bastion Shop</a></div>
 <div class="breadcrumb"><a href="${shop}">Shop</a> › ${catDisplay}</div>
-<div class="cat-heading"><h1>${catDisplay}</h1><p>${products.length} product${products.length !== 1 ? 's' : ''}</p></div>
+<div class="cat-heading">
+<h1>${catDisplay}</h1>
+<p>${products.length} product${products.length !== 1 ? 's' : ''}</p>
+<a class="cta" href="${shopFilterUrl}">Open category in shop</a>
+</div>
 <div class="cat-grid">${productCards}</div>
-<div class="footer"><a href="${shop}">← Back to Shop</a></div>
+<div class="footer"><a href="${shop}">Back to Shop</a></div>
 </body></html>`;
 }
 
@@ -7635,16 +8066,24 @@ app.get('/products/sitemap.xml', async c => {
   try {
     const { results } = await c.env.DB.prepare(`
       SELECT slug, updated_at, category FROM products
-      WHERE is_active = 1 AND slug IS NOT NULL
+      WHERE is_active = 1
+        AND slug IS NOT NULL AND TRIM(slug) != ''
+        AND COALESCE(show_in_shop, 1) = 1
       ORDER BY updated_at DESC
     `).all()
 
     const shop = 'https://shop.dicebastion.com'
 
-    // Collect unique categories
-    const categories = new Set()
+    // Collect unique categories + newest product update per category for lastmod
+    const categoryLastMod = new Map()
     ;(results || []).forEach(p => {
-      if (p.category) p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => categories.add(c))
+      if (!p.category) return
+      p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => {
+        const prev = categoryLastMod.get(c)
+        if (!prev || String(p.updated_at || '') > String(prev)) {
+          categoryLastMod.set(c, p.updated_at)
+        }
+      })
     })
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -7658,8 +8097,9 @@ app.get('/products/sitemap.xml', async c => {
     }
 
     // Category pages
-    for (const cat of categories) {
-      xml += `\n<url><loc>${shop}/products/category/${encodeURIComponent(cat)}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`
+    for (const [cat, updatedAt] of categoryLastMod) {
+      const lastmod = formatProductSitemapLastMod(updatedAt)
+      xml += `\n<url><loc>${shop}/products/category/${encodeURIComponent(cat)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.6</priority></url>`
     }
 
     xml += '\n</urlset>'
@@ -7684,7 +8124,9 @@ app.get('/products/sitemap-images.xml', async c => {
     const { results } = await c.env.DB.prepare(`
       SELECT slug, name, image_url, summary, description, full_description
       FROM products
-      WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
+      WHERE is_active = 1
+        AND slug IS NOT NULL AND TRIM(slug) != ''
+        AND COALESCE(show_in_shop, 1) = 1
       ORDER BY updated_at DESC
     `).all()
 
@@ -7725,7 +8167,8 @@ app.get('/products/:slug', async (c, next) => {
       return Response.redirect('https://shop.dicebastion.com/', 302)
     }
 
-    // Server-side dynamic rendering: bots get SEO page, humans get 302
+    // Shop UX: humans get the real shop + product modal. Bots get the SEO HTML
+    // at this canonical URL (same pattern as sitemap / Indexing API targets).
     const host = c.req.header('Host') || ''
     if (host.includes('shop.dicebastion.com')) {
       const ua = (c.req.header('User-Agent') || '').toLowerCase()
@@ -7739,7 +8182,7 @@ app.get('/products/:slug', async (c, next) => {
         })
       }
 
-      // Human → redirect to shop with product modal
+      // Human → shop homepage with product modal (not a standalone product design)
       return Response.redirect(`https://shop.dicebastion.com/?product=${encodeURIComponent(product.slug)}`, 302)
     }
 
@@ -7827,6 +8270,147 @@ app.get('/products', async (c) => {
   }
 })
 
+async function ensureProductCategoriesSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS product_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      featured INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      keywords TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )
+  `).run()
+}
+
+function normalizeCategoryKeywords(raw) {
+  const parts = String(raw || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+  const seen = new Set()
+  const out = []
+  for (const part of parts) {
+    const key = part.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(part)
+  }
+  return out.join(', ')
+}
+
+function collectProductCategoryNames(productRows) {
+  const counts = new Map()
+  for (const product of productRows || []) {
+    const raw = product.category || ''
+    for (const part of raw.split(',')) {
+      const name = part.trim()
+      if (!name) continue
+      counts.set(name, (counts.get(name) || 0) + 1)
+    }
+  }
+  return counts
+}
+
+async function listProductCategoryMeta(db) {
+  await ensureProductCategoriesSchema(db)
+  const products = await db.prepare(`
+    SELECT category FROM products
+    WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
+  `).all()
+  const counts = collectProductCategoryNames(products.results || [])
+  const metaRows = await db.prepare(`
+    SELECT id, name, featured, sort_order, keywords, created_at, updated_at
+    FROM product_categories
+    ORDER BY featured DESC, sort_order ASC, name COLLATE NOCASE ASC
+  `).all()
+  const metaByLower = new Map()
+  for (const row of metaRows.results || []) {
+    metaByLower.set(String(row.name || '').toLowerCase(), row)
+  }
+
+  const names = new Set([...counts.keys(), ...(metaRows.results || []).map(r => r.name)])
+  const categories = [...names].map(name => {
+    const meta = metaByLower.get(String(name).toLowerCase())
+    return {
+      name,
+      product_count: counts.get(name) || 0,
+      featured: meta ? !!Number(meta.featured) : false,
+      sort_order: meta ? Number(meta.sort_order) || 0 : 0,
+      keywords: meta?.keywords || '',
+      id: meta?.id || null
+    }
+  }).sort((a, b) => {
+    if (a.featured !== b.featured) return a.featured ? -1 : 1
+    if (a.featured && b.featured && a.sort_order !== b.sort_order) return a.sort_order - b.sort_order
+    if (a.product_count !== b.product_count) return b.product_count - a.product_count
+    return a.name.localeCompare(b.name)
+  })
+
+  return categories
+}
+
+// Public category metadata for shop chips + keyword search
+app.get('/product-categories', async (c) => {
+  try {
+    const categories = await listProductCategoryMeta(c.env.DB)
+    return c.json({
+      categories: categories.map(({ name, featured, sort_order, keywords, product_count }) => ({
+        name,
+        featured,
+        sort_order,
+        keywords,
+        product_count
+      }))
+    })
+  } catch (e) {
+    console.error('[product-categories] list:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/product-categories', requireAdmin, async (c) => {
+  try {
+    const categories = await listProductCategoryMeta(c.env.DB)
+    return c.json({ categories })
+  } catch (e) {
+    console.error('[admin/product-categories] list:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/product-categories', requireAdmin, async (c) => {
+  try {
+    await ensureProductCategoriesSchema(c.env.DB)
+    const body = await c.req.json()
+    const name = String(body.name || '').trim()
+    if (!name || name.length > 120) {
+      return c.json({ error: 'invalid_name' }, 400)
+    }
+    const featured = body.featured ? 1 : 0
+    const sortOrder = Math.max(0, Math.min(9999, parseInt(body.sort_order, 10) || 0))
+    const keywords = normalizeCategoryKeywords(body.keywords)
+    const now = toIso(new Date())
+
+    await c.env.DB.prepare(`
+      INSERT INTO product_categories (name, featured, sort_order, keywords, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        featured = excluded.featured,
+        sort_order = excluded.sort_order,
+        keywords = excluded.keywords,
+        updated_at = excluded.updated_at
+    `).bind(name, featured, sortOrder, keywords || null, now, now).run()
+
+    const categories = await listProductCategoryMeta(c.env.DB)
+    return c.json({ success: true, categories })
+  } catch (e) {
+    console.error('[admin/product-categories] upsert:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // Get single product by ID or slug (public)
 app.get('/products/:id', async (c) => {
   try {
@@ -7853,19 +8437,191 @@ app.get('/products/:id', async (c) => {
   }
 })
 
+async function ensureProductImportSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS product_imports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      source_filename TEXT,
+      created_at TEXT NOT NULL,
+      created_by TEXT,
+      product_count INTEGER DEFAULT 0,
+      cleaned_at TEXT
+    )
+  `).run()
+  try {
+    await db.prepare('ALTER TABLE products ADD COLUMN import_batch_id INTEGER').run()
+  } catch (_) {
+    // Column already exists
+  }
+}
+
+async function getImportBatchSaleStats(db, batchId) {
+  const products = await db.prepare(`
+    SELECT id, name, slug, is_active
+    FROM products
+    WHERE import_batch_id = ?
+  `).bind(batchId).all()
+  const list = products.results || []
+  if (!list.length) {
+    return { products: [], soldIds: new Set(), unsoldIds: [] }
+  }
+
+  const soldRows = await db.prepare(`
+    SELECT DISTINCT oi.product_id AS product_id
+    FROM order_items oi
+    WHERE oi.product_id IN (
+      SELECT id FROM products WHERE import_batch_id = ?
+    )
+  `).bind(batchId).all()
+  const soldIds = new Set((soldRows.results || []).map(r => Number(r.product_id)))
+  const unsoldIds = list.filter(p => !soldIds.has(Number(p.id))).map(p => Number(p.id))
+  return { products: list, soldIds, unsoldIds }
+}
+
+// Create a CSV import batch so products can be cleaned up later
+app.post('/admin/product-imports', requireAdmin, async (c) => {
+  try {
+    await ensureProductImportSchema(c.env.DB)
+    const body = await c.req.json().catch(() => ({}))
+    const label = String(body.label || '').trim() || `Import ${new Date().toISOString().slice(0, 10)}`
+    const sourceFilename = String(body.source_filename || '').trim() || null
+    const now = toIso(new Date())
+    const result = await c.env.DB.prepare(`
+      INSERT INTO product_imports (label, source_filename, created_at, created_by, product_count)
+      VALUES (?, ?, ?, ?, 0)
+    `).bind(label, sourceFilename, now, null).run()
+    return c.json({ success: true, id: result.meta.last_row_id, label })
+  } catch (e) {
+    console.error('Create product import error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// List import batches with sold / unsold counts
+app.get('/admin/product-imports', requireAdmin, async (c) => {
+  try {
+    await ensureProductImportSchema(c.env.DB)
+    const batches = await c.env.DB.prepare(`
+      SELECT id, label, source_filename, created_at, product_count, cleaned_at
+      FROM product_imports
+      ORDER BY id DESC
+      LIMIT 100
+    `).all()
+    const rows = batches.results || []
+    const enriched = []
+    for (const batch of rows) {
+      const stats = await getImportBatchSaleStats(c.env.DB, batch.id)
+      enriched.push({
+        ...batch,
+        total_products: stats.products.length,
+        sold_count: stats.soldIds.size,
+        unsold_count: stats.unsoldIds.length,
+        active_count: stats.products.filter(p => Number(p.is_active) === 1).length
+      })
+    }
+    return c.json({ imports: enriched })
+  } catch (e) {
+    console.error('List product imports error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Cleanup an import: hard-delete unsold products; keep sold products inactive
+app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
+  try {
+    await ensureProductImportSchema(c.env.DB)
+    const batchId = parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(batchId)) {
+      return c.json({ error: 'invalid_id' }, 400)
+    }
+
+    const batch = await c.env.DB.prepare('SELECT * FROM product_imports WHERE id = ?').bind(batchId).first()
+    if (!batch) {
+      return c.json({ error: 'not_found' }, 404)
+    }
+
+    const stats = await getImportBatchSaleStats(c.env.DB, batchId)
+    const soldIds = [...stats.soldIds]
+    const unsoldIds = stats.unsoldIds
+    const now = toIso(new Date())
+
+    // Keep sold products for order_items FK + history; hide from shop
+    if (soldIds.length) {
+      const placeholders = soldIds.map(() => '?').join(',')
+      await c.env.DB.prepare(`
+        UPDATE products
+        SET is_active = 0, updated_at = ?
+        WHERE id IN (${placeholders})
+      `).bind(now, ...soldIds).run()
+    }
+
+    // Hard-delete unsold (and clear carts)
+    let deleted = 0
+    if (unsoldIds.length) {
+      const placeholders = unsoldIds.map(() => '?').join(',')
+      await c.env.DB.prepare(`
+        DELETE FROM cart_items WHERE product_id IN (${placeholders})
+      `).bind(...unsoldIds).run().catch(() => {})
+
+      // SEO notify before delete
+      const toDelete = stats.products.filter(p => unsoldIds.includes(Number(p.id)))
+      for (const p of toDelete) {
+        if (p.slug) {
+          const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`
+          notifyContentSeoAsync(c.executionCtx, c.env, {
+            urls: [productUrl],
+            indexingUrl: productUrl,
+            indexingType: 'URL_DELETED'
+          })
+        }
+      }
+
+      const del = await c.env.DB.prepare(`
+        DELETE FROM products WHERE id IN (${placeholders})
+      `).bind(...unsoldIds).run()
+      deleted = del.meta?.changes || unsoldIds.length
+    }
+
+    const remaining = await c.env.DB.prepare(`
+      SELECT COUNT(*) AS c FROM products WHERE import_batch_id = ?
+    `).bind(batchId).first()
+
+    await c.env.DB.prepare(`
+      UPDATE product_imports
+      SET cleaned_at = ?, product_count = ?
+      WHERE id = ?
+    `).bind(now, Number(remaining?.c) || 0, batchId).run()
+
+    return c.json({
+      success: true,
+      deleted_unsold: deleted,
+      kept_sold_inactive: soldIds.length,
+      remaining_products: Number(remaining?.c) || 0
+    })
+  } catch (e) {
+    console.error('Cleanup product import error:', e)
+    return c.json({ error: 'internal_error', message: e.message }, 500)
+  }
+})
+
 // Create new product (admin only - TODO: add authentication)
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date } = await c.req.json()
+    await ensureProductImportSchema(c.env.DB)
+    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id } = await c.req.json()
     
     if (!name || !slug || price === undefined) {
       return c.json({ error: 'missing_required_fields' }, 400)
     }
     
     const now = toIso(new Date())
+    const batchId = import_batch_id != null && import_batch_id !== ''
+      ? parseInt(String(import_batch_id), 10)
+      : null
     const result = await c.env.DB.prepare(`
-      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       name, 
       slug, 
@@ -7878,9 +8634,20 @@ app.post('/admin/products', requireAdmin, async (c) => {
       image_url || null, 
       category || null,
       release_date || null,
+      Number.isFinite(batchId) ? batchId : null,
       now,
       now
     ).run()
+
+    if (Number.isFinite(batchId)) {
+      await c.env.DB.prepare(`
+        UPDATE product_imports
+        SET product_count = (
+          SELECT COUNT(*) FROM products WHERE import_batch_id = ?
+        )
+        WHERE id = ?
+      `).bind(batchId, batchId).run().catch(() => {})
+    }
 
     if (slug) {
       const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`
@@ -8118,7 +8885,6 @@ function normalizeDiscountTypeStored(t) {
 
 app.get('/admin/promo-codes', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const rows = await c.env.DB.prepare('SELECT * FROM promo_codes ORDER BY datetime(created_at) DESC').all()
     return c.json({ promo_codes: rows.results || [] })
   } catch (e) {
@@ -8129,7 +8895,6 @@ app.get('/admin/promo-codes', requireAdmin, async c => {
 
 app.post('/admin/promo-codes', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const body = await c.req.json()
     const code = normalizePromoCodeInput(body.code)
     if (!code) return c.json({ error: 'code_required' }, 400)
@@ -8190,7 +8955,6 @@ app.post('/admin/promo-codes', requireAdmin, async c => {
 
 app.put('/admin/promo-codes/:id', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const id = parseInt(c.req.param('id'), 10)
     if (!(id > 0)) return c.json({ error: 'invalid_id' }, 400)
 
@@ -8275,7 +9039,6 @@ app.put('/admin/promo-codes/:id', requireAdmin, async c => {
 
 app.delete('/admin/promo-codes/:id', requireAdmin, async c => {
   try {
-    await ensureShopPromoSchema(c.env.DB)
     const id = parseInt(c.req.param('id'), 10)
     if (!(id > 0)) return c.json({ error: 'invalid_id' }, 400)
     await c.env.DB.prepare('DELETE FROM promo_codes WHERE id = ?').bind(id).run()
@@ -8304,9 +9067,12 @@ app.post('/admin/indexing/notify', requireAdmin, async (c) => {
       google = await notifyGoogleIndexing(c.env, url, type || 'URL_UPDATED')
     }
 
-    // "ok" reflects the real mechanism (IndexNow). Always 200 so the browser sees JSON.
+    // "ok" is true if EITHER mechanism accepted the URL. IndexNow (Bing/Yandex/etc.)
+    // is best-effort and frequently 429s on Cloudflare's shared egress IP; Google's
+    // Indexing API succeeding is what matters for Search Console. Always 200 so the
+    // browser sees JSON.
     return c.json({
-      ok: indexNow.ok,
+      ok: indexNow.ok || !!(google && google.ok),
       indexnow: indexNow,
       google: google || { skipped: true, reason: 'google_sa_key_not_configured' }
     }, 200)
@@ -8336,8 +9102,10 @@ app.post('/admin/indexing/batch', requireAdmin, async (c) => {
       }))
     }
 
+    // ok if IndexNow accepted OR at least one Google submission succeeded.
+    const googleAnyOk = Array.isArray(google) && google.some(g => g && g.ok)
     return c.json({
-      ok: indexNow.ok,
+      ok: indexNow.ok || googleAnyOk,
       total: urls.length,
       indexnow: indexNow,
       google: google || { skipped: true, reason: 'google_sa_key_not_configured' }
@@ -8397,7 +9165,6 @@ app.get('/admin/newsletter/recipients', requireAdmin, async c => {
  */
 app.get('/admin/newsletter/events', requireAdmin, async c => {
   try {
-    await ensureEventImageVariantColumns(c.env.DB)
     const { results } = await c.env.DB.prepare(`
       SELECT event_id, event_name, description, event_datetime, location,
              image_url, image_url_card, slug, is_recurring, recurrence_pattern, recurrence_end_date
@@ -8772,33 +9539,54 @@ app.post('/support/contact', async (c) => {
       return c.json({ error: 'message_too_short', message: 'Please enter a message of at least 10 characters.' }, 400)
     }
 
+    const isPlaymatCommission = trimmedCategory === 'custom_playmat'
+    let mailAttachments = null
+    if (isPlaymatCommission && Array.isArray(body.attachments) && body.attachments.length) {
+      const parsed = parsePlaymatAttachments(body.attachments)
+      if (parsed.error) {
+        return c.json({ error: parsed.error, message: parsed.message }, 400)
+      }
+      mailAttachments = parsed.attachments
+    }
+
     const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
     if (!tsOk) {
       return c.json({ error: 'turnstile_failed', message: 'Security check failed. Please refresh and try again.' }, 403)
     }
 
-    const supportTo = c.env.SUPPORT_CONTACT_EMAIL || 'contact@dicebastion.com'
+    const supportTo = isPlaymatCommission
+      ? (c.env.PLAYMAT_COMMISSION_EMAIL || 'jen@dicebastion.com')
+      : (c.env.SUPPORT_CONTACT_EMAIL || 'contact@dicebastion.com')
     const categoryLabels = {
       general: 'General enquiry',
       membership: 'Membership',
       events: 'Events',
       bookings: 'Table bookings',
       website: 'Website / technical issue',
+      custom_playmat: 'Custom playmat commission',
       other: 'Other'
     }
     const categoryLabel = categoryLabels[trimmedCategory] || categoryLabels.general
     const submittedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Gibraltar' })
-    const subject = `[Dice Bastion Support] ${categoryLabel} — ${trimmedName}`
+    const subject = isPlaymatCommission
+      ? `[Custom playmat] ${trimmedName}`
+      : `[Dice Bastion Support] ${categoryLabel} - ${trimmedName}`
+    const introLine = isPlaymatCommission
+      ? 'You received a new custom playmat commission request from the shop.'
+      : 'You received a new message from the Dice Bastion support form.'
+    const attachmentNote = mailAttachments?.length
+      ? `<p><strong>Attachments:</strong> ${mailAttachments.length} file${mailAttachments.length === 1 ? '' : 's'} included with this email.</p>`
+      : ''
     const html = `
       <!DOCTYPE html>
       <html>
       <head><meta charset="UTF-8"></head>
       <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
         <div style="background:linear-gradient(135deg,#b2c6df 0%,#5374a5 100%);color:white;padding:24px 20px;text-align:center;border-radius:8px 8px 0 0;">
-          <h1 style="margin:0;font-size:1.4rem;">New support message</h1>
+          <h1 style="margin:0;font-size:1.4rem;">${isPlaymatCommission ? 'New playmat commission' : 'New support message'}</h1>
         </div>
         <div style="background:#ffffff;padding:24px;border:1px solid #e5e7eb;border-top:none;">
-          <p>You received a new message from the Dice Bastion support form.</p>
+          <p>${introLine}</p>
           <div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:15px;margin:16px 0;">
             <p style="margin:0 0 8px;"><strong>From:</strong> ${escapeHtml(trimmedName)} &lt;${escapeHtml(trimmedEmail)}&gt;</p>
             <p style="margin:0 0 8px;"><strong>Category:</strong> ${escapeHtml(categoryLabel)}</p>
@@ -8806,20 +9594,26 @@ app.post('/support/contact', async (c) => {
           </div>
           <p><strong>Message:</strong></p>
           <p style="white-space:pre-wrap;">${escapeHtml(trimmedMessage)}</p>
+          ${attachmentNote}
           <p style="color:#666;font-size:0.9rem;">Reply directly to this email to respond to the sender.</p>
         </div>
       </body>
       </html>
     `.trim()
     const text = [
-      'New support message from dicebastion.com/support',
+      isPlaymatCommission
+        ? 'New custom playmat commission from shop.dicebastion.com'
+        : 'New support message from dicebastion.com/support',
       '',
       `From: ${trimmedName} <${trimmedEmail}>`,
       `Category: ${categoryLabel}`,
       `Submitted: ${submittedAt} (Gibraltar time)`,
       '',
       'Message:',
-      trimmedMessage
+      trimmedMessage,
+      ...(mailAttachments?.length
+        ? ['', `Attachments: ${mailAttachments.map((a) => a.filename).join(', ')}`]
+        : [])
     ].join('\n')
 
     const sent = await sendEmail(c.env, {
@@ -8827,9 +9621,14 @@ app.post('/support/contact', async (c) => {
       subject,
       html,
       text,
+      attachments: mailAttachments,
       replyTo: { email: trimmedEmail, name: trimmedName },
-      emailType: 'support_contact',
-      metadata: { category: trimmedCategory, senderEmail: trimmedEmail }
+      emailType: isPlaymatCommission ? 'playmat_commission' : 'support_contact',
+      metadata: {
+        category: trimmedCategory,
+        senderEmail: trimmedEmail,
+        attachmentCount: mailAttachments?.length || 0
+      }
     })
     if (!sent?.success) {
       return c.json({
@@ -8841,6 +9640,117 @@ app.post('/support/contact', async (c) => {
     return c.json({ ok: true })
   } catch (e) {
     console.error('[support/contact] error:', e)
+    return c.json({ error: 'internal_error', message: 'Something went wrong. Please try again.' }, 500)
+  }
+})
+
+app.post('/events/register', async (c) => {
+  try {
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, eventRegistrationRateLimits, 3, 5)) {
+      return c.json({
+        error: 'rate_limit_exceeded',
+        message: 'Too many submissions. Please wait a few minutes and try again.'
+      }, 429)
+    }
+
+    const body = await c.req.json()
+    if (body.website) return c.json({ ok: true })
+
+    const trimmedName = clampStr(body.name, 200)
+    const trimmedEmail = clampStr(body.email, 320).toLowerCase()
+    const trimmedPhone = clampStr(body.phone, 40)
+    const trimmedEventType = clampStr(body.eventType, 20)
+    const trimmedDetails = clampStr(body.eventDetails, 8000)
+    const turnstileToken = body.turnstileToken
+
+    if (!trimmedName) {
+      return c.json({ error: 'name_required', message: 'Please enter your name.' }, 400)
+    }
+    if (!trimmedEmail || !EMAIL_RE.test(trimmedEmail)) {
+      return c.json({ error: 'invalid_email', message: 'Please enter a valid email address.' }, 400)
+    }
+    if (!trimmedPhone || trimmedPhone.replace(/\D/g, '').length < 6) {
+      return c.json({ error: 'invalid_phone', message: 'Please enter a valid phone number.' }, 400)
+    }
+
+    const eventTypeLabels = {
+      member: 'Members Event',
+      private: 'Private Event',
+      public: 'Public Event'
+    }
+    const eventTypeLabel = eventTypeLabels[trimmedEventType]
+    if (!eventTypeLabel) {
+      return c.json({ error: 'invalid_event_type', message: 'Please select an event type.' }, 400)
+    }
+
+    const tsOk = await verifyTurnstile(c.env, turnstileToken, ip, false, c)
+    if (!tsOk) {
+      return c.json({
+        error: 'turnstile_failed',
+        message: 'Security check failed. Please refresh and try again.'
+      }, 403)
+    }
+
+    const eventsTo = c.env.EVENT_REGISTRATION_EMAIL || 'admin@dicebastion.com'
+    const submittedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Gibraltar' })
+    const subject = `[GWC Event Registration] ${eventTypeLabel} — ${trimmedName}`
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"></head>
+      <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+        <div style="background:linear-gradient(135deg,#b2c6df 0%,#5374a5 100%);color:white;padding:24px 20px;text-align:center;border-radius:8px 8px 0 0;">
+          <h1 style="margin:0;font-size:1.4rem;">New event registration</h1>
+        </div>
+        <div style="background:#ffffff;padding:24px;border:1px solid #e5e7eb;border-top:none;">
+          <p>A member has submitted an event registration from the events policy page.</p>
+          <div style="background:#e0f2fe;border-left:4px solid #0284c7;padding:15px;margin:16px 0;">
+            <p style="margin:0 0 8px;"><strong>Name:</strong> ${escapeHtml(trimmedName)}</p>
+            <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeHtml(trimmedEmail)}</p>
+            <p style="margin:0 0 8px;"><strong>Phone:</strong> ${escapeHtml(trimmedPhone)}</p>
+            <p style="margin:0 0 8px;"><strong>Event type:</strong> ${escapeHtml(eventTypeLabel)}</p>
+            <p style="margin:0;"><strong>Submitted:</strong> ${escapeHtml(submittedAt)} (Gibraltar time)</p>
+          </div>
+          <p><strong>Event details:</strong></p>
+          <p style="white-space:pre-wrap;">${escapeHtml(trimmedDetails)}</p>
+          <p style="color:#666;font-size:0.9rem;">Reply directly to this email to respond to the organiser.</p>
+        </div>
+      </body>
+      </html>
+    `.trim()
+    const text = [
+      'New event registration from dicebastion.com/events-policy',
+      '',
+      `Name: ${trimmedName}`,
+      `Email: ${trimmedEmail}`,
+      `Phone: ${trimmedPhone}`,
+      `Event type: ${eventTypeLabel}`,
+      `Submitted: ${submittedAt} (Gibraltar time)`,
+      '',
+      'Event details:',
+      trimmedDetails
+    ].join('\n')
+
+    const sent = await sendEmail(c.env, {
+      to: eventsTo,
+      subject,
+      html,
+      text,
+      replyTo: { email: trimmedEmail, name: trimmedName },
+      emailType: 'event_registration',
+      metadata: { eventType: trimmedEventType, senderEmail: trimmedEmail }
+    })
+    if (!sent?.success) {
+      return c.json({
+        error: 'send_failed',
+        message: 'Could not send your registration. Please try again later.'
+      }, 502)
+    }
+
+    return c.json({ ok: true })
+  } catch (e) {
+    console.error('[events/register] error:', e)
     return c.json({ error: 'internal_error', message: 'Something went wrong. Please try again.' }, 500)
   }
 })
@@ -9240,7 +10150,6 @@ async function processAutoRenewals(env) {
     let trialRemindersSent = 0
 
     try {
-      await migrateFreeTrialColumns(env.DB)
       const trialReminderDate = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000))
       const trialReminderDateStr = toIso(trialReminderDate)
 
@@ -9321,6 +10230,28 @@ async function processAutoRenewals(env) {
 
       for (const trial of (trialCharges.results || [])) {
         try {
+          // User may have paid manually after a failed trial charge — don't charge again.
+          const currentActive = await getActiveMembership(env.DB, trial.user_id)
+          if (currentActive && currentActive.id !== trial.id) {
+            console.log(`[CRON] Skipping trial charge for membership ${trial.id} — user ${trial.user_id} has active membership ${currentActive.id}`)
+            await clearFreeTrialChargeScheduling(env.DB, { userId: trial.user_id, activeMembershipId: currentActive.id })
+            continue
+          }
+
+          const paidSinceTrial = await env.DB.prepare(`
+            SELECT 1 FROM transactions
+            WHERE user_id = ?
+              AND payment_status = 'PAID'
+              AND transaction_type IN ('membership', 'membership_charge', 'renewal')
+              AND datetime(created_at) >= datetime(?)
+            LIMIT 1
+          `).bind(trial.user_id, trial.trial_end_date).first()
+          if (paidSinceTrial) {
+            console.log(`[CRON] Skipping trial charge for membership ${trial.id} — user ${trial.user_id} already paid since trial end`)
+            await clearFreeTrialChargeScheduling(env.DB, { userId: trial.user_id, activeMembershipId: trial.id })
+            continue
+          }
+
           const instrument = await getActivePaymentInstrument(env.DB, trial.user_id)
           if (!instrument) {
             await env.DB.prepare('UPDATE memberships SET renewal_failed_at = ?, renewal_attempts = COALESCE(renewal_attempts, 0) + 1 WHERE id = ?')
@@ -10362,7 +11293,9 @@ function formatPlainShipping(raw) {
 
 function buildShopBuyerEmail(order, items) {
   const isDelivery = !!order.shipping_address
-  const deliveryLabel = isDelivery ? 'Local delivery (£4)' : 'Collection (free) — Gibraltar Warhammer Club'
+  const deliveryLabel = isDelivery
+    ? 'Local delivery (£4)'
+    : 'Local collection (free). We\'ll arrange a time with you, usually within 24 hours.'
   const disc = Number(order.discount_pence || 0)
 
   const itemsRows = (items || []).map(item => `
@@ -10404,7 +11337,10 @@ function buildShopBuyerEmail(order, items) {
     <p style="margin:0.25rem 0;"><strong>Shipping:</strong> ${order.shipping ? pennyToMoneyLine(order.shipping) : 'FREE'}</p>
     <p style="margin:0.25rem 0;"><strong>Total:</strong> ${pennyToMoneyLine(order.total)}</p>
 
-    <p>We'll email when your items are ready. Questions? Reply to this email or contact <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+    <p>${isDelivery
+      ? 'We\'ll be in touch about delivery.'
+      : 'We\'ll arrange a collection time with you, usually within 24 hours.'
+    } Questions? Reply to this email or contact <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
     <p>— The Dice Bastion Team</p>
   `
 
@@ -10412,7 +11348,7 @@ function buildShopBuyerEmail(order, items) {
     `Hi ${order.name || 'there'},`,
     '',
     `Your order ${order.order_number} is confirmed.`,
-    `Delivery: ${isDelivery ? 'Local delivery' : 'Collection'}`,
+    `Delivery: ${isDelivery ? 'Local delivery' : 'Local collection (we\'ll arrange a time with you, usually within 24 hours)'}`,
     ...(plainShip ? ['', plainShip] : []),
     ...(humanNotes ? ['', humanNotes.slice(0, 800)] : []),
     '',
@@ -10507,7 +11443,7 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
       total: Number(refreshed.total || 0) / 100,
       discountPence: Number(refreshed.discount_pence || 0),
       promoCodeApplied: refreshed.promo_code_applied || '',
-      deliveryMethod: refreshed.shipping_address ? 'Local delivery' : 'Collection',
+      deliveryMethod: refreshed.shipping_address ? 'Local delivery' : 'Local collection',
       orderNotes: String(refreshed.notes || '').replace(/^\[delivery:[^\]]+\]\s*/, '').trim(),
       shippingPlain,
       items: items.results || []
@@ -10620,47 +11556,6 @@ async function emailHasActiveMembershipForShopPromo(db, email) {
   return !!m
 }
 
-// Table/columns already exist in production. Runtime guard remains as a safety net for
-// fresh/un-migrated DBs; run-once flag keeps it off the hot request path.
-let __shopPromoSchemaReady = false
-async function ensureShopPromoSchema(db) {
-  if (__shopPromoSchemaReady) return
-  await db.prepare(`
-    CREATE TABLE IF NOT EXISTS promo_codes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT NOT NULL UNIQUE,
-      label TEXT,
-      discount_type TEXT NOT NULL,
-      discount_value INTEGER NOT NULL,
-      rules_json TEXT NOT NULL DEFAULT '{}',
-      active INTEGER NOT NULL DEFAULT 1,
-      starts_at TEXT,
-      ends_at TEXT,
-      max_uses INTEGER,
-      uses_count INTEGER NOT NULL DEFAULT 0,
-      min_subtotal_pence INTEGER,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `).run()
-  const alters = [
-    'ALTER TABLE orders ADD COLUMN promo_code_id INTEGER',
-    'ALTER TABLE orders ADD COLUMN discount_pence INTEGER DEFAULT 0',
-    'ALTER TABLE orders ADD COLUMN promo_code_applied TEXT'
-  ]
-  for (const sql of alters) {
-    try {
-      await db.prepare(sql).run()
-    } catch (e) {
-      const msg = String(e?.message || e)
-      if (!msg.includes('duplicate column')) {
-        console.warn('[promo/schema] ALTER skipped or failed:', msg)
-      }
-    }
-  }
-  __shopPromoSchemaReady = true
-}
-
 /**
  * Validates promo and computes discount against built line items + full subtotal.
  * @returns {Promise<{ ok: boolean, discountPence?: number, promoRow?: Object, promoCodeSnap?: string, error?: string }>}
@@ -10745,8 +11640,6 @@ app.post('/shop/promo/quote', async c => {
     if (!checkRateLimit(ip, shopPromoQuoteRateLimits, 30, 1)) {
       return c.json({ error: 'rate_limit_exceeded', message: 'Too many requests. Try again shortly.' }, 429)
     }
-
-    await ensureShopPromoSchema(c.env.DB)
 
     const body = await c.req.json().catch(() => ({}))
     const { email, items, promo_code: promoCodeRaw, delivery_method: deliveryMethod } = body
@@ -10856,8 +11749,6 @@ app.post('/shop/checkout', async c => {
     if (!checkRateLimit(ip, shopCheckoutRateLimits, 8, 1)) {
       return c.json({ error: 'rate_limit_exceeded', message: 'Too many checkout attempts. Try again shortly.' }, 429)
     }
-
-    await ensureShopPromoSchema(c.env.DB)
 
     const body = await c.req.json().catch(() => ({}))
     const {
@@ -11271,6 +12162,12 @@ export default {
     const host = request.headers.get('Host') || ''
     const pathNorm = url.pathname.replace(/\/+$/, '') || '/'
 
+    // OpenText/Webroot (and similar filters) flag sites that serve HTML/APIs over HTTP.
+    if (url.protocol === 'http:') {
+      url.protocol = 'https:'
+      return Response.redirect(url.toString(), 301)
+    }
+
     // Bookings API lives on Bunny Edge Script; proxy same-origin so mobile browsers
     // do not block cross-origin fetches to *.bunny.run (shows as "Failed to load table types").
     // POST /api/bookings has no trailing segment — must match exactly, not only /api/bookings/*.
@@ -11308,10 +12205,12 @@ export default {
       }
     }
 
-    // Same-origin API on dicebastion.com — avoids cross-origin fetches to workers.dev
-    // (Safari/Edge report those as "Load failed" when blocked by privacy tools).
+    // Same-origin API on site + shop — avoids cross-origin fetches to workers.dev
+    // (workers.dev currently 404s; Safari/Edge also block some cross-origin cases).
     if (
-      (host === 'dicebastion.com' || host === 'www.dicebastion.com') &&
+      (host === 'dicebastion.com' ||
+        host === 'www.dicebastion.com' ||
+        host === 'shop.dicebastion.com') &&
       url.pathname.startsWith('/api/')
     ) {
       const proxyUrl = new URL(request.url)

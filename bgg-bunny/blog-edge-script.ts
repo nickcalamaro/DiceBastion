@@ -225,6 +225,18 @@ async function migrateBlogPosts(): Promise<void> {
       /* column already exists */
     }
   }
+  try {
+    await client.execute(`ALTER TABLE blog_authors ADD COLUMN custom_html TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  const jenKofiHtml =
+    "<script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script>" +
+    "<script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#72a4f2', 'R2W721G7NT');kofiwidget2.draw();</script>";
+  await client.execute({
+    sql: `UPDATE blog_authors SET custom_html = ? WHERE slug = 'jen' AND (custom_html IS NULL OR TRIM(custom_html) = '')`,
+    args: [jenKofiHtml],
+  });
   migrated = true;
 }
 
@@ -249,7 +261,7 @@ async function upsertBlogAuthors(authorMeta: Record<string, { name?: string; ima
 }
 
 async function fetchAuthorMap(): Promise<Record<string, BlogAuthorProfile>> {
-  const result = await client.execute("SELECT slug, name, image, bio FROM blog_authors");
+  const result = await client.execute("SELECT slug, name, image, bio, custom_html FROM blog_authors");
   const map: Record<string, BlogAuthorProfile> = {};
   for (const row of result.rows) {
     const r = row as Record<string, unknown>;
@@ -258,6 +270,7 @@ async function fetchAuthorMap(): Promise<Record<string, BlogAuthorProfile>> {
       name: String(r.name),
       image: (r.image as string) || null,
       bio: (r.bio as string) || null,
+      custom_html: (r.custom_html as string) || null,
     };
   }
   return map;
@@ -643,7 +656,7 @@ async function taxonomyTerms(): Promise<Response> {
   }
 
   const authorProfilesResult = await client.execute(
-    "SELECT slug, name, image, bio FROM blog_authors ORDER BY name"
+    "SELECT slug, name, image, bio, custom_html FROM blog_authors ORDER BY name"
   );
 
   return jsonResponse({
@@ -679,7 +692,7 @@ function sanitizeBlogImageFilename(value: unknown): string {
 async function listAuthorsAdmin(): Promise<Response> {
   await migrateBlogPosts();
   const result = await client.execute(
-    "SELECT slug, name, image, bio, created_at, updated_at FROM blog_authors ORDER BY name"
+    "SELECT slug, name, image, bio, custom_html, created_at, updated_at FROM blog_authors ORDER BY name"
   );
   return jsonResponse({
     authors: result.rows.map((row) => {
@@ -689,6 +702,7 @@ async function listAuthorsAdmin(): Promise<Response> {
         name: String(r.name),
         image: (r.image as string) || null,
         bio: (r.bio as string) || null,
+        custom_html: (r.custom_html as string) || null,
         created_at: r.created_at,
         updated_at: r.updated_at,
       };
@@ -699,7 +713,7 @@ async function listAuthorsAdmin(): Promise<Response> {
 async function getAuthorAdmin(slug: string): Promise<Response> {
   await migrateBlogPosts();
   const result = await client.execute({
-    sql: "SELECT slug, name, image, bio, created_at, updated_at FROM blog_authors WHERE slug = ?",
+    sql: "SELECT slug, name, image, bio, custom_html, created_at, updated_at FROM blog_authors WHERE slug = ?",
     args: [slug],
   });
   if (result.rows.length === 0) return jsonResponse({ error: "Not found" }, 404);
@@ -709,6 +723,7 @@ async function getAuthorAdmin(slug: string): Promise<Response> {
     name: String(r.name),
     image: (r.image as string) || null,
     bio: (r.bio as string) || null,
+    custom_html: (r.custom_html as string) || null,
     created_at: r.created_at,
     updated_at: r.updated_at,
   });
@@ -719,21 +734,27 @@ async function saveAuthorAdmin(slug: string, request: Request): Promise<Response
   const key = String(slug || "").trim();
   if (!key) return jsonResponse({ error: "slug_required" }, 400);
 
-  const body = await request.json() as { name?: string; image?: string | null; bio?: string | null };
+  const body = await request.json() as {
+    name?: string;
+    image?: string | null;
+    bio?: string | null;
+    custom_html?: string | null;
+  };
   const name = String(body.name || "").trim();
   if (!name) return jsonResponse({ error: "name_required" }, 400);
 
   await client.execute({
     sql: `
-      INSERT INTO blog_authors (slug, name, image, bio)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO blog_authors (slug, name, image, bio, custom_html)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(slug) DO UPDATE SET
         name = excluded.name,
         image = excluded.image,
         bio = excluded.bio,
+        custom_html = excluded.custom_html,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
     `,
-    args: [key, name, body.image ?? null, body.bio ?? null],
+    args: [key, name, body.image ?? null, body.bio ?? null, body.custom_html ?? null],
   });
 
   try {

@@ -33,22 +33,6 @@ export function generateSecureToken(length = 32) {
  */
 export async function createEmailVerificationToken(db, email, userId, expiresIn = 60) {
   try {
-    // Create email_verification_tokens table if it doesn't exist
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS email_verification_tokens (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        email TEXT NOT NULL,
-        token TEXT NOT NULL UNIQUE,
-        token_hash TEXT NOT NULL,
-        purpose TEXT NOT NULL, -- 'email_preferences', 'password_reset', etc.
-        expires_at TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        used_at TEXT,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-      )
-    `).run().catch(() => {})
-    
     // Generate secure token
     const token = generateSecureToken(32)
     const expiresAt = new Date(Date.now() + expiresIn * 60 * 1000).toISOString()
@@ -147,20 +131,6 @@ export async function verifyEmailVerificationToken(db, token, email) {
  */
 export async function getUserEmailPreferences(db, userId) {
   try {
-    // Create email_preferences table if it doesn't exist
-    await db.prepare(`
-      CREATE TABLE IF NOT EXISTS email_preferences (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL UNIQUE,
-        essential_emails BOOLEAN DEFAULT 1, -- Required operational emails
-        marketing_emails BOOLEAN DEFAULT 0, -- Optional marketing emails
-        consent_given BOOLEAN DEFAULT 0,    -- Explicit consent for marketing
-        consent_date TEXT,                 -- When consent was given
-        last_updated TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-      )
-    `).run().catch(() => {})
-    
     // Get existing preferences or create defaults
     let preferences = await db.prepare(`
       SELECT * FROM email_preferences WHERE user_id = ?

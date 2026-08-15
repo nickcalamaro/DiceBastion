@@ -3,7 +3,7 @@
  * Used across admin, account, events, memberships, and shop pages
  */
 
-// API Configuration — same-origin /api on production (see worker fetch /api/* proxy)
+// API Configuration — same-origin /api on production; local wrangler on Hugo dev
 (function resolveApiBase() {
   if (window.__DB_API_BASE) return;
   const host = window.location.hostname || '';
@@ -11,7 +11,16 @@
     window.__DB_API_BASE = '/api';
     return;
   }
-  window.__DB_API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+  if (host === 'shop.dicebastion.com') {
+    window.__DB_API_BASE = '/api';
+    return;
+  }
+  if (host === 'localhost' || host === '127.0.0.1') {
+    window.__DB_API_BASE = 'http://localhost:8787';
+    return;
+  }
+  // workers.dev subdomain is unreliable; custom-domain /api proxy is canonical
+  window.__DB_API_BASE = 'https://dicebastion.com/api';
 })();
 // Blog API — Bunny Edge Script 75941
 window.__BLOG_API_BASE = window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run';
@@ -34,7 +43,7 @@ window.utils = {
    * Get API base URL (with optional trailing slash removal)
    */
   getApiBase: (removeTrailingSlash = false) => {
-    const base = window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev';
+    const base = window.__DB_API_BASE || 'https://dicebastion.com/api';
     return removeTrailingSlash ? base.replace(/\/+$/, '') : base;
   },
 
@@ -398,7 +407,7 @@ window.utils = {
     if (window.turnstile) return true;
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
       script.async = true;
       script.defer = true;
       script.onload = () => resolve(true);
@@ -419,7 +428,9 @@ window.utils = {
   renderTurnstile: async (elementId, sitekey, options = {}) => {
     const {
       skipOnLocalhost = true,
-      widgetState = null
+      widgetState = null,
+      appearance = null,
+      size = null,
     } = options;
 
     // Skip on localhost if configured
@@ -433,14 +444,19 @@ window.utils = {
     
     if (!element || !window.turnstile) return null;
 
+    const resolvedSize = size || (appearance === 'interaction-only' ? 'normal' : 'flexible');
+
     // Remove existing widget if present
-    if (widgetState && widgetState.widgetId !== null && widgetState.widgetId !== undefined) {
+    if (widgetState) {
+      widgetState.token = null;
+      if (widgetState.widgetId !== null && widgetState.widgetId !== undefined) {
       try {
         window.turnstile.remove(widgetState.widgetId);
         console.log('Turnstile widget removed:', widgetState.widgetId);
         widgetState.widgetId = null;
       } catch(e) {
         console.log('Turnstile remove failed:', e);
+      }
       }
     }
 
@@ -474,7 +490,14 @@ window.utils = {
       try {
         const widgetId = window.turnstile.render(freshElement, {
           sitekey,
-          size: 'flexible'
+          size: resolvedSize,
+          ...(appearance ? { appearance } : {}),
+          callback: (token) => {
+            if (widgetState) widgetState.token = token;
+          },
+          'expired-callback': () => {
+            if (widgetState) widgetState.token = null;
+          },
         });
         
         if (widgetState) {
@@ -503,11 +526,15 @@ window.utils = {
    * @param {boolean} skipOnLocalhost - Return test token on localhost (default: true)
    * @returns {Promise<string>} - The Turnstile token
    */
-  getTurnstileToken: async (elementId, widgetId = null, skipOnLocalhost = true) => {
+  getTurnstileToken: async (elementId, widgetId = null, skipOnLocalhost = true, widgetState = null) => {
     // Bypass on localhost
     if (skipOnLocalhost && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
       console.log('Localhost detected - using test-bypass token');
       return 'test-bypass';
+    }
+
+    if (widgetState?.token) {
+      return widgetState.token;
     }
 
     await window.utils.loadTurnstileSdk();

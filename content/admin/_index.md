@@ -8,6 +8,7 @@ showDate: false
 <!-- Shared Utilities -->
 <script src="/js/utils.js"></script>
 <script src="/js/modal.js"></script>
+<script src="/js/productCsvImport.js"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -55,6 +56,10 @@ showDate: false
 .dark .admin-tab-btn:hover { color: rgb(var(--color-neutral-200)); }
 .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-600)); color: rgb(var(--color-primary-600)); }
 .dark .admin-tab-btn.active { border-bottom-color: rgb(var(--color-primary-400)); color: rgb(var(--color-primary-400)); }
+
+.activity-type-filter-solo { cursor: pointer; }
+.activity-type-filter-solo:hover,
+.activity-type-filter-solo:focus { color: rgb(var(--color-primary-600)); text-decoration: underline; text-underline-offset: 2px; outline: none; }
 
 /* Deep-link section headings (e.g. /admin#bookings-upcoming) */
 .admin-section-heading { scroll-margin-top: 5rem; margin: 0 0 1rem 0; font-size: 1.125rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
@@ -294,12 +299,14 @@ Logout
 
 <!-- Tabs -->
 <div class="admin-tab-bar">
-<button class="admin-tab-btn tab-btn active" data-tab="products">Products</button>
+<button class="admin-tab-btn tab-btn active" data-tab="activity">Recent Activity</button>
+<button class="admin-tab-btn tab-btn" data-tab="products">Products</button>
 <button class="admin-tab-btn tab-btn" data-tab="shop-promos">Shop promo codes</button>
 <button class="admin-tab-btn tab-btn" data-tab="events">Events</button>
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
+<button class="admin-tab-btn tab-btn" data-tab="accounts" id="accounts-tab-btn" style="display: none;">Accounts</button>
 <button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings & Calendar</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 <button class="admin-tab-btn tab-btn" data-tab="newsletter">Newsletter</button>
@@ -308,12 +315,14 @@ Logout
 
 <nav class="admin-jump-links admin-mb-2" aria-label="Admin sections">
 <span style="color: rgb(var(--color-neutral-500));">Quick links:</span>
+<a href="#activity">Activity</a>
 <a href="#products">Products</a>
 <a href="#shop-promos">Shop promos</a>
 <a href="#events">Events</a>
 <a href="#registrations">Registrations</a>
 <a href="#orders">Orders</a>
 <a href="#memberships">Memberships</a>
+<a href="#accounts" id="accounts-jump-link" style="display: none;">Accounts</a>
 <a href="#bookings">Bookings</a>
 <a href="#bookings-upcoming">Upcoming</a>
 <a href="#cron">Cron</a>
@@ -322,8 +331,146 @@ Logout
 <a href="#blog-authors">Authors</a>
 </nav>
 
+<!-- Recent Activity Tab -->
+<div id="activity-tab" class="tab-content">
+<div class="admin-flex-between admin-mb-2">
+<h2 id="admin-section-activity" class="admin-section-heading admin-m-0">Recent Activity <a href="#activity" class="admin-permalink" aria-label="Link to activity">#</a></h2>
+<div class="admin-flex">
+<select id="activity-days-filter" onchange="loadRecentActivity()" class="form-select" style="padding: 0.5rem 1rem; font-size: 0.875rem;">
+<option value="7">Last 7 days</option>
+<option value="30" selected>Last 30 days</option>
+<option value="60">Last 60 days</option>
+<option value="90">Last 90 days</option>
+</select>
+<button id="refresh-activity-btn" onclick="loadRecentActivity()" class="btn btn-primary btn-sm">
+Refresh
+</button>
+</div>
+</div>
+<p class="admin-text-muted admin-mb-1">Memberships, event tickets, shop orders, account sign-ups, and more — newest first.</p>
+<div id="activity-type-filters" class="admin-mb-2" style="display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: center;">
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="account_created" checked>
+<span class="activity-type-filter-solo" data-activity-type="account_created" role="button" tabindex="0">Account created</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_new" checked>
+<span class="activity-type-filter-solo" data-activity-type="membership_new" role="button" tabindex="0">New membership</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="membership_expired" checked>
+<span class="activity-type-filter-solo" data-activity-type="membership_expired" role="button" tabindex="0">Membership expired</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_purchase" checked>
+<span class="activity-type-filter-solo" data-activity-type="event_purchase" role="button" tabindex="0">Event ticket</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="event_registration" checked>
+<span class="activity-type-filter-solo" data-activity-type="event_registration" role="button" tabindex="0">Event registration</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="table_booking" checked>
+<span class="activity-type-filter-solo" data-activity-type="table_booking" role="button" tabindex="0">Table booking</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="shop_order" checked>
+<span class="activity-type-filter-solo" data-activity-type="shop_order" role="button" tabindex="0">Shop order</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="donation" checked>
+<span class="activity-type-filter-solo" data-activity-type="donation" role="button" tabindex="0">Donation</span>
+</label>
+<label class="activity-type-filter-label-wrap" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem;">
+<input type="checkbox" class="checkbox-input activity-type-filter" data-activity-type="sponsorship" checked>
+<span class="activity-type-filter-solo" data-activity-type="sponsorship" role="button" tabindex="0">Sponsorship</span>
+</label>
+</div>
+<div class="table-wrapper">
+<div style="overflow-x: auto;">
+<table>
+<thead>
+<tr>
+<th>When</th>
+<th>Type</th>
+<th>Person</th>
+<th>Details</th>
+<th>Amount</th>
+</tr>
+</thead>
+<tbody id="activity-list">
+<tr>
+<td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+Loading activity...
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
 <!-- Products Tab -->
-<div id="products-tab" class="tab-content">
+<div id="products-tab" class="tab-content" style="display: none;">
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-section-heading admin-mt-0">Import products from CSV</h2>
+<p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
+Expects BNW-style columns:
+<code>Title</code>,
+<code>Price</code> (pounds),
+<code>Manufacturer</code>,
+<code>Type</code>,
+<code>Description</code>,
+<code>Image_URL</code>.
+Type and Manufacturer become category labels (up to 3). Existing slugs are skipped (create-only).
+Each import is saved as a batch so you can remove unsold items later without touching sold order history.
+</p>
+<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
+<div>
+<label class="form-label" for="csv-import-file">CSV file</label>
+<input type="file" id="csv-import-file" accept=".csv,text/csv" class="form-input">
+</div>
+<div>
+<label class="form-label" for="csv-import-stock">Default stock</label>
+<input type="number" id="csv-import-stock" value="0" min="0" class="form-input">
+</div>
+</div>
+<div class="admin-mb-1">
+<label class="form-label" for="csv-import-label">Import label</label>
+<input type="text" id="csv-import-label" class="form-input" placeholder="e.g. BNW Free League week — March">
+<small class="admin-text-small">Used in Manage imports when cleaning up after the sale period</small>
+</div>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap;">
+<button type="button" id="csv-preview-btn" class="btn btn-secondary">Parse / preview</button>
+<button type="button" id="csv-import-btn" class="btn btn-primary" disabled>Import products</button>
+</div>
+<div id="csv-import-status" class="admin-mb-1" style="display: none; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9375rem;"></div>
+<div id="csv-import-preview" style="overflow-x: auto;"></div>
+<div id="csv-import-results" class="admin-mb-1"></div>
+</div>
+
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-section-heading admin-mt-0">Manage imports</h2>
+<p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
+Cleanup hard-deletes products from a batch that were never ordered. Products that appear on any order are kept inactive so purchase records stay intact.
+</p>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem;">
+<button type="button" id="csv-imports-refresh-btn" class="btn btn-secondary">Refresh imports</button>
+</div>
+<div id="product-imports-list"><p class="admin-text-muted">Loading…</p></div>
+</div>
+
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-section-heading admin-mt-0">Shop categories</h2>
+<p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
+Feature categories to pin them to the front of the shop filter chips. Add search keywords (comma-separated) so typing those terms shows every product in that category — for example keywords <code>mtg, magic</code> on Magic: The Gathering.
+</p>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem;">
+<button type="button" id="shop-categories-refresh-btn" class="btn btn-secondary">Refresh categories</button>
+</div>
+<div id="shop-categories-list"><p class="admin-text-muted">Loading…</p></div>
+</div>
+
 <div class="card card-compact">
 <h2 id="product-form-title" class="admin-section-heading">Add New Product</h2>
 <form id="product-form">
@@ -706,6 +853,14 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </div>
 
 <div class="checkbox-group admin-mb-1">
+  <input type="checkbox" id="event-block-table-bookings" class="checkbox-input">
+  <label for="event-block-table-bookings" class="checkbox-label" style="font-weight: 600;">Block table bookings during this event</label>
+</div>
+<p id="event-block-bookings-hint" class="admin-text-small admin-mb-1" style="margin-top: -0.5rem;">
+  Uses the same blocked-time slots as Bookings &amp; Calendar. One-off events block that date; recurring events block each occurrence in the next 12 weeks (or until the recurrence end date).
+</p>
+
+<div class="checkbox-group admin-mb-1">
   <input type="checkbox" id="event-requires-purchase" checked onchange="toggleEventPricing()" class="checkbox-input">
   <label for="event-requires-purchase" class="checkbox-label" style="font-weight: 600;">Requires Ticket Purchase</label>
 </div>
@@ -735,7 +890,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="form-group">
 <label class="form-label">Image URL</label>
 <input type="url" id="event-image" placeholder="https://..." class="form-input">
-<small class="admin-text-small">Or upload below — one crop produces 800×379 (general), 400×238 (cards), and 885×300 (modal hero), each with the same edge treatment.</small>
+<small class="admin-text-small">Or upload below — one crop keeps the main image at upload resolution (max 4096px), plus 1200×714 (cards) and 2655×900 (modal hero).</small>
 <input type="hidden" id="event-image-card" value="">
 <input type="hidden" id="event-image-hero" value="">
 </div>
@@ -775,6 +930,81 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div id="orders-tab" class="tab-content" style="display: none;">
 <h2 id="admin-section-orders" class="admin-section-heading">Recent Orders <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
 <div id="orders-list"></div>
+</div>
+
+<!-- Accounts Tab (owner-only) -->
+<div id="accounts-tab" class="tab-content" style="display: none;">
+<div class="admin-flex-between admin-mb-2">
+<h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
+</div>
+<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Includes memberships, renewals, donations, event+membership bundles (membership portion only — event ticket fees are excluded), and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="accounts-from">From</label>
+<input type="date" id="accounts-from" class="form-input">
+</div>
+<div>
+<label class="form-label" for="accounts-to">To</label>
+<input type="date" id="accounts-to" class="form-input">
+</div>
+<button type="button" id="accounts-run-btn" class="btn btn-primary">Run report</button>
+<button type="button" id="accounts-csv-btn" class="btn btn-secondary" disabled>Download CSV</button>
+</div>
+<p id="accounts-status" class="admin-text-small admin-mb-1"></p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+<div class="stat-card" style="background: rgb(var(--color-primary-700));">
+<div class="stat-card-label">Line items</div>
+<div class="stat-card-value" id="accounts-stat-qty">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-primary-600));">
+<div class="stat-card-label">Gross</div>
+<div class="stat-card-value" id="accounts-stat-gross">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-700));">
+<div class="stat-card-label">Net payout</div>
+<div class="stat-card-value" id="accounts-stat-net">-</div>
+</div>
+</div>
+<h3 class="admin-section-heading">Sales by category</h3>
+<div class="table-wrapper admin-mb-2">
+<div style="overflow-x: auto;">
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th style="text-align: right;">Qty</th>
+<th style="text-align: right;">Gross</th>
+<th style="text-align: right;">Net</th>
+</tr>
+</thead>
+<tbody id="accounts-category-list">
+<tr>
+<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<h3 class="admin-section-heading">Line items</h3>
+<div class="table-wrapper">
+<div style="overflow-x: auto;">
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Category</th>
+<th style="text-align: right;">Amount</th>
+<th style="text-align: right;">Net</th>
+</tr>
+</thead>
+<tbody id="accounts-line-list">
+<tr>
+<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
 </div>
 
 <!-- Memberships Tab -->
@@ -1308,6 +1538,11 @@ Loading cron job logs...
 <label class="form-label">Short bio</label>
 <textarea id="blog-author-admin-bio" rows="4" class="form-textarea" placeholder="A few sentences about this author…"></textarea>
 </div>
+<div class="form-group">
+<label class="form-label">Custom HTML (author page only)</label>
+<textarea id="blog-author-admin-custom-html" rows="5" class="form-textarea" placeholder="Optional embeds (e.g. Ko-fi widget). Shown on /posts/author/slug/ below the profile." style="font-family:monospace;font-size:0.85rem;"></textarea>
+<p class="admin-text-small admin-m-0">Trusted HTML only — scripts and widgets are allowed. Leave blank to hide.</p>
+</div>
 <div class="admin-flex" style="gap:0.75rem;flex-wrap:wrap;">
 <button type="button" onclick="blogSaveAuthor()" class="btn btn-primary" id="blog-author-save-btn">Save author</button>
 <button type="button" onclick="blogCancelAuthorEdit()" class="btn btn-secondary">Cancel</button>
@@ -1689,6 +1924,7 @@ Loading cron job logs...
 
 <script>
 const API_BASE = utils.getApiBase();
+const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run';
 const BLOG_API_BASE = (window.__BLOG_API_BASE || 'https://dicebastionblogger-yvfyf.bunny.run').replace(/\/+$/, '');
 let sessionToken = null;
 let currentUser = null;
@@ -1937,11 +2173,15 @@ document.getElementById('login-container').style.display = 'none';
 document.getElementById('non-admin-container').style.display = 'none';
 document.getElementById('admin-dashboard').style.display = 'block';
 loadProducts();
+loadProductImports();
+loadShopCategories();
+loadRecentActivity();
 loadEvents();
 loadOrders();
 loadRegistrations();
 loadCronLogs();
 loadShopPromoCodes();
+revealAccountsTabIfOwner();
 handleAdminHash();
 // Verify session is still valid in background
 verifySession();
@@ -1977,6 +2217,13 @@ sessionToken = null;
 currentUser = null;
 document.getElementById('login-container').style.display = 'block';
 document.getElementById('admin-dashboard').style.display = 'none';
+} else {
+const data = await res.json().catch(() => ({}));
+if (data.user) {
+currentUser = data.user;
+localStorage.setItem('admin_user', JSON.stringify(currentUser));
+}
+revealAccountsTabIfOwner();
 }
 // If OK, dashboard is already showing - do nothing
 } catch (err) {
@@ -2013,11 +2260,15 @@ localStorage.setItem('admin_token', sessionToken); // For docs auth guard
       document.getElementById('login-container').style.display = 'none';
       document.getElementById('admin-dashboard').style.display = 'block';
       loadProducts();
+      loadProductImports();
+      loadShopCategories();
+      loadRecentActivity();
       loadEvents();
       loadOrders();
 loadRegistrations();
 loadCronLogs();
       loadShopPromoCodes();
+      revealAccountsTabIfOwner();
       handleAdminHash();
 } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
@@ -2152,6 +2403,175 @@ function getRecurrencePattern() {
   return JSON.stringify(pattern);
 }
 
+function formatDateYmd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addHoursToTimeString(timeStr, hours) {
+  const parts = String(timeStr || '00:00').split(':');
+  const h = parseInt(parts[0], 10) || 0;
+  const m = parseInt(parts[1], 10) || 0;
+  const total = h * 60 + m + hours * 60;
+  const nh = Math.floor(total / 60) % 24;
+  const nm = total % 60;
+  return String(nh).padStart(2, '0') + ':' + String(nm).padStart(2, '0');
+}
+
+function getNthWeekdayOfMonth(year, month, week, dayOfWeek) {
+  if (week === 5) {
+    const last = new Date(year, month + 1, 0);
+    while (last.getDay() !== dayOfWeek) last.setDate(last.getDate() - 1);
+    return last;
+  }
+  const first = new Date(year, month, 1);
+  const offset = (dayOfWeek - first.getDay() + 7) % 7;
+  const day = 1 + offset + (week - 1) * 7;
+  const candidate = new Date(year, month, day);
+  if (candidate.getMonth() !== month) return null;
+  return candidate;
+}
+
+function listRecurringOccurrenceDates(pattern, recurrenceEndDate) {
+  const dates = [];
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const horizon = new Date(start);
+  horizon.setDate(horizon.getDate() + 84);
+  const end = recurrenceEndDate ? new Date(recurrenceEndDate + 'T23:59:59') : horizon;
+  const limit = end < horizon ? end : horizon;
+
+  if (pattern.type === 'weekly') {
+    for (let d = new Date(start); d <= limit; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() === pattern.day) dates.push(formatDateYmd(d));
+    }
+    return dates;
+  }
+
+  if (pattern.type === 'monthly_date') {
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cursor <= limit) {
+      const year = cursor.getFullYear();
+      const month = cursor.getMonth();
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      const day = Math.min(pattern.date, lastDay);
+      const occ = new Date(year, month, day);
+      if (occ >= start && occ <= limit) dates.push(formatDateYmd(occ));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return dates;
+  }
+
+  if (pattern.type === 'monthly_day') {
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cursor <= limit) {
+      const occ = getNthWeekdayOfMonth(cursor.getFullYear(), cursor.getMonth(), pattern.week, pattern.day);
+      if (occ && occ >= start && occ <= limit) dates.push(formatDateYmd(occ));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return dates;
+  }
+
+  return dates;
+}
+
+function getEventBlockSlotsFromForm() {
+  const isRecurring = document.getElementById('event-is-recurring').checked;
+  const startTime = isRecurring
+    ? document.getElementById('recurring-time').value
+    : document.getElementById('event-time').value;
+  let endTime = isRecurring
+    ? document.getElementById('recurring-end-time').value
+    : document.getElementById('event-end-time').value;
+
+  if (!startTime) {
+    return { error: 'A start time is required to block table bookings.' };
+  }
+  if (!endTime) {
+    endTime = addHoursToTimeString(startTime, 3);
+  }
+  if (endTime <= startTime) {
+    return { error: 'End time must be after start time to create a table booking block.' };
+  }
+
+  const slots = [];
+  if (!isRecurring) {
+    const block_date = document.getElementById('event-date').value;
+    if (!block_date) return { error: 'Event date is required.' };
+    slots.push({ block_date, start_time: startTime, end_time: endTime });
+    return { slots };
+  }
+
+  const recurrenceEnd = document.getElementById('recurrence-end-date').value || null;
+  const pattern = JSON.parse(getRecurrencePattern());
+  const dates = listRecurringOccurrenceDates(pattern, recurrenceEnd);
+  if (!dates.length) {
+    return { error: 'No upcoming recurring dates found to block in the next 12 weeks.' };
+  }
+  for (const block_date of dates) {
+    slots.push({ block_date, start_time: startTime, end_time: endTime });
+  }
+  return { slots };
+}
+
+function eventBookingBlockReason(eventId, title) {
+  return `Event #${eventId}: ${String(title || 'Event').trim()}`.slice(0, 240);
+}
+
+async function createBookingTimeBlock(blockData) {
+  const response = await fetch(`${BOOKINGS_API}/api/bookings/blocks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(blockData)
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create time block');
+  }
+  return response.json();
+}
+
+async function deleteBookingTimeBlock(blockId) {
+  await fetch(`${BOOKINGS_API}/api/bookings/blocks/${blockId}`, { method: 'DELETE' });
+}
+
+async function deleteBookingBlocksForEvent(eventId) {
+  const res = await fetch(`${BOOKINGS_API}/api/bookings/blocks`);
+  if (!res.ok) return;
+  const data = await res.json();
+  const prefix = `Event #${eventId}:`;
+  const matches = (data.blocks || []).filter(b => String(b.reason || '').startsWith(prefix));
+  await Promise.all(matches.map(b => deleteBookingTimeBlock(b.id)));
+}
+
+async function eventHasTableBookingBlocks(eventId) {
+  const res = await fetch(`${BOOKINGS_API}/api/bookings/blocks`);
+  if (!res.ok) return false;
+  const data = await res.json();
+  const prefix = `Event #${eventId}:`;
+  return (data.blocks || []).some(b => String(b.reason || '').startsWith(prefix));
+}
+
+async function syncEventTableBookingBlocks({ eventId, eventTitle, shouldBlock }) {
+  if (!eventId) return { created: 0 };
+  await deleteBookingBlocksForEvent(eventId);
+  if (!shouldBlock) return { created: 0 };
+
+  const schedule = getEventBlockSlotsFromForm();
+  if (schedule.error) throw new Error(schedule.error);
+
+  const userStatus = utils.session.getUserStatus();
+  const reason = eventBookingBlockReason(eventId, eventTitle);
+  const created_by = userStatus.user?.email || 'admin';
+
+  for (const slot of schedule.slots) {
+    await createBookingTimeBlock({ ...slot, reason, created_by });
+  }
+  return { created: schedule.slots.length };
+}
+
 function setRecurrencePattern(patternJson) {
   if (!patternJson) return;
   
@@ -2222,16 +2642,17 @@ let currentCropKind = 'product';
 let cropBgMode = 'auto';   // 'auto' | 'white' | 'pick'
 let cropBgPickedCol = null; // hex string when mode is 'pick'
 
-const EVENT_IMAGE_MASTER_W = 1600;
-const EVENT_IMAGE_MASTER_H = 758;
-/** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout. */
+/** Cap long-edge of the event crop; below this we keep the upload’s native crop resolution. */
+const EVENT_IMAGE_MASTER_MAX = 4096;
+/** Each export: DB field key, pixel size, R2 filename suffix. Extend here + matching DB column + API + layout.
+ * Main uses the full master crop. Card/hero are 3× CSS slots (400×238 / 885×300) for sharp retina. */
 const EVENT_IMAGE_EXPORT_SPECS = [
-  /** At least fill target height when needed; blur fills any letterbox. */
-  { key: 'image_url', w: 800, h: 379, filename: 'event-main.jpg', fit: 'fillHeight' },
-  /** Full artwork visible in 400×238; blur above/below (or sides) — never side-crop wide art. */
-  { key: 'image_url_card', w: 400, h: 238, filename: 'event-card.jpg', fit: 'contain' },
+  /** Full-resolution main (same pixels as master crop after fillHeight compose). */
+  { key: 'image_url', filename: 'event-main.jpg', fit: 'fillHeight', useMasterSize: true },
+  /** Full artwork visible in card slot; never side-crop wide art. */
+  { key: 'image_url_card', w: 1200, h: 714, filename: 'event-card.jpg', fit: 'contain' },
   /** Hero stays contain so the full crop stays visible on the wide frame. */
-  { key: 'image_url_hero', w: 885, h: 300, filename: 'event-hero.jpg', fit: 'contain' }
+  { key: 'image_url_hero', w: 2655, h: 900, filename: 'event-hero.jpg', fit: 'contain' }
 ];
 
 const BLOG_CARD_SPEC = { w: 400, h: 238, filename: 'blog-card.jpg', fit: 'contain' };
@@ -2686,9 +3107,11 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 
     if (currentCropKind === 'event') {
       const exportSpecs = MULTI_SIZE_CROP_SPECS.event;
+      // Preserve source crop resolution (up to EVENT_IMAGE_MASTER_MAX). Forcing a small
+      // width/height here was why event images looked softer than the uploaded file.
       const masterCropped = cropper.getCroppedCanvas({
-        width: EVENT_IMAGE_MASTER_W,
-        height: EVENT_IMAGE_MASTER_H,
+        maxWidth: EVENT_IMAGE_MASTER_MAX,
+        maxHeight: EVENT_IMAGE_MASTER_MAX,
         imageSmoothingEnabled: true,
         imageSmoothingQuality: 'high',
         fillColor: 'transparent'
@@ -2701,6 +3124,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       const batchId = Date.now();
       const bundle = {};
       for (const spec of exportSpecs) {
+        const targetW = spec.useMasterSize ? masterCropped.width : spec.w;
+        const targetH = spec.useMasterSize ? masterCropped.height : spec.h;
         let dataUrl;
         if (spec.fit === 'contain') {
           // Tight artwork, no padding band — CSS ::before is the only background.
@@ -2710,8 +3135,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
             fitRect.sy,
             fitRect.sw,
             fitRect.sh,
-            spec.w,
-            spec.h,
+            targetW,
+            targetH,
             cropBgMode,
             cropBgPickedCol
           );
@@ -2722,10 +3147,10 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
             fitRect.sy,
             fitRect.sw,
             fitRect.sh,
-            spec.w,
-            spec.h
+            targetW,
+            targetH
           );
-          dataUrl = composeBlurredBackgroundJpeg(sized, spec.w, spec.h, cropBgMode, cropBgPickedCol);
+          dataUrl = composeBlurredBackgroundJpeg(sized, targetW, targetH, cropBgMode, cropBgPickedCol);
         }
         try {
           const uploadUrl = await adminUploadImageToR2(dataUrl, `${batchId}-${spec.filename}`);
@@ -2736,6 +3161,8 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
           return;
         }
       }
+      bundle._masterW = masterCropped.width;
+      bundle._masterH = masterCropped.height;
       currentCropCallback(bundle);
       closeCropModal();
       return;
@@ -2791,7 +3218,179 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 });
 
 // Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
-const ADMIN_TABS = ['products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'bookings', 'cron', 'newsletter', 'blog'];
+const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'accounts', 'bookings', 'cron', 'newsletter', 'blog'];
+const ACCOUNTS_OWNER_EMAIL = 'ncalamaro@gmail.com';
+let accountsReportRows = [];
+
+function isAccountsOwnerClient() {
+  const email = (currentUser && currentUser.email ? currentUser.email : '').trim().toLowerCase();
+  return email === ACCOUNTS_OWNER_EMAIL;
+}
+
+function revealAccountsTabIfOwner() {
+  const show = isAccountsOwnerClient();
+  const btn = document.getElementById('accounts-tab-btn');
+  const jump = document.getElementById('accounts-jump-link');
+  if (btn) btn.style.display = show ? '' : 'none';
+  if (jump) jump.style.display = show ? '' : 'none';
+  if (show) setDefaultAccountsDates();
+}
+
+function padAccountsDate(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatAccountsIsoDate(d) {
+  return `${d.getFullYear()}-${padAccountsDate(d.getMonth() + 1)}-${padAccountsDate(d.getDate())}`;
+}
+
+function setDefaultAccountsDates() {
+  const fromEl = document.getElementById('accounts-from');
+  const toEl = document.getElementById('accounts-to');
+  if (!fromEl || !toEl) return;
+  if (fromEl.value && toEl.value) return;
+  const now = new Date();
+  const firstThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastPrev = new Date(firstThisMonth.getTime() - 1);
+  const firstPrev = new Date(lastPrev.getFullYear(), lastPrev.getMonth(), 1);
+  fromEl.value = formatAccountsIsoDate(firstPrev);
+  toEl.value = formatAccountsIsoDate(lastPrev);
+}
+
+function accountsCategoryLabel(raw) {
+  const map = {
+    membership_monthly: 'Membership (monthly)',
+    membership_quarterly: 'Membership (quarterly)',
+    membership_annual: 'Membership (annual)',
+    membership: 'Membership',
+    bundle_monthly: 'Bundle membership only (monthly)',
+    bundle_quarterly: 'Bundle membership only (quarterly)',
+    bundle_annual: 'Bundle membership only (annual)',
+    bundle: 'Bundle membership only',
+    renewal: 'Renewal',
+    donation: 'Donation',
+    drinks: 'Drinks'
+  };
+  return map[raw] || raw;
+}
+
+function formatAccountsGbp(n) {
+  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(Number(n) || 0);
+}
+
+function formatAccountsWhen(iso) {
+  const d = new Date(String(iso || '').includes('T') || String(iso || '').includes(' ') ? String(iso).replace(' ', 'T') : iso);
+  if (Number.isNaN(d.getTime())) return String(iso || '').slice(0, 16);
+  return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function escapeAccountsHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadAccountsReport() {
+  if (!isAccountsOwnerClient() || !sessionToken) return;
+  const from = document.getElementById('accounts-from')?.value;
+  const to = document.getElementById('accounts-to')?.value;
+  const status = document.getElementById('accounts-status');
+  const runBtn = document.getElementById('accounts-run-btn');
+  const csvBtn = document.getElementById('accounts-csv-btn');
+  if (!from || !to) {
+    if (status) status.textContent = 'Choose a from and to date.';
+    return;
+  }
+  if (runBtn) runBtn.disabled = true;
+  if (status) status.textContent = 'Loading…';
+  try {
+    const res = await fetch(`${API_BASE}/admin/accounts/sales?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      revealAccountsTabIfOwner();
+      if (status) status.textContent = 'This report is not available for this account.';
+      return;
+    }
+    if (!res.ok) throw new Error(data.error || res.statusText);
+
+    const categories = data.categories || [];
+    const lines = data.line_items || [];
+    accountsReportRows = lines;
+    const totals = data.totals || {};
+
+    document.getElementById('accounts-stat-qty').textContent = String(totals.quantity || 0);
+    document.getElementById('accounts-stat-gross').textContent = formatAccountsGbp(totals.total_pounds);
+    document.getElementById('accounts-stat-net').textContent = formatAccountsGbp(totals.net_payout);
+
+    const catBody = document.getElementById('accounts-category-list');
+    if (!categories.length) {
+      catBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+    } else {
+      catBody.innerHTML = categories.map(row => `
+        <tr>
+          <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(row.quantity)}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.total_pounds))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
+        </tr>
+      `).join('') + `
+        <tr>
+          <td><strong>Total</strong></td>
+          <td style="text-align: right;"><strong>${escapeAccountsHtml(totals.quantity || 0)}</strong></td>
+          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.total_pounds))}</strong></td>
+          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.net_payout))}</strong></td>
+        </tr>`;
+    }
+
+    const lineBody = document.getElementById('accounts-line-list');
+    if (!lines.length) {
+      lineBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+    } else {
+      lineBody.innerHTML = lines.map(row => `
+        <tr>
+          <td>${escapeAccountsHtml(formatAccountsWhen(row.created_at))}</td>
+          <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.amount_pounds))}</td>
+          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
+        </tr>
+      `).join('');
+    }
+
+    if (csvBtn) csvBtn.disabled = !lines.length;
+    if (status) status.textContent = `${lines.length} line item${lines.length === 1 ? '' : 's'} from ${from} to ${to}.`;
+  } catch (err) {
+    console.error('Accounts report error:', err);
+    if (status) status.textContent = 'Could not load the report. ' + String(err.message || err);
+  } finally {
+    if (runBtn) runBtn.disabled = false;
+  }
+}
+
+function downloadAccountsCsv() {
+  if (!accountsReportRows.length) return;
+  const header = ['date', 'category', 'amount_pounds', 'net_payout'];
+  const lines = [header.join(',')].concat(accountsReportRows.map(row => {
+    const cells = [
+      row.created_at,
+      accountsCategoryLabel(row.category),
+      Number(row.amount_pounds).toFixed(2),
+      Number(row.net_payout).toFixed(2)
+    ];
+    return cells.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+  }));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  const from = document.getElementById('accounts-from')?.value || 'from';
+  const to = document.getElementById('accounts-to')?.value || 'to';
+  a.href = URL.createObjectURL(blob);
+  a.download = `dicebastion-accounts-${from}-to-${to}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 function scrollToAdminSection(sectionId) {
   const el = document.getElementById(sectionId);
@@ -2799,6 +3398,7 @@ function scrollToAdminSection(sectionId) {
 }
 
 function switchAdminTab(tab, options = {}) {
+  if (tab === 'accounts' && !isAccountsOwnerClient()) return false;
   const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
   if (!btn) return false;
   document.querySelectorAll('.tab-btn').forEach(b => {
@@ -2812,8 +3412,10 @@ function switchAdminTab(tab, options = {}) {
   document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
   const panel = document.getElementById(tab + '-tab');
   if (panel) panel.style.display = 'block';
+  if (tab === 'activity') loadRecentActivity();
   if (tab === 'bookings') loadBookingsAndCalendar();
   if (tab === 'memberships') loadMemberships();
+  if (tab === 'accounts') loadAccountsReport();
   if (tab === 'newsletter') {
     loadNewsletterRecipients();
     loadNewsletterEvents();
@@ -2823,6 +3425,9 @@ function switchAdminTab(tab, options = {}) {
     blogInitTab();
   }
   if (tab === 'shop-promos') loadShopPromoCodes();
+  if (tab === 'products') {
+    loadShopCategories();
+  }
   if (options.sectionId) {
     setTimeout(() => scrollToAdminSection(options.sectionId), 80);
   }
@@ -2860,6 +3465,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
+document.getElementById('accounts-run-btn')?.addEventListener('click', () => loadAccountsReport());
+document.getElementById('accounts-csv-btn')?.addEventListener('click', () => downloadAccountsCsv());
+
 // Image Upload Handlers
 document.getElementById('product-image-upload').addEventListener('change', (e) => {
 const file = e.target.files[0];
@@ -2876,32 +3484,948 @@ document.getElementById('event-image-upload').addEventListener('change', (e) => 
 const file = e.target.files[0];
 if (file) {
 showCropModal(file, (bundle) => {
+  // Capture previous artwork URLs before overwriting — used to refresh seo_image
+  // when it was auto-filled from the old hero/main/card (SEO pages prefer seo_image).
+  const prevMain = (document.getElementById('event-image')?.value || '').trim();
+  const prevCard = (document.getElementById('event-image-card')?.value || '').trim();
+  const prevHero = (document.getElementById('event-image-hero')?.value || '').trim();
   uploadedEventBundle = bundle;
   document.getElementById('event-image').value = bundle.image_url || '';
   document.getElementById('event-image-card').value = bundle.image_url_card || '';
   document.getElementById('event-image-hero').value = bundle.image_url_hero || '';
   const eventSeoImage = document.getElementById('event-seo-image');
-  if (eventSeoImage && !eventSeoImage.value.trim() && bundle.image_url_hero) {
-    eventSeoImage.value = bundle.image_url_hero;
+  if (eventSeoImage && bundle.image_url_hero) {
+    const currentSeo = eventSeoImage.value.trim();
+    const previousArtwork = [prevMain, prevCard, prevHero].filter(Boolean);
+    const seoWasEmptyOrPreviousArtwork = !currentSeo || previousArtwork.includes(currentSeo);
+    if (seoWasEmptyOrPreviousArtwork) {
+      eventSeoImage.value = bundle.image_url_hero;
+    }
   }
   document.getElementById('event-image-preview').innerHTML =
     `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-start;">
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main 800×379</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.image_url}" alt="Main"></div></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 400×238</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.image_url_card}" alt="Card"></div></div>
-      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 885×300</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.image_url_hero}" alt="Hero"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Main ${bundle._masterW || '?'}×${bundle._masterH || '?'} (full)</div><div class="event-export-thumb event-export-thumb--main"><img src="${bundle.image_url}" alt="Main"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Card 1200×714</div><div class="event-export-thumb event-export-thumb--card"><img src="${bundle.image_url_card}" alt="Card"></div></div>
+      <div><div style="font-size:0.7rem;color:rgb(var(--color-neutral-500));">Hero 2655×900</div><div class="event-export-thumb event-export-thumb--hero"><img src="${bundle.image_url_hero}" alt="Hero"></div></div>
     </div>`;
 }, 800 / 379, 'event');
 }
 });
 
 // Products
+
+let adminProductsList = [];
+
+let csvImportRows = [];
+
+
+
+function slugifyProductName(name) {
+
+  if (window.ProductCsvImport) return ProductCsvImport.slugifyProductName(name);
+
+  return String(name || '')
+
+    .toLowerCase()
+
+    .replace(/[^a-z0-9]+/g, '-')
+
+    .replace(/^-+|-+$/g, '');
+
+}
+
+
+
+function escapeCsvHtml(s) {
+
+  if (window.ProductCsvImport) return ProductCsvImport.escapeHtml(s);
+
+  if (typeof utils !== 'undefined' && utils.escapeHtml) return utils.escapeHtml(s);
+
+  return escapeHtmlPromo(s);
+
+}
+
+
+
+function mapCsvRowToProduct(row, defaults) {
+
+  const mapped = ProductCsvImport.mapBnwRowToProduct(row, defaults);
+
+  if (adminProductsList.some(p => p.slug === mapped.payload.slug)) {
+
+    mapped.notes.push('Slug already exists (will skip)');
+
+  }
+
+  return mapped;
+
+}
+
+
+
+function setCsvStatus(message, kind) {
+
+  const el = document.getElementById('csv-import-status');
+
+  if (!el) return;
+
+  el.style.display = message ? 'block' : 'none';
+
+  el.textContent = message || '';
+
+  const colors = {
+
+    info: { bg: 'rgba(var(--color-primary-50), 0.5)', color: 'rgb(var(--color-neutral-800))' },
+
+    ok: { bg: '#ecfdf5', color: '#065f46' },
+
+    err: { bg: '#fee2e2', color: '#991b1b' }
+
+  };
+
+  const c = colors[kind] || colors.info;
+
+  el.style.background = c.bg;
+
+  el.style.color = c.color;
+
+}
+
+
+
+function renderCsvPreview(mappedRows) {
+
+  const host = document.getElementById('csv-import-preview');
+
+  const importBtn = document.getElementById('csv-import-btn');
+
+  if (!host) return;
+
+
+
+  const validCount = mappedRows.filter(r => r.valid).length;
+
+  const importableCount = mappedRows.filter(
+
+    r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+
+  ).length;
+
+
+
+  if (!mappedRows.length) {
+
+    host.innerHTML = '<p class="admin-text-muted">No data rows found.</p>';
+
+    if (importBtn) {
+
+      importBtn.disabled = true;
+
+      importBtn.textContent = 'Import products';
+
+    }
+
+    return;
+
+  }
+
+
+
+  const rowsHtml = mappedRows.map((r, idx) => {
+
+    const img = r.preview.imageUrl
+
+      ? `<img src="${escapeCsvHtml(r.preview.imageUrl)}" alt="" referrerpolicy="no-referrer" loading="lazy" style="width:48px;height:48px;object-fit:contain;background:rgb(var(--color-neutral-100));border-radius:4px;" onerror="this.style.display='none'">`
+
+      : '<span class="admin-text-muted">—</span>';
+
+    return `<tr style="border-bottom:1px solid rgb(var(--color-neutral-200));">
+
+      <td style="padding:0.5rem;vertical-align:top;">${idx + 1}</td>
+
+      <td style="padding:0.5rem;vertical-align:top;">${img}</td>
+
+      <td style="padding:0.5rem;vertical-align:top;"><strong>${escapeCsvHtml(r.preview.name)}</strong><div class="admin-text-small">${escapeCsvHtml(r.preview.slug)}</div></td>
+
+      <td style="padding:0.5rem;vertical-align:top;font-size:0.875rem;">${escapeCsvHtml(r.preview.category || '—')}</td>
+
+      <td style="padding:0.5rem;vertical-align:top;">${escapeCsvHtml(r.preview.priceLabel)}</td>
+
+      <td style="padding:0.5rem;vertical-align:top;font-size:0.8rem;color:${r.valid ? 'rgb(var(--color-neutral-600))' : '#991b1b'};">${escapeCsvHtml(r.notes.join('; ') || 'Ready')}</td>
+
+    </tr>`;
+
+  }).join('');
+
+
+
+  host.innerHTML = `
+
+    <p class="admin-text-muted" style="margin:0 0 0.75rem;font-size:0.9375rem;">
+
+      ${mappedRows.length} row(s) parsed · ${validCount} valid · ${importableCount} new to import
+
+    </p>
+
+    <table style="width:100%;border-collapse:collapse;font-size:0.9375rem;">
+
+      <thead>
+
+        <tr style="text-align:left;border-bottom:2px solid rgb(var(--color-neutral-300));">
+
+          <th style="padding:0.5rem;">#</th>
+
+          <th style="padding:0.5rem;">Image</th>
+
+          <th style="padding:0.5rem;">Product</th>
+
+          <th style="padding:0.5rem;">Categories</th>
+
+          <th style="padding:0.5rem;">Price</th>
+
+          <th style="padding:0.5rem;">Notes</th>
+
+        </tr>
+
+      </thead>
+
+      <tbody>${rowsHtml}</tbody>
+
+    </table>`;
+
+
+
+  if (importBtn) {
+
+    importBtn.disabled = importableCount === 0;
+
+    importBtn.textContent = importableCount
+
+      ? `Import ${importableCount} product${importableCount === 1 ? '' : 's'}`
+
+      : 'Import products';
+
+  }
+
+}
+
+
+
+async function previewCsvImport() {
+
+  if (!window.ProductCsvImport) {
+
+    setCsvStatus('CSV helper failed to load. Refresh the page.', 'err');
+
+    return;
+
+  }
+
+  const fileInput = document.getElementById('csv-import-file');
+
+  const file = fileInput?.files?.[0];
+
+  const results = document.getElementById('csv-import-results');
+
+  if (results) results.innerHTML = '';
+
+
+
+  if (!file) {
+
+    setCsvStatus('Choose a CSV file first.', 'err');
+
+    csvImportRows = [];
+
+    renderCsvPreview([]);
+
+    return;
+
+  }
+
+
+
+  const stock = parseInt(document.getElementById('csv-import-stock')?.value || '0', 10);
+
+  const defaults = { stock: Number.isFinite(stock) && stock >= 0 ? stock : 0 };
+
+
+
+  try {
+
+    const text = await file.text();
+
+    const objects = ProductCsvImport.csvRowsToObjects(ProductCsvImport.parseCsvText(text));
+
+    const headers = objects[0] ? Object.keys(objects[0]) : [];
+
+    const missing = ['Title', 'Price'].filter(h => !headers.includes(h));
+
+    if (missing.length) {
+
+      setCsvStatus(`Missing required column(s): ${missing.join(', ')}. Found: ${headers.join(', ') || '(none)'}`, 'err');
+
+      csvImportRows = [];
+
+      renderCsvPreview([]);
+
+      return;
+
+    }
+
+
+
+    csvImportRows = objects.map(row => mapCsvRowToProduct(row, defaults));
+
+    const sample = csvImportRows[0]?.preview?.name || '';
+
+    setCsvStatus(`Parsed ${csvImportRows.length} product row(s). First title: "${sample}". Review the preview, then import.`, 'info');
+
+    renderCsvPreview(csvImportRows);
+
+
+
+    const labelEl = document.getElementById('csv-import-label');
+
+    if (labelEl && !labelEl.value.trim()) {
+
+      labelEl.value = file.name.replace(/\.csv$/i, '') + ' — ' + new Date().toISOString().slice(0, 10);
+
+    }
+
+  } catch (err) {
+
+    console.error(err);
+
+    setCsvStatus('Failed to parse CSV file.', 'err');
+
+    csvImportRows = [];
+
+    renderCsvPreview([]);
+
+  }
+
+}
+
+
+
+async function runCsvImport() {
+
+  if (!window.ProductCsvImport) {
+
+    setCsvStatus('CSV helper failed to load. Refresh the page.', 'err');
+
+    return;
+
+  }
+
+  const importBtn = document.getElementById('csv-import-btn');
+
+  const previewBtn = document.getElementById('csv-preview-btn');
+
+  const results = document.getElementById('csv-import-results');
+
+  if (!csvImportRows.length) {
+
+    setCsvStatus('Parse a CSV file before importing.', 'err');
+
+    return;
+
+  }
+
+
+
+  const file = document.getElementById('csv-import-file')?.files?.[0];
+
+  const label =
+
+    document.getElementById('csv-import-label')?.value?.trim() ||
+
+    (file ? file.name : 'CSV import');
+
+
+
+  if (importBtn) {
+
+    importBtn.disabled = true;
+
+    importBtn.textContent = 'Creating import batch...';
+
+  }
+
+  if (previewBtn) previewBtn.disabled = true;
+
+
+
+  let batchId = null;
+
+  try {
+
+    const batchRes = await fetch(`${API_BASE}/admin/product-imports`, {
+
+      method: 'POST',
+
+      headers: {
+
+        'Content-Type': 'application/json',
+
+        'X-Session-Token': sessionToken
+
+      },
+
+      body: JSON.stringify({
+
+        label,
+
+        source_filename: file?.name || null
+
+      })
+
+    });
+
+    const batchData = await batchRes.json().catch(() => ({}));
+
+    if (!batchRes.ok || !batchData.id) {
+
+      setCsvStatus('Failed to create import batch: ' + (batchData.error || batchRes.status), 'err');
+
+      if (importBtn) {
+
+        importBtn.disabled = false;
+
+        importBtn.textContent = 'Import products';
+
+      }
+
+      if (previewBtn) previewBtn.disabled = false;
+
+      return;
+
+    }
+
+    batchId = batchData.id;
+
+  } catch (err) {
+
+    console.error(err);
+
+    setCsvStatus('Failed to create import batch (network error). Is the Worker deployed?', 'err');
+
+    if (importBtn) {
+
+      importBtn.disabled = false;
+
+      importBtn.textContent = 'Import products';
+
+    }
+
+    if (previewBtn) previewBtn.disabled = false;
+
+    return;
+
+  }
+
+
+
+  const existingSlugs = new Set(adminProductsList.map(p => p.slug));
+
+  const toImport = csvImportRows.filter(r => r.valid);
+
+  let created = 0;
+
+  let skipped = 0;
+
+  let failed = 0;
+
+  const detailLines = [];
+
+
+
+  for (let i = 0; i < toImport.length; i++) {
+
+    const row = toImport[i];
+
+    const payload = { ...row.payload, import_batch_id: batchId };
+
+    setCsvStatus(`Importing ${i + 1} of ${toImport.length}: ${payload.name}`, 'info');
+
+
+
+    if (existingSlugs.has(payload.slug)) {
+
+      skipped++;
+
+      detailLines.push(`Skipped ${payload.name} (slug exists)`);
+
+      continue;
+
+    }
+
+
+
+    try {
+
+      const response = await fetch(`${API_BASE}/admin/products`, {
+
+        method: 'POST',
+
+        headers: {
+
+          'Content-Type': 'application/json',
+
+          'X-Session-Token': sessionToken
+
+        },
+
+        body: JSON.stringify(payload)
+
+      });
+
+
+
+      if (response.ok) {
+
+        created++;
+
+        existingSlugs.add(payload.slug);
+
+        detailLines.push(`Created ${payload.name}`);
+
+        if (payload.category) {
+
+          payload.category.split(',').forEach(cat => {
+
+            const t = cat.trim();
+
+            if (t) allCategories.add(t);
+
+          });
+
+        }
+
+      } else {
+
+        const error = await response.json().catch(() => ({}));
+
+        if (error.error === 'slug_already_exists') {
+
+          skipped++;
+
+          existingSlugs.add(payload.slug);
+
+          detailLines.push(`Skipped ${payload.name} (slug exists)`);
+
+        } else {
+
+          failed++;
+
+          detailLines.push(`Failed ${payload.name}: ${error.error || response.status}`);
+
+        }
+
+      }
+
+    } catch (err) {
+
+      failed++;
+
+      detailLines.push(`Failed ${payload.name}: network error`);
+
+      console.error(err);
+
+    }
+
+  }
+
+
+
+  setCsvStatus(
+
+    `Import #${batchId} finished: ${created} created, ${skipped} skipped, ${failed} failed.`,
+
+    failed ? 'err' : 'ok'
+
+  );
+
+  if (results) {
+
+    results.innerHTML = `<ul style="margin:0;padding-left:1.25rem;color:rgb(var(--color-neutral-700));font-size:0.875rem;">${
+
+      detailLines.map(line => `<li>${escapeCsvHtml(line)}</li>`).join('')
+
+    }</ul>`;
+
+  }
+
+
+
+  await loadProducts();
+
+  renderExistingCategories();
+
+  await loadProductImports();
+
+
+
+  const stock = parseInt(document.getElementById('csv-import-stock')?.value || '0', 10) || 0;
+
+  if (file) {
+
+    try {
+
+      const text = await file.text();
+
+      const objects = ProductCsvImport.csvRowsToObjects(ProductCsvImport.parseCsvText(text));
+
+      csvImportRows = objects.map(row => mapCsvRowToProduct(row, { stock }));
+
+      renderCsvPreview(csvImportRows);
+
+    } catch (_) {
+
+      /* keep previous preview */
+
+    }
+
+  }
+
+
+
+  if (importBtn) {
+
+    const remaining = csvImportRows.filter(
+
+      r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+
+    ).length;
+
+    importBtn.disabled = remaining === 0;
+
+    importBtn.textContent = remaining
+
+      ? `Import ${remaining} product${remaining === 1 ? '' : 's'}`
+
+      : 'Import products';
+
+  }
+
+  if (previewBtn) previewBtn.disabled = false;
+
+}
+
+
+
+async function loadProductImports() {
+
+  const host = document.getElementById('product-imports-list');
+
+  if (!host) return;
+
+  try {
+
+    const res = await fetch(`${API_BASE}/admin/product-imports`, {
+
+      headers: { 'X-Session-Token': sessionToken }
+
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+
+      host.innerHTML = `<p class="admin-text-muted">Could not load imports (${escapeCsvHtml(data.error || res.status)}). Deploy the Worker if this is a new endpoint.</p>`;
+
+      return;
+
+    }
+
+    const imports = data.imports || [];
+
+    if (!imports.length) {
+
+      host.innerHTML = '<p class="admin-text-muted">No CSV import batches yet.</p>';
+
+      return;
+
+    }
+
+    host.innerHTML = imports.map(batch => {
+
+      const cleaned = batch.cleaned_at
+
+        ? `Cleaned ${escapeCsvHtml(String(batch.cleaned_at).slice(0, 10))}`
+
+        : 'Not cleaned';
+
+      const canCleanup = Number(batch.unsold_count) > 0 || Number(batch.active_count) > 0;
+
+      return `<div class="item-card" style="margin-bottom:0.75rem;">
+
+        <div style="flex:1;">
+
+          <h3 style="margin:0 0 0.35rem;">${escapeCsvHtml(batch.label)} <span class="admin-text-small">#${batch.id}</span></h3>
+
+          <p class="admin-text-muted" style="margin:0;font-size:0.875rem;">
+
+            Created ${escapeCsvHtml(String(batch.created_at || '').slice(0, 10))}
+
+            ${batch.source_filename ? ' · ' + escapeCsvHtml(batch.source_filename) : ''}
+
+            · ${Number(batch.total_products) || 0} products
+
+            · ${Number(batch.sold_count) || 0} sold (kept on cleanup)
+
+            · ${Number(batch.unsold_count) || 0} unsold
+
+            · ${cleaned}
+
+          </p>
+
+        </div>
+
+        <div class="item-actions">
+
+          <button type="button" class="btn-delete" ${canCleanup ? '' : 'disabled'}
+
+            onclick="cleanupProductImport(${batch.id}, ${JSON.stringify(batch.label || '')}, ${Number(batch.unsold_count) || 0}, ${Number(batch.sold_count) || 0})">
+
+            Clean up import
+
+          </button>
+
+        </div>
+
+      </div>`;
+
+    }).join('');
+
+  } catch (err) {
+
+    console.error(err);
+
+    host.innerHTML = '<p class="admin-text-muted">Failed to load import batches.</p>';
+
+  }
+
+}
+
+
+
+async function cleanupProductImport(id, label, unsoldCount, soldCount) {
+
+  const ok = confirm(
+
+    'Clean up import "' + label + '"?\n\n' +
+
+    unsoldCount + ' unsold product(s) will be permanently deleted.\n' +
+
+    soldCount + ' sold product(s) will be kept inactive (order history preserved).\n\n' +
+
+    'This cannot be undone for deleted products.'
+
+  );
+
+  if (!ok) return;
+
+  try {
+
+    const res = await fetch(`${API_BASE}/admin/product-imports/${id}/cleanup`, {
+
+      method: 'POST',
+
+      headers: { 'X-Session-Token': sessionToken }
+
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+
+      alert('Cleanup failed: ' + (data.error || data.message || res.status));
+
+      return;
+
+    }
+
+    alert(
+
+      'Cleanup done.\nDeleted unsold: ' + (data.deleted_unsold || 0) +
+
+      '\nKept sold (inactive): ' + (data.kept_sold_inactive || 0)
+
+    );
+
+    await loadProducts();
+
+    await loadProductImports();
+
+  } catch (err) {
+
+    console.error(err);
+
+    alert('Cleanup failed (network error)');
+
+  }
+
+}
+
+
+
 document.getElementById('product-name').addEventListener('input', (e) => {
-const slug = e.target.value
-.toLowerCase()
-.replace(/[^a-z0-9]+/g, '-')
-.replace(/^-+|-+$/g, '');
+
+const slug = slugifyProductName(e.target.value);
+
 document.getElementById('product-slug').value = slug;
+
 });
+
+
+
+document.getElementById('csv-preview-btn')?.addEventListener('click', () => {
+
+  previewCsvImport();
+
+});
+
+
+
+document.getElementById('csv-import-btn')?.addEventListener('click', () => {
+
+  runCsvImport();
+
+});
+
+
+
+document.getElementById('csv-imports-refresh-btn')?.addEventListener('click', () => {
+  loadProductImports();
+});
+
+document.getElementById('shop-categories-refresh-btn')?.addEventListener('click', () => {
+  loadShopCategories();
+});
+
+async function loadShopCategories() {
+  const host = document.getElementById('shop-categories-list');
+  if (!host || !sessionToken) return;
+  try {
+    const res = await fetch(`${API_BASE}/admin/product-categories`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      host.innerHTML = `<p class="admin-text-muted">Could not load categories (${escapeCsvHtml(data.error || res.status)}). Deploy the Worker if this is a new endpoint.</p>`;
+      return;
+    }
+    const rows = data.categories || [];
+    if (!rows.length) {
+      host.innerHTML = '<p class="admin-text-muted">No product categories yet. Add categories on products first.</p>';
+      return;
+    }
+    host.innerHTML = `
+      <div class="table-wrapper">
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Products</th>
+                <th>Featured</th>
+                <th>Order</th>
+                <th>Search keywords</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(row => {
+                const name = escapeCsvHtml(row.name);
+                const nameAttr = escapeCsvHtml(row.name).replace(/'/g, '&#39;');
+                return `
+                  <tr data-category-name="${name}">
+                    <td><strong>${name}</strong></td>
+                    <td>${Number(row.product_count) || 0}</td>
+                    <td>
+                      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">
+                        <input type="checkbox" class="shop-cat-featured" ${row.featured ? 'checked' : ''}>
+                        <span class="admin-text-small">Pin front</span>
+                      </label>
+                    </td>
+                    <td>
+                      <input type="number" class="form-input shop-cat-order" min="0" max="9999" value="${Number(row.sort_order) || 0}" style="width:5rem;padding:0.4rem 0.5rem;">
+                    </td>
+                    <td>
+                      <input type="text" class="form-input shop-cat-keywords" value="${escapeCsvHtml(row.keywords || '')}" placeholder="e.g. mtg, magic" style="min-width:12rem;">
+                    </td>
+                    <td>
+                      <button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="${nameAttr}">Save</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    console.error(err);
+    host.innerHTML = '<p class="admin-text-muted">Could not load categories (network error).</p>';
+  }
+}
+
+document.getElementById('shop-categories-list')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.shop-cat-save');
+  if (!btn) return;
+  const row = btn.closest('tr');
+  if (!row) return;
+  const name = btn.getAttribute('data-name');
+  const featured = !!row.querySelector('.shop-cat-featured')?.checked;
+  const sort_order = parseInt(row.querySelector('.shop-cat-order')?.value, 10) || 0;
+  const keywords = row.querySelector('.shop-cat-keywords')?.value || '';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/admin/product-categories`, {
+      method: 'PUT',
+      headers: adminJsonHeaders(),
+      body: JSON.stringify({ name, featured, sort_order, keywords })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    await loadShopCategories();
+  } catch (err) {
+    alert('Save failed: ' + String(err.message || err));
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('csv-import-file')?.addEventListener('change', () => {
+
+  csvImportRows = [];
+
+  const preview = document.getElementById('csv-import-preview');
+
+  const results = document.getElementById('csv-import-results');
+
+  if (preview) preview.innerHTML = '';
+
+  if (results) results.innerHTML = '';
+
+  const importBtn = document.getElementById('csv-import-btn');
+
+  if (importBtn) {
+
+    importBtn.disabled = true;
+
+    importBtn.textContent = 'Import products';
+
+  }
+
+  setCsvStatus('', 'info');
+
+});
+
+
 
 // Category management
 let selectedCategories = [];
@@ -3002,36 +4526,37 @@ async function loadProducts() {
 try {
 const res = await fetch(`${API_BASE}/products`);
 const products = await res.json();
+adminProductsList = Array.isArray(products) ? products : [];
 const list = document.getElementById('products-list');
 
 // Collect all categories
-products.forEach(p => {
+adminProductsList.forEach(p => {
 if (p.category) {
 p.category.split(',').forEach(cat => allCategories.add(cat.trim()));
 }
 });
 renderExistingCategories();
 
-if (products.length === 0) {
+if (adminProductsList.length === 0) {
 list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No products yet</p>';
 return;
 }
 
-list.innerHTML = products.map(p => {
+list.innerHTML = adminProductsList.map(p => {
 const categories = p.category ? p.category.split(',').map(c => c.trim()).join(', ') : 'N/A';
 return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
-${p.image_url ? `<img src="${p.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
+${p.image_url ? `<img src="${escapeCsvHtml(p.image_url)}" alt="" referrerpolicy="no-referrer" loading="lazy" style="width: 80px; height: 80px; object-fit: contain; border-radius: 6px; background: rgb(var(--color-neutral-100));" onerror="this.style.display='none'">` : ''}
 <div style="flex: 1;">
-<h3>${p.name} ${p.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'}</h3>
-<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${p.summary || ''}</p>
-<p style="margin: 0.5rem 0;"><strong>£${(p.price / 100).toFixed(2)}</strong> | Stock: ${p.stock_quantity} | Categories: ${categories}</p>
+<h3>${escapeCsvHtml(p.name)} ${p.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'}</h3>
+<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${escapeCsvHtml(p.summary || '')}</p>
+<p style="margin: 0.5rem 0;"><strong>£${(p.price / 100).toFixed(2)}</strong> | Stock: ${p.stock_quantity} | Categories: ${escapeCsvHtml(categories)}</p>
 </div>
 </div>
 <div class="item-actions">
 <button class="btn-edit" onclick="editProduct(${p.id})">Edit</button>
-<button class="btn-delete" onclick="deleteProduct(${p.id}, '${p.name}')">Delete</button>
+<button class="btn-delete" onclick="deleteProduct(${p.id}, '${String(p.name || '').replace(/'/g, "\\'")}')">Delete</button>
 ${p.slug ? `<button class="btn-index" onclick="requestIndexing('product', '${p.slug}', this)">📡 Index</button>` : ''}
 </div>
 </div>
@@ -3278,6 +4803,23 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     });
 
     if (res.ok) {
+      const saved = await res.json().catch(() => ({}));
+      const eventId = id || saved.id;
+      let blockNote = '';
+      try {
+        const shouldBlock = document.getElementById('event-block-table-bookings').checked;
+        const blockResult = await syncEventTableBookingBlocks({
+          eventId,
+          eventTitle: data.title,
+          shouldBlock
+        });
+        if (shouldBlock && blockResult.created > 0) {
+          blockNote = ` ${blockResult.created} table booking block${blockResult.created === 1 ? '' : 's'} created.`;
+        }
+      } catch (blockErr) {
+        blockNote = ' Warning: table booking blocks could not be updated — ' + blockErr.message;
+      }
+
       document.getElementById('event-form').reset();
       document.getElementById('event-id').value = '';
       document.getElementById('event-form-title').textContent = 'Add New Event';
@@ -3291,7 +4833,7 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
       document.getElementById('event-image-hero').value = '';
 uploadedEventBundle = null;
 loadEvents();
-alert('Event saved successfully!');
+alert('Event saved successfully!' + blockNote);
 } else {
 const error = await res.json();
 alert('Failed to save event: ' + (error.error || error.message || 'Unknown error'));
@@ -3321,6 +4863,7 @@ document.getElementById('event-seo-image').value = '';
 document.getElementById('event-end-time').value = '';
 document.getElementById('recurring-end-time').value = '';
 document.getElementById('event-requires-purchase').checked = true;
+document.getElementById('event-block-table-bookings').checked = false;
 document.getElementById('event-pricing-fields').style.display = 'block';
 document.getElementById('event-form-title').textContent = 'Add New Event';
 document.getElementById('event-submit-text').textContent = 'Add Event';
@@ -3425,6 +4968,7 @@ async function editEvent(id) {
     document.getElementById('event-form-title').textContent = 'Edit Event';
     document.getElementById('event-submit-text').textContent = 'Update Event';
     document.getElementById('cancel-event-edit').style.display = 'block';
+    document.getElementById('event-block-table-bookings').checked = await eventHasTableBookingBlocks(id);
     document.getElementById('event-form').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     alert('Error loading event: ' + err.message);
@@ -3514,6 +5058,219 @@ async function deleteEvent(id, title) {
       }
     }
   });
+}
+
+// Recent Activity
+const ACTIVITY_TYPE_LABELS = {
+  account_created: { label: 'Account created', color: '#6366f1' },
+  membership_new: { label: 'New membership', color: '#4CAF50' },
+  membership_expired: { label: 'Membership expired', color: '#f44336' },
+  event_purchase: { label: 'Event ticket', color: '#2196F3' },
+  event_registration: { label: 'Event registration', color: '#0ea5e9' },
+  table_booking: { label: 'Table booking', color: '#14b8a6' },
+  shop_order: { label: 'Shop order', color: '#8b5cf6' },
+  donation: { label: 'Donation', color: '#ec4899' },
+  sponsorship: { label: 'Sponsorship', color: '#f59e0b' }
+};
+
+let recentActivityCache = [];
+let recentActivityDays = '30';
+
+const PLAN_LABELS = { monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' };
+
+function getActivityTypeFilters() {
+  const enabled = new Set();
+  document.querySelectorAll('.activity-type-filter:checked').forEach(cb => {
+    if (cb.dataset.activityType) enabled.add(cb.dataset.activityType);
+  });
+  return enabled;
+}
+
+function renderActivityRow(activity) {
+  const occurred = new Date(activity.occurred_at);
+  const typeConfig = ACTIVITY_TYPE_LABELS[activity.activity_type] || { label: activity.activity_type, color: '#666' };
+  const amount = activity.display_amount ? `£${activity.display_amount}` : '—';
+  const person = activity.name
+    ? `<div style="font-weight: 500;">${escapeHtml(activity.name)}</div><div class="admin-text-sm admin-text-muted">${escapeHtml(activity.email || '')}</div>`
+    : `<div class="admin-text-sm">${escapeHtml(activity.email || '—')}</div>`;
+
+  return `
+    <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
+      <td style="padding: 1rem; white-space: nowrap;">
+        <div style="font-weight: 500;">${occurred.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</div>
+        <div class="admin-text-sm admin-text-muted">${occurred.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+      </td>
+      <td style="padding: 1rem;">
+        <span class="admin-text-sm" style="padding: 0.25rem 0.75rem; background: ${typeConfig.color}22; color: ${typeConfig.color}; border-radius: 4px; font-weight: 600; white-space: nowrap;">
+          ${typeConfig.label}
+        </span>
+      </td>
+      <td style="padding: 1rem;">${person}</td>
+      <td class="admin-text-sm" style="padding: 1rem;">${escapeHtml(formatActivityDetail(activity))}</td>
+      <td style="padding: 1rem; font-weight: 500;">${amount}</td>
+    </tr>
+  `;
+}
+
+function renderRecentActivityTable() {
+  const tableBody = document.getElementById('activity-list');
+  if (!tableBody) return;
+
+  if (!recentActivityCache.length) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+          No activity in the last ${recentActivityDays} days
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  const enabledTypes = getActivityTypeFilters();
+  const visible = recentActivityCache.filter(a => enabledTypes.has(a.activity_type));
+
+  if (!visible.length) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+          No activity matches the selected filters
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tableBody.innerHTML = visible.map(renderActivityRow).join('');
+}
+
+function soloActivityTypeFilter(type) {
+  document.querySelectorAll('.activity-type-filter').forEach(cb => {
+    cb.checked = cb.dataset.activityType === type;
+  });
+  renderRecentActivityTable();
+}
+
+function initActivityTypeFilters() {
+  document.querySelectorAll('.activity-type-filter').forEach(cb => {
+    if (cb.dataset.activityFilterBound) return;
+    cb.dataset.activityFilterBound = '1';
+    cb.addEventListener('change', renderRecentActivityTable);
+  });
+  document.querySelectorAll('.activity-type-filter-solo').forEach(span => {
+    if (span.dataset.activitySoloBound) return;
+    span.dataset.activitySoloBound = '1';
+    span.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const type = span.dataset.activityType;
+      if (type) soloActivityTypeFilter(type);
+    });
+    span.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      const type = span.dataset.activityType;
+      if (type) soloActivityTypeFilter(type);
+    });
+  });
+}
+
+function mapBookingToActivity(booking) {
+  const tablePart = booking.table_type || 'Table';
+  const datePart = booking.booking_date || '';
+  const timePart = [booking.start_time, booking.end_time].filter(Boolean).join('–');
+  const detail = timePart ? `${tablePart} · ${datePart}, ${timePart}` : `${tablePart} · ${datePart}`;
+  const paid = Number(booking.amount_paid);
+  const displayAmount = Number.isFinite(paid) && paid > 0 ? paid.toFixed(2) : null;
+  return {
+    activity_type: 'table_booking',
+    occurred_at: booking.created_at,
+    email: booking.user_email,
+    name: booking.user_name,
+    detail,
+    display_amount: displayAmount,
+    currency: 'GBP',
+    ref_id: booking.id
+  };
+}
+
+function mergeAndSortActivityRows(d1Activities, bookings) {
+  const bookingRows = (bookings || []).map(mapBookingToActivity);
+  return [...(d1Activities || []), ...bookingRows].sort((a, b) => {
+    const ta = Date.parse(a.occurred_at || '') || 0;
+    const tb = Date.parse(b.occurred_at || '') || 0;
+    return tb - ta;
+  });
+}
+
+function formatActivityDetail(activity) {
+  const type = activity.activity_type;
+  const detail = activity.detail || '';
+  if (type === 'membership_new' || type === 'membership_expired') {
+    return PLAN_LABELS[detail] || detail || '—';
+  }
+  if (type === 'shop_order') {
+    return detail ? `Order ${detail}` : '—';
+  }
+  if (type === 'event_purchase' || type === 'event_registration' || type === 'table_booking') {
+    return detail || '—';
+  }
+  if (type === 'donation') {
+    return detail ? `Campaign: ${detail}` : '—';
+  }
+  if (type === 'sponsorship') {
+    return detail === 'claimed' ? 'Claimed by member' : 'Purchased (pool)';
+  }
+  return '—';
+}
+
+async function loadRecentActivity() {
+  const tableBody = document.getElementById('activity-list');
+  if (!tableBody) return;
+
+  recentActivityDays = document.getElementById('activity-days-filter')?.value || '30';
+  initActivityTypeFilters();
+  tableBody.innerHTML = `
+    <tr>
+      <td colspan="5" class="admin-text-center admin-text-muted" style="padding: 3rem;">
+        Loading activity...
+      </td>
+    </tr>
+  `;
+
+  try {
+    const bookingHeaders = sessionToken ? { Authorization: 'Bearer ' + sessionToken } : {};
+    const [activityRes, bookingsRes] = await Promise.all([
+      fetch(`${API_BASE}/admin/recent-activity?days=${encodeURIComponent(recentActivityDays)}&limit=100`, {
+        headers: { 'X-Session-Token': sessionToken }
+      }),
+      fetch(`${BOOKINGS_API}/api/bookings/recent?days=${encodeURIComponent(recentActivityDays)}&limit=100`, {
+        headers: bookingHeaders
+      }).catch(() => null)
+    ]);
+
+    if (!activityRes.ok) throw new Error('Failed to fetch activity');
+
+    const data = await activityRes.json();
+    const d1Activities = data.success && Array.isArray(data.activities) ? data.activities : [];
+    let bookings = [];
+    if (bookingsRes && bookingsRes.ok) {
+      const bookingsData = await bookingsRes.json();
+      bookings = Array.isArray(bookingsData.bookings) ? bookingsData.bookings : [];
+    }
+    recentActivityCache = mergeAndSortActivityRows(d1Activities, bookings).slice(0, 100);
+    renderRecentActivityTable();
+  } catch (err) {
+    console.error('Error loading recent activity:', err);
+    recentActivityCache = [];
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="admin-text-center" style="padding: 3rem; color: #c00;">
+          Failed to load activity. Please refresh.
+        </td>
+      </tr>
+    `;
+  }
 }
 
 // Orders
@@ -4305,8 +6062,8 @@ async function loadBookingsSchedule() {
     const headers = sessionToken ? { 'Authorization': 'Bearer ' + sessionToken } : {};
     const [eventsRes, bookingsRes, blocksRes] = await Promise.all([
       fetch(API_BASE + '/events'),
-      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all', { headers }),
-      fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks')
+      fetch(`${BOOKINGS_API}/api/bookings/all`, { headers }),
+      fetch(`${BOOKINGS_API}/api/bookings/blocks`)
     ]);
     const eventsRaw = eventsRes.ok ? await eventsRes.json() : [];
     const bookingsData = bookingsRes.ok ? await bookingsRes.json() : { bookings: [] };
@@ -4345,7 +6102,7 @@ async function cancelBookingAdmin(bookingId) {
   }
   
   try {
-    const response = await fetch(`https://dicebastionbookings-ofbbu.bunny.run/api/bookings/${bookingId}`, {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/${bookingId}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${sessionToken}`
@@ -4387,7 +6144,7 @@ async function deleteTimeBlock(blockId) {
   if (!confirm('Delete this time block?')) return;
   
   try {
-    const response = await fetch(`https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks/${blockId}`, {
+    const response = await fetch(`${BOOKINGS_API}/api/bookings/blocks/${blockId}`, {
       method: 'DELETE'
     });
     
@@ -4451,20 +6208,10 @@ function showCreateBlockModal() {
     };
     
     try {
-      const response = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(blockData)
-      });
-      
-      if (response.ok) {
-        modal.close();
-        await loadTimeBlocks();
-        await loadCalendarWeek();
-      } else {
-        const data = await response.json();
-        alert('Failed to create block: ' + (data.error || 'Unknown error'));
-      }
+      await createBookingTimeBlock(blockData);
+      modal.close();
+      await loadTimeBlocks();
+      await loadCalendarWeek();
     } catch (err) {
       console.error('Error creating block:', err);
       alert('Failed to create time block');
@@ -4485,8 +6232,8 @@ async function loadCalendarWeek() {
   
   // Load bookings and blocks for the week
   try {
-    const bookingsResponse = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/all');
-    const blocksResponse = await fetch('https://dicebastionbookings-ofbbu.bunny.run/api/bookings/blocks');
+    const bookingsResponse = await fetch(`${BOOKINGS_API}/api/bookings/all`);
+    const blocksResponse = await fetch(`${BOOKINGS_API}/api/bookings/blocks`);
     
     const bookingsData = await bookingsResponse.json();
     const blocksData = await blocksResponse.json();
@@ -4573,8 +6320,6 @@ function changeWeek(direction) {
   currentWeekStart.setDate(currentWeekStart.getDate() + (direction * 7));
   loadCalendarWeek();
 }
-
-const BOOKINGS_API = 'https://dicebastionbookings-ofbbu.bunny.run';
 
 const BOOKING_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -5287,8 +7032,8 @@ async function loadNewsletterEvents() {
 }
 
 function nlEventImageSrc(ev) {
-  // Prefer image_url (the 800x379 main variant): it is filled edge-to-edge at a CONSISTENT
-  // aspect ratio with the blurred backdrop baked into the file, so every event looks uniform
+  // Prefer image_url (the main fillHeight variant): it is filled edge-to-edge at a CONSISTENT
+  // aspect ratio with a flat fill baked into the file, so every event looks uniform
   // in a flat frame. image_url_card is exported at each artwork's OWN aspect ratio (tight, no
   // baked fill) for object-fit:contain + a CSS ::before backdrop — that context does not exist
   // in email, so using it here made cards look different / crop weirdly.
@@ -6048,6 +7793,7 @@ function blogNewAuthor() {
   document.getElementById('blog-author-admin-name').value = '';
   document.getElementById('blog-author-admin-image').value = '';
   document.getElementById('blog-author-admin-bio').value = '';
+  document.getElementById('blog-author-admin-custom-html').value = '';
   blogRenderAuthorAdminPreview('');
   document.getElementById('blog-author-delete-btn').style.display = 'none';
   document.getElementById('blog-author-admin-form').style.display = 'block';
@@ -6068,6 +7814,7 @@ async function blogEditAuthor(slug) {
     document.getElementById('blog-author-admin-name').value = author.name || '';
     document.getElementById('blog-author-admin-image').value = author.image || '';
     document.getElementById('blog-author-admin-bio').value = author.bio || '';
+    document.getElementById('blog-author-admin-custom-html').value = author.custom_html || '';
     blogRenderAuthorAdminPreview(author.image || '');
     document.getElementById('blog-author-delete-btn').style.display = 'inline-flex';
     document.getElementById('blog-author-admin-form').style.display = 'block';
@@ -6089,6 +7836,7 @@ async function blogSaveAuthor() {
   const name = document.getElementById('blog-author-admin-name').value.trim();
   const image = document.getElementById('blog-author-admin-image').value.trim() || null;
   const bio = document.getElementById('blog-author-admin-bio').value.trim() || null;
+  const custom_html = document.getElementById('blog-author-admin-custom-html').value.trim() || null;
 
   if (!slug || !name) {
     Modal.alert({ title: 'Missing fields', message: 'Slug and display name are required.' });
@@ -6103,7 +7851,7 @@ async function blogSaveAuthor() {
     const res = await fetch(`${BLOG_API_BASE}/admin/blog/authors/${encodeURIComponent(slug)}`, {
       method: 'PUT',
       headers: adminJsonHeaders(),
-      body: JSON.stringify({ name, image, bio }),
+      body: JSON.stringify({ name, image, bio, custom_html }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || data.message || 'Save failed');

@@ -281,17 +281,72 @@ async function fetchPaymentByReference(
   return data;
 }
 
-async function getExpectedBookingAmount(
-  tableTypeId: number,
-  isMember: boolean
-): Promise<number | null> {
+type TableTypePrices = { member_price: number; non_member_price: number };
+
+async function getTableTypePrices(tableTypeId: number): Promise<TableTypePrices | null> {
   const result = await client.execute({
     sql: "SELECT member_price, non_member_price FROM booking_table_types WHERE id = ? AND active = 1",
     args: [tableTypeId],
   });
   if (result.rows.length === 0) return null;
   const row = result.rows[0];
-  return isMember ? Number(row.member_price) : Number(row.non_member_price);
+  return {
+    member_price: Number(row.member_price),
+    non_member_price: Number(row.non_member_price),
+  };
+}
+
+/** True when this member already has a member-priced booking in the same session (time slot) on this date. */
+async function memberHasUsedBenefitInSlot(
+  userEmail: string,
+  bookingDate: string,
+  startTime: string,
+  endTime: string
+): Promise<boolean> {
+  const result = await client.execute({
+    sql: `SELECT COUNT(*) as count FROM bookings
+          WHERE LOWER(user_email) = LOWER(?)
+          AND booking_date = ?
+          AND start_time = ?
+          AND end_time = ?
+          AND is_member_booking = 1
+          AND status != 'cancelled'`,
+    args: [userEmail, bookingDate, startTime, endTime],
+  });
+  return Number(result.rows[0]?.count || 0) > 0;
+}
+
+type ResolvedBookingPricing = {
+  amount: number;
+  usesMemberBenefit: boolean;
+};
+
+async function resolveBookingPricing(
+  tableTypeId: number,
+  userEmail: string | null | undefined,
+  bookingDate: string,
+  startTime: string,
+  endTime: string
+): Promise<ResolvedBookingPricing | null> {
+  const prices = await getTableTypePrices(tableTypeId);
+  if (!prices) return null;
+
+  const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
+  if (!isMember) {
+    return { amount: prices.non_member_price, usesMemberBenefit: false };
+  }
+
+  const benefitUsed = await memberHasUsedBenefitInSlot(
+    userEmail!,
+    bookingDate,
+    startTime,
+    endTime
+  );
+  if (benefitUsed) {
+    return { amount: prices.non_member_price, usesMemberBenefit: false };
+  }
+
+  return { amount: prices.member_price, usesMemberBenefit: true };
 }
 
 /**
@@ -618,6 +673,14 @@ BunnySDK.net.http.serve(async (request: Request) => {
       return await getAllBookings();
     }
 
+    // GET /api/bookings/recent?days=30&limit=100 - Recently created bookings (admin activity feed)
+    if (path === "/api/bookings/recent" && request.method === "GET") {
+      const url = new URL(request.url);
+      const days = Math.min(Math.max(parseInt(url.searchParams.get("days") || "30", 10) || 30, 1), 90);
+      const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 1), 200);
+      return await getRecentBookings(days, limit);
+    }
+
     // GET /api/bookings/blocks - Get all booking blocks
     if (path === "/api/bookings/blocks" && request.method === "GET") {
       return await getBlockedTimes();
@@ -718,6 +781,7 @@ async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: 
     }
 
     const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
+    const tablePrices = isMember ? await getTableTypePrices(tableTypeId) : null;
     if (date === todayStr) {
       return jsonResponse({
         slots: [],
@@ -805,14 +869,30 @@ async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: 
         const spotsLeft = maxBookings - count;
 
         const available = spotsLeft > 0;
-        
-        return {
+
+        const slotInfo: Record<string, unknown> = {
           start_time: slot.start,
           end_time: slot.end,
           spots_left: spotsLeft,
           available,
-          blocked: false
+          blocked: false,
         };
+
+        if (isMember && userEmail && tablePrices) {
+          const benefitUsed = await memberHasUsedBenefitInSlot(
+            userEmail,
+            date,
+            slot.start,
+            slot.end
+          );
+          const usesMemberBenefit = !benefitUsed;
+          slotInfo.member_benefit_available = usesMemberBenefit;
+          slotInfo.price = usesMemberBenefit
+            ? tablePrices.member_price
+            : tablePrices.non_member_price;
+        }
+
+        return slotInfo;
       })
     );
 
@@ -897,6 +977,17 @@ async function createBooking(request: Request) {
       }, 422);
     }
 
+    const pricing = await resolveBookingPricing(
+      table_type_id,
+      user_email,
+      booking_date,
+      start_time,
+      end_time
+    );
+    if (pricing === null) {
+      return jsonResponse({ error: "Invalid table type" }, 400);
+    }
+
     if (is_member_booking && !isMember) {
       return jsonResponse({
         error: "membership_required",
@@ -904,11 +995,15 @@ async function createBooking(request: Request) {
       }, 403);
     }
 
-    const expectedAmount = await getExpectedBookingAmount(table_type_id, isMember);
-    if (expectedAmount === null) {
-      return jsonResponse({ error: "Invalid table type" }, 400);
+    if (is_member_booking && !pricing.usesMemberBenefit) {
+      return jsonResponse({
+        error: "member_benefit_unavailable",
+        message:
+          "You already have a member booking for this session. Additional tables are charged at the standard rate.",
+      }, 422);
     }
-    const amountToCharge = expectedAmount;
+
+    const amountToCharge = pricing.amount;
 
     const schedule = await loadBookingConfig();
     const { startHour, endHour } = getEffectiveHoursForDate(
@@ -970,7 +1065,7 @@ async function createBooking(request: Request) {
         table_type_id,
         order_ref,
         amountToCharge,
-        isMember ? 1 : 0,
+        pricing.usesMemberBenefit ? 1 : 0,
         amountToCharge > 0 ? 'pending' : 'confirmed', // Track payment status separately
         notes || null,
         now,
@@ -991,7 +1086,7 @@ async function createBooking(request: Request) {
           tableTypeId: table_type_id,
           amountPaid: 0,
           orderRef: order_ref,
-          isMemberBooking: isMember,
+          isMemberBooking: pricing.usesMemberBenefit,
           notes: notes || undefined,
         });
       } catch (e) {
@@ -1332,6 +1427,46 @@ async function getAllBookings() {
   } catch (error) {
     console.error("Error fetching all bookings:", error);
     return jsonResponse({ error: "Failed to fetch bookings" }, 500);
+  }
+}
+
+/**
+ * Get recently created bookings (admin activity feed)
+ */
+async function getRecentBookings(days: number, limit: number) {
+  try {
+    const result = await client.execute({
+      sql: `SELECT b.id, b.user_email, b.user_name, b.booking_date, b.start_time, b.end_time,
+                   b.status, b.payment_status, b.amount_paid, b.notes, b.created_at,
+                   t.name as table_type_name
+            FROM bookings b
+            LEFT JOIN booking_table_types t ON b.table_type_id = t.id
+            WHERE b.status != 'cancelled'
+              AND datetime(b.created_at) >= datetime('now', ?)
+            ORDER BY b.created_at DESC
+            LIMIT ?`,
+      args: [`-${days} days`, limit],
+    });
+
+    return jsonResponse({
+      bookings: result.rows.map((row) => ({
+        id: row.id,
+        user_email: row.user_email,
+        user_name: row.user_name,
+        booking_date: row.booking_date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        table_type: row.table_type_name,
+        status: row.status,
+        payment_status: row.payment_status,
+        amount_paid: Number(row.amount_paid),
+        notes: row.notes,
+        created_at: row.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error("Error fetching recent bookings:", error);
+    return jsonResponse({ error: "Failed to fetch recent bookings" }, 500);
   }
 }
 

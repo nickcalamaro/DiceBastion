@@ -250,7 +250,7 @@ describe('CORS Headers', () => {
         'Origin': 'https://test.com'
       }
     })
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(204)
     // Check for Access-Control-Allow-Methods which is always present
     expect(response.headers.get('Access-Control-Allow-Methods')).toContain('GET')
     expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST')

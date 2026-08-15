@@ -26,6 +26,8 @@ export interface BlogAuthorProfile {
   name: string;
   image?: string | null;
   bio?: string | null;
+  /** Trusted admin HTML (widgets, embeds) shown on /posts/author/slug/ only. */
+  custom_html?: string | null;
 }
 
 export interface BlogTaxonomyIndex {
@@ -271,11 +273,17 @@ function resolvePostAuthors(
   const seenNames = new Set<string>();
 
   for (const slug of slugs) {
-    const profile = authors[slug] || { slug, name: slug.replace(/-/g, " ") };
+    const profile = authors[slug] || { slug, name: slug.replace(/-/g, " "), custom_html: null };
     const key = profile.name.trim().toLowerCase();
     if (seenNames.has(key)) continue;
     seenNames.add(key);
-    profiles.push({ slug, name: profile.name.trim(), image: profile.image, bio: profile.bio });
+    profiles.push({
+      slug,
+      name: profile.name.trim(),
+      image: profile.image,
+      bio: profile.bio,
+      custom_html: profile.custom_html || null,
+    });
   }
 
   const people = profiles.filter((p) => !isOrgAuthorName(p.name));
@@ -512,6 +520,20 @@ function renderAuthorByline(profiles: BlogAuthorProfile[], siteUrl: string): str
     .join("");
 
   return `<aside class="blog-author-byline" aria-label="Article author">${items}</aside>`;
+}
+
+/** Widgets/embeds from author profiles (e.g. Ko-fi), shown on posts by those authors. */
+function renderAuthorCustomHtml(profiles: BlogAuthorProfile[]): string {
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  for (const profile of profiles) {
+    const html = (profile.custom_html || "").trim();
+    if (!html || seen.has(html)) continue;
+    seen.add(html);
+    blocks.push(`<div class="blog-author-custom-html">${html}</div>`);
+  }
+  if (!blocks.length) return "";
+  return `<div class="blog-author-custom-html-group" aria-label="Author extras">${blocks.join("")}</div>`;
 }
 
 function renderTaxonomySidebar(
@@ -1315,6 +1337,19 @@ main.page-container {
   font-weight: 600;
   color: rgb(var(--color-neutral-500));
 }
+.blog-author-custom-html {
+  margin: 0 0 1.75rem;
+  max-width: 52rem;
+}
+.blog-author-custom-html-group {
+  margin-bottom: 1.5rem;
+}
+.blog-author-custom-html-group .blog-author-custom-html {
+  margin-bottom: 1rem;
+}
+.blog-author-custom-html-group .blog-author-custom-html:last-child {
+  margin-bottom: 0;
+}
 .blog-author-posts-heading {
   margin: 0 0 1.25rem;
   font-size: 1.15rem;
@@ -1887,6 +1922,7 @@ export function renderBlogAuthorPage(
   const name = profile?.name || authorSlug.replace(/-/g, " ");
   const bio = profile?.bio || "";
   const image = profile?.image || "";
+  const customHtml = (profile?.custom_html || "").trim();
   const filtered = posts.filter((post) => (post.authors || []).includes(authorSlug));
   const postCount = filtered.length;
   const canonical = `${siteUrl}/posts/author/${encodeURIComponent(authorSlug)}/`;
@@ -1918,6 +1954,7 @@ export function renderBlogAuthorPage(
     <div class="blog-layout">
       <div class="blog-main">
         ${profileHeader}
+        ${customHtml ? `<div class="blog-author-custom-html">${customHtml}</div>` : ""}
         <h2 class="blog-author-posts-heading">Articles by ${escapeHtml(name)}</h2>
         <section class="list-card-grid">${cards}</section>
         ${renderBlogPageFooter(siteUrl, true)}
@@ -1987,6 +2024,7 @@ export function renderBlogPostPage(
       </div>
       ${tags ? `<div class="blog-tag-list">${tags}</div>` : ""}
       ${renderAuthorByline(authorProfiles, siteUrl)}
+      ${renderAuthorCustomHtml(authorProfiles)}
       <div class="blog-article-body">${sanitizedBody}</div>
     </article>`;
 

@@ -369,7 +369,7 @@ Triggered daily at 2 AM UTC via Cloudflare `scheduled` event:
 - Auto-renewals (3-day warnings, charge attempts, expiry)
 - Event reminders (24-hour advance)
 - Delayed account setup emails
-- SEO indexing (Google Indexing API, sitemap pings)
+- SEO indexing (IndexNow + Google Indexing API; live D1 sitemaps)
 
 These will need a new trigger mechanism on Bunny (external cron service or Bunny's scheduled tasks).
 
@@ -399,6 +399,7 @@ PAYMENTS_API_URL            — URL of the payments service
 INTERNAL_SECRET             — Shared secret for service-to-service auth
 MAILERSEND_API_KEY          — MailerSend API key (email service only)
 SUPPORT_CONTACT_EMAIL       — Inbox for /support form (e.g. contact@dicebastion.com)
+PLAYMAT_COMMISSION_EMAIL    — Inbox for shop custom playmat commissions (defaults to jen@dicebastion.com)
 TURNSTILE_SECRET            — Cloudflare Turnstile secret (required for /support in production)
 ALLOW_TEST_BYPASS           — Set "true" to accept test-bypass Turnstile token on localhost
 ```
@@ -524,7 +525,8 @@ Key tables (Cloudflare D1, to be migrated):
 - `payment_instruments` — saved cards for recurring payments
 - `email_history` — audit log of all emails sent
 - `email_preferences` — GDPR consent tracking per user
-- `products`, `orders`, `order_items`, `cart_items` — shop (Phase 2)
+- `products`, `orders`, `order_items` — shop catalogue and completed purchases
+- `cart_items` — **reserved / unused**. Live shop carts use browser `localStorage` (`shop_cart`) plus a small TTL cookie via `shop/static/js/shopCartStorage.js`, not D1. Do not expect rows here unless DB-backed carts are built later (abandoned-cart email, cross-device sync, or inventory holds).
 - `donations` — fundraiser campaigns
 - `cron_job_log` — scheduled job execution history
 - `password_reset_tokens` — time-limited reset tokens

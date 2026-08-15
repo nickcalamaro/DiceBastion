@@ -295,20 +295,25 @@
     localStorage.setItem(CONSENT_KEY, JSON.stringify(consent));
   }
   
-  // Load analytics if consented
+  // Cloudflare Web Analytics site token (Hugo params). Empty = analytics never loads.
+  const CF_WEB_ANALYTICS_TOKEN = {{ with .Site.Params.cloudflareWebAnalyticsToken }}{{ printf "%q" . }}{{ else }}""{{ end }};
+
+  // Load Cloudflare Web Analytics only after analytics consent (manual snippet, not auto-inject).
   function loadAnalytics() {
     const consent = getConsent();
-    if (consent && consent.preferences.analytics) {
-      // TODO: Load your analytics script here
-      // Example: Google Analytics, Plausible, etc.
-      console.log('Analytics enabled');
-      
-      // Example for Google Analytics (uncomment when ready):
-      // window.dataLayer = window.dataLayer || [];
-      // function gtag(){dataLayer.push(arguments);}
-      // gtag('js', new Date());
-      // gtag('config', 'YOUR-GA-ID');
-    }
+    if (!consent || !consent.preferences.analytics) return;
+    if (!CF_WEB_ANALYTICS_TOKEN) return;
+    if (document.getElementById('cf-web-analytics')) return;
+
+    const script = document.createElement('script');
+    script.id = 'cf-web-analytics';
+    script.defer = true;
+    script.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+    script.setAttribute('data-cf-beacon', JSON.stringify({
+      token: CF_WEB_ANALYTICS_TOKEN,
+      spa: true
+    }));
+    document.head.appendChild(script);
   }
   
   // Show banner

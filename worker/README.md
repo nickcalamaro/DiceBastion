@@ -4,7 +4,10 @@ Setup steps
 - npm i -g wrangler
 
 2) Configure D1 binding
-- wrangler d1 execute dicebastion-d1 --file=worker/migrations/0001_init.sql
+- Apply SQL migrations in order: `wrangler d1 execute dicebastion --remote --file=migrations/0001_add_seo_description.sql` (and 0002–0005 as needed)
+- `0003_query_indexes.sql` — safe to re-run (IF NOT EXISTS)
+- `0004_schema_tables.sql` — promo_codes, sponsored_memberships, email_verification_tokens
+- `0005_additive_columns.sql` — one-time column adds for fresh databases only
 
 3) Set secrets
 - wrangler secret put SUMUP_CLIENT_ID

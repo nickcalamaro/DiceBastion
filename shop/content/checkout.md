@@ -36,13 +36,12 @@ title: "Checkout"
 <input type="radio" name="delivery_method" value="collection" checked>
 <div class="delivery-card">
 <div class="delivery-header">
-<strong>Collection (Free)</strong>
+<strong>Local collection (Free)</strong>
 <span class="delivery-price">£0.00</span>
 </div>
-<p class="delivery-description">Collect from Gibraltar Warhammer Club</p>
+<p class="delivery-description">Local collection</p>
 <div class="collection-info">
-<small><strong>Location:</strong> <a href="https://maps.app.goo.gl/xRVr1Jq58ANZ9DLY6" target="_blank" rel="noopener noreferrer">Gibraltar Warhammer Club (View on Map)</a></small>
-<small>We'll email you when your order is ready for collection (usually within 24 hours)</small>
+<small>We'll arrange a time with you, usually within 24 hours.</small>
 </div>
 </div>
 </label>
@@ -473,7 +472,7 @@ grid-template-columns: 1fr;
 
 <script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
 <script>
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = 'https://dicebastion.com/api';
 let cart = [];
 let currentOrderNumber = null;
 let appliedDiscountPence = 0;

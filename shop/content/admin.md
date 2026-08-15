@@ -312,19 +312,23 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 </ul>
 <p>When shared on WhatsApp, Discord, Facebook, or Twitter, these links will show a rich preview card with the product image, name, price, and description — pulled from the Open Graph and Twitter Card meta tags on the SEO page.</p>
 
-<h3>🗺️ Sitemap</h3>
+<h3>Sitemap</h3>
 <p><strong>Root sitemap (submit this in Search Console):</strong> <code>https://shop.dicebastion.com/sitemap.xml</code> — a <em>sitemap index</em> that points at:</p>
 <ul>
   <li><code>pages-sitemap.xml</code> — Hugo static pages (built on Cloudflare Pages). On the custom domain this URL is <strong>proxied by the Worker</strong> from the Pages project (<code>SHOP_PAGES_ORIGIN</code>, default <code>dicebastion-shop.pages.dev</code>) so Google can fetch it.</li>
-  <li><code>products/sitemap.xml</code> — dynamic list of every active product and category URL from the database (served by the Worker).</li>
+  <li><code>products/sitemap.xml</code> — dynamic list of every active shop product and category URL from the database (served by the Worker).</li>
+  <li><code>products/sitemap-images.xml</code> — product image sitemap.</li>
 </ul>
 <p>The old Hugo-only URL <code>/sitemap.xml</code> used to list <em>no</em> products; Google only saw shop shell pages. After deploy, use the root URL above so crawlers discover products.</p>
-<p><strong>Automatic updates:</strong> The production Worker runs a daily cron (see <code>worker/wrangler.toml</code> <code>[triggers] crons</code>) that <em>pings</em> Google with your sitemap URLs so it knows to recrawl lists. If the <code>GOOGLE_SA_KEY</code> secret is configured on the Worker, the same job also sends <strong>Indexing API</strong> requests for recently updated events and shop products (quota shared across both). That is on top of sitemap pings, not a replacement — keep Search Console sitemap submitted once.</p>
+<p><strong>Automatic updates:</strong> Product and category sitemaps are live from D1 (no rebuild needed). The production Worker also runs a daily cron that notifies IndexNow and, when <code>GOOGLE_SA_KEY</code> is set, the Google Indexing API for recently updated shop products (quota shared with events). Keep the sitemap submitted once in Search Console — that is the main discovery path, same idea as events.</p>
 
-<h3>🕸️ Crawlable Internal Links</h3>
-<p>The shop homepage is automatically injected with hidden <code>&lt;a&gt;</code> links to every active product's SEO page. This gives Google a crawl path from your shop to each product — critical for discovery and indexing. These links are invisible to visitors but fully visible to search crawlers.</p>
+<h3>Crawlable internal links</h3>
+<p>On each homepage response, Pages middleware injects a footer nav of real <code>&lt;a href="/products/..."&gt;</code> and category links so Google can crawl from the shop homepage to every product SEO URL. Product cards in the UI also use those SEO URLs; clicks open the in-shop modal instead of a separate product design.</p>
 
-<h3>💡 Best Practices</h3>
+<h3>Human vs bot behaviour</h3>
+<p><code>/products/your-slug</code> is the canonical URL in sitemaps and Search Console. Googlebot (and other crawlers) receive the rich Product SEO HTML there. People are redirected to <code>/?product=your-slug</code> so they stay on the normal shop page with the product modal — not a standalone event-style page.</p>
+
+<h3>Best Practices</h3>
 <ul>
   <li><strong>Always fill in Summary</strong> — it's the primary text Google shows in search snippets. Keep it under 160 characters and make it compelling</li>
   <li><strong>Use Full Description</strong> for detailed product info — it's the richest content Google can index. Use the formatting toolbar for lists and links</li>
@@ -334,11 +338,11 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
   <li><strong>Set Release Date for pre-orders</strong> — Google will display "Pre-Order" availability status instead of "In Stock"</li>
 </ul>
 
-<h3>🔍 Testing Your SEO Pages</h3>
+<h3>Testing Your SEO Pages</h3>
 <ul>
-  <li><strong>Direct test:</strong> Visit <code>shop.dicebastion.com/products/your-slug</code> — you'll be redirected to the shop (that's correct!)</li>
-  <li><strong>Bot test:</strong> Use <a href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Google Rich Results Test</a> to see the Product schema</li>
-  <li><strong>Social test:</strong> Use <a href="https://developers.facebook.com/tools/debug/" target="_blank" rel="noopener">Facebook Debugger</a> or share the link in a Discord DM to yourself</li>
+  <li><strong>Direct test:</strong> Visit <code>shop.dicebastion.com/products/your-slug</code> in a browser — you should land on the shop with the product modal open</li>
+  <li><strong>Bot test:</strong> Use <a href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Google Rich Results Test</a> on the <code>/products/your-slug</code> URL to see the Product schema</li>
+  <li><strong>Social test:</strong> Use <a href="https://developers.facebook.com/tools/debug/" target="_blank" rel="noopener">Facebook Debugger</a> or share <code>/?product=your-slug</code> in a Discord DM</li>
   <li><strong>Sitemap:</strong> Open <code>shop.dicebastion.com/sitemap.xml</code> (index) and <code>shop.dicebastion.com/products/sitemap.xml</code> to verify products</li>
 </ul>
 </div>
@@ -496,7 +500,7 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 </style>
 
 <script>
-const API_BASE = 'https://dicebastion-memberships.ncalamaro.workers.dev';
+const API_BASE = 'https://dicebastion.com/api';
 let adminKey = '';
 let editingProductId = null;
 let editingPromoId = null;
