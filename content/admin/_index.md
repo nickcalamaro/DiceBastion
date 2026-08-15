@@ -4186,9 +4186,15 @@ async function loadProductImports() {
 
         <div class="item-actions">
 
-          <button type="button" class="btn-delete" ${canCleanup ? '' : 'disabled'}
+          <button type="button" class="btn-delete csv-cleanup-btn" ${canCleanup ? '' : 'disabled'}
 
-            onclick="cleanupProductImport(${batch.id}, ${JSON.stringify(batch.label || '')}, ${Number(batch.unsold_count) || 0}, ${Number(batch.sold_count) || 0})">
+            data-id="${Number(batch.id) || 0}"
+
+            data-label="${escapeCsvHtml(batch.label || '')}"
+
+            data-unsold="${Number(batch.unsold_count) || 0}"
+
+            data-sold="${Number(batch.sold_count) || 0}">
 
             Clean up import
 
@@ -4300,6 +4306,17 @@ document.getElementById('csv-import-btn')?.addEventListener('click', () => {
 
 document.getElementById('csv-imports-refresh-btn')?.addEventListener('click', () => {
   loadProductImports();
+});
+
+document.getElementById('product-imports-list')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.csv-cleanup-btn');
+  if (!btn || btn.disabled) return;
+  cleanupProductImport(
+    Number(btn.getAttribute('data-id')),
+    btn.getAttribute('data-label') || '',
+    Number(btn.getAttribute('data-unsold')) || 0,
+    Number(btn.getAttribute('data-sold')) || 0
+  );
 });
 
 document.getElementById('shop-categories-refresh-btn')?.addEventListener('click', () => {
