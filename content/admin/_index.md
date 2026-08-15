@@ -1581,6 +1581,10 @@ Loading cron job logs...
 .btn-index:hover { background: #047857; }
 .dark .btn-index:hover { background: #059669; }
 .btn-index:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-copy { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-800)); border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; font-weight: 600; }
+.dark .btn-copy { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
+.btn-copy:hover { background: rgb(var(--color-neutral-300)); }
+.dark .btn-copy:hover { background: rgb(var(--color-neutral-600)); }
 
 /* Newsletter Builder */
 .nl-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgb(var(--color-primary-50)); border: 1px solid rgb(var(--color-primary-200)); border-radius: 8px; font-size: 0.875rem; font-weight: 600; color: rgb(var(--color-primary-700)); }
@@ -4574,6 +4578,7 @@ ${p.image_url ? `<img src="${escapeCsvHtml(p.image_url)}" alt="" referrerpolicy=
 <div class="item-actions">
 <button class="btn-edit" onclick="editProduct(${p.id})">Edit</button>
 <button class="btn-delete" onclick="deleteProduct(${p.id}, '${String(p.name || '').replace(/'/g, "\\'")}')">Delete</button>
+${p.slug ? `<button type="button" class="btn-copy" data-slug="${encodeURIComponent(p.slug)}" title="Copy Search Console URL">Copy URL</button>` : ''}
 ${p.slug ? `<button class="btn-index" onclick="requestIndexing('product', '${p.slug}', this)">📡 Index</button>` : ''}
 </div>
 </div>
@@ -6483,6 +6488,31 @@ function formatIndexingError(data) {
   if (data.message) return String(data.message);
   return JSON.stringify(data);
 }
+
+async function copyProductSeoUrl(slug, btn) {
+  if (!slug) return;
+  const url = 'https://shop.dicebastion.com/products/' + encodeURIComponent(slug);
+  const orig = btn ? btn.textContent : 'Copy URL';
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      throw new Error('clipboard unavailable');
+    }
+    await navigator.clipboard.writeText(url);
+    if (btn) {
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = orig; }, 1600);
+    }
+  } catch (err) {
+    window.prompt('Copy this URL for Google Search Console', url);
+  }
+}
+
+document.getElementById('products-list')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-copy');
+  if (!btn) return;
+  const slug = decodeURIComponent(btn.getAttribute('data-slug') || '');
+  copyProductSeoUrl(slug, btn);
+});
 
 async function requestIndexing(type, slug, btn) {
   const urlMap = {

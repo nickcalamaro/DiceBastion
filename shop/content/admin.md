@@ -384,6 +384,8 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 .product-actions {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .btn-edit, .btn-delete {
@@ -418,6 +420,18 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 }
 .btn-index:hover { background: #047857; }
 .btn-index:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-copy {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: rgb(var(--color-neutral-200));
+  color: rgb(var(--color-neutral-800));
+}
+.btn-copy:hover { background: rgb(var(--color-neutral-300)); }
 
 .badge {
   display: inline-block;
@@ -822,6 +836,7 @@ async function loadProducts() {
         <div class="product-actions">
           <button class="btn-edit" onclick="editProduct(${product.id})">Edit</button>
           <button class="btn-delete" onclick="deleteProduct(${product.id}, '${product.name}')">Delete</button>
+          ${product.slug ? `<button type="button" class="btn-copy" data-slug="${encodeURIComponent(product.slug)}" title="Copy Search Console URL">Copy URL</button>` : ''}
           ${product.slug ? `<button class="btn-index" onclick="requestIndexing('${product.slug}', this)">📡 Index</button>` : ''}
         </div>
       </div>
@@ -1149,10 +1164,40 @@ async function requestIndexing(slug, btn) {
   }
 }
 
+function productSeoUrl(slug) {
+  return 'https://shop.dicebastion.com/products/' + encodeURIComponent(slug);
+}
+
+async function copyProductSeoUrl(slug, btn) {
+  if (!slug) return;
+  const url = productSeoUrl(slug);
+  const orig = btn ? btn.textContent : 'Copy URL';
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      throw new Error('clipboard unavailable');
+    }
+    await navigator.clipboard.writeText(url);
+    if (btn) {
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = orig; }, 1600);
+    }
+  } catch (err) {
+    window.prompt('Copy this URL for Google Search Console', url);
+  }
+}
+
+document.getElementById('products-list')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-copy');
+  if (!btn) return;
+  const slug = decodeURIComponent(btn.getAttribute('data-slug') || '');
+  copyProductSeoUrl(slug, btn);
+});
+
 // Make functions global for onclick handlers
 window.editProduct = editProduct;
 window.deleteProduct = deleteProduct;
 window.requestIndexing = requestIndexing;
+window.copyProductSeoUrl = copyProductSeoUrl;
 window.toggleShopSeoSection = toggleShopSeoSection;
 window.toggleDocsSection = toggleDocsSection;
 window.formatProductText = formatProductText;
