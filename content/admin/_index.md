@@ -4144,11 +4144,11 @@ async function loadProductImports() {
 
     }
 
-    const imports = data.imports || [];
+    const imports = (data.imports || []).filter(batch => !batch.cleaned_at);
 
     if (!imports.length) {
 
-      host.innerHTML = '<p class="admin-text-muted">No CSV import batches yet.</p>';
+      host.innerHTML = '<p class="admin-text-muted">No CSV import batches waiting for cleanup.</p>';
 
       return;
 

@@ -8505,6 +8505,7 @@ app.get('/admin/product-imports', requireAdmin, async (c) => {
     const batches = await c.env.DB.prepare(`
       SELECT id, label, source_filename, created_at, product_count, cleaned_at
       FROM product_imports
+      WHERE cleaned_at IS NULL
       ORDER BY id DESC
       LIMIT 100
     `).all()

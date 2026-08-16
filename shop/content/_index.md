@@ -738,6 +738,17 @@ function remainingForProduct(product) {
   return Math.max(0, product.stock_quantity - inCart);
 }
 
+/** Public stock label: hide high stock on cards; cap modal at "3+". */
+function formatPublicStock(qty, { hideWhenPlenty = false } = {}) {
+  const n = Number(qty) || 0;
+  if (n <= 0) return { text: 'Out of stock', className: 'out' };
+  if (n >= 3) {
+    if (hideWhenPlenty) return { text: '', className: '' };
+    return { text: '3+ in stock', className: '' };
+  }
+  return { text: `${n} in stock`, className: 'low' };
+}
+
 function addProductToCart(product, requestedQty, options) {
   const opts = options || {};
   if (!product || product.stock_quantity === 0) return 0;
@@ -1287,17 +1298,13 @@ function renderProducts(products) {
         <div class="product-footer">
           <div>
             <div class="product-price">${formatPrice(product.price)}</div>
-            <div class="product-stock ${
-              product.stock_quantity < 5 && product.stock_quantity > 0
-                ? 'low'
-                : ''
-            } ${product.stock_quantity === 0 ? 'out' : ''}">
-              ${
-                product.stock_quantity > 0
-                  ? `${product.stock_quantity} in stock`
-                  : 'Out of stock'
-              }
-            </div>
+            ${(() => {
+              const stock = formatPublicStock(product.stock_quantity, {
+                hideWhenPlenty: true
+              });
+              if (!stock.text) return '';
+              return `<div class="product-stock ${stock.className}">${stock.text}</div>`;
+            })()}
           </div>
         </div>
       </div>
@@ -1390,7 +1397,7 @@ ${isPreorder ? `<div style="display: inline-block; background: rgb(var(--color-p
 ${isPreorder ? `<div style="font-size: 1rem; color: rgb(var(--color-primary-600)); margin-bottom: 1rem; font-weight: 500;">Available from ${releaseDate}</div>` : ''}
 <div style="font-size: 2rem; font-weight: 700; color: rgb(var(--color-primary-600)); margin-bottom: 1rem;">${formatPrice(product.price)}</div>
 <div style="margin-bottom: 1rem; color: rgb(var(--color-neutral-600));">
-<strong>Stock:</strong> ${product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
+<strong>Stock:</strong> ${formatPublicStock(product.stock_quantity).text}
 </div>
 ${product.full_description ? `<div style="line-height: 1.6; margin-bottom: 1.5rem; color: rgb(var(--color-neutral-700));">${product.full_description}</div>` : product.summary ? `<div style="line-height: 1.6; margin-bottom: 1.5rem; color: rgb(var(--color-neutral-700));">${product.summary}</div>` : ''}
 ${actionsHtml}
