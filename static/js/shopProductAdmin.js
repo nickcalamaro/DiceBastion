@@ -5,6 +5,7 @@
   const PAGE_SIZE = 20;
   let page = 1;
   let query = '';
+  let cachedProducts = [];
 
   function escapeHtml(s) {
     if (global.escapeCsvHtml) return global.escapeCsvHtml(s);
@@ -26,7 +27,7 @@
   }
 
   function filteredProducts() {
-    const list = Array.isArray(global.adminProductsList) ? global.adminProductsList : [];
+    const list = cachedProducts;
     const q = query.trim().toLowerCase();
     if (!q) return list.slice();
     return list.filter(function (p) {
@@ -38,13 +39,14 @@
     });
   }
 
-  function render() {
+  function render(listOverride) {
+    if (Array.isArray(listOverride)) cachedProducts = listOverride;
     const list = document.getElementById('products-list');
     const pager = document.getElementById('admin-product-pagination');
     const countEl = document.getElementById('admin-product-count');
     if (!list) return;
 
-    const all = Array.isArray(global.adminProductsList) ? global.adminProductsList : [];
+    const all = cachedProducts;
     if (!all.length) {
       list.innerHTML = '<p class="admin-text-muted">No products yet</p>';
       if (countEl) countEl.textContent = '';

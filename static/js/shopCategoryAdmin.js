@@ -16,16 +16,16 @@
       .replace(/"/g, '&quot;');
   }
 
-  function apiBase() {
-    return global.API_BASE || (global.utils && global.utils.getApiBase && global.utils.getApiBase()) || '';
+  function sessionToken() {
+    if (global.utils && global.utils.session && typeof global.utils.session.get === 'function') {
+      return global.utils.session.get() || '';
+    }
+    return global.sessionToken || '';
   }
 
-  function sessionToken() {
-    if (global.sessionToken) return global.sessionToken;
-    if (global.utils && global.utils.session && typeof global.utils.session.get === 'function') {
-      return global.utils.session.get();
-    }
-    return '';
+  function apiBase() {
+    if (global.utils && global.utils.getApiBase) return global.utils.getApiBase();
+    return global.API_BASE || '';
   }
 
   function jsonHeaders() {
@@ -75,7 +75,7 @@
   function fillSelect() {
     const select = document.getElementById('shop-category-select');
     if (!select) return;
-    const options = ['<option value="">Select a category</option>'];
+    const options = ['<option value="">Select a category (' + shopCategoryRows.length + ')</option>'];
     shopCategoryRows.forEach(function (row) {
       const name = String(row.name || '');
       if (!name) return;
@@ -165,14 +165,18 @@
     const select = document.getElementById('shop-category-select');
     const host = document.getElementById('shop-categories-editor');
     if (!select && !host) return;
+    if (host) host.innerHTML = '<p class="admin-text-muted" style="margin:0;">Loading categories…</p>';
     const token = sessionToken();
     if (!token) {
       if (host) host.innerHTML = '<p class="admin-text-muted" style="margin:0;">Sign in to load shop categories.</p>';
       return;
     }
+    const controller = new AbortController();
+    const timer = setTimeout(function () { controller.abort(); }, 20000);
     try {
       const res = await fetch(apiBase() + '/admin/product-categories', {
-        headers: { 'X-Session-Token': token }
+        headers: { 'X-Session-Token': token },
+        signal: controller.signal
       });
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok) {
@@ -191,7 +195,14 @@
       renderEditor();
     } catch (err) {
       console.error(err);
-      if (host) host.innerHTML = '<p class="admin-text-muted" style="margin:0;">Could not load categories (network error).</p>';
+      const timedOut = err && (err.name === 'AbortError' || /aborted/i.test(String(err.message || err)));
+      if (host) {
+        host.innerHTML = timedOut
+          ? '<p class="admin-text-muted" style="margin:0;">Could not load categories (timed out). Redeploy the Worker if this persists.</p>'
+          : '<p class="admin-text-muted" style="margin:0;">Could not load categories (network error).</p>';
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
 

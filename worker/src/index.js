@@ -8161,7 +8161,6 @@ app.get('/products/sitemap.xml', async c => {
       SELECT slug, updated_at, category FROM products
       WHERE is_active = 1
         AND slug IS NOT NULL AND TRIM(slug) != ''
-        AND COALESCE(show_in_shop, 1) = 1
       ORDER BY updated_at DESC
     `).all()
 
@@ -8218,7 +8217,6 @@ app.get('/products/sitemap-images.xml', async c => {
       FROM products
       WHERE is_active = 1
         AND slug IS NOT NULL AND TRIM(slug) != ''
-        AND COALESCE(show_in_shop, 1) = 1
       ORDER BY name ASC
     `).all()
 
@@ -8269,7 +8267,7 @@ app.get('/products/category/:name', async c => {
 
     const { results } = await c.env.DB.prepare(`
       SELECT id, name, slug, summary, description, full_description, price, currency, stock_quantity, image_url, category, release_date
-      FROM products WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
+      FROM products WHERE is_active = 1
       ORDER BY name ASC
     `).all()
 
@@ -8365,13 +8363,9 @@ app.get('/products/:slug', async (c, next) => {
 // Get all active products (public), optionally filtered by category
 app.get('/products', async (c) => {
   try {
-    await ensureCategoriesCanonicalized(c.env.DB)
     const category = c.req.query('category')
     let sql = `SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
       FROM products WHERE is_active = 1`
-    if (!category) {
-      sql += ' AND COALESCE(show_in_shop, 1) = 1'
-    }
     sql += ' ORDER BY name ASC'
     const products = await c.env.DB.prepare(sql).all()
     let rows = products.results || []
@@ -8544,6 +8538,12 @@ async function ensureCategoriesCanonicalized(db) {
   await categoryCanonicalizePromise
 }
 
+function scheduleCategoryCanonicalize(c) {
+  if (c.executionCtx && typeof c.executionCtx.waitUntil === 'function') {
+    c.executionCtx.waitUntil(ensureCategoriesCanonicalized(c.env.DB))
+  }
+}
+
 function collectProductCategoryNames(productRows) {
   const counts = new Map()
   for (const product of productRows || []) {
@@ -8556,10 +8556,9 @@ function collectProductCategoryNames(productRows) {
 
 async function listProductCategoryMeta(db) {
   await ensureProductCategoriesSchema(db)
-  await ensureCategoriesCanonicalized(db)
   const products = await db.prepare(`
     SELECT category FROM products
-    WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
+    WHERE is_active = 1
   `).all()
   const counts = collectProductCategoryNames(products.results || [])
   const metaRows = await db.prepare(`
@@ -8675,6 +8674,7 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
         updated_at = excluded.updated_at
     `).bind(name, featured, sortOrder, keywords || null, seoTitle, seoDescription, seoImage, now, now).run()
 
+    scheduleCategoryCanonicalize(c)
     const categories = await listProductCategoryMeta(c.env.DB)
     return c.json({ success: true, categories })
   } catch (e) {
@@ -8878,6 +8878,22 @@ app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
   }
 })
 
+// All products for admin (including inactive). Do not canonicalize here — that rewrite
+// used to run on GET and could stall D1 until the browser gave up with no console error.
+app.get('/admin/products', requireAdmin, async (c) => {
+  try {
+    const products = await c.env.DB.prepare(`
+      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
+      FROM products
+      ORDER BY name ASC
+    `).all()
+    return c.json((products.results || []).map(withNormalizedProductCategory))
+  } catch (e) {
+    console.error('Admin list products error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // Create new product (admin only - TODO: add authentication)
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
@@ -8926,7 +8942,8 @@ app.post('/admin/products', requireAdmin, async (c) => {
       const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`
       notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl })
     }
-    
+    scheduleCategoryCanonicalize(c)
+
     return c.json({ success: true, product_id: result.meta.last_row_id })
   } catch (e) {
     console.error('Create product error:', e)
@@ -8995,7 +9012,8 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
       const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}`
       notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl })
     }
-    
+    scheduleCategoryCanonicalize(c)
+
     return c.json({ success: true })
   } catch (e) {
     console.error('Update product error:', e)
@@ -12547,7 +12565,7 @@ export default {
           fetch(request),
           env.DB.prepare(`
             SELECT slug, name, category FROM products
-            WHERE is_active = 1 AND slug IS NOT NULL AND COALESCE(show_in_shop, 1) = 1
+            WHERE is_active = 1 AND slug IS NOT NULL
             ORDER BY name ASC
           `).all()
         ])

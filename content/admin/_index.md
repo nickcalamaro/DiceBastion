@@ -10,8 +10,8 @@ showDate: false
 <script src="/js/modal.js"></script>
 <script src="/js/shopCategories.js"></script>
 <script src="/js/productCsvImport.js"></script>
-<script src="/js/shopCategoryAdmin.js"></script>
-<script src="/js/shopProductAdmin.js"></script>
+<script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
+<script src="/js/shopProductAdmin.js?v=20260817b"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -4385,6 +4385,8 @@ document.getElementById('csv-import-file')?.addEventListener('change', () => {
 // Category management
 let selectedCategories = [];
 let allCategories = new Set();
+window.selectedCategories = selectedCategories;
+window.allCategories = allCategories;
 
 function categoryDisplay(name) {
   return (window.ShopCategories && ShopCategories.display(name)) || String(name || '').trim();
@@ -4428,6 +4430,7 @@ if (window.ShopProductAdmin && typeof ShopProductAdmin.closeCategorySuggest === 
 
 function removeCategory(category) {
 selectedCategories = selectedCategories.filter(c => c !== category);
+window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 }
@@ -4492,28 +4495,52 @@ document.getElementById('product-release-date').value = '';
 }
 
 async function loadProducts() {
+const list = document.getElementById('products-list');
+if (list) list.innerHTML = '<p class="admin-text-muted">Loading products…</p>';
+const controller = new AbortController();
+const timer = setTimeout(function () { controller.abort(); }, 20000);
 try {
-const res = await fetch(`${API_BASE}/products`);
-const products = await res.json();
-adminProductsList = Array.isArray(products) ? products : [];
+const token = sessionToken || (utils.session && utils.session.get()) || '';
+let res = await fetch(`${API_BASE}/admin/products`, {
+  headers: { 'X-Session-Token': token },
+  signal: controller.signal
+});
+if (res.status === 404) {
+  res = await fetch(`${API_BASE}/products`, { signal: controller.signal });
+}
+const products = await res.json().catch(() => null);
+if (!res.ok || !Array.isArray(products)) {
+  console.error('Load products error:', res.status, products);
+  if (list) list.innerHTML = '<p class="admin-text-muted">Could not load products' + (res.status ? ' (' + res.status + ')' : '') + '.</p>';
+  return;
+}
+adminProductsList = products;
+
+if (window.ShopProductAdmin && typeof ShopProductAdmin.render === 'function') {
+  ShopProductAdmin.render(adminProductsList);
+} else if (list) {
+  list.innerHTML = adminProductsList.length
+    ? '<p class="admin-text-muted">' + adminProductsList.length + ' products loaded.</p>'
+    : '<p class="admin-text-muted">No products yet</p>';
+}
 
 adminProductsList.forEach(p => {
 if (p.category) {
 p.category.split(',').forEach(cat => addCategoryTag(cat));
 }
 });
+window.allCategories = allCategories;
 renderExistingCategories();
-
-if (window.ShopProductAdmin && typeof ShopProductAdmin.render === 'function') {
-  ShopProductAdmin.render();
-} else {
-  const list = document.getElementById('products-list');
-  if (list && adminProductsList.length === 0) {
-    list.innerHTML = '<p class="admin-text-muted">No products yet</p>';
-  }
-}
 } catch (err) {
 console.error('Load products error:', err);
+if (list) {
+  const timedOut = err && (err.name === 'AbortError' || /aborted/i.test(String(err)));
+  list.innerHTML = timedOut
+    ? '<p class="admin-text-muted">Could not load products (timed out). Redeploy the Worker if this persists.</p>'
+    : '<p class="admin-text-muted">Could not load products.</p>';
+}
+} finally {
+clearTimeout(timer);
 }
 }
 
@@ -4562,6 +4589,7 @@ document.getElementById('product-preorder').checked = false;
 document.getElementById('product-release-date').value = '';
 document.getElementById('preorder-date-container').style.display = 'none';
 selectedCategories = [];
+window.selectedCategories = selectedCategories;
 renderCategoryTags();
 uploadedProductImage = null;
 loadProducts();
@@ -4586,6 +4614,7 @@ document.getElementById('product-preorder').checked = false;
 document.getElementById('product-release-date').value = '';
 document.getElementById('preorder-date-container').style.display = 'none';
 selectedCategories = [];
+window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 uploadedProductImage = null;
@@ -4609,6 +4638,7 @@ document.getElementById('product-active').checked = product.is_active === 1;
 selectedCategories = product.category
   ? (window.ShopCategories ? ShopCategories.parseField(product.category) : product.category.split(',').map(c => c.trim()).filter(Boolean))
   : [];
+window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 
