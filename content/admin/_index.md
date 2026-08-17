@@ -11,6 +11,7 @@ showDate: false
 <script src="/js/shopCategories.js"></script>
 <script src="/js/productCsvImport.js"></script>
 <script src="/js/shopCategoryAdmin.js"></script>
+<script src="/js/shopProductAdmin.js"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -23,9 +24,10 @@ showDate: false
 
 .admin-container { max-width: 450px; margin: 5rem auto; padding: 0 1rem; }
 .admin-wide-container { max-width: 600px; margin: 5rem auto; padding: 0 1rem; }
-.admin-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-.admin-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
-.admin-flex { display: flex; gap: 1rem; }
+.admin-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; min-width: 0; }
+.admin-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; min-width: 0; }
+.admin-grid-2 > *, .admin-grid-3 > * { min-width: 0; }
+.admin-flex { display: flex; gap: 1rem; min-width: 0; }
 .admin-flex-center { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
 .admin-flex-between { display: flex; justify-content: space-between; align-items: center; }
 .admin-text-center { text-align: center; }
@@ -164,8 +166,21 @@ showDate: false
 /* Info/category containers */
 .admin-info-box { background: rgb(var(--color-neutral-100)); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
 .dark .admin-info-box { background: rgb(var(--color-neutral-900)); }
-.admin-category-container { display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 2rem; padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral-50)); }
+.admin-category-container { display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 2rem; padding: 0.5rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 6px; background: rgb(var(--color-neutral-50)); overflow: hidden; }
+.admin-category-container > span { max-width: 100%; overflow-wrap: anywhere; }
 .dark .admin-category-container { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
+.admin-category-combobox { position: relative; min-width: 0; }
+.admin-category-combobox-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: stretch; }
+.admin-category-suggest { position: absolute; left: 0; right: 0; top: calc(100% + 0.25rem); z-index: 30; max-height: 16rem; overflow-x: hidden; overflow-y: auto; margin: 0; padding: 0.25rem 0; list-style: none; background: #fff; border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+.dark .admin-category-suggest { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); }
+.admin-category-suggest[hidden] { display: none; }
+.admin-category-suggest-item, .admin-category-suggest-empty { display: block; width: 100%; text-align: left; padding: 0.5rem 0.75rem; border: none; background: none; color: rgb(var(--color-neutral-800)); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.dark .admin-category-suggest-item, .dark .admin-category-suggest-empty { color: rgb(var(--color-neutral-100)); }
+.admin-category-suggest-empty { cursor: default; color: rgb(var(--color-neutral-500)); }
+.admin-category-suggest-item:hover, .admin-category-suggest-item.is-active { background: rgb(var(--color-primary-50)); color: rgb(var(--color-primary-800)); }
+.dark .admin-category-suggest-item:hover, .dark .admin-category-suggest-item.is-active { background: rgba(var(--color-primary-900), 0.35); color: rgb(var(--color-primary-200)); }
+.admin-category-suggest-create { font-weight: 600; }
+#shop-category-select { max-width: 100%; }
 
 /* Item cards (extends forms.css .card) */
 .item-card { background: rgb(var(--color-neutral)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
@@ -465,13 +480,20 @@ Cleanup hard-deletes products from a batch that were never ordered. Products tha
 <div class="card card-compact admin-mb-2">
 <h2 class="admin-section-heading admin-mt-0">Shop categories</h2>
 <p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
-Feature categories to pin them to the front of the shop filter chips. Add search keywords (comma-separated) so typing those terms shows every product in that category — for example keywords <code>mtg, magic</code> on Magic: The Gathering.
-SEO title, description, and optional image control Google and share previews. Leave them blank to use the category name, a default description, and the first listed product image. Copy URL gives the canonical Search Console / share link.
+Feature a category to pin it on the shop. Keywords help shop search. SEO fields control Google and share previews; leave them blank to use defaults.
 </p>
-<div class="admin-flex admin-mb-1" style="gap: 0.75rem;">
-<button type="button" id="shop-categories-refresh-btn" class="btn btn-secondary">Refresh categories</button>
+<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
+<div>
+<label class="form-label" for="shop-category-select">Category</label>
+<select id="shop-category-select" class="form-select">
+<option value="">Select a category</option>
+</select>
 </div>
-<div id="shop-categories-list"><p class="admin-text-muted">Loading…</p></div>
+<div>
+<button type="button" id="shop-categories-refresh-btn" class="btn btn-secondary">Refresh</button>
+</div>
+</div>
+<div id="shop-categories-editor"><p class="admin-text-muted" style="margin:0;">Select a category to edit featured order, search keywords, and SEO.</p></div>
 </div>
 
 <div class="card card-compact">
@@ -524,14 +546,16 @@ SEO title, description, and optional image control Google and share previews. Le
 </div>
 
 <div class="admin-mb-1">
-<label class="form-label">Categories (up to 3)</label>
+<label class="form-label" for="category-input">Categories (up to 3)</label>
 <div id="category-tags" class="admin-category-container"></div>
-<div class="admin-flex">
-<input type="text" id="category-input" placeholder="Type category name..." class="form-input" style="flex: 1;">
-<button type="button" onclick="addCategory()" class="btn btn-primary" style="padding: 0.75rem 1.5rem;">Add</button>
+<div class="admin-category-combobox">
+<div class="admin-category-combobox-row">
+<input type="text" id="category-input" class="form-input" placeholder="Search or type a category" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="category-suggest" aria-autocomplete="list">
+<button type="button" id="category-add-btn" class="btn btn-primary">Add</button>
 </div>
-<div id="existing-categories" class="admin-flex" style="margin-top: 0.5rem;"></div>
-<small class="admin-text-small">Click existing categories below to add them, or type a new one</small>
+<ul id="category-suggest" class="admin-category-suggest" hidden></ul>
+</div>
+<small class="admin-text-small">Type to filter existing categories, or add a new name</small>
 </div>
 
 <div class="admin-mb-1">
@@ -572,7 +596,13 @@ SEO title, description, and optional image control Google and share previews. Le
 </div>
 
 <h2 id="admin-section-products" class="admin-section-heading">Products <a href="#products" class="admin-permalink" aria-label="Link to products">#</a></h2>
+<div class="admin-mb-1">
+<label class="form-label" for="admin-product-search">Search products</label>
+<input type="search" id="admin-product-search" class="form-input" placeholder="Name, slug, or category" autocomplete="off">
+</div>
+<p id="admin-product-count" class="admin-text-small"></p>
 <div id="products-list"></div>
+<div id="admin-product-pagination" class="admin-product-pagination"></div>
 </div>
 
 <!-- Shop promo codes (checkout on shop.dicebastion.com) -->
@@ -4391,6 +4421,9 @@ allCategories.add(category);
 input.value = '';
 renderCategoryTags();
 renderExistingCategories();
+if (window.ShopProductAdmin && typeof ShopProductAdmin.closeCategorySuggest === 'function') {
+  ShopProductAdmin.closeCategorySuggest();
+}
 }
 
 function removeCategory(category) {
@@ -4415,19 +4448,9 @@ ${cat}
 }
 
 function renderExistingCategories() {
-const container = document.getElementById('existing-categories');
-const availableCategories = Array.from(allCategories).filter(c => !selectedCategories.some(s => categoryKey(s) === categoryKey(c)));
-  
-if (availableCategories.length === 0) {
-container.innerHTML = '';
-return;
-}
-  
-container.innerHTML = availableCategories.map(cat => `
-<button type="button" onclick="addExistingCategory('${cat}')" style="padding: 0.5rem 0.75rem; background: rgb(var(--color-neutral-200)); color: rgb(var(--color-neutral-700)); border: 1px solid rgb(var(--color-neutral-300)); border-radius: 6px; cursor: pointer; font-size: 0.875rem;">
-${cat}
-</button>
-`).join('');
+  if (window.ShopProductAdmin && typeof ShopProductAdmin.renderCategorySuggest === 'function') {
+    ShopProductAdmin.renderCategorySuggest();
+  }
 }
 
 function addExistingCategory(category) {
@@ -4443,17 +4466,18 @@ return;
 selectedCategories.push(name);
 renderCategoryTags();
 renderExistingCategories();
+if (window.ShopProductAdmin && typeof ShopProductAdmin.closeCategorySuggest === 'function') {
+  ShopProductAdmin.closeCategorySuggest();
+}
 }
 
 // Allow Enter key to add category
 document.addEventListener('DOMContentLoaded', () => {
-const categoryInput = document.getElementById('category-input');
-if (categoryInput) {
-categoryInput.addEventListener('keypress', (e) => {
-if (e.key === 'Enter') {
+const categoryAddBtn = document.getElementById('category-add-btn');
+if (categoryAddBtn) {
+categoryAddBtn.addEventListener('click', (e) => {
 e.preventDefault();
 addCategory();
-}
 });
 }
 });
@@ -4472,9 +4496,7 @@ try {
 const res = await fetch(`${API_BASE}/products`);
 const products = await res.json();
 adminProductsList = Array.isArray(products) ? products : [];
-const list = document.getElementById('products-list');
 
-// Collect all categories
 adminProductsList.forEach(p => {
 if (p.category) {
 p.category.split(',').forEach(cat => addCategoryTag(cat));
@@ -4482,32 +4504,14 @@ p.category.split(',').forEach(cat => addCategoryTag(cat));
 });
 renderExistingCategories();
 
-if (adminProductsList.length === 0) {
-list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No products yet</p>';
-return;
+if (window.ShopProductAdmin && typeof ShopProductAdmin.render === 'function') {
+  ShopProductAdmin.render();
+} else {
+  const list = document.getElementById('products-list');
+  if (list && adminProductsList.length === 0) {
+    list.innerHTML = '<p class="admin-text-muted">No products yet</p>';
+  }
 }
-
-list.innerHTML = adminProductsList.map(p => {
-const categories = p.category ? (window.ShopCategories ? ShopCategories.parseField(p.category).join(', ') : p.category.split(',').map(c => c.trim()).join(', ')) : 'N/A';
-return `
-<div class="item-card">
-<div style="display: flex; gap: 1rem;">
-${p.image_url ? `<img src="${escapeCsvHtml(p.image_url)}" alt="" referrerpolicy="no-referrer" loading="lazy" style="width: 80px; height: 80px; object-fit: contain; border-radius: 6px; background: rgb(var(--color-neutral-100));" onerror="this.style.display='none'">` : ''}
-<div style="flex: 1;">
-<h3>${escapeCsvHtml(p.name)} ${p.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'}</h3>
-<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${escapeCsvHtml(p.summary || '')}</p>
-<p style="margin: 0.5rem 0;"><strong>£${(p.price / 100).toFixed(2)}</strong> | Stock: ${p.stock_quantity} | Categories: ${escapeCsvHtml(categories)}</p>
-</div>
-</div>
-<div class="item-actions">
-<button class="btn-edit" onclick="editProduct(${p.id})">Edit</button>
-<button class="btn-delete" onclick="deleteProduct(${p.id}, '${String(p.name || '').replace(/'/g, "\\'")}')">Delete</button>
-${p.slug ? `<button type="button" class="btn-copy" data-slug="${encodeURIComponent(p.slug)}" title="Copy Search Console URL">Copy URL</button>` : ''}
-${p.slug ? `<button class="btn-index" onclick="requestIndexing('product', '${p.slug}', this)">📡 Index</button>` : ''}
-</div>
-</div>
-`;
-}).join('');
 } catch (err) {
 console.error('Load products error:', err);
 }
@@ -4561,6 +4565,7 @@ selectedCategories = [];
 renderCategoryTags();
 uploadedProductImage = null;
 loadProducts();
+if (typeof loadShopCategories === 'function') loadShopCategories();
 } else {
 alert('Failed to save product');
 }
@@ -4582,16 +4587,15 @@ document.getElementById('product-release-date').value = '';
 document.getElementById('preorder-date-container').style.display = 'none';
 selectedCategories = [];
 renderCategoryTags();
+renderExistingCategories();
 uploadedProductImage = null;
 });
 
 async function editProduct(id) {
 try {
-const res = await fetch(`${API_BASE}/products`);
-const products = await res.json();
-const product = products.find(p => p.id === id);
+const product = (adminProductsList || []).find(p => Number(p.id) === Number(id));
+if (!product) return;
 
-if (product) {
 document.getElementById('product-id').value = product.id;
 document.getElementById('product-name').value = product.name;
 document.getElementById('product-slug').value = product.slug;
@@ -4602,11 +4606,11 @@ document.getElementById('product-stock').value = product.stock_quantity;
 document.getElementById('product-image').value = product.image_url || '';
 document.getElementById('product-active').checked = product.is_active === 1;
 
-// Load categories
 selectedCategories = product.category
   ? (window.ShopCategories ? ShopCategories.parseField(product.category) : product.category.split(',').map(c => c.trim()).filter(Boolean))
   : [];
 renderCategoryTags();
+renderExistingCategories();
 
 // Pre-order fields
 if (product.release_date) {
@@ -4627,8 +4631,8 @@ document.getElementById('product-image-preview').innerHTML =
 document.getElementById('product-form-title').textContent = 'Edit Product';
 document.getElementById('product-submit-text').textContent = 'Update Product';
 document.getElementById('cancel-product-edit').style.display = 'block';
+uploadedProductImage = null;
 document.getElementById('product-form').scrollIntoView({ behavior: 'smooth' });
-}
 } catch (err) {
 alert('Error loading product');
 }
@@ -6415,13 +6419,6 @@ function formatIndexingError(data) {
   return JSON.stringify(data);
 }
 
-
-document.getElementById('products-list')?.addEventListener('click', (e) => {
-  const btn = e.target.closest('.btn-copy');
-  if (!btn) return;
-  const slug = decodeURIComponent(btn.getAttribute('data-slug') || '');
-  copyProductSeoUrl(slug, btn);
-});
 
 async function requestIndexing(type, slug, btn) {
   const urlMap = {

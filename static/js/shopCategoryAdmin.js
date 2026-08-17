@@ -3,6 +3,9 @@
  * break the admin <script> block — e.g. </textarea> closing the page early).
  */
 (function (global) {
+  let shopCategoryRows = [];
+  let selectedName = '';
+
   function escapeHtml(s) {
     if (global.escapeCsvHtml) return global.escapeCsvHtml(s);
     if (s == null) return '';
@@ -63,7 +66,37 @@
     await copyUrlToClipboard(categoryCanonicalUrl(name), btn);
   }
 
-  function categoryCardHtml(row) {
+  function selectedRow() {
+    return shopCategoryRows.find(function (row) {
+      return String(row.name || '') === selectedName;
+    }) || null;
+  }
+
+  function fillSelect() {
+    const select = document.getElementById('shop-category-select');
+    if (!select) return;
+    const options = ['<option value="">Select a category</option>'];
+    shopCategoryRows.forEach(function (row) {
+      const name = String(row.name || '');
+      if (!name) return;
+      const count = Number(row.product_count) || 0;
+      const selected = name === selectedName ? ' selected' : '';
+      options.push(
+        '<option value="' + escapeHtml(name) + '"' + selected + '>' +
+          escapeHtml(name) + ' (' + count + ')' +
+        '</option>'
+      );
+    });
+    select.innerHTML = options.join('');
+    if (selectedName && shopCategoryRows.some(function (row) { return row.name === selectedName; })) {
+      select.value = selectedName;
+    } else {
+      selectedName = '';
+      select.value = '';
+    }
+  }
+
+  function editorHtml(row) {
     const name = escapeHtml(row.name);
     const nameAttr = encodeURIComponent(row.name || '');
     const canonical = categoryCanonicalUrl(row.name || '');
@@ -72,7 +105,7 @@
     const featured = row.featured ? ' checked' : '';
     const sortOrder = Number(row.sort_order) || 0;
     return (
-      '<div class="item-card shop-cat-card" style="display:block;margin-bottom:0.75rem;">' +
+      '<div class="item-card shop-cat-card" style="display:block;margin:0;">' +
         '<div class="admin-flex-between" style="margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">' +
           '<h3 style="margin:0;">' + name + ' <span class="admin-text-small">' + count + ' product' + plural + '</span></h3>' +
           '<div class="admin-flex" style="gap:0.5rem;flex-wrap:wrap;">' +
@@ -117,12 +150,24 @@
     );
   }
 
-  async function loadShopCategories() {
-    const host = document.getElementById('shop-categories-list');
+  function renderEditor() {
+    const host = document.getElementById('shop-categories-editor');
     if (!host) return;
+    const row = selectedRow();
+    if (!row) {
+      host.innerHTML = '<p class="admin-text-muted" style="margin:0;">Select a category to edit featured order, search keywords, and SEO.</p>';
+      return;
+    }
+    host.innerHTML = editorHtml(row);
+  }
+
+  async function loadShopCategories() {
+    const select = document.getElementById('shop-category-select');
+    const host = document.getElementById('shop-categories-editor');
+    if (!select && !host) return;
     const token = sessionToken();
     if (!token) {
-      host.innerHTML = '<p class="admin-text-muted">Sign in to load shop categories.</p>';
+      if (host) host.innerHTML = '<p class="admin-text-muted" style="margin:0;">Sign in to load shop categories.</p>';
       return;
     }
     try {
@@ -131,23 +176,36 @@
       });
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok) {
-        host.innerHTML = '<p class="admin-text-muted">Could not load categories (' + escapeHtml(data.error || res.status) + '). Deploy the Worker if this is a new endpoint.</p>';
+        if (host) {
+          host.innerHTML = '<p class="admin-text-muted" style="margin:0;">Could not load categories (' + escapeHtml(data.error || res.status) + '). Deploy the Worker if this is a new endpoint.</p>';
+        }
         return;
       }
-      const rows = data.categories || [];
-      if (!rows.length) {
-        host.innerHTML = '<p class="admin-text-muted">No product categories yet. Add categories on products first.</p>';
+      shopCategoryRows = data.categories || [];
+      if (!shopCategoryRows.length) {
+        fillSelect();
+        if (host) host.innerHTML = '<p class="admin-text-muted" style="margin:0;">No product categories yet. Add categories on products first.</p>';
         return;
       }
-      host.innerHTML = rows.map(categoryCardHtml).join('');
+      fillSelect();
+      renderEditor();
     } catch (err) {
       console.error(err);
-      host.innerHTML = '<p class="admin-text-muted">Could not load categories (network error).</p>';
+      if (host) host.innerHTML = '<p class="admin-text-muted" style="margin:0;">Could not load categories (network error).</p>';
     }
   }
 
-  function bindShopCategoryList() {
-    const host = document.getElementById('shop-categories-list');
+  function bindShopCategoryUi() {
+    const select = document.getElementById('shop-category-select');
+    if (select && select.getAttribute('data-shop-cat-select-bound') !== '1') {
+      select.setAttribute('data-shop-cat-select-bound', '1');
+      select.addEventListener('change', function () {
+        selectedName = select.value || '';
+        renderEditor();
+      });
+    }
+
+    const host = document.getElementById('shop-categories-editor');
     if (!host || host.getAttribute('data-shop-cat-bound') === '1') return;
     host.setAttribute('data-shop-cat-bound', '1');
     host.addEventListener('click', async function (e) {
@@ -185,7 +243,14 @@
         });
         const data = await res.json().catch(function () { return {}; });
         if (!res.ok) throw new Error(data.error || res.statusText);
-        await loadShopCategories();
+        selectedName = name;
+        if (Array.isArray(data.categories)) {
+          shopCategoryRows = data.categories;
+          fillSelect();
+          renderEditor();
+        } else {
+          await loadShopCategories();
+        }
       } catch (err) {
         alert('Save failed: ' + String(err.message || err));
         btn.disabled = false;
@@ -193,8 +258,8 @@
     });
   }
 
-  document.addEventListener('DOMContentLoaded', bindShopCategoryList);
-  if (document.readyState !== 'loading') bindShopCategoryList();
+  document.addEventListener('DOMContentLoaded', bindShopCategoryUi);
+  if (document.readyState !== 'loading') bindShopCategoryUi();
 
   global.loadShopCategories = loadShopCategories;
   global.copyUrlToClipboard = copyUrlToClipboard;
