@@ -93,23 +93,23 @@ function productPrimaryImage(product) {
   return `${SHOP_ORIGIN}/img/og-image.png`;
 }
 
+function categoryTags(field) {
+  return String(field || '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
 function productHasCategory(product, categoryName) {
   const wanted = String(categoryName || '').trim().toLowerCase();
   if (!wanted) return false;
-  return String(product.category || '')
-    .split(',')
-    .map((c) => c.trim().toLowerCase())
-    .filter(Boolean)
-    .includes(wanted);
+  return categoryTags(product.category).some((c) => c.toLowerCase() === wanted);
 }
 
 function canonicalCategoryName(products, requestedName) {
   const wanted = String(requestedName || '').trim().toLowerCase();
   for (const product of products || []) {
-    const match = String(product.category || '')
-      .split(',')
-      .map((c) => c.trim())
-      .find((c) => c.toLowerCase() === wanted);
+    const match = categoryTags(product.category).find((c) => c.toLowerCase() === wanted);
     if (match) return match;
   }
   return String(requestedName || '').trim();
@@ -170,12 +170,7 @@ ${img ? `<p><img src="${img}" alt="${title}"></p>` : ''}
 function buildSeoCrawlNav(products) {
   const categories = new Set();
   for (const p of products) {
-    if (!p.category) continue;
-    String(p.category)
-      .split(',')
-      .map((c) => c.trim())
-      .filter(Boolean)
-      .forEach((c) => categories.add(c));
+    categoryTags(p.category).forEach((c) => categories.add(c));
   }
 
   const categoryLinks = [...categories]

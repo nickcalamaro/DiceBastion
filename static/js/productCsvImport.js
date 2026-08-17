@@ -108,13 +108,22 @@
       .replace(/'/g, '&#039;');
   }
 
+  function importCategoryTag(raw) {
+    const trimmed = String(raw || '').trim().replace(/\s+/g, ' ');
+    if (!trimmed) return '';
+    const lower = trimmed.toLowerCase().replace(/-/g, ' ');
+    if (lower === 'board game' || lower === 'board games') return 'Board Games';
+    return global.ShopCategories ? ShopCategories.display(trimmed) : trimmed;
+  }
+
   function buildCategoryTags(row) {
     const tags = [];
     const seen = new Set();
     ;[row.Type, row.Manufacturer].forEach((raw) => {
-      const tag = String(raw || '').trim();
-      if (!tag || seen.has(tag)) return;
-      seen.add(tag);
+      const tag = importCategoryTag(raw);
+      const key = tag.toLowerCase();
+      if (!tag || seen.has(key)) return;
+      seen.add(key);
       tags.push(tag);
     });
     return tags.slice(0, 3);

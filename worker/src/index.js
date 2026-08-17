@@ -368,26 +368,58 @@ function resolveProductPrimaryImage(product, shopUrl) {
   return `${shopUrl}/img/og-image.png`
 }
 
+function toTitleCase(str) {
+  return String(str || '').replace(
+    /\w\S*/g,
+    (text) => text.charAt(0).toUpperCase() + text.substring(1).toLowerCase()
+  )
+}
+
+function normalizeCategoryLabel(raw) {
+  const trimmed = String(raw || '').trim().replace(/\s+/g, ' ')
+  return trimmed ? toTitleCase(trimmed) : ''
+}
+
+function categoryMatchKey(raw) {
+  return normalizeCategoryLabel(raw).toLowerCase()
+}
+
 function parseProductCategoryNames(categoryField) {
-  return String(categoryField || '')
-    .split(',')
-    .map((c) => c.trim())
-    .filter(Boolean)
+  const seen = new Set()
+  const out = []
+  for (const part of String(categoryField || '').split(',')) {
+    const name = normalizeCategoryLabel(part)
+    const key = name.toLowerCase()
+    if (!name || seen.has(key)) continue
+    seen.add(key)
+    out.push(name)
+  }
+  return out
+}
+
+function normalizeProductCategoryField(raw) {
+  return parseProductCategoryNames(raw).join(', ')
+}
+
+function withNormalizedProductCategory(product) {
+  if (!product) return product
+  const category = normalizeProductCategoryField(product.category)
+  return { ...product, category: category || null }
 }
 
 function productBelongsToCategory(product, categoryName) {
-  const wanted = String(categoryName || '').trim().toLowerCase()
+  const wanted = categoryMatchKey(categoryName)
   if (!wanted) return false
   return parseProductCategoryNames(product.category).some((c) => c.toLowerCase() === wanted)
 }
 
 function canonicalCategoryName(products, requestedName) {
-  const wanted = String(requestedName || '').trim().toLowerCase()
+  const wanted = categoryMatchKey(requestedName)
   for (const product of products || []) {
     const match = parseProductCategoryNames(product.category).find((c) => c.toLowerCase() === wanted)
     if (match) return match
   }
-  return String(requestedName || '').trim()
+  return normalizeCategoryLabel(requestedName)
 }
 
 function defaultCategoryDescription(categoryName) {
@@ -7851,7 +7883,7 @@ function generateProductSeoPage(product, allCategories) {
   const priceDisplay = priceNum.toFixed(2);
   const inStock = (product.stock_quantity || 0) > 0;
   const isPreorder = product.release_date && new Date(product.release_date) > new Date();
-  const categories = (product.category || '').split(',').map(c => c.trim()).filter(Boolean);
+  const categories = parseProductCategoryNames(product.category);
   const primaryCategory = categories[0] || 'Tabletop Gaming';
 
   // Google Product structured data (JSON-LD)
@@ -8138,8 +8170,7 @@ app.get('/products/sitemap.xml', async c => {
     // Collect unique categories + newest product update per category for lastmod
     const categoryLastMod = new Map()
     ;(results || []).forEach(p => {
-      if (!p.category) return
-      p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => {
+      parseProductCategoryNames(p.category).forEach(c => {
         const prev = categoryLastMod.get(c)
         if (!prev || String(p.updated_at || '') > String(prev)) {
           categoryLastMod.set(c, p.updated_at)
@@ -8250,7 +8281,7 @@ app.get('/products/category/:name', async c => {
 
     const canonicalName = canonicalCategoryName(catProducts, categoryName)
     const categoryList = await listProductCategoryMeta(c.env.DB)
-    const seoMeta = categoryList.find(row => String(row.name || '').toLowerCase() === canonicalName.toLowerCase()) || null
+    const seoMeta = categoryList.find(row => categoryMatchKey(row.name) === categoryMatchKey(canonicalName)) || null
 
     // Bots get category page, humans get redirect to shop filtered by category
     const host = c.req.header('Host') || ''
@@ -8334,15 +8365,20 @@ app.get('/products/:slug', async (c, next) => {
 // Get all active products (public), optionally filtered by category
 app.get('/products', async (c) => {
   try {
+    await ensureCategoriesCanonicalized(c.env.DB)
     const category = c.req.query('category')
     let sql = `SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
       FROM products WHERE is_active = 1`
-    const binds = []
-    if (category) { sql += ' AND category = ?'; binds.push(category) }
-    else { sql += ' AND COALESCE(show_in_shop, 1) = 1' }
+    if (!category) {
+      sql += ' AND COALESCE(show_in_shop, 1) = 1'
+    }
     sql += ' ORDER BY name ASC'
-    const products = await c.env.DB.prepare(sql).bind(...binds).all()
-    return c.json(products.results || [])
+    const products = await c.env.DB.prepare(sql).all()
+    let rows = products.results || []
+    if (category) {
+      rows = rows.filter((p) => productBelongsToCategory(p, category))
+    }
+    return c.json(rows.map(withNormalizedProductCategory))
   } catch (e) {
     console.error('Get products error:', e)
     return c.json({ error: 'internal_error' }, 500)
@@ -8389,13 +8425,129 @@ function normalizeCategoryKeywords(raw) {
   return out.join(', ')
 }
 
+async function runDbBatch(db, statements, chunkSize = 50) {
+  for (let i = 0; i < statements.length; i += chunkSize) {
+    const chunk = statements.slice(i, i + chunkSize)
+    if (chunk.length) await db.batch(chunk)
+  }
+}
+
+async function canonicalizeStoredProductCategories(db) {
+  const rewriteTag = (raw) => {
+    const trimmed = String(raw || '').trim().replace(/\s+/g, ' ')
+    if (!trimmed) return ''
+    const lower = trimmed.toLowerCase().replace(/-/g, ' ')
+    if (lower === 'board game' || lower === 'board games') return 'Board Games'
+    return toTitleCase(trimmed)
+  }
+  const rewriteField = (raw) => {
+    const seen = new Set()
+    const out = []
+    for (const part of String(raw || '').split(',')) {
+      const name = rewriteTag(part)
+      const key = name.toLowerCase()
+      if (!name || seen.has(key)) continue
+      seen.add(key)
+      out.push(name)
+    }
+    return out.join(', ')
+  }
+
+  const products = await db.prepare(`
+    SELECT id, category FROM products
+    WHERE category IS NOT NULL AND TRIM(category) != ''
+  `).all()
+  const productStmts = []
+  for (const row of products.results || []) {
+    const next = rewriteField(row.category)
+    const prev = String(row.category || '')
+    if (next === prev) continue
+    productStmts.push(
+      db.prepare('UPDATE products SET category = ? WHERE id = ?').bind(next || null, row.id)
+    )
+  }
+  await runDbBatch(db, productStmts)
+
+  await ensureProductCategoriesSchema(db)
+  const metaRows = await db.prepare(`
+    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image
+    FROM product_categories
+  `).all()
+  const groups = new Map()
+  for (const row of metaRows.results || []) {
+    const canon = rewriteTag(row.name)
+    if (!canon) continue
+    const key = canon.toLowerCase()
+    if (!groups.has(key)) groups.set(key, { canon, rows: [] })
+    groups.get(key).rows.push(row)
+  }
+
+  const now = toIso(new Date())
+  const metaStmts = []
+  for (const { canon, rows } of groups.values()) {
+    const canonRow = rows.find((r) => r.name === canon)
+    const keep = canonRow || rows[0]
+    const others = rows.filter((r) => r.id !== keep.id)
+    const featured = rows.some((r) => Number(r.featured)) ? 1 : 0
+    const sortOrder = Math.min(...rows.map((r) => Number(r.sort_order) || 0))
+    const keywords = normalizeCategoryKeywords(
+      rows.map((r) => r.keywords).filter(Boolean).join(', ')
+    )
+    const seoTitle = rows.map((r) => String(r.seo_title || '').trim()).find(Boolean) || null
+    const seoDescription = rows.map((r) => String(r.seo_description || '').trim()).find(Boolean) || null
+    const seoImage = rows.map((r) => String(r.seo_image || '').trim()).find(Boolean) || null
+
+    const needsUpdate =
+      keep.name !== canon ||
+      others.length > 0 ||
+      Number(keep.featured) !== featured ||
+      (Number(keep.sort_order) || 0) !== sortOrder ||
+      String(keep.keywords || '') !== String(keywords || '') ||
+      String(keep.seo_title || '') !== String(seoTitle || '') ||
+      String(keep.seo_description || '') !== String(seoDescription || '') ||
+      String(keep.seo_image || '') !== String(seoImage || '')
+
+    for (const other of others) {
+      metaStmts.push(db.prepare('DELETE FROM product_categories WHERE id = ?').bind(other.id))
+    }
+    if (needsUpdate) {
+      metaStmts.push(
+        db.prepare(`
+          UPDATE product_categories
+          SET name = ?, featured = ?, sort_order = ?, keywords = ?, seo_title = ?, seo_description = ?, seo_image = ?, updated_at = ?
+          WHERE id = ?
+        `).bind(
+          canon,
+          featured,
+          sortOrder,
+          keywords || null,
+          seoTitle,
+          seoDescription,
+          seoImage,
+          now,
+          keep.id
+        )
+      )
+    }
+  }
+  await runDbBatch(db, metaStmts)
+}
+
+let categoryCanonicalizePromise = null
+async function ensureCategoriesCanonicalized(db) {
+  if (!categoryCanonicalizePromise) {
+    categoryCanonicalizePromise = canonicalizeStoredProductCategories(db).catch((err) => {
+      categoryCanonicalizePromise = null
+      console.error('[categories] canonicalize:', err)
+    })
+  }
+  await categoryCanonicalizePromise
+}
+
 function collectProductCategoryNames(productRows) {
   const counts = new Map()
   for (const product of productRows || []) {
-    const raw = product.category || ''
-    for (const part of raw.split(',')) {
-      const name = part.trim()
-      if (!name) continue
+    for (const name of parseProductCategoryNames(product.category)) {
       counts.set(name, (counts.get(name) || 0) + 1)
     }
   }
@@ -8404,6 +8556,7 @@ function collectProductCategoryNames(productRows) {
 
 async function listProductCategoryMeta(db) {
   await ensureProductCategoriesSchema(db)
+  await ensureCategoriesCanonicalized(db)
   const products = await db.prepare(`
     SELECT category FROM products
     WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
@@ -8416,12 +8569,20 @@ async function listProductCategoryMeta(db) {
   `).all()
   const metaByLower = new Map()
   for (const row of metaRows.results || []) {
-    metaByLower.set(String(row.name || '').toLowerCase(), row)
+    const key = categoryMatchKey(row.name)
+    if (!key) continue
+    const existing = metaByLower.get(key)
+    if (!existing || (Number(row.featured) && !Number(existing.featured))) {
+      metaByLower.set(key, row)
+    }
   }
 
-  const names = new Set([...counts.keys(), ...(metaRows.results || []).map(r => r.name)])
+  const names = new Set([
+    ...counts.keys(),
+    ...(metaRows.results || []).map((r) => normalizeCategoryLabel(r.name)).filter(Boolean)
+  ])
   const categories = [...names].map(name => {
-    const meta = metaByLower.get(String(name).toLowerCase())
+    const meta = metaByLower.get(categoryMatchKey(name))
     return {
       name,
       product_count: counts.get(name) || 0,
@@ -8479,7 +8640,7 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
   try {
     await ensureProductCategoriesSchema(c.env.DB)
     const body = await c.req.json()
-    const name = String(body.name || '').trim()
+    const name = normalizeCategoryLabel(body.name)
     if (!name || name.length > 120) {
       return c.json({ error: 'invalid_name' }, 400)
     }
@@ -8493,6 +8654,13 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
       ? (ensureAbsoluteImageUrl(seoImageRaw, 'https://shop.dicebastion.com') || null)
       : null
     const now = toIso(new Date())
+
+    const existingMeta = await c.env.DB.prepare('SELECT id, name FROM product_categories').all()
+    for (const row of existingMeta.results || []) {
+      if (categoryMatchKey(row.name) === name.toLowerCase() && row.name !== name) {
+        await c.env.DB.prepare('DELETE FROM product_categories WHERE id = ?').bind(row.id).run()
+      }
+    }
 
     await c.env.DB.prepare(`
       INSERT INTO product_categories (name, featured, sort_order, keywords, seo_title, seo_description, seo_image, created_at, updated_at)
@@ -8534,7 +8702,7 @@ app.get('/products/:id', async (c) => {
       return c.json({ error: 'product_not_found' }, 404)
     }
     
-    return c.json(product)
+    return c.json(withNormalizedProductCategory(product))
   } catch (e) {
     console.error('Get product error:', e)
     return c.json({ error: 'internal_error' }, 500)
@@ -8737,7 +8905,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
       currency || 'GBP', 
       stock_quantity || 0, 
       image_url || null, 
-      category || null,
+      normalizeProductCategoryField(category) || null,
       release_date || null,
       Number.isFinite(batchId) ? batchId : null,
       now,
@@ -8787,7 +8955,7 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     if (currency !== undefined) { updates.push('currency = ?'); binds.push(currency) }
     if (stock_quantity !== undefined) { updates.push('stock_quantity = ?'); binds.push(stock_quantity) }
     if (image_url !== undefined) { updates.push('image_url = ?'); binds.push(image_url) }
-    if (category !== undefined) { updates.push('category = ?'); binds.push(category) }
+    if (category !== undefined) { updates.push('category = ?'); binds.push(normalizeProductCategoryField(category) || null) }
     if (is_active !== undefined) { updates.push('is_active = ?'); binds.push(is_active ? 1 : 0) }
     if (release_date !== undefined) { updates.push('release_date = ?'); binds.push(release_date) }
     
@@ -11644,8 +11812,8 @@ function productMatchesPromoScopes(productId, categoryStr, rules) {
   let catOk =
     !hasCat
   if (!catOk && categoryStr) {
-    const tags = String(categoryStr).split(',').map(s => s.trim()).filter(Boolean)
-    catOk = catList.some(c => tags.includes(c))
+    const tags = parseProductCategoryNames(categoryStr)
+    catOk = catList.some((c) => tags.some((t) => t.toLowerCase() === categoryMatchKey(c)))
   }
   if (!hasPid) return catOk
   if (!hasCat) return pidOk
@@ -11792,7 +11960,7 @@ app.post('/shop/promo/quote', async c => {
         quantity,
         unit_price: unitPrice,
         subtotal: lineSubtotal,
-        category: product.category || ''
+        category: normalizeProductCategoryField(product.category) || ''
       })
     }
 
@@ -11915,7 +12083,7 @@ app.post('/shop/checkout', async c => {
       })
       promoLines.push({
         product_id: product.id,
-        category: product.category || '',
+        category: normalizeProductCategoryField(product.category) || '',
         subtotal: lineSubtotal
       })
     }
@@ -12394,7 +12562,7 @@ export default {
         // Collect categories
         const categories = new Set()
         activeProducts.forEach(p => {
-          if (p.category) p.category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => categories.add(c))
+          parseProductCategoryNames(p.category).forEach(c => categories.add(c))
         })
 
         const productLinks = activeProducts.map(p =>

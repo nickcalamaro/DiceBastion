@@ -610,6 +610,7 @@ color: rgb(var(--color-neutral-800));
 }
 </style>
 
+<script src="/js/shopCategories.js"></script>
 <script>
 // Shop initialization
 const API_BASE = 'https://dicebastion.com/api';
@@ -619,6 +620,24 @@ let categoryMeta = [];
 let categoryMetaByName = new Map();
 let currentFilter = null;
 let currentSearchTerm = '';
+
+function categoryDisplay(name) {
+  return (window.ShopCategories && ShopCategories.display(name)) || String(name || '').trim();
+}
+
+function categoryKey(name) {
+  return (window.ShopCategories && ShopCategories.key(name)) || String(name || '').trim().toLowerCase();
+}
+
+function categoryTags(raw) {
+  if (window.ShopCategories) return ShopCategories.parseField(raw);
+  return String(raw || '').split(',').map(c => c.trim()).filter(Boolean);
+}
+
+function categoriesSame(a, b) {
+  if (window.ShopCategories) return ShopCategories.same(a, b);
+  return categoryKey(a) === categoryKey(b) && !!categoryKey(a);
+}
 
 function loadCart() {
   if (typeof ShopCartStorage !== 'undefined') {
@@ -1016,9 +1035,11 @@ async function loadProducts() {
       meta = [];
     }
     categoryMeta = meta;
-    categoryMetaByName = new Map(
-      meta.map(row => [String(row.name || '').toLowerCase(), row])
-    );
+    categoryMetaByName = new Map();
+    meta.forEach(row => {
+      const key = categoryKey(row.name);
+      if (key) categoryMetaByName.set(key, row);
+    });
 
     buildCategoryFilter(allProducts);
     applyFilters();
@@ -1056,23 +1077,18 @@ function buildCategoryFilter(products) {
   const categoryCount = {};
 
   products.forEach(product => {
-    if (product.category) {
-      product.category.split(',').forEach(cat => {
-        const trimmedCat = cat.trim();
-        if (trimmedCat) {
-          categoryCount[trimmedCat] = (categoryCount[trimmedCat] || 0) + 1;
-        }
-      });
-    }
+    categoryTags(product.category).forEach(name => {
+      categoryCount[name] = (categoryCount[name] || 0) + 1;
+    });
   });
 
   const discovered = Object.keys(categoryCount);
-  const metaNames = categoryMeta.map(m => m.name).filter(Boolean);
+  const metaNames = categoryMeta.map(m => categoryDisplay(m.name)).filter(Boolean);
   const allNames = [...new Set([...discovered, ...metaNames])].filter(name => categoryCount[name] > 0);
 
   const sortedCategories = allNames.sort((a, b) => {
-    const ma = categoryMetaByName.get(a.toLowerCase());
-    const mb = categoryMetaByName.get(b.toLowerCase());
+    const ma = categoryMetaByName.get(categoryKey(a));
+    const mb = categoryMetaByName.get(categoryKey(b));
     const fa = !!(ma && ma.featured);
     const fb = !!(mb && mb.featured);
     if (fa !== fb) return fa ? -1 : 1;
@@ -1125,15 +1141,12 @@ function productMatchesSearch(product, term) {
   const name = String(product.name || '').toLowerCase();
   if (name.includes(term)) return true;
 
-  const cats = String(product.category || '')
-    .split(',')
-    .map(c => c.trim())
-    .filter(Boolean);
+  const cats = categoryTags(product.category);
 
   if (cats.some(c => c.toLowerCase().includes(term))) return true;
 
   for (const cat of cats) {
-    const meta = categoryMetaByName.get(cat.toLowerCase());
+    const meta = categoryMetaByName.get(categoryKey(cat));
     if (!meta) continue;
     const keywords = parseCategoryKeywords(meta.keywords);
     if (keywords.some(kw => kw.startsWith(term) || (term.length >= kw.length && term.startsWith(kw)))) {
@@ -1161,7 +1174,7 @@ function applyFilters() {
 
   if (currentFilter) {
     filteredProducts = filteredProducts.filter(product =>
-      product.category && product.category.split(',').map(c => c.trim()).includes(currentFilter)
+      categoryTags(product.category).some(c => categoriesSame(c, currentFilter))
     );
   }
 
@@ -1187,11 +1200,14 @@ function setActiveCategoryButton(category) {
   const target = category || '';
   document.querySelectorAll('.category-btn').forEach(btn => {
     const btnCat = btn.getAttribute('data-category') || '';
-    btn.classList.toggle('active', btnCat === target);
+    const isAll = !btnCat && !target;
+    btn.classList.toggle('active', isAll || (!!target && categoriesSame(btnCat, target)));
   });
 
   if (category) {
-    const activeBtn = document.querySelector(`.category-btn[data-category="${CSS.escape(category)}"]`);
+    const activeBtn = [...document.querySelectorAll('.category-btn')].find(btn =>
+      categoriesSame(btn.getAttribute('data-category'), category)
+    );
     if (activeBtn && activeBtn.closest('#category-filter-extra')) {
       toggleCategoryExtras(true);
     }
@@ -1227,7 +1243,7 @@ function shopQueryUrl(updates = {}) {
 
 // Filter products by category (updates shareable ?category= URL)
 function filterByCategory(category, btnElement, { syncUrl = true } = {}) {
-  currentFilter = category || null;
+  currentFilter = category ? categoryDisplay(category) : null;
   if (btnElement) {
     document.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
     btnElement.classList.add('active');
@@ -1421,10 +1437,11 @@ if (params.has('product')) {
 };
 
 function applyCategoryFromUrl(categoryParam, { syncUrl = false } = {}) {
-  currentFilter = categoryParam || null;
+  const canonical = categoryParam ? categoryDisplay(categoryParam) : null;
+  currentFilter = canonical || null;
   setActiveCategoryButton(currentFilter);
   applyFilters();
-  if (syncUrl) {
+  if (syncUrl || (categoryParam && canonical && canonical !== categoryParam)) {
     syncCategoryUrl(currentFilter, { replace: true });
   }
 }

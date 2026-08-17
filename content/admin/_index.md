@@ -8,6 +8,7 @@ showDate: false
 <!-- Shared Utilities -->
 <script src="/js/utils.js"></script>
 <script src="/js/modal.js"></script>
+<script src="/js/shopCategories.js"></script>
 <script src="/js/productCsvImport.js"></script>
 <script src="/js/shopCategoryAdmin.js"></script>
 <script src="/js/richTextEditor.js"></script>
@@ -4000,13 +4001,7 @@ async function runCsvImport() {
 
         if (payload.category) {
 
-          payload.category.split(',').forEach(cat => {
-
-            const t = cat.trim();
-
-            if (t) allCategories.add(t);
-
-          });
+          payload.category.split(',').forEach(cat => addCategoryTag(cat));
 
         }
 
@@ -4361,9 +4356,23 @@ document.getElementById('csv-import-file')?.addEventListener('change', () => {
 let selectedCategories = [];
 let allCategories = new Set();
 
+function categoryDisplay(name) {
+  return (window.ShopCategories && ShopCategories.display(name)) || String(name || '').trim();
+}
+
+function categoryKey(name) {
+  return (window.ShopCategories && ShopCategories.key(name)) || String(name || '').trim().toLowerCase();
+}
+
+function addCategoryTag(raw) {
+  const t = categoryDisplay(raw);
+  if (t) allCategories.add(t);
+  return t;
+}
+
 function addCategory() {
 const input = document.getElementById('category-input');
-const category = input.value.trim();
+const category = categoryDisplay(input.value);
   
 if (!category) return;
   
@@ -4372,7 +4381,7 @@ alert('Maximum 3 categories allowed');
 return;
 }
   
-if (selectedCategories.includes(category)) {
+if (selectedCategories.some(c => categoryKey(c) === categoryKey(category))) {
 alert('Category already added');
 return;
 }
@@ -4387,6 +4396,7 @@ renderExistingCategories();
 function removeCategory(category) {
 selectedCategories = selectedCategories.filter(c => c !== category);
 renderCategoryTags();
+renderExistingCategories();
 }
 
 function renderCategoryTags() {
@@ -4406,7 +4416,7 @@ ${cat}
 
 function renderExistingCategories() {
 const container = document.getElementById('existing-categories');
-const availableCategories = Array.from(allCategories).filter(c => !selectedCategories.includes(c));
+const availableCategories = Array.from(allCategories).filter(c => !selectedCategories.some(s => categoryKey(s) === categoryKey(c)));
   
 if (availableCategories.length === 0) {
 container.innerHTML = '';
@@ -4421,11 +4431,16 @@ ${cat}
 }
 
 function addExistingCategory(category) {
+const name = categoryDisplay(category);
+if (!name) return;
 if (selectedCategories.length >= 3) {
 alert('Maximum 3 categories allowed');
 return;
 }
-selectedCategories.push(category);
+if (selectedCategories.some(c => categoryKey(c) === categoryKey(name))) {
+return;
+}
+selectedCategories.push(name);
 renderCategoryTags();
 renderExistingCategories();
 }
@@ -4462,7 +4477,7 @@ const list = document.getElementById('products-list');
 // Collect all categories
 adminProductsList.forEach(p => {
 if (p.category) {
-p.category.split(',').forEach(cat => allCategories.add(cat.trim()));
+p.category.split(',').forEach(cat => addCategoryTag(cat));
 }
 });
 renderExistingCategories();
@@ -4473,7 +4488,7 @@ return;
 }
 
 list.innerHTML = adminProductsList.map(p => {
-const categories = p.category ? p.category.split(',').map(c => c.trim()).join(', ') : 'N/A';
+const categories = p.category ? (window.ShopCategories ? ShopCategories.parseField(p.category).join(', ') : p.category.split(',').map(c => c.trim()).join(', ')) : 'N/A';
 return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
@@ -4512,7 +4527,7 @@ summary: document.getElementById('product-summary').value,
 full_description: document.getElementById('description-content').innerHTML,
 price: Math.round(parseFloat(document.getElementById('product-price').value) * 100),
 stock_quantity: parseInt(document.getElementById('product-stock').value),
-category: selectedCategories.join(','),
+category: window.ShopCategories ? ShopCategories.normalizeField(selectedCategories.join(',')) : selectedCategories.join(','),
 image_url: imageUrl,
 is_active: document.getElementById('product-active').checked ? 1 : 0,
 release_date: releaseDate
@@ -4588,7 +4603,9 @@ document.getElementById('product-image').value = product.image_url || '';
 document.getElementById('product-active').checked = product.is_active === 1;
 
 // Load categories
-selectedCategories = product.category ? product.category.split(',').map(c => c.trim()) : [];
+selectedCategories = product.category
+  ? (window.ShopCategories ? ShopCategories.parseField(product.category) : product.category.split(',').map(c => c.trim()).filter(Boolean))
+  : [];
 renderCategoryTags();
 
 // Pre-order fields
