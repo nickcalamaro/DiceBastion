@@ -29,15 +29,16 @@ Client-side only — intentional for a small guest-checkout shop:
 
 Implemented in `shop/static/js/shopCartStorage.js`. Checkout creates `orders` / `order_items` in D1 on payment. The D1 `cart_items` table is **reserved and unused** (empty is expected). Revisit DB-backed carts only for abandoned-cart emails, cross-device sync when logged in, or server-side inventory holds.
 
-## Product share previews (`/?product=slug`)
+## Product and category share previews
 
 Pages Function [`functions/_middleware.js`](functions/_middleware.js):
 
 - Social bots on `/?product=` get OG HTML (canonical points at `/products/:slug`).
+- Social bots on `/?category=` get OG HTML (canonical points at `/products/category/:name`). The preview image is the first product listed in that category (A–Z, same as the shop grid).
 - Homepage responses inject crawlable product/category links for Google (footer nav).
-- Humans always get the Hugo shop; product cards and `/products/:slug` open the modal via `/?product=`.
+- Humans always get the Hugo shop; product cards and `/products/:slug` open the modal via `/?product=`. Category chips and `/products/category/:name` filter the shop via `/?category=`.
 
-Worker SEO at `/products/:slug` remains the canonical URL for sitemaps and crawlers (bots get Product JSON-LD HTML; people are redirected to the modal).
+Worker SEO at `/products/:slug` and `/products/category/:name` remains the canonical URL for sitemaps and crawlers (bots get rich HTML; people are redirected to the shop UI).
 
 ## Database Schema
 

@@ -368,6 +368,37 @@ function resolveProductPrimaryImage(product, shopUrl) {
   return `${shopUrl}/img/og-image.png`
 }
 
+function parseProductCategoryNames(categoryField) {
+  return String(categoryField || '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean)
+}
+
+function productBelongsToCategory(product, categoryName) {
+  const wanted = String(categoryName || '').trim().toLowerCase()
+  if (!wanted) return false
+  return parseProductCategoryNames(product.category).some((c) => c.toLowerCase() === wanted)
+}
+
+function canonicalCategoryName(products, requestedName) {
+  const wanted = String(requestedName || '').trim().toLowerCase()
+  for (const product of products || []) {
+    const match = parseProductCategoryNames(product.category).find((c) => c.toLowerCase() === wanted)
+    if (match) return match
+  }
+  return String(requestedName || '').trim()
+}
+
+/** Share/Google preview: first listed product in that category (shop order is name A–Z). */
+function resolveCategoryPreviewImage(products, shopUrl) {
+  const first = (products || [])[0]
+  if (!first) return `${shopUrl}/img/og-image.png`
+  return resolveProductPrimaryImage(first, shopUrl)
+}
+
+const SHOP_SEO_BOT_UA = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/
+
 function buildUrlsetSitemapXml(urlEntries) {
   const urls = []
   for (const e of urlEntries || []) {
@@ -7957,7 +7988,8 @@ function generateCategorySeoPage(categoryName, products) {
   const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
   const shopFilterUrl = `${shop}/?category=${encodeURIComponent(categoryName)}`;
   const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`;
-  const ogImage = products.map(p => ensureAbsoluteImageUrl(p.image_url, shop)).find(Boolean) || '';
+  const ogImage = resolveCategoryPreviewImage(products, shop);
+  const firstProduct = products[0];
 
   // CollectionPage + ItemList schema
   const schema = {
@@ -7966,6 +7998,8 @@ function generateCategorySeoPage(categoryName, products) {
     'name': `${categoryName} | Dice Bastion Shop, Gibraltar`,
     'description': desc,
     'url': url,
+    'image': ogImage,
+    'primaryImageOfPage': ogImage,
     'mainEntity': {
       '@type': 'ItemList',
       'numberOfItems': products.length,
@@ -7973,7 +8007,8 @@ function generateCategorySeoPage(categoryName, products) {
         '@type': 'ListItem',
         'position': i + 1,
         'url': `${shop}/products/${encodeURIComponent(p.slug)}`,
-        'name': p.name
+        'name': p.name,
+        'image': resolveProductPrimaryImage(p, shop)
       }))
     }
   };
@@ -7989,26 +8024,28 @@ function generateCategorySeoPage(categoryName, products) {
 
   const productCards = products.map(p => {
     const price = ((Number(p.price) || 0) / 100).toFixed(2);
-    const cardImg = p.image_url ? ensureAbsoluteImageUrl(p.image_url, shop) : '';
+    const cardImg = resolveProductPrimaryImage(p, shop);
     return `<a href="${shop}/products/${encodeURIComponent(p.slug)}" class="cat-product-card">
-${cardImg ? `<img src="${cardImg}" alt="${e(p.name)}" loading="lazy" decoding="async">` : '<div class="cat-product-img-placeholder"></div>'}
+<img src="${e(cardImg)}" alt="${e(p.name)}" loading="lazy" decoding="async">
 <div class="cat-product-info"><span class="cat-product-name">${e(p.name)}</span><span class="cat-product-price">£${price}</span></div></a>`;
   }).join('\n');
 
-  const ogImageMeta = ogImage
-    ? `<meta property="og:image" content="${e(ogImage)}"><meta name="twitter:image" content="${e(ogImage)}">`
-    : '';
+  const descMeta = e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc);
+  const previewAlt = firstProduct?.name
+    ? `${catDisplay} — ${e(firstProduct.name)}`
+    : catDisplay;
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>${catDisplay} | Dice Bastion Shop, Gibraltar</title>
-<meta name="description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
+<meta name="description" content="${descMeta}">
 <meta property="og:type" content="website"><meta property="og:url" content="${url}">
-<meta property="og:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar"><meta property="og:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
+<meta property="og:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar"><meta property="og:description" content="${descMeta}">
 <meta property="og:site_name" content="Dice Bastion Shop">
-${ogImageMeta}
-<meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
-<meta name="twitter:description" content="${e(desc.length > 160 ? desc.substring(0, 157) + '...' : desc)}">
+<meta property="og:image" content="${e(ogImage)}"><meta property="og:image:alt" content="${previewAlt}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
+<meta name="twitter:description" content="${descMeta}">
+<meta name="twitter:image" content="${e(ogImage)}"><meta name="twitter:image:alt" content="${previewAlt}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbs)}</script>
 <link rel="canonical" href="${url}">
@@ -8022,6 +8059,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .cat-heading{max-width:900px;width:100%;margin:1rem auto;padding:0 1rem}
 .cat-heading h1{font-size:2rem;color:#fff}
 .cat-heading p{color:#808090;margin-top:.25rem}
+.cat-hero{max-width:900px;width:100%;margin:0 auto 0.5rem;padding:0 1rem}
+.cat-hero img{width:100%;max-height:360px;object-fit:cover;border-radius:12px;border:1px solid #2a2a4a;display:block}
 .cta{display:inline-block;margin-top:1rem;padding:.65rem 1.5rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600}
 .cat-grid{max-width:900px;width:100%;margin:1rem auto 2rem;padding:0 1rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1.25rem}
 .cat-product-card{background:#16162a;border:1px solid #2a2a4a;border-radius:12px;overflow:hidden;text-decoration:none;color:#e0e0e0;transition:transform .2s,border-color .2s}
@@ -8037,6 +8076,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </head><body>
 <div class="header"><a href="${shop}">Dice Bastion Shop</a></div>
 <div class="breadcrumb"><a href="${shop}">Shop</a> › ${catDisplay}</div>
+${ogImage ? `<div class="cat-hero"><img src="${e(ogImage)}" alt="${previewAlt}"></div>` : ''}
 <div class="cat-heading">
 <h1>${catDisplay}</h1>
 <p>${products.length} product${products.length !== 1 ? 's' : ''}</p>
@@ -8122,12 +8162,12 @@ app.get('/products/sitemap-images.xml', async c => {
   try {
     const shop = 'https://shop.dicebastion.com'
     const { results } = await c.env.DB.prepare(`
-      SELECT slug, name, image_url, summary, description, full_description
+      SELECT slug, name, image_url, summary, description, full_description, category
       FROM products
       WHERE is_active = 1
         AND slug IS NOT NULL AND TRIM(slug) != ''
         AND COALESCE(show_in_shop, 1) = 1
-      ORDER BY updated_at DESC
+      ORDER BY name ASC
     `).all()
 
     const entries = (results || []).map((product) => ({
@@ -8135,6 +8175,22 @@ app.get('/products/sitemap-images.xml', async c => {
       title: product.name || product.slug,
       images: collectProductImageUrls(product, shop)
     }))
+
+    const firstByCategory = new Map()
+    for (const product of results || []) {
+      for (const cat of parseProductCategoryNames(product.category)) {
+        if (!firstByCategory.has(cat)) firstByCategory.set(cat, product)
+      }
+    }
+    for (const [cat, product] of firstByCategory) {
+      const preview = resolveCategoryPreviewImage([product], shop)
+      if (!preview) continue
+      entries.push({
+        pageUrl: `${shop}/products/category/${encodeURIComponent(cat)}`,
+        title: cat,
+        images: [preview]
+      })
+    }
 
     const xml = buildImageSitemapXml(entries)
 
@@ -8152,12 +8208,61 @@ app.get('/products/sitemap-images.xml', async c => {
   }
 })
 
+// ---------- Category SEO route (must be before /products/:slug) ----------
+app.get('/products/category/:name', async c => {
+  try {
+    let categoryName = c.req.param('name') || ''
+    try { categoryName = decodeURIComponent(categoryName) } catch (_) { /* already decoded */ }
+    categoryName = categoryName.trim()
+
+    const { results } = await c.env.DB.prepare(`
+      SELECT id, name, slug, summary, description, full_description, price, currency, stock_quantity, image_url, category, release_date
+      FROM products WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
+      ORDER BY name ASC
+    `).all()
+
+    const catProducts = (results || []).filter(p => productBelongsToCategory(p, categoryName))
+
+    if (catProducts.length === 0) {
+      return Response.redirect('https://shop.dicebastion.com/', 302)
+    }
+
+    const canonicalName = canonicalCategoryName(catProducts, categoryName)
+
+    // Bots get category page, humans get redirect to shop filtered by category
+    const host = c.req.header('Host') || ''
+    if (host.includes('shop.dicebastion.com')) {
+      const ua = (c.req.header('User-Agent') || '').toLowerCase()
+      const isBot = SHOP_SEO_BOT_UA.test(ua)
+
+      if (isBot) {
+        const html = generateCategorySeoPage(canonicalName, catProducts)
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=1800' }
+        })
+      }
+
+      return Response.redirect(`https://shop.dicebastion.com/?category=${encodeURIComponent(canonicalName)}`, 302)
+    }
+
+    const html = generateCategorySeoPage(canonicalName, catProducts)
+    return new Response(html, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    })
+  } catch (err) {
+    console.error('Category page error:', err)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // ---------- Product SEO route (by slug) ----------
 app.get('/products/:slug', async (c, next) => {
   try {
     const slug = c.req.param('slug')
     // Pure numeric IDs are handled by the JSON API route below
-    if (!slug || slug.includes('.') || /^\d+$/.test(slug)) return next()
+    if (!slug || slug === 'category' || slug.includes('.') || /^\d+$/.test(slug)) return next()
 
     const product = await c.env.DB.prepare(
       'SELECT * FROM products WHERE slug = ? AND is_active = 1'
@@ -8172,7 +8277,7 @@ app.get('/products/:slug', async (c, next) => {
     const host = c.req.header('Host') || ''
     if (host.includes('shop.dicebastion.com')) {
       const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
+      const isBot = SHOP_SEO_BOT_UA.test(ua)
 
       if (isBot) {
         const html = generateProductSeoPage(product)
@@ -8199,55 +8304,6 @@ app.get('/products/:slug', async (c, next) => {
     return c.json(product)
   } catch (err) {
     console.error('Product slug error:', err)
-    return c.json({ error: 'internal_error' }, 500)
-  }
-})
-
-// ---------- Category SEO route ----------
-app.get('/products/category/:name', async c => {
-  try {
-    const categoryName = decodeURIComponent(c.req.param('name'))
-
-    const { results } = await c.env.DB.prepare(`
-      SELECT id, name, slug, summary, price, currency, stock_quantity, image_url, category, release_date
-      FROM products WHERE is_active = 1 AND COALESCE(show_in_shop, 1) = 1
-      ORDER BY name ASC
-    `).all()
-
-    // Filter products that contain this category
-    const catProducts = (results || []).filter(p =>
-      p.category && p.category.split(',').map(c => c.trim()).includes(categoryName)
-    )
-
-    if (catProducts.length === 0) {
-      return Response.redirect('https://shop.dicebastion.com/', 302)
-    }
-
-    // Bots get category page, humans get redirect to shop filtered by category
-    const host = c.req.header('Host') || ''
-    if (host.includes('shop.dicebastion.com')) {
-      const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/.test(ua)
-
-      if (isBot) {
-        const html = generateCategorySeoPage(categoryName, catProducts)
-        return new Response(html, {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=1800' }
-        })
-      }
-
-      return Response.redirect(`https://shop.dicebastion.com/?category=${encodeURIComponent(categoryName)}`, 302)
-    }
-
-    // Workers.dev fallback
-    const html = generateCategorySeoPage(categoryName, catProducts)
-    return new Response(html, {
-      status: 200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    })
-  } catch (err) {
-    console.error('Category page error:', err)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
@@ -12259,7 +12315,7 @@ export default {
       }
 
       // /products/category/:name → Hono serves category SEO page
-      if (parts.length === 4 && parts[2] === 'category') {
+      if (parts[2] === 'category' && parts.length >= 4 && parts[3]) {
         return app.fetch(request, env, ctx)
       }
 

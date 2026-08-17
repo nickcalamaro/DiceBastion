@@ -64,6 +64,7 @@ Rendered by `bgg-bunny/blog-html.ts` and uploaded to Bunny Storage on publish.
 - Blog sitemaps: `https://dicebastion.com/posts/sitemap.xml` and `https://dicebastion.com/posts/sitemap-images.xml` (listed in `layouts/robots.txt`)
 - Event SEO pages (`/events/:slug/`): hero/card/main images in Open Graph, JSON-LD, and `https://dicebastion.com/events/sitemap-images.xml`
 - Product SEO pages (`shop.dicebastion.com/products/:slug/`): product image + description images in Open Graph, Product schema, and `https://shop.dicebastion.com/products/sitemap-images.xml`
+- Category SEO pages (`shop.dicebastion.com/products/category/:name/`): first listed product image as `og:image` / CollectionPage schema image; listed in the product and image sitemaps
 
 ## Copy guidelines
 

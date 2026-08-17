@@ -1,7 +1,9 @@
 /**
  * Shop Pages middleware:
  * 1) Social bots on /?product=slug get OG HTML (canonical → /products/slug).
- * 2) Homepage HTML gets crawlable product/category links injected (like events listing).
+ * 2) Social bots on /?category=Name get OG HTML (canonical → /products/category/Name),
+ *    using the first listed product image as the preview.
+ * 3) Homepage HTML gets crawlable product/category links injected (like events listing).
  * Humans still use the shop UI + product modal; /products/:slug 302s humans to /?product=.
  */
 
@@ -62,6 +64,57 @@ function absoluteImageUrl(url) {
   return `${SHOP_ORIGIN}/${raw}`;
 }
 
+function extractImgUrlsFromHtml(html) {
+  if (!html || !html.includes('<img')) return [];
+  const urls = [];
+  const re = /<img\b[^>]*\bsrc=(["'])([^"']+)\1/gi;
+  let match;
+  while ((match = re.exec(html))) {
+    urls.push(match[2]);
+  }
+  return urls;
+}
+
+function productPrimaryImage(product) {
+  const fromField = absoluteImageUrl(product.image_url);
+  if (fromField) return fromField;
+  for (const raw of extractImgUrlsFromHtml(product.full_description)) {
+    const abs = absoluteImageUrl(raw);
+    if (abs) return abs;
+  }
+  for (const raw of extractImgUrlsFromHtml(product.summary)) {
+    const abs = absoluteImageUrl(raw);
+    if (abs) return abs;
+  }
+  for (const raw of extractImgUrlsFromHtml(product.description)) {
+    const abs = absoluteImageUrl(raw);
+    if (abs) return abs;
+  }
+  return `${SHOP_ORIGIN}/img/og-image.png`;
+}
+
+function productHasCategory(product, categoryName) {
+  const wanted = String(categoryName || '').trim().toLowerCase();
+  if (!wanted) return false;
+  return String(product.category || '')
+    .split(',')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(wanted);
+}
+
+function canonicalCategoryName(products, requestedName) {
+  const wanted = String(requestedName || '').trim().toLowerCase();
+  for (const product of products || []) {
+    const match = String(product.category || '')
+      .split(',')
+      .map((c) => c.trim())
+      .find((c) => c.toLowerCase() === wanted);
+    if (match) return match;
+  }
+  return String(requestedName || '').trim();
+}
+
 function responseWithHtml(html, status = 200, baseHeaders = null) {
   const headers = new Headers(baseHeaders || undefined);
   headers.set('Content-Type', 'text/html; charset=utf-8');
@@ -72,12 +125,13 @@ function responseWithHtml(html, status = 200, baseHeaders = null) {
   return new Response(html, { status, headers });
 }
 
-function ogHtml({ name, description, image, canonicalUrl, shareUrl }) {
+function ogHtml({ name, description, image, canonicalUrl, shareUrl, type = 'product' }) {
   const title = escapeHtml(name);
   const desc = escapeHtml(truncateMeta(description, 160));
   const img = escapeHtml(image);
   const canonical = escapeHtml(canonicalUrl);
   const share = escapeHtml(shareUrl);
+  const ogType = escapeHtml(type);
   const imgMeta = img
     ? `<meta property="og:image" content="${img}">
 <meta property="og:image:alt" content="${title}">
@@ -92,7 +146,7 @@ function ogHtml({ name, description, image, canonicalUrl, shareUrl }) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} | Dice Bastion Shop</title>
 <meta name="description" content="${desc}">
-<meta property="og:type" content="product">
+<meta property="og:type" content="${ogType}">
 <meta property="og:site_name" content="Dice Bastion Shop">
 <meta property="og:url" content="${share}">
 <meta property="og:title" content="${title}">
@@ -190,9 +244,36 @@ async function handleProductOg(request, next, slug) {
     const html = ogHtml({
       name: product.name,
       description: productDescription(product),
-      image: absoluteImageUrl(product.image_url),
+      image: productPrimaryImage(product),
       canonicalUrl,
       shareUrl
+    });
+
+    return responseWithHtml(html);
+  } catch (_) {
+    return next();
+  }
+}
+
+async function handleCategoryOg(request, next, categoryName) {
+  try {
+    const products = await fetchActiveProducts();
+    const catProducts = products
+      .filter((p) => productHasCategory(p, categoryName))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en'));
+    if (!catProducts.length) return next();
+
+    const displayName = canonicalCategoryName(catProducts, categoryName);
+    const first = catProducts[0];
+    const shareUrl = `${SHOP_ORIGIN}/?category=${encodeURIComponent(displayName)}`;
+    const canonicalUrl = `${SHOP_ORIGIN}/products/category/${encodeURIComponent(displayName)}`;
+    const html = ogHtml({
+      name: `${displayName} | Dice Bastion Shop`,
+      description: `Browse ${displayName} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`,
+      image: productPrimaryImage(first),
+      canonicalUrl,
+      shareUrl,
+      type: 'website'
     });
 
     return responseWithHtml(html);
@@ -234,9 +315,14 @@ export async function onRequest(context) {
 
   const url = new URL(request.url);
   const slug = (url.searchParams.get('product') || '').trim();
+  const category = (url.searchParams.get('category') || '').trim();
 
   if (slug && isBot(request)) {
     return handleProductOg(request, next, slug);
+  }
+
+  if (category && isBot(request)) {
+    return handleCategoryOg(request, next, category);
   }
 
   const response = await next();

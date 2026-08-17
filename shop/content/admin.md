@@ -327,6 +327,7 @@ and how the discount applies (<code>apply_scope</code>: <code>eligible_lines</co
 
 <h3>Human vs bot behaviour</h3>
 <p><code>/products/your-slug</code> is the canonical URL in sitemaps and Search Console. Googlebot (and other crawlers) receive the rich Product SEO HTML there. People are redirected to <code>/?product=your-slug</code> so they stay on the normal shop page with the product modal — not a standalone event-style page.</p>
+<p>Category pages work the same way: <code>/products/category/CategoryName</code> is canonical. Bots get a CollectionPage with the first listed product as the share/Google preview image. People are redirected to <code>/?category=CategoryName</code>.</p>
 
 <h3>Best Practices</h3>
 <ul>
