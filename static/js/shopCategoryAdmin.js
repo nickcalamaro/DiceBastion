@@ -17,11 +17,19 @@
     return global.API_BASE || (global.utils && global.utils.getApiBase && global.utils.getApiBase()) || '';
   }
 
+  function sessionToken() {
+    if (global.sessionToken) return global.sessionToken;
+    if (global.utils && global.utils.session && typeof global.utils.session.get === 'function') {
+      return global.utils.session.get();
+    }
+    return '';
+  }
+
   function jsonHeaders() {
     if (typeof global.adminJsonHeaders === 'function') return global.adminJsonHeaders();
     return {
       'Content-Type': 'application/json',
-      'X-Session-Token': global.sessionToken
+      'X-Session-Token': sessionToken()
     };
   }
 
@@ -111,10 +119,15 @@
 
   async function loadShopCategories() {
     const host = document.getElementById('shop-categories-list');
-    if (!host || !global.sessionToken) return;
+    if (!host) return;
+    const token = sessionToken();
+    if (!token) {
+      host.innerHTML = '<p class="admin-text-muted">Sign in to load shop categories.</p>';
+      return;
+    }
     try {
       const res = await fetch(apiBase() + '/admin/product-categories', {
-        headers: { 'X-Session-Token': global.sessionToken }
+        headers: { 'X-Session-Token': token }
       });
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok) {
