@@ -34,11 +34,19 @@ showPagination: false
   var API = utils.getApiBase();
   var products = [], modal = null, cart = {};
 
+  function inCategory(product, name) {
+    var wanted = String(name || '').trim().toLowerCase();
+    if (!wanted) return false;
+    return String((product && product.category) || '').split(',').some(function (part) {
+      return part.trim().toLowerCase() === wanted;
+    });
+  }
+
   async function init() {
     try {
       var res = await fetch(API + '/products?category=drinks');
       var data = await res.json();
-      products = Array.isArray(data) ? data.filter(function (p) { return p.category === 'drinks'; }) : [];
+      products = Array.isArray(data) ? data.filter(function (p) { return inCategory(p, 'drinks'); }) : [];
       products.sort(function (a, b) { return b.name.localeCompare(a.name); });
     } catch (e) { products = []; }
 
@@ -130,12 +138,9 @@ showPagination: false
         widget.style.display = 'block';
         widget.innerHTML = '';
       }
-      await utils.loadSumUpSdk();
-      await SumUpCard.mount({
+      await window.utils.mountSumUpWidget({
         id: 'pay-widget',
         checkoutId: checkoutId,
-        locale: 'en-GB',
-        country: 'GB',
         onResponse: function (type, body) {
           utils.hideError('pay-error');
           var t = String(type || '').toLowerCase();
