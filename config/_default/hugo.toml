@@ -18,6 +18,11 @@ mainSections = ["posts"]
 
 enableEmoji = true
 
+# Admin dashboard embeds a large inline script. Tdewolff JS minify fails on
+# template literals that mix interpolations with HTML (`unexpected < in expression`).
+[minify]
+  disableJS = true
+
 # googleAnalytics = "G-XXXXXXXXX"
 
 [pagination]

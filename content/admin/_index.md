@@ -4337,7 +4337,7 @@ async function loadShopCategories() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      host.innerHTML = `<p class="admin-text-muted">Could not load categories (${escapeCsvHtml(data.error || res.status)}). Deploy the Worker if this is a new endpoint.</p>`;
+      host.innerHTML = '<p class="admin-text-muted">Could not load categories (' + escapeCsvHtml(data.error || res.status) + '). Deploy the Worker if this is a new endpoint.</p>';
       return;
     }
     const rows = data.categories || [];
@@ -4345,52 +4345,56 @@ async function loadShopCategories() {
       host.innerHTML = '<p class="admin-text-muted">No product categories yet. Add categories on products first.</p>';
       return;
     }
-    host.innerHTML = rows.map(row => {
+    host.innerHTML = rows.map(function (row) {
       const name = escapeCsvHtml(row.name);
       const nameAttr = encodeURIComponent(row.name || '');
       const canonical = 'https://shop.dicebastion.com/products/category/' + encodeURIComponent(row.name || '');
-      return `
-        <div class="item-card shop-cat-card" style="display:block;margin-bottom:0.75rem;">
-          <div class="admin-flex-between" style="margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
-            <h3 style="margin:0;">${name} <span class="admin-text-small">${Number(row.product_count) || 0} product${Number(row.product_count) === 1 ? '' : 's'}</span></h3>
-            <div class="admin-flex" style="gap:0.5rem;flex-wrap:wrap;">
-              <button type="button" class="btn-copy shop-cat-copy-url" data-name="${nameAttr}">Copy URL</button>
-              <button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="${nameAttr}">Save</button>
-            </div>
-          </div>
-          <p class="admin-text-small" style="margin:0 0 0.75rem;word-break:break-all;">${escapeCsvHtml(canonical)}</p>
-          <div class="admin-grid-3 admin-mb-1" style="align-items:end;">
-            <div>
-              <label class="form-label">Featured</label>
-              <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">
-                <input type="checkbox" class="shop-cat-featured" ${row.featured ? 'checked' : ''}>
-                <span class="admin-text-small">Pin front</span>
-              </label>
-            </div>
-            <div>
-              <label class="form-label">Order</label>
-              <input type="number" class="form-input shop-cat-order" min="0" max="9999" value="${Number(row.sort_order) || 0}">
-            </div>
-            <div>
-              <label class="form-label">Search keywords</label>
-              <input type="text" class="form-input shop-cat-keywords" value="${escapeCsvHtml(row.keywords || '')}" placeholder="e.g. mtg, magic">
-            </div>
-          </div>
-          <div class="admin-mb-1">
-            <label class="form-label">SEO title</label>
-            <input type="text" class="form-input shop-cat-seo-title" maxlength="120" value="${escapeCsvHtml(row.seo_title || '')}" placeholder="${name} | Dice Bastion Shop, Gibraltar">
-          </div>
-          <div class="admin-mb-1">
-            <label class="form-label">SEO description</label>
-            <textarea class="form-textarea shop-cat-seo-description" rows="2" maxlength="320" placeholder="Shown in Google and when this category is shared">${escapeCsvHtml(row.seo_description || '')}</textarea>
-          </div>
-          <div>
-            <label class="form-label">SEO image URL</label>
-            <input type="url" class="form-input shop-cat-seo-image" value="${escapeCsvHtml(row.seo_image || '')}" placeholder="Leave blank to use the first listed product">
-            <small class="admin-text-small">Overrides the default first-product preview image</small>
-          </div>
-        </div>
-      `;
+      const count = Number(row.product_count) || 0;
+      const plural = count === 1 ? '' : 's';
+      const featured = row.featured ? ' checked' : '';
+      const sortOrder = Number(row.sort_order) || 0;
+      return (
+        '<div class="item-card shop-cat-card" style="display:block;margin-bottom:0.75rem;">' +
+          '<div class="admin-flex-between" style="margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">' +
+            '<h3 style="margin:0;">' + name + ' <span class="admin-text-small">' + count + ' product' + plural + '</span></h3>' +
+            '<div class="admin-flex" style="gap:0.5rem;flex-wrap:wrap;">' +
+              '<button type="button" class="btn-copy shop-cat-copy-url" data-name="' + nameAttr + '">Copy URL</button>' +
+              '<button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="' + nameAttr + '">Save</button>' +
+            '</div>' +
+          '</div>' +
+          '<p class="admin-text-small" style="margin:0 0 0.75rem;word-break:break-all;">' + escapeCsvHtml(canonical) + '</p>' +
+          '<div class="admin-grid-3 admin-mb-1" style="align-items:end;">' +
+            '<div>' +
+              '<label class="form-label">Featured</label>' +
+              '<label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">' +
+                '<input type="checkbox" class="shop-cat-featured"' + featured + '>' +
+                '<span class="admin-text-small">Pin front</span>' +
+              '</label>' +
+            '</div>' +
+            '<div>' +
+              '<label class="form-label">Order</label>' +
+              '<input type="number" class="form-input shop-cat-order" min="0" max="9999" value="' + sortOrder + '">' +
+            '</div>' +
+            '<div>' +
+              '<label class="form-label">Search keywords</label>' +
+              '<input type="text" class="form-input shop-cat-keywords" value="' + escapeCsvHtml(row.keywords || '') + '" placeholder="e.g. mtg, magic">' +
+            '</div>' +
+          '</div>' +
+          '<div class="admin-mb-1">' +
+            '<label class="form-label">SEO title</label>' +
+            '<input type="text" class="form-input shop-cat-seo-title" maxlength="120" value="' + escapeCsvHtml(row.seo_title || '') + '" placeholder="Category | Dice Bastion Shop, Gibraltar">' +
+          '</div>' +
+          '<div class="admin-mb-1">' +
+            '<label class="form-label">SEO description</label>' +
+            '<textarea class="form-textarea shop-cat-seo-description" rows="2" maxlength="320" placeholder="Shown in Google and when this category is shared">' + escapeCsvHtml(row.seo_description || '') + '</textarea>' +
+          '</div>' +
+          '<div>' +
+            '<label class="form-label">SEO image URL</label>' +
+            '<input type="url" class="form-input shop-cat-seo-image" value="' + escapeCsvHtml(row.seo_image || '') + '" placeholder="Leave blank to use the first listed product">' +
+            '<small class="admin-text-small">Overrides the default first-product preview image</small>' +
+          '</div>' +
+        '</div>'
+      );
     }).join('');
   } catch (err) {
     console.error(err);
