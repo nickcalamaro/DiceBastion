@@ -34,7 +34,7 @@ Implemented in `shop/static/js/shopCartStorage.js`. Checkout creates `orders` / 
 Pages Function [`functions/_middleware.js`](functions/_middleware.js):
 
 - Social bots on `/?product=` get OG HTML (canonical points at `/products/:slug`).
-- Social bots on `/?category=` get OG HTML (canonical points at `/products/category/:name`). The preview image is the first product listed in that category (A–Z, same as the shop grid).
+- Social bots on `/?category=` get OG HTML (canonical points at `/products/category/:name`). Preview image is the category SEO image if set, otherwise the first product listed in that category (A–Z, same as the shop grid). Title and description can be edited on the main admin Products tab.
 - Homepage responses inject crawlable product/category links for Google (footer nav).
 - Humans always get the Hugo shop; product cards and `/products/:slug` open the modal via `/?product=`. Category chips and `/products/category/:name` filter the shop via `/?category=`.
 
@@ -232,8 +232,8 @@ curl https://dicebastion-memberships.ncalamaro.workers.dev/products
 - [ ] Reduce stock quantities
 
 ### Admin Dashboard
-- [ ] Create HTML admin interface
-- [ ] Product management UI
+- [x] Product and category management lives on the main site admin (`https://dicebastion.com/admin/`, Products tab)
+- [x] `shop.dicebastion.com/admin` redirects there
 - [ ] Order management
 - [ ] Inventory tracking
 - [ ] Sales reports

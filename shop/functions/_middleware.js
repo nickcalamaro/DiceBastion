@@ -211,6 +211,28 @@ function buildSeoCrawlNav(products) {
       </nav>`;
 }
 
+async function fetchCategoryMetaMap() {
+  const res = await fetch(`${API_BASE}/product-categories`, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'DiceBastion-shop-seo/1'
+    }
+  });
+  if (!res.ok) return new Map();
+  const data = await res.json();
+  const rows = Array.isArray(data.categories) ? data.categories : [];
+  const map = new Map();
+  for (const row of rows) {
+    const key = String(row.name || '').trim().toLowerCase();
+    if (key) map.set(key, row);
+  }
+  return map;
+}
+
+function defaultCategoryDescription(categoryName) {
+  return `Browse ${categoryName} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`;
+}
+
 async function fetchActiveProducts() {
   const res = await fetch(`${API_BASE}/products`, {
     headers: {
@@ -257,20 +279,28 @@ async function handleProductOg(request, next, slug) {
 
 async function handleCategoryOg(request, next, categoryName) {
   try {
-    const products = await fetchActiveProducts();
+    const [products, metaMap] = await Promise.all([
+      fetchActiveProducts(),
+      fetchCategoryMetaMap()
+    ]);
     const catProducts = products
       .filter((p) => productHasCategory(p, categoryName))
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en'));
     if (!catProducts.length) return next();
 
     const displayName = canonicalCategoryName(catProducts, categoryName);
+    const meta = metaMap.get(displayName.toLowerCase()) || {};
     const first = catProducts[0];
+    const title = String(meta.seo_title || '').trim() || `${displayName} | Dice Bastion Shop`;
+    const description =
+      String(meta.seo_description || '').trim() || defaultCategoryDescription(displayName);
+    const image = absoluteImageUrl(meta.seo_image) || productPrimaryImage(first);
     const shareUrl = `${SHOP_ORIGIN}/?category=${encodeURIComponent(displayName)}`;
     const canonicalUrl = `${SHOP_ORIGIN}/products/category/${encodeURIComponent(displayName)}`;
     const html = ogHtml({
-      name: `${displayName} | Dice Bastion Shop`,
-      description: `Browse ${displayName} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`,
-      image: productPrimaryImage(first),
+      name: title,
+      description,
+      image,
       canonicalUrl,
       shareUrl,
       type: 'website'

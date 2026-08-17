@@ -15,7 +15,7 @@ disableKinds = ["taxonomy", "term"]
 [markup.goldmark.renderer]
   unsafe = true
 
-# TDewolf's JS minifier sometimes fails on large inline `<script>` blocks (e.g. admin page),
+# TDewolf's JS minifier sometimes fails on large inline `<script>` blocks,
 # yielding spurious "unexpected EOF" during `hugo --minify`. Keep HTML/CSS minified; skip JS.
 [minify]
   disableJS = true

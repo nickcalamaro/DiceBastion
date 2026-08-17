@@ -390,11 +390,30 @@ function canonicalCategoryName(products, requestedName) {
   return String(requestedName || '').trim()
 }
 
+function defaultCategoryDescription(categoryName) {
+  return `Browse ${categoryName} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`
+}
+
 /** Share/Google preview: first listed product in that category (shop order is name A–Z). */
 function resolveCategoryPreviewImage(products, shopUrl) {
   const first = (products || [])[0]
   if (!first) return `${shopUrl}/img/og-image.png`
   return resolveProductPrimaryImage(first, shopUrl)
+}
+
+function resolveCategorySeo(categoryName, products, meta, shopUrl) {
+  const shop = shopUrl || 'https://shop.dicebastion.com'
+  const title = String(meta?.seo_title || '').trim() || `${categoryName} | Dice Bastion Shop, Gibraltar`
+  const description = String(meta?.seo_description || '').trim() || defaultCategoryDescription(categoryName)
+  const customImage = ensureAbsoluteImageUrl(meta?.seo_image, shop)
+  const image = customImage || resolveCategoryPreviewImage(products, shop)
+  return { title, description, image }
+}
+
+function clampSeoText(raw, maxLen) {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  return text.length > maxLen ? text.slice(0, maxLen).trim() : text
 }
 
 const SHOP_SEO_BOT_UA = /googlebot|google-inspectiontool|google-structured-data-testing-tool|google-read-aloud|storebot-google|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|discordbot|applebot|semrushbot|ahrefsbot|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt|anthropic|claude|crawler|spider|bot\/|crawl/
@@ -7981,21 +8000,23 @@ ${bodyHtml ? `<div class="desc">${bodyHtml}</div>` : `<div class="desc">${e(plai
 }
 
 // ---------- Product Category SEO Page ----------
-function generateCategorySeoPage(categoryName, products) {
+function generateCategorySeoPage(categoryName, products, seoMeta) {
   const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
   const shop = 'https://shop.dicebastion.com';
   const catDisplay = e(categoryName);
   const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
   const shopFilterUrl = `${shop}/?category=${encodeURIComponent(categoryName)}`;
-  const desc = `Browse ${catDisplay} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`;
-  const ogImage = resolveCategoryPreviewImage(products, shop);
+  const seo = resolveCategorySeo(categoryName, products, seoMeta, shop);
+  const title = e(seo.title);
+  const desc = seo.description;
+  const ogImage = seo.image;
   const firstProduct = products[0];
 
   // CollectionPage + ItemList schema
   const schema = {
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
-    'name': `${categoryName} | Dice Bastion Shop, Gibraltar`,
+    'name': seo.title,
     'description': desc,
     'url': url,
     'image': ogImage,
@@ -8037,13 +8058,13 @@ function generateCategorySeoPage(categoryName, products) {
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${catDisplay} | Dice Bastion Shop, Gibraltar</title>
+<title>${title}</title>
 <meta name="description" content="${descMeta}">
 <meta property="og:type" content="website"><meta property="og:url" content="${url}">
-<meta property="og:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar"><meta property="og:description" content="${descMeta}">
+<meta property="og:title" content="${title}"><meta property="og:description" content="${descMeta}">
 <meta property="og:site_name" content="Dice Bastion Shop">
 <meta property="og:image" content="${e(ogImage)}"><meta property="og:image:alt" content="${previewAlt}">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${catDisplay} | Dice Bastion Shop, Gibraltar">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}">
 <meta name="twitter:description" content="${descMeta}">
 <meta name="twitter:image" content="${e(ogImage)}"><meta name="twitter:image:alt" content="${previewAlt}">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
@@ -8228,6 +8249,8 @@ app.get('/products/category/:name', async c => {
     }
 
     const canonicalName = canonicalCategoryName(catProducts, categoryName)
+    const categoryList = await listProductCategoryMeta(c.env.DB)
+    const seoMeta = categoryList.find(row => String(row.name || '').toLowerCase() === canonicalName.toLowerCase()) || null
 
     // Bots get category page, humans get redirect to shop filtered by category
     const host = c.req.header('Host') || ''
@@ -8236,7 +8259,7 @@ app.get('/products/category/:name', async c => {
       const isBot = SHOP_SEO_BOT_UA.test(ua)
 
       if (isBot) {
-        const html = generateCategorySeoPage(canonicalName, catProducts)
+        const html = generateCategorySeoPage(canonicalName, catProducts, seoMeta)
         return new Response(html, {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=1800' }
@@ -8246,7 +8269,7 @@ app.get('/products/category/:name', async c => {
       return Response.redirect(`https://shop.dicebastion.com/?category=${encodeURIComponent(canonicalName)}`, 302)
     }
 
-    const html = generateCategorySeoPage(canonicalName, catProducts)
+    const html = generateCategorySeoPage(canonicalName, catProducts, seoMeta)
     return new Response(html, {
       status: 200,
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
@@ -8334,10 +8357,20 @@ async function ensureProductCategoriesSchema(db) {
       featured INTEGER NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL DEFAULT 0,
       keywords TEXT,
+      seo_title TEXT,
+      seo_description TEXT,
+      seo_image TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     )
   `).run()
+  for (const col of ['seo_title', 'seo_description', 'seo_image']) {
+    try {
+      await db.prepare(`ALTER TABLE product_categories ADD COLUMN ${col} TEXT`).run()
+    } catch (_) {
+      // Column already exists
+    }
+  }
 }
 
 function normalizeCategoryKeywords(raw) {
@@ -8377,7 +8410,7 @@ async function listProductCategoryMeta(db) {
   `).all()
   const counts = collectProductCategoryNames(products.results || [])
   const metaRows = await db.prepare(`
-    SELECT id, name, featured, sort_order, keywords, created_at, updated_at
+    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image, created_at, updated_at
     FROM product_categories
     ORDER BY featured DESC, sort_order ASC, name COLLATE NOCASE ASC
   `).all()
@@ -8395,6 +8428,9 @@ async function listProductCategoryMeta(db) {
       featured: meta ? !!Number(meta.featured) : false,
       sort_order: meta ? Number(meta.sort_order) || 0 : 0,
       keywords: meta?.keywords || '',
+      seo_title: meta?.seo_title || '',
+      seo_description: meta?.seo_description || '',
+      seo_image: meta?.seo_image || '',
       id: meta?.id || null
     }
   }).sort((a, b) => {
@@ -8412,12 +8448,15 @@ app.get('/product-categories', async (c) => {
   try {
     const categories = await listProductCategoryMeta(c.env.DB)
     return c.json({
-      categories: categories.map(({ name, featured, sort_order, keywords, product_count }) => ({
+      categories: categories.map(({ name, featured, sort_order, keywords, product_count, seo_title, seo_description, seo_image }) => ({
         name,
         featured,
         sort_order,
         keywords,
-        product_count
+        product_count,
+        seo_title,
+        seo_description,
+        seo_image
       }))
     })
   } catch (e) {
@@ -8447,17 +8486,26 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
     const featured = body.featured ? 1 : 0
     const sortOrder = Math.max(0, Math.min(9999, parseInt(body.sort_order, 10) || 0))
     const keywords = normalizeCategoryKeywords(body.keywords)
+    const seoTitle = clampSeoText(body.seo_title, 120) || null
+    const seoDescription = clampSeoText(body.seo_description, 320) || null
+    const seoImageRaw = String(body.seo_image || '').trim()
+    const seoImage = seoImageRaw
+      ? (ensureAbsoluteImageUrl(seoImageRaw, 'https://shop.dicebastion.com') || null)
+      : null
     const now = toIso(new Date())
 
     await c.env.DB.prepare(`
-      INSERT INTO product_categories (name, featured, sort_order, keywords, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO product_categories (name, featured, sort_order, keywords, seo_title, seo_description, seo_image, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(name) DO UPDATE SET
         featured = excluded.featured,
         sort_order = excluded.sort_order,
         keywords = excluded.keywords,
+        seo_title = excluded.seo_title,
+        seo_description = excluded.seo_description,
+        seo_image = excluded.seo_image,
         updated_at = excluded.updated_at
-    `).bind(name, featured, sortOrder, keywords || null, now, now).run()
+    `).bind(name, featured, sortOrder, keywords || null, seoTitle, seoDescription, seoImage, now, now).run()
 
     const categories = await listProductCategoryMeta(c.env.DB)
     return c.json({ success: true, categories })
