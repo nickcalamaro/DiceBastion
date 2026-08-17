@@ -9,6 +9,7 @@ showDate: false
 <script src="/js/utils.js"></script>
 <script src="/js/modal.js"></script>
 <script src="/js/productCsvImport.js"></script>
+<script src="/js/shopCategoryAdmin.js"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -4328,114 +4329,6 @@ document.getElementById('shop-categories-refresh-btn')?.addEventListener('click'
   loadShopCategories();
 });
 
-async function loadShopCategories() {
-  const host = document.getElementById('shop-categories-list');
-  if (!host || !sessionToken) return;
-  try {
-    const res = await fetch(`${API_BASE}/admin/product-categories`, {
-      headers: { 'X-Session-Token': sessionToken }
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      host.innerHTML = '<p class="admin-text-muted">Could not load categories (' + escapeCsvHtml(data.error || res.status) + '). Deploy the Worker if this is a new endpoint.</p>';
-      return;
-    }
-    const rows = data.categories || [];
-    if (!rows.length) {
-      host.innerHTML = '<p class="admin-text-muted">No product categories yet. Add categories on products first.</p>';
-      return;
-    }
-    host.innerHTML = rows.map(function (row) {
-      const name = escapeCsvHtml(row.name);
-      const nameAttr = encodeURIComponent(row.name || '');
-      const canonical = 'https://shop.dicebastion.com/products/category/' + encodeURIComponent(row.name || '');
-      const count = Number(row.product_count) || 0;
-      const plural = count === 1 ? '' : 's';
-      const featured = row.featured ? ' checked' : '';
-      const sortOrder = Number(row.sort_order) || 0;
-      return (
-        '<div class="item-card shop-cat-card" style="display:block;margin-bottom:0.75rem;">' +
-          '<div class="admin-flex-between" style="margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">' +
-            '<h3 style="margin:0;">' + name + ' <span class="admin-text-small">' + count + ' product' + plural + '</span></h3>' +
-            '<div class="admin-flex" style="gap:0.5rem;flex-wrap:wrap;">' +
-              '<button type="button" class="btn-copy shop-cat-copy-url" data-name="' + nameAttr + '">Copy URL</button>' +
-              '<button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="' + nameAttr + '">Save</button>' +
-            '</div>' +
-          '</div>' +
-          '<p class="admin-text-small" style="margin:0 0 0.75rem;word-break:break-all;">' + escapeCsvHtml(canonical) + '</p>' +
-          '<div class="admin-grid-3 admin-mb-1" style="align-items:end;">' +
-            '<div>' +
-              '<label class="form-label">Featured</label>' +
-              '<label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">' +
-                '<input type="checkbox" class="shop-cat-featured"' + featured + '>' +
-                '<span class="admin-text-small">Pin front</span>' +
-              '</label>' +
-            '</div>' +
-            '<div>' +
-              '<label class="form-label">Order</label>' +
-              '<input type="number" class="form-input shop-cat-order" min="0" max="9999" value="' + sortOrder + '">' +
-            '</div>' +
-            '<div>' +
-              '<label class="form-label">Search keywords</label>' +
-              '<input type="text" class="form-input shop-cat-keywords" value="' + escapeCsvHtml(row.keywords || '') + '" placeholder="e.g. mtg, magic">' +
-            '</div>' +
-          '</div>' +
-          '<div class="admin-mb-1">' +
-            '<label class="form-label">SEO title</label>' +
-            '<input type="text" class="form-input shop-cat-seo-title" maxlength="120" value="' + escapeCsvHtml(row.seo_title || '') + '" placeholder="Category | Dice Bastion Shop, Gibraltar">' +
-          '</div>' +
-          '<div class="admin-mb-1">' +
-            '<label class="form-label">SEO description</label>' +
-            '<textarea class="form-textarea shop-cat-seo-description" rows="2" maxlength="320" placeholder="Shown in Google and when this category is shared">' + escapeCsvHtml(row.seo_description || '') + '</textarea>' +
-          '</div>' +
-          '<div>' +
-            '<label class="form-label">SEO image URL</label>' +
-            '<input type="url" class="form-input shop-cat-seo-image" value="' + escapeCsvHtml(row.seo_image || '') + '" placeholder="Leave blank to use the first listed product">' +
-            '<small class="admin-text-small">Overrides the default first-product preview image</small>' +
-          '</div>' +
-        '</div>'
-      );
-    }).join('');
-  } catch (err) {
-    console.error(err);
-    host.innerHTML = '<p class="admin-text-muted">Could not load categories (network error).</p>';
-  }
-}
-
-document.getElementById('shop-categories-list')?.addEventListener('click', async (e) => {
-  const copyBtn = e.target.closest('.shop-cat-copy-url');
-  if (copyBtn) {
-    const name = decodeURIComponent(copyBtn.getAttribute('data-name') || '');
-    copyCategorySeoUrl(name, copyBtn);
-    return;
-  }
-  const btn = e.target.closest('.shop-cat-save');
-  if (!btn) return;
-  const card = btn.closest('.shop-cat-card');
-  if (!card) return;
-  const name = decodeURIComponent(btn.getAttribute('data-name') || '');
-  const featured = !!card.querySelector('.shop-cat-featured')?.checked;
-  const sort_order = parseInt(card.querySelector('.shop-cat-order')?.value, 10) || 0;
-  const keywords = card.querySelector('.shop-cat-keywords')?.value || '';
-  const seo_title = card.querySelector('.shop-cat-seo-title')?.value || '';
-  const seo_description = card.querySelector('.shop-cat-seo-description')?.value || '';
-  const seo_image = card.querySelector('.shop-cat-seo-image')?.value || '';
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${API_BASE}/admin/product-categories`, {
-      method: 'PUT',
-      headers: adminJsonHeaders(),
-      body: JSON.stringify({ name, featured, sort_order, keywords, seo_title, seo_description, seo_image })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    await loadShopCategories();
-  } catch (err) {
-    alert('Save failed: ' + String(err.message || err));
-    btn.disabled = false;
-  }
-});
-
 document.getElementById('csv-import-file')?.addEventListener('change', () => {
 
   csvImportRows = [];
@@ -6505,31 +6398,6 @@ function formatIndexingError(data) {
   return JSON.stringify(data);
 }
 
-async function copyProductSeoUrl(slug, btn) {
-  if (!slug) return;
-  await copyUrlToClipboard('https://shop.dicebastion.com/products/' + encodeURIComponent(slug), btn);
-}
-
-async function copyCategorySeoUrl(name, btn) {
-  if (!name) return;
-  await copyUrlToClipboard('https://shop.dicebastion.com/products/category/' + encodeURIComponent(name), btn);
-}
-
-async function copyUrlToClipboard(url, btn) {
-  const orig = btn ? btn.textContent : 'Copy URL';
-  try {
-    if (!navigator.clipboard || !navigator.clipboard.writeText) {
-      throw new Error('clipboard unavailable');
-    }
-    await navigator.clipboard.writeText(url);
-    if (btn) {
-      btn.textContent = 'Copied';
-      setTimeout(function () { btn.textContent = orig; }, 1600);
-    }
-  } catch (err) {
-    window.prompt('Copy this URL for Google Search Console', url);
-  }
-}
 
 document.getElementById('products-list')?.addEventListener('click', (e) => {
   const btn = e.target.closest('.btn-copy');
