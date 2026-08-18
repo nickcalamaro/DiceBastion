@@ -482,10 +482,18 @@ Cleanup hard-deletes products from a batch that were never ordered. Products tha
 <p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
 Feature a category to pin it on the shop. Keywords help shop search. SEO fields control Google and share previews; leave them blank to use defaults.
 </p>
-<div class="admin-flex admin-mb-1" style="justify-content:flex-end;">
+<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
+<div>
+<label class="form-label" for="shop-category-select">Category</label>
+<select id="shop-category-select" class="form-select">
+<option value="">Loading categories…</option>
+</select>
+</div>
+<div>
 <button type="button" id="shop-categories-refresh-btn" class="btn btn-secondary">Refresh</button>
 </div>
-<div id="shop-categories-list"><p class="admin-text-muted" style="margin:0;">Loading categories…</p></div>
+</div>
+<div id="shop-categories-editor"><p class="admin-text-muted" style="margin:0;">Select a category to edit featured order, search keywords, and SEO.</p></div>
 </div>
 
 <div class="card card-compact">
@@ -4342,100 +4350,163 @@ document.getElementById('product-imports-list')?.addEventListener('click', (e) =
   );
 });
 
-async function loadShopCategories() {
-  const host = document.getElementById('shop-categories-list');
-  if (!host || !sessionToken) return;
-  host.innerHTML = '<p class="admin-text-muted">Loading categories…</p>';
+let shopCategoryRows = [];
+
+function getShopCategoryUrl(name) {
+  return `https://shop.dicebastion.com/products/category/${encodeURIComponent(name || '')}`;
+}
+
+function renderShopCategoryEditor(selectedName) {
+  const editor = document.getElementById('shop-categories-editor');
+  if (!editor) return;
+  const row = shopCategoryRows.find((item) => item.name === selectedName);
+  if (!row) {
+    editor.innerHTML = '<p class="admin-text-muted" style="margin:0;">Select a category to edit featured order, search keywords, and SEO.</p>';
+    return;
+  }
+
+  const name = escapeCsvHtml(row.name);
+  const nameAttr = name.replace(/'/g, '&#39;');
+  const canonicalUrl = getShopCategoryUrl(row.name);
+
+  editor.innerHTML = `
+    <div class="card card-compact" style="border:1px solid rgb(var(--color-neutral-200));">
+      <div class="admin-flex admin-mb-1" style="justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+        <div>
+          <h3 class="admin-section-heading admin-mt-0" style="margin-bottom:0.25rem;">${name}</h3>
+          <p class="admin-text-muted" style="margin:0;">${Number(row.product_count) || 0} products in this category.</p>
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button type="button" class="btn-copy shop-cat-copy-url" data-url="${escapeCsvHtml(canonicalUrl).replace(/'/g, '&#39;')}">Copy URL</button>
+          <button type="button" class="btn-index" onclick="requestIndexing('category', '${nameAttr}', this)">Index</button>
+        </div>
+      </div>
+      <div class="admin-grid-2">
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:0.5rem;cursor:pointer;">
+            <input type="checkbox" id="shop-cat-featured" ${row.featured ? 'checked' : ''}>
+            <span class="admin-text-small">Pin on the shop category chips</span>
+          </label>
+        </div>
+        <div>
+          <label class="form-label" for="shop-cat-order">Featured order</label>
+          <input type="number" id="shop-cat-order" class="form-input" min="0" max="9999" value="${Number(row.sort_order) || 0}">
+        </div>
+      </div>
+      <div class="admin-mt-1">
+        <label class="form-label" for="shop-cat-keywords">Search keywords</label>
+        <input type="text" id="shop-cat-keywords" class="form-input" value="${escapeCsvHtml(row.keywords || '')}" placeholder="e.g. mtg, magic">
+      </div>
+      <div class="admin-mt-1">
+        <label class="form-label" for="shop-cat-seo-title">SEO title</label>
+        <input type="text" id="shop-cat-seo-title" class="form-input" value="${escapeCsvHtml(row.seo_title || '')}" maxlength="120" placeholder="Leave blank to use the category name">
+      </div>
+      <div class="admin-mt-1">
+        <label class="form-label" for="shop-cat-seo-description">SEO description</label>
+        <textarea id="shop-cat-seo-description" class="form-textarea" rows="3" maxlength="320" placeholder="Leave blank to use the default category description">${escapeCsvHtml(row.seo_description || '')}</textarea>
+      </div>
+      <div class="admin-mt-1">
+        <label class="form-label" for="shop-cat-seo-image">SEO image URL</label>
+        <input type="url" id="shop-cat-seo-image" class="form-input" value="${escapeCsvHtml(row.seo_image || '')}" placeholder="Optional override for social sharing image">
+      </div>
+      <div class="admin-flex admin-mt-1" style="justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <p class="admin-text-muted" style="margin:0;">Canonical URL: <code>${escapeCsvHtml(canonicalUrl)}</code></p>
+        <button type="button" class="btn btn-primary shop-cat-save" data-name="${nameAttr}">Save category</button>
+      </div>
+    </div>
+  `;
+}
+
+async function loadShopCategories(preferredName) {
+  const select = document.getElementById('shop-category-select');
+  const editor = document.getElementById('shop-categories-editor');
+  if (!select || !editor || !sessionToken) return;
+
+  const currentValue = preferredName !== undefined ? preferredName : (select.value || '');
+  select.disabled = true;
+  select.innerHTML = '<option value="">Loading categories…</option>';
+  editor.innerHTML = '<p class="admin-text-muted" style="margin:0;">Loading categories…</p>';
+
   try {
     const res = await fetch(`${API_BASE}/admin/product-categories`, {
       headers: { 'X-Session-Token': sessionToken }
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      host.innerHTML = `<p class="admin-text-muted">Could not load categories (${escapeCsvHtml(data.error || res.status)}). Deploy the Worker if this is a new endpoint.</p>`;
+      select.innerHTML = '<option value="">Could not load categories</option>';
+      editor.innerHTML = `<p class="admin-text-muted" style="margin:0;">Could not load categories (${escapeCsvHtml(data.error || res.status)}). Deploy the Worker if this is a new endpoint.</p>`;
       return;
     }
-    const rows = data.categories || [];
-    if (!rows.length) {
-      host.innerHTML = '<p class="admin-text-muted">No product categories yet. Add categories on products first.</p>';
+
+    shopCategoryRows = Array.isArray(data.categories) ? data.categories : [];
+    if (!shopCategoryRows.length) {
+      select.innerHTML = '<option value="">No categories yet</option>';
+      editor.innerHTML = '<p class="admin-text-muted" style="margin:0;">No product categories yet. Add categories on products first.</p>';
       return;
     }
-    host.innerHTML = `
-      <div class="table-wrapper">
-        <div style="overflow-x: auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th>Products</th>
-                <th>Featured</th>
-                <th>Order</th>
-                <th>Search keywords</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(row => {
-                const name = escapeCsvHtml(row.name);
-                const nameAttr = escapeCsvHtml(row.name).replace(/'/g, '&#39;');
-                return `
-                  <tr data-category-name="${name}">
-                    <td><strong>${name}</strong></td>
-                    <td>${Number(row.product_count) || 0}</td>
-                    <td>
-                      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">
-                        <input type="checkbox" class="shop-cat-featured" ${row.featured ? 'checked' : ''}>
-                        <span class="admin-text-small">Pin front</span>
-                      </label>
-                    </td>
-                    <td>
-                      <input type="number" class="form-input shop-cat-order" min="0" max="9999" value="${Number(row.sort_order) || 0}" style="width:5rem;padding:0.4rem 0.5rem;">
-                    </td>
-                    <td>
-                      <input type="text" class="form-input shop-cat-keywords" value="${escapeCsvHtml(row.keywords || '')}" placeholder="e.g. mtg, magic" style="min-width:12rem;">
-                    </td>
-                    <td>
-                      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-                        <button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="${nameAttr}">Save</button>
-                        <button type="button" class="btn-index" onclick="requestIndexing('category', '${nameAttr}', this)">Index</button>
-                      </div>
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
+
+    select.innerHTML = [
+      '<option value="">Select a category</option>',
+      ...shopCategoryRows.map((row) => `<option value="${escapeCsvHtml(row.name).replace(/"/g, '&quot;')}">${escapeCsvHtml(row.name)} (${Number(row.product_count) || 0})</option>`)
+    ].join('');
+
+    const nextValue = shopCategoryRows.some((row) => row.name === currentValue) ? currentValue : '';
+    select.value = nextValue;
+    renderShopCategoryEditor(nextValue);
   } catch (err) {
     console.error(err);
-    host.innerHTML = '<p class="admin-text-muted">Could not load categories (network error).</p>';
+    select.innerHTML = '<option value="">Could not load categories</option>';
+    editor.innerHTML = '<p class="admin-text-muted" style="margin:0;">Could not load categories (network error).</p>';
+  } finally {
+    select.disabled = false;
   }
 }
 
-document.getElementById('shop-categories-list')?.addEventListener('click', async (e) => {
-  const btn = e.target.closest('.shop-cat-save');
-  if (!btn) return;
-  const row = btn.closest('tr');
-  if (!row) return;
-  const name = btn.getAttribute('data-name');
-  const featured = !!row.querySelector('.shop-cat-featured')?.checked;
-  const sort_order = parseInt(row.querySelector('.shop-cat-order')?.value, 10) || 0;
-  const keywords = row.querySelector('.shop-cat-keywords')?.value || '';
-  btn.disabled = true;
+document.getElementById('shop-category-select')?.addEventListener('change', (e) => {
+  renderShopCategoryEditor(e.target.value || '');
+});
+
+document.getElementById('shop-categories-editor')?.addEventListener('click', async (e) => {
+  const copyBtn = e.target.closest('.shop-cat-copy-url');
+  if (copyBtn) {
+    const url = copyBtn.getAttribute('data-url') || '';
+    try {
+      await navigator.clipboard.writeText(url);
+      const original = copyBtn.textContent;
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => {
+        copyBtn.textContent = original;
+      }, 2000);
+    } catch (err) {
+      alert('Copy failed: ' + String(err.message || err));
+    }
+    return;
+  }
+
+  const saveBtn = e.target.closest('.shop-cat-save');
+  if (!saveBtn) return;
+
+  const name = saveBtn.getAttribute('data-name');
+  const featured = !!document.getElementById('shop-cat-featured')?.checked;
+  const sort_order = parseInt(document.getElementById('shop-cat-order')?.value, 10) || 0;
+  const keywords = document.getElementById('shop-cat-keywords')?.value || '';
+  const seo_title = document.getElementById('shop-cat-seo-title')?.value || '';
+  const seo_description = document.getElementById('shop-cat-seo-description')?.value || '';
+  const seo_image = document.getElementById('shop-cat-seo-image')?.value || '';
+
+  saveBtn.disabled = true;
   try {
     const res = await fetch(`${API_BASE}/admin/product-categories`, {
       method: 'PUT',
       headers: adminJsonHeaders(),
-      body: JSON.stringify({ name, featured, sort_order, keywords })
+      body: JSON.stringify({ name, featured, sort_order, keywords, seo_title, seo_description, seo_image })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || res.statusText);
-    await loadShopCategories();
+    await loadShopCategories(name);
   } catch (err) {
     alert('Save failed: ' + String(err.message || err));
-    btn.disabled = false;
+    saveBtn.disabled = false;
   }
 });
 
