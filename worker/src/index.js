@@ -251,6 +251,31 @@ const SEO_SITEMAP_URLS = {
   shopProductImages: 'https://shop.dicebastion.com/products/sitemap-images.xml'
 }
 
+function getShopProductUrl(slug) {
+  const value = String(slug || '').trim()
+  return value ? `https://shop.dicebastion.com/products/${encodeURIComponent(value)}` : ''
+}
+
+function parseProductCategories(categoryValue) {
+  return [...new Set(
+    String(categoryValue || '')
+      .split(',')
+      .map(c => c.trim())
+      .filter(Boolean)
+  )]
+}
+
+function getShopCategoryUrl(categoryName) {
+  const value = String(categoryName || '').trim()
+  return value ? `https://shop.dicebastion.com/products/category/${encodeURIComponent(value)}` : ''
+}
+
+function getShopCategoryUrls(categoryValue) {
+  return parseProductCategories(categoryValue)
+    .map(getShopCategoryUrl)
+    .filter(Boolean)
+}
+
 /** Prefer HTTPS and absolute URLs for crawlers (Google Images, Open Graph). */
 function ensureAbsoluteImageUrl(url, baseUrl) {
   const trimmed = String(url || '').trim()
@@ -8674,6 +8699,13 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
         updated_at = excluded.updated_at
     `).bind(name, featured, sortOrder, keywords || null, seoTitle, seoDescription, seoImage, now, now).run()
 
+    const categoryUrl = getShopCategoryUrl(name)
+    if (categoryUrl) {
+      notifyContentSeoAsync(c.executionCtx, c.env, {
+        urls: [categoryUrl],
+        indexingUrl: categoryUrl
+      })
+    }
     scheduleCategoryCanonicalize(c)
     const categories = await listProductCategoryMeta(c.env.DB)
     return c.json({ success: true, categories })
@@ -8841,9 +8873,10 @@ app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
       const toDelete = stats.products.filter(p => unsoldIds.includes(Number(p.id)))
       for (const p of toDelete) {
         if (p.slug) {
-          const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`
+          const productUrl = getShopProductUrl(p.slug)
+          const categoryUrls = getShopCategoryUrls(p.category)
           notifyContentSeoAsync(c.executionCtx, c.env, {
-            urls: [productUrl],
+            urls: [productUrl, ...categoryUrls],
             indexingUrl: productUrl,
             indexingType: 'URL_DELETED'
           })
@@ -8939,8 +8972,9 @@ app.post('/admin/products', requireAdmin, async (c) => {
     }
 
     if (slug) {
-      const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`
-      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl })
+      const productUrl = getShopProductUrl(slug)
+      const categoryUrls = getShopCategoryUrls(category)
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl, ...categoryUrls], indexingUrl: productUrl })
     }
     scheduleCategoryCanonicalize(c)
 
@@ -8959,6 +8993,8 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
   try {
     const id = c.req.param('id')
     const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date } = await c.req.json()
+    const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url FROM products WHERE id = ?')
+      .bind(id).first()
     
     const updates = []
     const binds = []
@@ -8979,8 +9015,7 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     // Handle image update - delete old image if new one provided and different
     if (image_url !== undefined) {
       // Get current product to find old image
-      const currentProduct = await c.env.DB.prepare('SELECT image_url FROM products WHERE id = ?')
-        .bind(id).first()
+      const currentProduct = previousProduct
       
       if (currentProduct && currentProduct.image_url && currentProduct.image_url !== image_url) {
         const oldKey = extractImageKey(currentProduct.image_url)
@@ -9007,10 +9042,14 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
       UPDATE products SET ${updates.join(', ')} WHERE id = ?
     `).bind(...binds).run()
 
-    const productSlug = slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
+    const productSlug = slug || previousProduct?.slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
     if (productSlug) {
-      const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(productSlug)}`
-      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl })
+      const productUrl = getShopProductUrl(productSlug)
+      const categoryUrls = [...new Set([
+        ...getShopCategoryUrls(previousProduct?.category),
+        ...getShopCategoryUrls(category !== undefined ? category : previousProduct?.category)
+      ])]
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl, ...categoryUrls], indexingUrl: productUrl })
     }
     scheduleCategoryCanonicalize(c)
 
@@ -9027,7 +9066,7 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
     const id = c.req.param('id')
     
     // Get product to find image
-    const product = await c.env.DB.prepare('SELECT image_url, slug FROM products WHERE id = ?')
+    const product = await c.env.DB.prepare('SELECT image_url, slug, category FROM products WHERE id = ?')
       .bind(id).first()
     
     // Delete image from R2
@@ -9047,8 +9086,9 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
       .run()
 
     if (product?.slug) {
-      const productUrl = `https://shop.dicebastion.com/products/${encodeURIComponent(product.slug)}`
-      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl], indexingUrl: productUrl, indexingType: 'URL_DELETED' })
+      const productUrl = getShopProductUrl(product.slug)
+      const categoryUrls = getShopCategoryUrls(product.category)
+      notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl, ...categoryUrls], indexingUrl: productUrl, indexingType: 'URL_DELETED' })
     }
     
     return c.json({ success: true })
@@ -10262,6 +10302,9 @@ async function processSeoFreshness(env) {
   let prodProcessed = 0
   let prodSucceeded = 0
   let prodFailed = 0
+  let catProcessed = 0
+  let catSucceeded = 0
+  let catFailed = 0
 
   try {
     const dayOfWeek = new Date().getUTCDay()
@@ -10308,22 +10351,43 @@ async function processSeoFreshness(env) {
       products = (results || []).slice(0, shopBudget)
       console.log(`[SEO] Shop products to notify: ${products.length} (budget ${shopBudget})`)
     }
-    const productUrls = products.map(p => `https://shop.dicebastion.com/products/${encodeURIComponent(p.slug)}`)
+    const productUrls = products.map(p => getShopProductUrl(p.slug)).filter(Boolean)
     prodProcessed = products.length
+
+    const categoryBudget = Math.max(0, shopBudget - products.length)
+    let categoryNames = []
+    if (categoryBudget > 0) {
+      const since = dayOfWeek === 0 ? null : "AND updated_at >= datetime('now', '-48 hours')"
+      const { results } = await env.DB.prepare(`
+        SELECT category FROM products
+        WHERE is_active = 1
+          AND COALESCE(show_in_shop, 1) = 1
+          ${since || ''}
+        ORDER BY updated_at DESC
+      `).all()
+      categoryNames = [...new Set(
+        (results || []).flatMap(row => parseProductCategories(row.category))
+      )].slice(0, categoryBudget)
+      console.log(`[SEO] Shop categories to notify: ${categoryNames.length} (budget ${categoryBudget})`)
+    }
+    const categoryUrls = categoryNames.map(getShopCategoryUrl).filter(Boolean)
+    catProcessed = categoryUrls.length
 
     // 1. IndexNow — real-time push to Bing/Yandex/Seznam/Naver (replaces the
     //    deprecated Google sitemap-ping endpoint, which now 404s and does nothing).
     //    Google itself discovers via the accurate-lastmod sitemaps + Search Console.
     const indexNowEvents = eventUrls.length ? await submitToIndexNow(env, eventUrls) : { ok: true, results: [] }
     const indexNowProducts = productUrls.length ? await submitToIndexNow(env, productUrls) : { ok: true, results: [] }
+    const indexNowCategories = categoryUrls.length ? await submitToIndexNow(env, categoryUrls) : { ok: true, results: [] }
     if (indexNowEvents.ok) succeeded = eventBatch.length; else failed = eventBatch.length
     if (indexNowProducts.ok) prodSucceeded = products.length; else prodFailed = products.length
+    if (indexNowCategories.ok) catSucceeded = categoryUrls.length; else catFailed = categoryUrls.length
 
     // 2. Google Indexing API (best-effort only — officially supports JobPosting /
     //    BroadcastEvent, so Google may ignore these; we still attempt it when configured).
     let googleAttempted = 0
     if (env.GOOGLE_SA_KEY) {
-      for (const url of [...eventUrls, ...productUrls]) {
+      for (const url of [...eventUrls, ...productUrls, ...categoryUrls]) {
         try {
           await notifyGoogleIndexing(env, url, 'URL_UPDATED')
           googleAttempted++
@@ -10333,9 +10397,9 @@ async function processSeoFreshness(env) {
       }
     }
 
-    const totalProcessed = processed + prodProcessed
-    const totalSucceeded = succeeded + prodSucceeded
-    const totalFailed = failed + prodFailed
+    const totalProcessed = processed + prodProcessed + catProcessed
+    const totalSucceeded = succeeded + prodSucceeded + catSucceeded
+    const totalFailed = failed + prodFailed + catFailed
 
     await logCronJob(env.DB, jobName, totalFailed === 0 ? 'completed' : 'partial', {
       started_at: startedAt,
@@ -10347,6 +10411,7 @@ async function processSeoFreshness(env) {
         mechanism: 'indexnow_primary',
         events: { processed, indexnow_ok: indexNowEvents.ok },
         products: { processed: prodProcessed, indexnow_ok: indexNowProducts.ok },
+        categories: { processed: catProcessed, indexnow_ok: indexNowCategories.ok },
         google_indexing_attempts: googleAttempted
       }
     })
@@ -10354,9 +10419,9 @@ async function processSeoFreshness(env) {
     console.error(`[CRON] ${jobName} FAILED:`, err)
     await logCronJob(env.DB, jobName, 'failed', {
       started_at: startedAt,
-      records_processed: processed + prodProcessed,
-      records_succeeded: succeeded + prodSucceeded,
-      records_failed: failed + prodFailed,
+      records_processed: processed + prodProcessed + catProcessed,
+      records_succeeded: succeeded + prodSucceeded + catSucceeded,
+      records_failed: failed + prodFailed + catFailed,
       error_message: err.message
     })
     throw err
