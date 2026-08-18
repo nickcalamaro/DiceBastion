@@ -482,18 +482,10 @@ Cleanup hard-deletes products from a batch that were never ordered. Products tha
 <p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
 Feature a category to pin it on the shop. Keywords help shop search. SEO fields control Google and share previews; leave them blank to use defaults.
 </p>
-<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
-<div>
-<label class="form-label" for="shop-category-select">Category</label>
-<select id="shop-category-select" class="form-select">
-<option value="">Select a category</option>
-</select>
-</div>
-<div>
+<div class="admin-flex admin-mb-1" style="justify-content:flex-end;">
 <button type="button" id="shop-categories-refresh-btn" class="btn btn-secondary">Refresh</button>
 </div>
-</div>
-<div id="shop-categories-editor"><p class="admin-text-muted" style="margin:0;">Select a category to edit featured order, search keywords, and SEO.</p></div>
+<div id="shop-categories-list"><p class="admin-text-muted" style="margin:0;">Loading categories…</p></div>
 </div>
 
 <div class="card card-compact">
@@ -4353,6 +4345,7 @@ document.getElementById('product-imports-list')?.addEventListener('click', (e) =
 async function loadShopCategories() {
   const host = document.getElementById('shop-categories-list');
   if (!host || !sessionToken) return;
+  host.innerHTML = '<p class="admin-text-muted">Loading categories…</p>';
   try {
     const res = await fetch(`${API_BASE}/admin/product-categories`, {
       headers: { 'X-Session-Token': sessionToken }
@@ -4404,7 +4397,7 @@ async function loadShopCategories() {
                     <td>
                       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                         <button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="${nameAttr}">Save</button>
-                        <button type="button" class="btn-index" onclick="requestIndexing('category', '${nameAttr}', this)">📡 Index</button>
+                        <button type="button" class="btn-index" onclick="requestIndexing('category', '${nameAttr}', this)">Index</button>
                       </div>
                     </td>
                   </tr>

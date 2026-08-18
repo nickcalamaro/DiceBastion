@@ -276,6 +276,19 @@ function getShopCategoryUrls(categoryValue) {
     .filter(Boolean)
 }
 
+const PRODUCT_CATEGORY_META_CACHE_TTL_MS = 30 * 1000
+let productCategoryMetaCache = {
+  expiresAt: 0,
+  value: null
+}
+
+function invalidateProductCategoryMetaCache() {
+  productCategoryMetaCache = {
+    expiresAt: 0,
+    value: null
+  }
+}
+
 /** Prefer HTTPS and absolute URLs for crawlers (Google Images, Open Graph). */
 function ensureAbsoluteImageUrl(url, baseUrl) {
   const trimmed = String(url || '').trim()
@@ -8550,6 +8563,7 @@ async function canonicalizeStoredProductCategories(db) {
     }
   }
   await runDbBatch(db, metaStmts)
+  invalidateProductCategoryMetaCache()
 }
 
 let categoryCanonicalizePromise = null
@@ -8580,6 +8594,9 @@ function collectProductCategoryNames(productRows) {
 }
 
 async function listProductCategoryMeta(db) {
+  if (productCategoryMetaCache.value && productCategoryMetaCache.expiresAt > Date.now()) {
+    return productCategoryMetaCache.value
+  }
   await ensureProductCategoriesSchema(db)
   const products = await db.prepare(`
     SELECT category FROM products
@@ -8625,6 +8642,10 @@ async function listProductCategoryMeta(db) {
     return a.name.localeCompare(b.name)
   })
 
+  productCategoryMetaCache = {
+    expiresAt: Date.now() + PRODUCT_CATEGORY_META_CACHE_TTL_MS,
+    value: categories
+  }
   return categories
 }
 
@@ -8678,6 +8699,7 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
       ? (ensureAbsoluteImageUrl(seoImageRaw, 'https://shop.dicebastion.com') || null)
       : null
     const now = toIso(new Date())
+    invalidateProductCategoryMetaCache()
 
     const existingMeta = await c.env.DB.prepare('SELECT id, name FROM product_categories').all()
     for (const row of existingMeta.results || []) {
@@ -8976,6 +8998,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
       const categoryUrls = getShopCategoryUrls(category)
       notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl, ...categoryUrls], indexingUrl: productUrl })
     }
+    invalidateProductCategoryMetaCache()
     scheduleCategoryCanonicalize(c)
 
     return c.json({ success: true, product_id: result.meta.last_row_id })
@@ -9051,6 +9074,7 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
       ])]
       notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl, ...categoryUrls], indexingUrl: productUrl })
     }
+    invalidateProductCategoryMetaCache()
     scheduleCategoryCanonicalize(c)
 
     return c.json({ success: true })
@@ -9090,6 +9114,7 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
       const categoryUrls = getShopCategoryUrls(product.category)
       notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl, ...categoryUrls], indexingUrl: productUrl, indexingType: 'URL_DELETED' })
     }
+    invalidateProductCategoryMetaCache()
     
     return c.json({ success: true })
   } catch (e) {
