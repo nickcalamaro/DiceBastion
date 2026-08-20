@@ -3,16 +3,65 @@
   {
     "@context": "https://schema.org",
     "@type": "WebSite",
-    "@id": "{{ (site.GetPage "/").Permalink | safeURL }}",
+    "@id": "{{ (site.GetPage "/").Permalink | safeURL }}#website",
     "name": "{{ .Site.Title | safeJS }}",
-    {{ with .Site.Params.description }}"description": "{{ . | safeJS }}",{{ end }}
+    "description": "Gibraltar board games, Magic: The Gathering and other TCGs, RPGs and tabletop events at Dice Bastion in Casemates Vaults.",
     {{ with .Site.LanguageCode }}"inLanguage": "{{ . }}",{{ end }}
     "url": "{{ (site.GetPage "/").Permalink | safeURL }}",
-    {{ with .Site.Params.keywords }}"keywords": {{ . }},{{ end }}
-    "publisher" : {
-      "@type": "Person",
-      "name": "{{ .Site.Params.Author.name | safeJS }}"
+    "publisher": {
+      "@id": "{{ (site.GetPage "/").Permalink | safeURL }}#organization"
     }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "HobbyShop",
+    "@id": "{{ (site.GetPage "/").Permalink | safeURL }}#organization",
+    "name": "Dice Bastion",
+    "alternateName": "Gibraltar Dice Bastion",
+    "description": "Gibraltar hub for board games, trading card games (MTG, Pokemon and more), wargames and RPGs. Public Friday nights, member access on other days, shop and board game library at Casemates Vaults.",
+    "url": "{{ (site.GetPage "/").Permalink | safeURL }}",
+    "image": "{{ "img/DB_Logo_2025.png" | absURL }}",
+    "logo": "{{ "img/DB_Logo_2025.png" | absURL }}",
+    "email": "contact@dicebastion.com",
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": "Unit 23a Casemates Vaults, Casemates Square",
+      "addressLocality": "Gibraltar",
+      "postalCode": "GX11 1AA",
+      "addressCountry": "GI"
+    },
+    "geo": {
+      "@type": "GeoCoordinates",
+      "latitude": 36.1455,
+      "longitude": -5.3536
+    },
+    "areaServed": {
+      "@type": "Country",
+      "name": "Gibraltar"
+    },
+    "openingHoursSpecification": [
+      {
+        "@type": "OpeningHoursSpecification",
+        "dayOfWeek": "Friday",
+        "opens": "18:00",
+        "closes": "23:59",
+        "description": "Open to the public"
+      },
+      {
+        "@type": "OpeningHoursSpecification",
+        "dayOfWeek": ["Monday", "Wednesday", "Friday", "Saturday", "Sunday"],
+        "opens": "10:00",
+        "closes": "22:00",
+        "description": "Member access"
+      }
+    ],
+    "sameAs": [
+      "https://www.facebook.com/profile.php?id=61582095542976",
+      "https://www.instagram.com/dicebastion/",
+      "https://shop.dicebastion.com"
+    ]
   }
   </script>
 {{ else if .IsPage }}
@@ -29,7 +78,7 @@
     {{ with .Site.LanguageCode }}"inLanguage": "{{ . }}",{{ end }}
     "url" : "{{ .Permalink }}",
     "author" : {
-      "@type": "Person",
+      "@type": "Organization",
       "name": "{{ .Site.Params.Author.name | safeJS }}"
     },
     {{ with .PublishDate }}"copyrightYear": "{{ .Format "2006" }}",{{ end }}

@@ -61,8 +61,29 @@ weight = 3
 [main.params]
 visibility = 3
 
+[[main]]
+name = "TCGs"
+pageRef = "tcgs"
+parent = "GJSJUISJ"
+weight = 4
+[main.params]
+visibility = 3
 
+[[main]]
+name = "Magic the Gathering"
+pageRef = "magic-the-gathering"
+parent = "GJSJUISJ"
+weight = 5
+[main.params]
+visibility = 3
 
+[[main]]
+name = "Riftbound"
+pageRef = "riftbound"
+parent = "GJSJUISJ"
+weight = 6
+[main.params]
+visibility = 3
 
 [[main]]
 name = "FAQs"
