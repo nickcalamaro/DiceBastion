@@ -451,6 +451,15 @@ function productBelongsToCategory(product, categoryName) {
   return parseProductCategoryNames(product.category).some((c) => c.toLowerCase() === wanted)
 }
 
+/** Walk-in /drinks menu items — keep purchasable via /drinks, hide from shop.dicebastion.com */
+function isDrinksCategoryName(categoryName) {
+  return categoryMatchKey(categoryName) === 'drinks'
+}
+
+function isDrinksProduct(product) {
+  return productBelongsToCategory(product, 'Drinks')
+}
+
 function canonicalCategoryName(products, requestedName) {
   const wanted = categoryMatchKey(requestedName)
   for (const product of products || []) {
@@ -8203,11 +8212,13 @@ app.get('/products/sitemap.xml', async c => {
     `).all()
 
     const shop = 'https://shop.dicebastion.com'
+    const shopProducts = (results || []).filter((p) => !isDrinksProduct(p))
 
     // Collect unique categories + newest product update per category for lastmod
     const categoryLastMod = new Map()
-    ;(results || []).forEach(p => {
+    shopProducts.forEach(p => {
       parseProductCategoryNames(p.category).forEach(c => {
+        if (isDrinksCategoryName(c)) return
         const prev = categoryLastMod.get(c)
         if (!prev || String(p.updated_at || '') > String(prev)) {
           categoryLastMod.set(c, p.updated_at)
@@ -8220,7 +8231,7 @@ app.get('/products/sitemap.xml', async c => {
 <url><loc>${shop}</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`
 
     // Product pages
-    for (const p of (results || [])) {
+    for (const p of shopProducts) {
       const lastmod = formatProductSitemapLastMod(p.updated_at)
       xml += `\n<url><loc>${shop}/products/${encodeURIComponent(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.8</priority></url>`
     }
@@ -8258,15 +8269,18 @@ app.get('/products/sitemap-images.xml', async c => {
       ORDER BY name ASC
     `).all()
 
-    const entries = (results || []).map((product) => ({
+    const shopProducts = (results || []).filter((p) => !isDrinksProduct(p))
+
+    const entries = shopProducts.map((product) => ({
       pageUrl: `${shop}/products/${encodeURIComponent(product.slug)}`,
       title: product.name || product.slug,
       images: collectProductImageUrls(product, shop)
     }))
 
     const firstByCategory = new Map()
-    for (const product of results || []) {
+    for (const product of shopProducts) {
       for (const cat of parseProductCategoryNames(product.category)) {
+        if (isDrinksCategoryName(cat)) continue
         if (!firstByCategory.has(cat)) firstByCategory.set(cat, product)
       }
     }
@@ -8302,6 +8316,11 @@ app.get('/products/category/:name', async c => {
     let categoryName = c.req.param('name') || ''
     try { categoryName = decodeURIComponent(categoryName) } catch (_) { /* already decoded */ }
     categoryName = categoryName.trim()
+
+    // Drinks are sold via dicebastion.com/drinks, not the online shop catalogue
+    if (isDrinksCategoryName(categoryName)) {
+      return Response.redirect('https://dicebastion.com/drinks/', 302)
+    }
 
     const { results } = await c.env.DB.prepare(`
       SELECT id, name, slug, summary, description, full_description, price, currency, stock_quantity, image_url, category, release_date
@@ -8409,6 +8428,9 @@ app.get('/products', async (c) => {
     let rows = products.results || []
     if (category) {
       rows = rows.filter((p) => productBelongsToCategory(p, category))
+    } else {
+      // Default catalogue is the online shop — exclude drinks (sold via /drinks only)
+      rows = rows.filter((p) => !isDrinksProduct(p))
     }
     return c.json(rows.map(withNormalizedProductCategory))
   } catch (e) {
@@ -8654,7 +8676,9 @@ app.get('/product-categories', async (c) => {
   try {
     const categories = await listProductCategoryMeta(c.env.DB)
     return c.json({
-      categories: categories.map(({ name, featured, sort_order, keywords, product_count, seo_title, seo_description, seo_image }) => ({
+      categories: categories
+        .filter((row) => !isDrinksCategoryName(row.name))
+        .map(({ name, featured, sort_order, keywords, product_count, seo_title, seo_description, seo_image }) => ({
         name,
         featured,
         sort_order,
@@ -10368,12 +10392,12 @@ async function processSeoFreshness(env) {
     if (shopBudget > 0) {
       const since = dayOfWeek === 0 ? null : "AND updated_at >= datetime('now', '-48 hours')"
       const { results } = await env.DB.prepare(`
-        SELECT slug FROM products
+        SELECT slug, category FROM products
         WHERE is_active = 1 AND slug IS NOT NULL AND TRIM(slug) != ''
           ${since || ''}
         ORDER BY updated_at DESC
       `).all()
-      products = (results || []).slice(0, shopBudget)
+      products = (results || []).filter((p) => !isDrinksProduct(p)).slice(0, shopBudget)
       console.log(`[SEO] Shop products to notify: ${products.length} (budget ${shopBudget})`)
     }
     const productUrls = products.map(p => getShopProductUrl(p.slug)).filter(Boolean)
@@ -10392,7 +10416,7 @@ async function processSeoFreshness(env) {
       `).all()
       categoryNames = [...new Set(
         (results || []).flatMap(row => parseProductCategories(row.category))
-      )].slice(0, categoryBudget)
+      )].filter((name) => !isDrinksCategoryName(name)).slice(0, categoryBudget)
       console.log(`[SEO] Shop categories to notify: ${categoryNames.length} (budget ${categoryBudget})`)
     }
     const categoryUrls = categoryNames.map(getShopCategoryUrl).filter(Boolean)
@@ -12667,13 +12691,17 @@ export default {
 
         let html = await originRes.text()
 
+        const shopProducts = activeProducts.filter((p) => !isDrinksProduct(p))
+
         // Collect categories
         const categories = new Set()
-        activeProducts.forEach(p => {
-          parseProductCategoryNames(p.category).forEach(c => categories.add(c))
+        shopProducts.forEach(p => {
+          parseProductCategoryNames(p.category).forEach(c => {
+            if (!isDrinksCategoryName(c)) categories.add(c)
+          })
         })
 
-        const productLinks = activeProducts.map(p =>
+        const productLinks = shopProducts.map(p =>
           `<a href="/products/${encodeURIComponent(p.slug)}">${p.name}</a>`
         ).join('\n          ')
 
