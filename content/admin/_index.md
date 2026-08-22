@@ -486,7 +486,7 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <div>
 <label class="form-label" for="shop-category-select">Category</label>
 <select id="shop-category-select" class="form-select">
-<option value="">Select a category</option>
+<option value="">Loading categories…</option>
 </select>
 </div>
 <div>
@@ -4350,10 +4350,6 @@ document.getElementById('product-imports-list')?.addEventListener('click', (e) =
   );
 });
 
-document.getElementById('shop-categories-refresh-btn')?.addEventListener('click', () => {
-  loadShopCategories();
-});
-
 document.getElementById('csv-import-file')?.addEventListener('change', () => {
 
   csvImportRows = [];
@@ -6453,7 +6449,8 @@ function formatIndexingError(data) {
 async function requestIndexing(type, slug, btn) {
   const urlMap = {
     event: `https://dicebastion.com/events/${encodeURIComponent(slug)}`,
-    product: `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`
+    product: `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`,
+    category: `https://shop.dicebastion.com/products/category/${encodeURIComponent(slug)}`
   };
   const url = urlMap[type];
   if (!url) return;
