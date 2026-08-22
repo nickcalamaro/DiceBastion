@@ -8417,11 +8417,44 @@ app.get('/products/:slug', async (c, next) => {
   }
 })
 
+function stripProductHtmlToText(html) {
+  return String(html || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function abridgeProductCardText(product, maxLen = 140) {
+  const summary = String(product?.summary || '').trim()
+  if (summary) return summary
+  const raw =
+    stripProductHtmlToText(product?.full_description) ||
+    String(product?.description || '').trim()
+  if (!raw) return ''
+  if (raw.length <= maxLen) return raw
+  const sliced = raw.slice(0, maxLen)
+  const lastSpace = sliced.lastIndexOf(' ')
+  return ((lastSpace > 80 ? sliced.slice(0, lastSpace) : sliced).trim()) + '...'
+}
+
+function toPublicCatalogueProduct(product) {
+  const normalized = withNormalizedProductCategory(product)
+  const preview = abridgeProductCardText(normalized)
+  const { full_description, ...rest } = normalized
+  return { ...rest, preview }
+}
+
 // Get all active products (public), optionally filtered by category
 app.get('/products', async (c) => {
   try {
     const category = c.req.query('category')
-    let sql = `SELECT id, name, slug, description, summary, price, currency, stock_quantity, image_url, category, is_active, release_date
+    let sql = `SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date
       FROM products WHERE is_active = 1`
     sql += ' ORDER BY name ASC'
     const products = await c.env.DB.prepare(sql).all()
@@ -8432,7 +8465,7 @@ app.get('/products', async (c) => {
       // Default catalogue is the online shop — exclude drinks (sold via /drinks only)
       rows = rows.filter((p) => !isDrinksProduct(p))
     }
-    return c.json(rows.map(withNormalizedProductCategory))
+    return c.json(rows.map(toPublicCatalogueProduct))
   } catch (e) {
     console.error('Get products error:', e)
     return c.json({ error: 'internal_error' }, 500)

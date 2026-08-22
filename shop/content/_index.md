@@ -154,6 +154,42 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
   color: white;
 }
 
+.modal-related {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin: 0 0 1.5rem;
+  padding: 0.95rem 1.1rem 1.05rem;
+  background: rgb(var(--color-neutral-50));
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 12px;
+}
+
+.modal-related-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-800));
+  text-align: left;
+  flex: 0 1 auto;
+}
+
+.modal-related-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0 0 0 auto;
+  padding: 0;
+}
+
+.modal-related-tags .category-btn {
+  background: rgb(var(--color-neutral));
+}
+
 .seo-crawl-links {
   position: absolute;
   width: 1px;
@@ -687,6 +723,41 @@ function categoriesSame(a, b) {
   return categoryKey(a) === categoryKey(b) && !!categoryKey(a);
 }
 
+function relatedCategoryLinksHtml(product) {
+  const tags = categoryTags(product && product.category)
+    .map(function (name) { return categoryDisplay(name); })
+    .filter(Boolean)
+    .slice(0, 3);
+  if (!tags.length) return '';
+  const links = tags.map(function (cat) {
+    const label = escapeHtml(cat);
+    const href = '/products/category/' + encodeURIComponent(cat);
+    return '<li><a href="' + href + '" class="category-btn" data-category="' + label + '">' + label + '</a></li>';
+  }).join('');
+  return (
+    '<nav class="modal-related" aria-label="Explore more like this:">' +
+      '<h3 class="modal-related-title">Explore more like this:</h3>' +
+      '<ul class="modal-related-tags">' + links + '</ul>' +
+    '</nav>'
+  );
+}
+
+function bindModalRelatedLinks() {
+  const modalBody = document.getElementById('modal-body');
+  if (!modalBody) return;
+  modalBody.querySelectorAll('.modal-related-tags a[data-category]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      if (e.defaultPrevented) return;
+      if (e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      const cat = a.getAttribute('data-category');
+      closeProductModal();
+      filterByCategory(cat || null);
+    });
+  });
+}
+
 function loadCart() {
   if (typeof ShopCartStorage !== 'undefined') {
     return ShopCartStorage.load();
@@ -777,6 +848,9 @@ function sanitizeProductHtml(html) {
 function productCardPreview(product) {
   const summary = typeof product.summary === 'string' ? product.summary.trim() : '';
   if (summary) return escapeHtml(summary);
+
+  const preview = typeof product.preview === 'string' ? product.preview.trim() : '';
+  if (preview) return escapeHtml(preview);
 
   const fromFull = stripHtmlToText(product.full_description);
   const fromShort =
@@ -1678,6 +1752,7 @@ ${isPreorder ? `<div style="font-size: 1rem; color: rgb(var(--color-primary-600)
 <strong>Stock:</strong> ${escapeHtml(formatPublicStock(product.stock_quantity).text)}
 </div>
 ${richHtml ? `<div style="line-height: 1.6; margin-bottom: 1.5rem; color: rgb(var(--color-neutral-700));">${richHtml}</div>` : ''}
+${relatedCategoryLinksHtml(product)}
 ${actionsHtml}
 </div>`;
 
@@ -1686,6 +1761,7 @@ ${actionsHtml}
     modal.classList.add('active');
     document.body.style.overflow = 'hidden';
     document.getElementById('modal-close-btn')?.focus();
+    bindModalRelatedLinks();
     if (product.stock_quantity > 0 && room > 0) {
       wireModalCartUI(product);
       document.getElementById('modal-keep-shopping')?.addEventListener('click', () => closeProductModal());
