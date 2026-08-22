@@ -1,7 +1,7 @@
 <script src="/js/utils.js"></script>
 
 {{/* Static crawlable links for search engines (JS grid alone is invisible to many crawlers). */}}
-{{- $eventsApi := "https://dicebastion-memberships.ncalamaro.workers.dev/events" -}}
+{{- $eventsApi := "https://dicebastion.com/api/events" -}}
 {{- with resources.GetRemote $eventsApi -}}
 <nav class="event-index-crawl-links" aria-label="All upcoming events">
   <ul>
@@ -42,8 +42,13 @@ function formatEventDate(datetime) {
 
 async function loadEvents() {
   try {
-    // Always production worker (same as crawl links / events single). Do not use local wrangler.
-    const res = await fetch('https://dicebastion-memberships.ncalamaro.workers.dev/events');
+    var apiBase = (typeof utils !== 'undefined' && utils.getApiBase)
+      ? utils.getApiBase(true)
+      : '/api';
+    if (apiBase.indexOf('localhost:8787') !== -1) {
+      apiBase = 'https://dicebastion.com/api';
+    }
+    const res = await fetch(apiBase + '/events');
     if (!res.ok) throw new Error('Failed to fetch events');
     
     allEvents = await res.json();

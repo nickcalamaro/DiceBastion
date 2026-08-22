@@ -55,7 +55,7 @@
 
 <script>
 (function(){
-  const API_BASE = (window.__DB_API_BASE || 'https://dicebastion-memberships.ncalamaro.workers.dev').replace(/\/+$/,'');
+  const API_BASE = (window.__DB_API_BASE || '/api').replace(/\/+$/,'');
   const eventId = '{{ .Get "id" }}';
   const TS_SITE_KEY = '{{ .Get "sitekey" | default "0x4AAAAAACAB4xlOnW3S8K0k" }}';
   const IS_LOCALHOST = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
