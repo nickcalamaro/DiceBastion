@@ -8364,7 +8364,7 @@ app.get('/products/:slug', async (c, next) => {
 app.get('/products', async (c) => {
   try {
     const category = c.req.query('category')
-    let sql = `SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
+    let sql = `SELECT id, name, slug, description, summary, price, currency, stock_quantity, image_url, category, is_active, release_date
       FROM products WHERE is_active = 1`
     sql += ' ORDER BY name ASC'
     const products = await c.env.DB.prepare(sql).all()
