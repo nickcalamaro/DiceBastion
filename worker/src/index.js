@@ -961,6 +961,19 @@ function isCheckoutPaid(payment) {
   return false
 }
 
+/** True when SumUp has finished and the card was declined / checkout expired — not 3DS-in-flight. */
+function isCheckoutFailed(payment) {
+  if (!payment || isCheckoutPaid(payment)) return false
+  const status = String(payment.status || '').toUpperCase()
+  if (status === 'FAILED' || status === 'DECLINED' || status === 'EXPIRED') return true
+  const txs = payment.transactions
+  if (!Array.isArray(txs) || !txs.length) return false
+  return txs.every(t => {
+    const s = String(t?.status || '').toUpperCase()
+    return s === 'FAILED' || s === 'DECLINED'
+  })
+}
+
 /** Pull SumUp transaction_code from checkout response (top-level or transactions[]). */
 function extractSumUpTransactionCode(payment) {
   if (!payment) return null
@@ -1760,6 +1773,15 @@ async function verifyTurnstile(env, token, ip, debug, context = null){
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const EVT_UUID_RE = /^EVT-\d+-[0-9a-f\-]{36}$/i
+const ORD_UUID_RE = /^ORD-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const BUNDLE_UUID_RE = /^BUNDLE-\d+-[0-9a-f\-]{36}$/i
+const DON_UUID_RE = /^DON-[A-Za-z0-9_-]+-[0-9a-f\-]{36}$/i
+
+function isTelemetryOrderRef(ref) {
+  if (!ref || typeof ref !== 'string') return false
+  return UUID_RE.test(ref) || EVT_UUID_RE.test(ref) || ORD_UUID_RE.test(ref) ||
+    BUNDLE_UUID_RE.test(ref) || DON_UUID_RE.test(ref)
+}
 
 /**
  * Clamp string to maximum length
@@ -1853,6 +1875,11 @@ function parsePlaymatAttachments(rawList) {
 /** Canonical public site origin for SumUp 3DS redirect_url and email links. */
 function siteUrl(env) {
   return String(env.SITE_URL || 'https://dicebastion.com').replace(/\/+$/, '')
+}
+
+/** Shop origin — 3DS redirect_url must return to shop.dicebastion.com, not the main site. */
+function shopUrl(env) {
+  return String(env.SHOP_URL || 'https://shop.dicebastion.com').replace(/\/+$/, '')
 }
 
 // ============================================================================
@@ -4296,9 +4323,9 @@ app.post('/client-payment-log', async (c) => {
     const type = String(body.type || '').toLowerCase()
     const orderRef = typeof body.orderRef === 'string' ? body.orderRef.trim() : ''
     const txCode = transactionCodeFromSumUpBody(body.sumupBody)
-    const scaEvent = (type === 'auth-screen' || type === 'sent') ? type : null
+    const scaEvent = (type === 'auth-screen' || type === 'sent' || body.sca === true) ? (type || 'sca') : null
 
-    if (orderRef && UUID_RE.test(orderRef)) {
+    if (orderRef && isTelemetryOrderRef(orderRef)) {
       try {
         if (scaEvent) await markTransactionScaFired(c.env.DB, orderRef)
         if (txCode) await updateTransactionPaymentMeta(c.env.DB, { orderRef, sumupBody: body.sumupBody })
@@ -12299,6 +12326,7 @@ app.post('/shop/checkout', async c => {
       country: clampStr(shippingAddressRaw.country || 'GI', 4)
     }) : null
 
+    const checkoutEmail = clampStr(email, 320).trim()
     const checkout = await createCheckout(c.env, {
       amount: totalPence / 100,
       currency: currencyResolved,
@@ -12307,7 +12335,9 @@ app.post('/shop/checkout', async c => {
       description: formatShopCheckoutDescription(orderItemsPayload, {
         deliveryMethod,
         promoCode: promoCodeSnap
-      })
+      }),
+      // Required for 3DS: bank challenge returns here instead of abandoning the widget.
+      redirectUrl: `${shopUrl(c.env)}/order-confirmation?order=${encodeURIComponent(orderNumber)}&email=${encodeURIComponent(checkoutEmail)}`
     })
     if (!checkout?.id) return c.json({ error: 'sumup_checkout_failed' }, 502)
 
@@ -12389,8 +12419,22 @@ app.post('/shop/confirm-payment/:orderNumber', async c => {
       return c.json({ success: false, status: 'pending', order: orderRow })
     }
 
+    if (isCheckoutFailed(payment)) {
+      const nowFailed = toIso(new Date())
+      await c.env.DB.prepare(
+        `UPDATE orders SET payment_status = ?, updated_at = ? WHERE order_number = ? AND LOWER(COALESCE(payment_status,'')) NOT IN ('paid','completed')`
+      ).bind('failed', nowFailed, orderNumber).run()
+      const failedOrder = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
+      return c.json({
+        success: false,
+        status: 'failed',
+        message: 'Payment was declined. Your card has not been charged.',
+        order: failedOrder
+      })
+    }
+
     if (!payment || !isCheckoutPaid(payment)) {
-      return c.json({ success: true, status: 'pending', order: orderRow })
+      return c.json({ success: false, status: 'pending', order: orderRow })
     }
 
     await completePaidShopOrder(c.env.DB, c.env, orderRow, payment.id || payment.payment_id || orderRow.payment_id)

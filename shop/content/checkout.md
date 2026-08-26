@@ -471,10 +471,12 @@ grid-template-columns: 1fr;
 </style>
 
 <script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
+<script src="https://dicebastion.com/js/utils.js"></script>
 <script>
-const API_BASE = 'https://dicebastion.com/api';
+const API_BASE = (window.utils && window.utils.getApiBase(true)) || 'https://dicebastion.com/api';
 let cart = [];
 let currentOrderNumber = null;
+let currentCheckoutId = null;
 let appliedDiscountPence = 0;
 
 const PROMO_ERR_MSG = {
@@ -727,44 +729,80 @@ const detail = result.message || PROMO_ERR_MSG[result.error] || result.error || 
 throw new Error(detail);
 }
 
-// Store order number for later
 currentOrderNumber = result.order_number;
+currentCheckoutId = result.checkoutId;
 
-// Mount SumUp widget with checkoutId (current SDK exposes SumUpCard only; legacy builds had utils.loadSumUpSdk)
-const SumUpCardMount =
-  typeof window !== 'undefined' && window.SumUpCard
-    ? window.SumUpCard
-    : typeof SumUpCard !== 'undefined'
-      ? SumUpCard
-      : null;
-const sumUpUtils = typeof window !== 'undefined' && window.utils ? window.utils : null;
-if (sumUpUtils && typeof sumUpUtils.loadSumUpSdk === 'function') {
-  await sumUpUtils.loadSumUpSdk();
+function logShopPayment(type, body) {
+try {
+if (window.utils && typeof window.utils.logPaymentEvent === 'function') {
+window.utils.logPaymentEvent({
+flow: 'shop',
+type: type,
+orderRef: currentOrderNumber,
+checkoutId: currentCheckoutId,
+message: (body && body.message) || null,
+sumupBody: body
+});
 }
-if (!SumUpCardMount || typeof SumUpCardMount.mount !== 'function') {
-throw new Error('SumUp card widget is not available. Refresh the page or check that gateway.sumup.com is not blocked.');
+} catch (_) {}
 }
-await SumUpCardMount.mount({
-id: 'sumup-card',
-checkoutId: result.checkoutId,
-locale: 'en-GB',
-country: 'GB',
-onResponse: async function(type, body) {
-if (type === 'success') {
-if (typeof ShopCartStorage !== 'undefined') ShopCartStorage.clear(); else localStorage.removeItem('shop_cart');
-window.location.href = '/order-confirmation?order=' + encodeURIComponent(currentOrderNumber)
-  + '&email=' + encodeURIComponent(orderData.email || '')
-  + '&status=success';
-} else if (type === 'error') {
-console.error('Payment error:', body);
-alert('Payment failed. Please try again.');
+
+function resetCheckoutForm(message) {
+try {
+if (window.SumUpCard && window.SumUpCard.unmount) {
+window.SumUpCard.unmount({ id: 'sumup-card' });
+}
+} catch (_) {}
+const cardHost = document.getElementById('sumup-card');
+if (cardHost) cardHost.innerHTML = '';
 document.getElementById('checkout-form-container').style.display = 'block';
 document.getElementById('payment-processing').style.display = 'none';
 submitBtn.disabled = false;
 submitBtn.textContent = 'Place Order';
+if (message) alert(message);
+}
+
+const sumUpUtils = window.utils || null;
+if (sumUpUtils && typeof sumUpUtils.loadSumUpSdk === 'function') {
+  await sumUpUtils.loadSumUpSdk();
+}
+const mountFn = (sumUpUtils && typeof sumUpUtils.mountSumUpWidget === 'function')
+  ? (opts) => sumUpUtils.mountSumUpWidget(opts)
+  : (window.SumUpCard && typeof window.SumUpCard.mount === 'function')
+    ? (opts) => window.SumUpCard.mount(opts)
+    : null;
+if (!mountFn) {
+throw new Error('SumUp card widget is not available. Refresh the page or check that gateway.sumup.com is not blocked.');
+}
+await mountFn({
+id: 'sumup-card',
+checkoutId: result.checkoutId,
+email: orderData.email || undefined,
+locale: 'en-GB',
+country: 'GB',
+onResponse: async function(type, body) {
+const t = String(type || '').toLowerCase();
+logShopPayment(t, body);
+if (t === 'auth-screen' || t === 'sent') {
+return;
+}
+if (t === 'success') {
+const bodyStatus = String((body && body.status) || '').toUpperCase();
+if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+resetCheckoutForm((body && body.message) || 'Payment failed. Please try again.');
+return;
+}
+window.location.href = '/order-confirmation?order=' + encodeURIComponent(currentOrderNumber)
+  + '&email=' + encodeURIComponent(orderData.email || '')
+  + '&status=success';
+} else if (t === 'error' || t === 'fail') {
+console.error('Payment error:', body);
+resetCheckoutForm((body && body.message) || 'Payment failed. Please try again.');
+} else if (t === 'cancel') {
+resetCheckoutForm('Payment cancelled. You can try again when ready.');
 }
 }
-}); // Hide spinner, show widget
+});
 document.querySelector('.processing-card').style.display = 'none';
 
 } catch (error) {

@@ -169,13 +169,24 @@
       modal.querySelector('.evt-details').style.display='none';
       cardEl.innerHTML='';
       await window.utils.loadSumUpSdk();
-      await SumUpCard.mount({ id: 'evt-card-'+eventId, checkoutId, locale: 'en-GB', country: 'GB', onResponse: async (type) => {
-        clearError();
+      await SumUpCard.mount({ id: 'evt-card-'+eventId, checkoutId, locale: 'en-GB', country: 'GB', onResponse: async (type, body) => {
         const t = String(type||'').toLowerCase();
+        try {
+          if (window.utils && window.utils.logPaymentEvent) {
+            window.utils.logPaymentEvent({ flow: 'event', type: t, orderRef: orderRef, checkoutId: checkoutId, message: (body && body.message) || null, sumupBody: body });
+          }
+        } catch(_){}
+        if (t === 'auth-screen' || t === 'sent') return;
+        clearError();
         if (t === 'success') {
+          const bodyStatus = String((body && body.status) || '').toUpperCase();
+          if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+            showError((body && body.message) || 'Payment failed. Please try again.');
+            return;
+          }
           await confirm(orderRef, { pollInterval: 3000, maxAttempts: 20 });
         } else if (t === 'error' || t === 'fail') {
-          showError('Payment failed. Please try again.');
+          showError((body && body.message) || 'Payment failed. Please try again.');
         } else if (t === 'cancel') {
           showError('Payment cancelled.');
         }

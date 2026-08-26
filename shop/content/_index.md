@@ -795,10 +795,18 @@ function formatPrice(pence) {
   return '£' + (pence / 100).toFixed(2);
 }
 
+/** Undo &#039; / &amp; etc. so re-escaping for HTML does not show entities literally. */
+function decodeHtmlEntities(text) {
+  if (text == null || text === '') return '';
+  const d = document.createElement('div');
+  d.innerHTML = String(text);
+  return d.textContent || d.innerText || '';
+}
+
 function escapeHtml(text) {
   if (text == null || text === '') return '';
   const d = document.createElement('div');
-  d.textContent = text;
+  d.textContent = decodeHtmlEntities(text);
   return d.innerHTML;
 }
 
@@ -843,6 +851,17 @@ function sanitizeProductHtml(html) {
     });
   });
   return parsed.body.innerHTML;
+}
+
+/** Fix double-escaped entities in stored HTML (e.g. &amp;#039; → '). */
+function normalizeProductHtml(html) {
+  if (!html) return '';
+  let out = String(html);
+  // Only unwind amp-prefixed entities; leave real markup alone
+  for (let i = 0; i < 3 && /&amp;(#\d+|#x[0-9a-f]+|[a-z]+);/i.test(out); i++) {
+    out = out.replace(/&amp;((?:#\d+|#x[0-9a-f]+|[a-z]+);)/gi, '&$1');
+  }
+  return out;
 }
 
 function productCardPreview(product) {
@@ -1712,7 +1731,7 @@ window.showProductDetail = async function (productId, slug, skipPushState) {
       : '';
 
     const richHtml = product.full_description
-      ? sanitizeProductHtml(product.full_description)
+      ? sanitizeProductHtml(normalizeProductHtml(product.full_description))
       : product.summary
         ? `<p>${escapeHtml(product.summary)}</p>`
         : '';
