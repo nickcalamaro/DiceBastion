@@ -87,6 +87,23 @@ title: "Order Confirmation"
 <a href="/" class="btn btn-secondary">Back to Shop</a>
 </div>
 </div>
+
+<div id="confirmation-failed" style="display: none;">
+<h1>Payment unsuccessful</h1>
+<p class="subtitle">Your card was not charged</p>
+
+<div class="info-box error">
+<h3>What happened?</h3>
+<p>The payment was declined by the card issuer. This is often a 3D Secure check that did not complete, or the bank blocking the charge.</p>
+<p><strong>Order Number:</strong> <span id="failed-order-number">-</span></p>
+<p>You can return to checkout and try again with the same or a different card.</p>
+</div>
+
+<div class="actions">
+<a href="/checkout/" class="btn btn-primary">Try again</a>
+<a href="/" class="btn btn-secondary">Back to Shop</a>
+</div>
+</div>
 </div>
 </div>
 
@@ -285,7 +302,7 @@ title: "Order Confirmation"
 </style>
 
 <script>
-const API_BASE = 'https://dicebastion.com/api';
+const API_BASE = (window.location.hostname === 'shop.dicebastion.com') ? '/api' : 'https://dicebastion.com/api';
 
 function getUrlParams() {
 const params = new URLSearchParams(window.location.search);
@@ -310,6 +327,15 @@ minute: '2-digit'
 });
 }
 
+function hideAllConfirmationStates() {
+document.getElementById('confirmation-loading').style.display = 'none';
+document.getElementById('confirmation-success').style.display = 'none';
+document.getElementById('confirmation-pending').style.display = 'none';
+document.getElementById('confirmation-error').style.display = 'none';
+const failedEl = document.getElementById('confirmation-failed');
+if (failedEl) failedEl.style.display = 'none';
+}
+
 async function checkOrderStatus() {
 const { order, email } = getUrlParams();
 
@@ -319,50 +345,33 @@ return;
 }
 
 try {
-// First, try to confirm payment with SumUp
-const confirmResponse = await fetch(`${API_BASE}/shop/confirm-payment/${order}`, {
+let attempts = 0;
+const maxAttempts = 20;
+
+while (attempts < maxAttempts) {
+const confirmResponse = await fetch(`${API_BASE}/shop/confirm-payment/${encodeURIComponent(order)}`, {
 method: 'POST'
 });
 
 if (confirmResponse.ok) {
 const confirmData = await confirmResponse.json();
-
 if (confirmData.status === 'completed') {
 showSuccess(confirmData.order);
 clearCart();
 return;
 }
-}
-
-// If not completed, poll for order status
-let attempts = 0;
-const maxAttempts = 5;
-
-while (attempts < maxAttempts) {
-const response = await fetch(`${API_BASE}/shop/order/${encodeURIComponent(order)}${email ? `?email=${encodeURIComponent(email)}` : ''}`);
-
-if (response.ok) {
-const orderData = await response.json();
-
-if (orderData.payment_status === 'paid' || orderData.status === 'completed') {
-showSuccess(orderData);
-clearCart();
+if (confirmData.status === 'failed') {
+showFailed(confirmData.order || { order_number: order });
 return;
-} else if (orderData.payment_status === 'pending' || orderData.status === 'pending') {
-if (attempts >= maxAttempts - 1) {
-showPending(orderData);
-return;
-}
 }
 }
 
 attempts++;
 if (attempts < maxAttempts) {
-await new Promise(resolve => setTimeout(resolve, 2000));
+await new Promise(resolve => setTimeout(resolve, 3000));
 }
 }
 
-// After max attempts, show pending state
 showPending({ order_number: order });
 
 } catch (error) {
@@ -372,31 +381,29 @@ showError();
 }
 
 function showSuccess(orderData) {
-document.getElementById('confirmation-loading').style.display = 'none';
-document.getElementById('confirmation-pending').style.display = 'none';
-document.getElementById('confirmation-error').style.display = 'none';
-
+hideAllConfirmationStates();
 document.getElementById('order-number').textContent = orderData.order_number;
 document.getElementById('order-date').textContent = formatDate(orderData.created_at);
 document.getElementById('order-total').textContent = formatPrice(orderData.total);
 document.getElementById('order-email').textContent = orderData.email;
-
 document.getElementById('confirmation-success').style.display = 'block';
 }
 
 function showPending(orderData) {
-document.getElementById('confirmation-loading').style.display = 'none';
-document.getElementById('confirmation-success').style.display = 'none';
-document.getElementById('confirmation-error').style.display = 'none';
-
+hideAllConfirmationStates();
 document.getElementById('pending-order-number').textContent = orderData.order_number;
 document.getElementById('confirmation-pending').style.display = 'block';
 }
 
+function showFailed(orderData) {
+hideAllConfirmationStates();
+const num = document.getElementById('failed-order-number');
+if (num) num.textContent = orderData.order_number || '-';
+document.getElementById('confirmation-failed').style.display = 'block';
+}
+
 function showError() {
-document.getElementById('confirmation-loading').style.display = 'none';
-document.getElementById('confirmation-success').style.display = 'none';
-document.getElementById('confirmation-pending').style.display = 'none';
+hideAllConfirmationStates();
 document.getElementById('confirmation-error').style.display = 'block';
 }
 

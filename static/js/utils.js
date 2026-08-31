@@ -340,6 +340,7 @@ window.utils = {
    * @param {Object} opts
    * @param {string} opts.id          - DOM element id to render the widget in
    * @param {string} opts.checkoutId  - SumUp checkout id
+   * @param {string} [opts.email]     - customer email (helps 3DS / SCA)
    * @param {Function} opts.onResponse - callback(type, body)
    * @param {Function} [opts.onLoad]  - optional callback when widget loads
    * @returns {Promise<Object|null>}  - the widget instance (has .submit(), .unmount(), .update())
@@ -362,6 +363,8 @@ window.utils = {
       }
     };
 
+    if (opts.email) mountOpts.email = opts.email;
+
     // Only include googlePay config if a merchantId is actually set
     if (!mountOpts.googlePay.merchantId) {
       delete mountOpts.googlePay;
@@ -382,9 +385,16 @@ window.utils = {
    */
   logPaymentEvent: (data) => {
     try {
+      const type = String((data && data.type) || '').toLowerCase();
+      const sca = type === 'auth-screen' || type === 'sent' || data?.sca === true;
       const base = window.utils.getApiBase(true);
       const url = `${base}/client-payment-log`;
-      const payload = JSON.stringify(data || {});
+      const payload = JSON.stringify({
+        ...(data || {}),
+        type,
+        sca,
+        stage: (data && data.stage) || (sca ? 'sca_3ds' : 'widget_onResponse')
+      });
       // sendBeacon survives page unload (e.g. 3DS redirects); fall back to keepalive fetch.
       if (navigator && typeof navigator.sendBeacon === 'function') {
         const blob = new Blob([payload], { type: 'application/json' });

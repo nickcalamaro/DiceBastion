@@ -198,6 +198,7 @@ window.initEventPurchase = function initEventPurchase(event) {
   let hasActiveMembership = false;
   let membershipPlans = []; // Store available membership plans
   let selectedMembershipPlan = null; // Currently selected plan for bundle
+  let checkoutEmail = '';
   
   if (!root || !modal) return;
   
@@ -701,33 +702,46 @@ window.initEventPurchase = function initEventPurchase(event) {
       cardEl.style.display = 'block';
         // Mount fresh widget
       await window.utils.loadSumUpSdk();
-      await SumUpCard.mount({
+      const mountFn = (window.utils.mountSumUpWidget)
+        ? (opts) => window.utils.mountSumUpWidget(opts)
+        : (opts) => SumUpCard.mount(opts);
+      await mountFn({
         id: 'evt-card-'+eventId,
         checkoutId,
+        email: checkoutEmail || undefined,
         locale: 'en-GB',
         country: 'GB',
         onResponse: async (type, body) => {
-          console.log('SumUp onResponse:', type, body);
+          const t = String(type || '').toLowerCase();
+          console.log('SumUp onResponse:', t, body);
           try {
             window.utils.logPaymentEvent({
               flow: 'event',
-              type: type,
-              stage: 'widget_onResponse',
+              type: t,
               orderRef: orderRef,
               checkoutId: checkoutId,
               message: (body && body.message) || null,
               sumupBody: body
             });
           } catch (_) {}
+          // 3DS/SCA: widget may navigate away; do not treat as a failure or start confirm yet.
+          if (t === 'auth-screen' || t === 'sent') {
+            return;
+          }
           clearError();
-          if (type === 'success') {
+          if (t === 'success') {
+            const bodyStatus = String((body && body.status) || '').toUpperCase();
+            if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+              showError((body && body.message) || 'Payment failed. Please try again.');
+              return;
+            }
             await confirmPayment(orderRef, { pollInterval: 3000, maxAttempts: 20 });
-          } else if (type === 'error' || type === 'fail') {
+          } else if (t === 'error' || t === 'fail') {
             showError((body && body.message) || 'Payment failed. Please try again.');
-          } else if (type === 'cancel') {
+          } else if (t === 'cancel') {
             showError('Payment cancelled. You can try again when ready.');
           } else {
-            console.log('SumUp intermediate state:', type, body);
+            console.log('SumUp intermediate state:', t, body);
           }
         }
       });
@@ -746,6 +760,7 @@ window.initEventPurchase = function initEventPurchase(event) {
   }
   
   async function startCheckout(email, name, privacy, turnstileToken) {
+    checkoutEmail = email || checkoutEmail;
     clearError();
     
     // If user's applicable price is 0, use free registration
@@ -847,6 +862,7 @@ window.initEventPurchase = function initEventPurchase(event) {
     }
     
     if (data.checkoutId) {
+      checkoutEmail = email || checkoutEmail;
       mountWidget(data.checkoutId, data.orderRef);
       return;
     }
@@ -899,6 +915,7 @@ window.initEventPurchase = function initEventPurchase(event) {
   }
 
   async function startBundleCheckout(email, name, privacy, turnstileToken) {
+    checkoutEmail = email || checkoutEmail;
     clearError();
     
     if (!selectedMembershipPlan) {
@@ -938,6 +955,7 @@ window.initEventPurchase = function initEventPurchase(event) {
     }
     
     if (data.checkoutId) {
+      checkoutEmail = email || checkoutEmail;
       mountWidget(data.checkoutId, data.orderRef);
       return;
     }
