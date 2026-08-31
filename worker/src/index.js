@@ -9031,23 +9031,27 @@ app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
     }
 
     const stats = await getImportBatchSaleStats(c.env.DB, batchId)
-    const allIds = stats.products.map(p => Number(p.id)).filter(id => Number.isFinite(id))
     const now = toIso(new Date())
     let archived = 0
 
-    if (allIds.length) {
-      const placeholders = allIds.map(() => '?').join(',')
+    if (stats.products.length) {
       await c.env.DB.prepare(`
-        DELETE FROM cart_items WHERE product_id IN (${placeholders})
-      `).bind(...allIds).run().catch(() => {})
+        DELETE FROM cart_items
+        WHERE product_id IN (SELECT id FROM products WHERE import_batch_id = ?)
+      `).bind(batchId).run().catch(() => {})
 
+      const seoUrls = []
+      let firstProductUrl = null
       for (const p of stats.products) {
         if (!p.slug) continue
         const productUrl = getShopProductUrl(p.slug)
-        const categoryUrls = getShopCategoryUrls(p.category)
+        if (!firstProductUrl) firstProductUrl = productUrl
+        seoUrls.push(productUrl, ...getShopCategoryUrls(p.category))
+      }
+      if (seoUrls.length) {
         notifyContentSeoAsync(c.executionCtx, c.env, {
-          urls: [productUrl, ...categoryUrls],
-          indexingUrl: productUrl,
+          urls: seoUrls,
+          indexingUrl: firstProductUrl,
           indexingType: 'URL_DELETED'
         })
       }
@@ -9055,9 +9059,9 @@ app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
       const upd = await c.env.DB.prepare(`
         UPDATE products
         SET is_active = 0, catalog_status = 'archived', updated_at = ?
-        WHERE id IN (${placeholders})
-      `).bind(now, ...allIds).run()
-      archived = upd.meta?.changes || allIds.length
+        WHERE import_batch_id = ?
+      `).bind(now, batchId).run()
+      archived = upd.meta?.changes || stats.products.length
     }
 
     const remaining = await c.env.DB.prepare(`

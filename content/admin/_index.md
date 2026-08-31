@@ -4340,7 +4340,7 @@ async function cleanupProductImport(id, label, unsoldCount, soldCount) {
 
     if (!res.ok) {
 
-      alert('Cleanup failed: ' + (data.error || data.message || res.status));
+      alert('Cleanup failed: ' + (data.message || data.error || res.status));
 
       return;
 
