@@ -8820,6 +8820,64 @@ app.get('/products/:id', async (c) => {
   }
 })
 
+function normalizeProductEan(raw) {
+  const digits = String(raw == null ? '' : raw).replace(/\D/g, '')
+  if (digits.length < 8 || digits.length > 14) return null
+  return digits
+}
+
+function productNamesMatch(a, b) {
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  return norm(a) === norm(b)
+}
+
+function pickEditorialField(archived, incoming) {
+  const a = String(archived == null ? '' : archived).trim()
+  if (a) return archived
+  if (incoming == null || incoming === '') return archived == null ? null : archived
+  return incoming
+}
+
+function isListedInShopRow(row) {
+  if (!row) return false
+  return Number(row.is_active) === 1 && (row.catalog_status || 'listed') !== 'archived'
+}
+
+function nameMismatchPayload(existing, incomingName) {
+  if (!existing || productNamesMatch(existing.name, incomingName)) return null
+  return {
+    name_mismatch: true,
+    previous_name: existing.name,
+    incoming_name: incomingName
+  }
+}
+
+async function findProductForImport(db, { ean, slug }) {
+  if (ean) {
+    const byEan = await db.prepare(`
+      SELECT * FROM products
+      WHERE ean = ?
+      ORDER BY CASE WHEN COALESCE(catalog_status, 'listed') = 'archived' THEN 0 ELSE 1 END,
+               CASE WHEN is_active = 0 THEN 0 ELSE 1 END,
+               id DESC
+      LIMIT 1
+    `).bind(ean).first()
+    if (byEan) return { product: byEan, via: 'ean' }
+  }
+  if (slug) {
+    const bySlug = await db.prepare(`
+      SELECT * FROM products
+      WHERE slug = ?
+      ORDER BY CASE WHEN COALESCE(catalog_status, 'listed') = 'archived' THEN 0 ELSE 1 END,
+               CASE WHEN is_active = 0 THEN 0 ELSE 1 END,
+               id DESC
+      LIMIT 1
+    `).bind(slug).first()
+    if (bySlug) return { product: bySlug, via: 'slug' }
+  }
+  return null
+}
+
 async function ensureProductImportSchema(db) {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS product_imports (
@@ -8832,16 +8890,35 @@ async function ensureProductImportSchema(db) {
       cleaned_at TEXT
     )
   `).run()
-  try {
-    await db.prepare('ALTER TABLE products ADD COLUMN import_batch_id INTEGER').run()
-  } catch (_) {
-    // Column already exists
+  for (const sql of [
+    'ALTER TABLE products ADD COLUMN import_batch_id INTEGER',
+    'ALTER TABLE products ADD COLUMN ean TEXT',
+    "ALTER TABLE products ADD COLUMN catalog_status TEXT DEFAULT 'listed'"
+  ]) {
+    try {
+      await db.prepare(sql).run()
+    } catch (_) {
+      // Column already exists
+    }
   }
+  try {
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_products_ean ON products (ean)').run()
+  } catch (_) { /* ignore */ }
+  try {
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_products_catalog_status ON products (catalog_status)').run()
+  } catch (_) { /* ignore */ }
+  try {
+    await db.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_ean_unique
+      ON products (ean)
+      WHERE ean IS NOT NULL AND TRIM(ean) != ''
+    `).run()
+  } catch (_) { /* ignore */ }
 }
 
 async function getImportBatchSaleStats(db, batchId) {
   const products = await db.prepare(`
-    SELECT id, name, slug, is_active
+    SELECT id, name, slug, is_active, catalog_status, category
     FROM products
     WHERE import_batch_id = ?
   `).bind(batchId).all()
@@ -8901,7 +8978,8 @@ app.get('/admin/product-imports', requireAdmin, async (c) => {
         total_products: stats.products.length,
         sold_count: stats.soldIds.size,
         unsold_count: stats.unsoldIds.length,
-        active_count: stats.products.filter(p => Number(p.is_active) === 1).length
+        active_count: stats.products.filter(p => isListedInShopRow(p)).length,
+        archived_count: stats.products.filter(p => (p.catalog_status || 'listed') === 'archived').length
       })
     }
     return c.json({ imports: enriched })
@@ -8911,7 +8989,7 @@ app.get('/admin/product-imports', requireAdmin, async (c) => {
   }
 })
 
-// Cleanup an import: hard-delete unsold products; keep sold products inactive
+// Cleanup an import: archive all products in the batch (keep in DB, hide from shop)
 app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
@@ -8926,46 +9004,33 @@ app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
     }
 
     const stats = await getImportBatchSaleStats(c.env.DB, batchId)
-    const soldIds = [...stats.soldIds]
-    const unsoldIds = stats.unsoldIds
+    const allIds = stats.products.map(p => Number(p.id)).filter(id => Number.isFinite(id))
     const now = toIso(new Date())
+    let archived = 0
 
-    // Keep sold products for order_items FK + history; hide from shop
-    if (soldIds.length) {
-      const placeholders = soldIds.map(() => '?').join(',')
-      await c.env.DB.prepare(`
-        UPDATE products
-        SET is_active = 0, updated_at = ?
-        WHERE id IN (${placeholders})
-      `).bind(now, ...soldIds).run()
-    }
-
-    // Hard-delete unsold (and clear carts)
-    let deleted = 0
-    if (unsoldIds.length) {
-      const placeholders = unsoldIds.map(() => '?').join(',')
+    if (allIds.length) {
+      const placeholders = allIds.map(() => '?').join(',')
       await c.env.DB.prepare(`
         DELETE FROM cart_items WHERE product_id IN (${placeholders})
-      `).bind(...unsoldIds).run().catch(() => {})
+      `).bind(...allIds).run().catch(() => {})
 
-      // SEO notify before delete
-      const toDelete = stats.products.filter(p => unsoldIds.includes(Number(p.id)))
-      for (const p of toDelete) {
-        if (p.slug) {
-          const productUrl = getShopProductUrl(p.slug)
-          const categoryUrls = getShopCategoryUrls(p.category)
-          notifyContentSeoAsync(c.executionCtx, c.env, {
-            urls: [productUrl, ...categoryUrls],
-            indexingUrl: productUrl,
-            indexingType: 'URL_DELETED'
-          })
-        }
+      for (const p of stats.products) {
+        if (!p.slug) continue
+        const productUrl = getShopProductUrl(p.slug)
+        const categoryUrls = getShopCategoryUrls(p.category)
+        notifyContentSeoAsync(c.executionCtx, c.env, {
+          urls: [productUrl, ...categoryUrls],
+          indexingUrl: productUrl,
+          indexingType: 'URL_DELETED'
+        })
       }
 
-      const del = await c.env.DB.prepare(`
-        DELETE FROM products WHERE id IN (${placeholders})
-      `).bind(...unsoldIds).run()
-      deleted = del.meta?.changes || unsoldIds.length
+      const upd = await c.env.DB.prepare(`
+        UPDATE products
+        SET is_active = 0, catalog_status = 'archived', updated_at = ?
+        WHERE id IN (${placeholders})
+      `).bind(now, ...allIds).run()
+      archived = upd.meta?.changes || allIds.length
     }
 
     const remaining = await c.env.DB.prepare(`
@@ -8978,10 +9043,13 @@ app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
       WHERE id = ?
     `).bind(now, Number(remaining?.c) || 0, batchId).run()
 
+    invalidateProductCategoryMetaCache()
+
     return c.json({
       success: true,
-      deleted_unsold: deleted,
-      kept_sold_inactive: soldIds.length,
+      archived,
+      sold_count: stats.soldIds.size,
+      unsold_count: stats.unsoldIds.length,
       remaining_products: Number(remaining?.c) || 0
     })
   } catch (e) {
@@ -8990,12 +9058,31 @@ app.post('/admin/product-imports/:id/cleanup', requireAdmin, async (c) => {
   }
 })
 
-// All products for admin (including inactive). Do not canonicalize here — that rewrite
-// used to run on GET and could stall D1 until the browser gave up with no console error.
+async function refreshImportBatchProductCount(db, batchId) {
+  if (!Number.isFinite(batchId)) return
+  await db.prepare(`
+    UPDATE product_imports
+    SET product_count = (
+      SELECT COUNT(*) FROM products WHERE import_batch_id = ?
+    )
+    WHERE id = ?
+  `).bind(batchId, batchId).run().catch(() => {})
+}
+
+function uniqueConstraintError(e) {
+  const msg = String(e?.message || '')
+  if (!msg.includes('UNIQUE constraint')) return null
+  if (/ean/i.test(msg)) return 'ean_already_exists'
+  return 'slug_already_exists'
+}
+
+// All products for admin (including inactive and archived). Do not canonicalize here —
+// that rewrite used to run on GET and could stall D1 until the browser gave up.
 app.get('/admin/products', requireAdmin, async (c) => {
   try {
+    await ensureProductImportSchema(c.env.DB)
     const products = await c.env.DB.prepare(`
-      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at
+      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at, ean, catalog_status, import_batch_id
       FROM products
       ORDER BY name ASC
     `).all()
@@ -9006,49 +9093,132 @@ app.get('/admin/products', requireAdmin, async (c) => {
   }
 })
 
-// Create new product (admin only - TODO: add authentication)
+// Create or restore a product (CSV import restores archived rows by EAN / slug)
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id } = await c.req.json()
-    
+    const body = await c.req.json()
+    const {
+      name, slug, description, summary, full_description, price, currency,
+      stock_quantity, image_url, category, release_date, import_batch_id, ean: rawEan
+    } = body
+
     if (!name || !slug || price === undefined) {
       return c.json({ error: 'missing_required_fields' }, 400)
     }
-    
+
     const now = toIso(new Date())
     const batchId = import_batch_id != null && import_batch_id !== ''
       ? parseInt(String(import_batch_id), 10)
       : null
+    const ean = normalizeProductEan(rawEan)
+    const incomingCategory = normalizeProductCategoryField(category) || null
+    const mismatch = (existing) => nameMismatchPayload(existing, name) || {}
+
+    const match = await findProductForImport(c.env.DB, { ean, slug })
+    if (match?.product) {
+      const existing = match.product
+      if (isListedInShopRow(existing)) {
+        return c.json({
+          success: true,
+          action: 'skipped',
+          reason: match.via === 'ean' ? 'ean_already_listed' : 'slug_already_exists',
+          product_id: existing.id,
+          ...mismatch(existing)
+        })
+      }
+
+      const restoredName = String(existing.name || '').trim() ? existing.name : name
+      const restoredCategory = pickEditorialField(existing.category, incomingCategory)
+      const restoredDescription = pickEditorialField(existing.description, description)
+      const restoredSummary = pickEditorialField(existing.summary, summary)
+      const restoredFull = pickEditorialField(existing.full_description, full_description)
+      const restoredImage = image_url || existing.image_url || null
+      const restoredEan = ean || normalizeProductEan(existing.ean)
+      const previousBatchId = existing.import_batch_id != null
+        ? parseInt(String(existing.import_batch_id), 10)
+        : null
+
+      await c.env.DB.prepare(`
+        UPDATE products SET
+          name = ?,
+          description = ?,
+          summary = ?,
+          full_description = ?,
+          price = ?,
+          currency = ?,
+          stock_quantity = ?,
+          image_url = ?,
+          category = ?,
+          release_date = ?,
+          import_batch_id = ?,
+          ean = ?,
+          is_active = 1,
+          catalog_status = 'listed',
+          updated_at = ?
+        WHERE id = ?
+      `).bind(
+        restoredName,
+        restoredDescription || null,
+        restoredSummary || null,
+        restoredFull || null,
+        price,
+        currency || existing.currency || 'GBP',
+        stock_quantity || 0,
+        restoredImage,
+        restoredCategory,
+        release_date || null,
+        Number.isFinite(batchId) ? batchId : (Number.isFinite(previousBatchId) ? previousBatchId : null),
+        restoredEan,
+        now,
+        existing.id
+      ).run()
+
+      if (Number.isFinite(batchId)) await refreshImportBatchProductCount(c.env.DB, batchId)
+      if (Number.isFinite(previousBatchId) && previousBatchId !== batchId) {
+        await refreshImportBatchProductCount(c.env.DB, previousBatchId)
+      }
+
+      const productSlug = existing.slug || slug
+      if (productSlug) {
+        const productUrl = getShopProductUrl(productSlug)
+        const categoryUrls = getShopCategoryUrls(restoredCategory)
+        notifyContentSeoAsync(c.executionCtx, c.env, { urls: [productUrl, ...categoryUrls], indexingUrl: productUrl })
+      }
+      invalidateProductCategoryMetaCache()
+      scheduleCategoryCanonicalize(c)
+
+      return c.json({
+        success: true,
+        action: 'restored',
+        restored_via: match.via,
+        product_id: existing.id,
+        ...mismatch(existing)
+      })
+    }
+
     const result = await c.env.DB.prepare(`
-      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id, ean, catalog_status, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listed', 1, ?, ?)
     `).bind(
-      name, 
-      slug, 
+      name,
+      slug,
       description || null,
-      summary || null, 
+      summary || null,
       full_description || null,
-      price, 
-      currency || 'GBP', 
-      stock_quantity || 0, 
-      image_url || null, 
-      normalizeProductCategoryField(category) || null,
+      price,
+      currency || 'GBP',
+      stock_quantity || 0,
+      image_url || null,
+      incomingCategory,
       release_date || null,
       Number.isFinite(batchId) ? batchId : null,
+      ean,
       now,
       now
     ).run()
 
-    if (Number.isFinite(batchId)) {
-      await c.env.DB.prepare(`
-        UPDATE product_imports
-        SET product_count = (
-          SELECT COUNT(*) FROM products WHERE import_batch_id = ?
-        )
-        WHERE id = ?
-      `).bind(batchId, batchId).run().catch(() => {})
-    }
+    if (Number.isFinite(batchId)) await refreshImportBatchProductCount(c.env.DB, batchId)
 
     if (slug) {
       const productUrl = getShopProductUrl(slug)
@@ -9058,21 +9228,22 @@ app.post('/admin/products', requireAdmin, async (c) => {
     invalidateProductCategoryMetaCache()
     scheduleCategoryCanonicalize(c)
 
-    return c.json({ success: true, product_id: result.meta.last_row_id })
+    return c.json({ success: true, action: 'created', product_id: result.meta.last_row_id })
   } catch (e) {
     console.error('Create product error:', e)
-    if (e.message?.includes('UNIQUE constraint')) {
-      return c.json({ error: 'slug_already_exists' }, 400)
-    }
+    const uniqueErr = uniqueConstraintError(e)
+    if (uniqueErr) return c.json({ error: uniqueErr }, 400)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
 
+
 // Update product (admin only)
 app.put('/admin/products/:id', requireAdmin, async (c) => {
   try {
+    await ensureProductImportSchema(c.env.DB)
     const id = c.req.param('id')
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date } = await c.req.json()
+    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, ean } = await c.req.json()
     const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url FROM products WHERE id = ?')
       .bind(id).first()
     
@@ -9089,8 +9260,16 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     if (stock_quantity !== undefined) { updates.push('stock_quantity = ?'); binds.push(stock_quantity) }
     if (image_url !== undefined) { updates.push('image_url = ?'); binds.push(image_url) }
     if (category !== undefined) { updates.push('category = ?'); binds.push(normalizeProductCategoryField(category) || null) }
-    if (is_active !== undefined) { updates.push('is_active = ?'); binds.push(is_active ? 1 : 0) }
+    if (is_active !== undefined) {
+      updates.push('is_active = ?')
+      binds.push(is_active ? 1 : 0)
+      if (is_active) {
+        updates.push('catalog_status = ?')
+        binds.push('listed')
+      }
+    }
     if (release_date !== undefined) { updates.push('release_date = ?'); binds.push(release_date) }
+    if (ean !== undefined) { updates.push('ean = ?'); binds.push(normalizeProductEan(ean)) }
     
     // Handle image update - delete old image if new one provided and different
     if (image_url !== undefined) {
@@ -9137,6 +9316,8 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     return c.json({ success: true })
   } catch (e) {
     console.error('Update product error:', e)
+    const uniqueErr = uniqueConstraintError(e)
+    if (uniqueErr) return c.json({ error: uniqueErr }, 400)
     return c.json({ error: 'internal_error' }, 500)
   }
 })

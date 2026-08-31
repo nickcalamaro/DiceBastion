@@ -8,6 +8,7 @@ Setup steps
 - `0003_query_indexes.sql` — safe to re-run (IF NOT EXISTS)
 - `0004_schema_tables.sql` — promo_codes, sponsored_memberships, email_verification_tokens
 - `0005_additive_columns.sql` — one-time column adds for fresh databases only
+- `0009_product_ean_archive.sql` — product `ean` + `catalog_status` (archived imports stay in DB, hidden from the shop)
 
 3) Set secrets
 - wrangler secret put SUMUP_CLIENT_ID

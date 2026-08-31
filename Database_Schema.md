@@ -114,7 +114,8 @@ CREATE TABLE products (
         is_active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-      , summary TEXT, full_description TEXT, release_date TEXT);
+      , summary TEXT, full_description TEXT, release_date TEXT, import_batch_id INTEGER, ean TEXT, catalog_status TEXT DEFAULT 'listed');
+-- catalog_status: 'listed' (in the shop when is_active = 1) | 'archived' (hidden after CSV import cleanup, kept for EAN restore).
 CREATE TABLE orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_number TEXT UNIQUE NOT NULL,

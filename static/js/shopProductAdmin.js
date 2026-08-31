@@ -5,6 +5,7 @@
   const PAGE_SIZE = 20;
   let page = 1;
   let query = '';
+  let showArchived = false;
   let cachedProducts = [];
 
   function escapeHtml(s) {
@@ -26,16 +27,24 @@
       .join(', ');
   }
 
+  function isArchived(p) {
+    return (p.catalog_status || 'listed') === 'archived';
+  }
+
   function filteredProducts() {
-    const list = cachedProducts;
+    const list = cachedProducts.filter(function (p) {
+      if (showArchived) return true;
+      return !isArchived(p);
+    });
     const q = query.trim().toLowerCase();
     if (!q) return list.slice();
     return list.filter(function (p) {
       const name = String(p.name || '').toLowerCase();
       const slug = String(p.slug || '').toLowerCase();
       const summary = String(p.summary || '').toLowerCase();
+      const ean = String(p.ean || '').toLowerCase();
       const cats = categoryLabel(p.category).toLowerCase();
-      return name.indexOf(q) !== -1 || slug.indexOf(q) !== -1 || summary.indexOf(q) !== -1 || cats.indexOf(q) !== -1;
+      return name.indexOf(q) !== -1 || slug.indexOf(q) !== -1 || summary.indexOf(q) !== -1 || cats.indexOf(q) !== -1 || ean.indexOf(q) !== -1;
     });
   }
 
@@ -62,22 +71,35 @@
     const slice = filtered.slice(start, start + PAGE_SIZE);
 
     if (countEl) {
+      const archivedHidden = showArchived ? 0 : cachedProducts.filter(isArchived).length;
       if (!filtered.length) {
-        countEl.textContent = 'No products match that search.';
+        countEl.textContent = query.trim()
+          ? 'No products match that search.'
+          : (archivedHidden ? archivedHidden + ' archived import product(s) hidden.' : '');
       } else {
         const from = start + 1;
         const to = start + slice.length;
         countEl.textContent = 'Showing ' + from + '-' + to + ' of ' + filtered.length +
-          (filtered.length !== all.length ? ' (filtered from ' + all.length + ')' : '');
+          (filtered.length !== all.length ? ' (filtered from ' + all.length + ')' : '') +
+          (archivedHidden ? ' · ' + archivedHidden + ' archived hidden' : '');
       }
     }
 
     if (!filtered.length) {
-      list.innerHTML = '<p class="admin-text-muted">No products match that search.</p>';
+      const archivedHidden = showArchived ? 0 : cachedProducts.filter(isArchived).length;
+      list.innerHTML = '<p class="admin-text-muted">' +
+        (query.trim()
+          ? 'No products match that search.'
+          : (archivedHidden ? 'Archived import products are hidden. Tick the box above to show them.' : 'No products yet')) +
+        '</p>';
     } else {
       list.innerHTML = slice.map(function (p) {
         const categories = p.category ? categoryLabel(p.category) : 'N/A';
         const inactive = Number(p.is_active) === 1 ? '' : ' <span class="admin-text-small">(Inactive)</span>';
+        const archived = isArchived(p) ? ' <span class="admin-text-small">(Archived import)</span>' : '';
+        const eanLine = p.ean
+          ? '<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600)); font-size: 0.875rem;">EAN ' + escapeHtml(String(p.ean)) + '</p>'
+          : '';
         const img = p.image_url
           ? '<img src="' + escapeHtml(p.image_url) + '" alt="" referrerpolicy="no-referrer" loading="lazy" style="width: 80px; height: 80px; object-fit: contain; border-radius: 6px; background: rgb(var(--color-neutral-100));" onerror="this.style.display=\'none\'">'
           : '';
@@ -94,7 +116,8 @@
             '<div style="display: flex; gap: 1rem;">' +
               img +
               '<div style="flex: 1;">' +
-                '<h3>' + escapeHtml(p.name) + inactive + '</h3>' +
+                '<h3>' + escapeHtml(p.name) + inactive + archived + '</h3>' +
+                eanLine +
                 '<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">' + escapeHtml(p.summary || '') + '</p>' +
                 '<p style="margin: 0.5rem 0;"><strong>£' + (Number(p.price || 0) / 100).toFixed(2) +
                   '</strong> | Stock: ' + escapeHtml(p.stock_quantity) +
@@ -307,6 +330,16 @@
       search.setAttribute('data-bound', '1');
       search.addEventListener('input', function () {
         query = search.value || '';
+        page = 1;
+        render();
+      });
+    }
+
+    const archivedToggle = document.getElementById('admin-show-archived');
+    if (archivedToggle && archivedToggle.getAttribute('data-bound') !== '1') {
+      archivedToggle.setAttribute('data-bound', '1');
+      archivedToggle.addEventListener('change', function () {
+        showArchived = !!archivedToggle.checked;
         page = 1;
         render();
       });

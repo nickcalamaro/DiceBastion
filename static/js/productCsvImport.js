@@ -1,6 +1,6 @@
 /**
  * Product CSV import helpers (kept outside Hugo markdown to avoid Goldmark mangling).
- * Expects BNW-style columns: Title, Price, Manufacturer, Type, Description, Image_URL
+ * Expects BNW-style columns: Title, Price, Manufacturer, Type, Description, Image_URL, EAN
  */
 (function (global) {
   function stripBom(text) {
@@ -108,6 +108,71 @@
       .replace(/'/g, '&#039;');
   }
 
+  function normalizeEan(raw) {
+    const digits = String(raw == null ? '' : raw).replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 14) return null;
+    return digits;
+  }
+
+  function headerKey(name) {
+    return String(name || '')
+      .replace(/^\uFEFF/, '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '');
+  }
+
+  function extractEanFromCsvRow(row) {
+    if (!row || typeof row !== 'object') return null;
+    const keys = Object.keys(row);
+    const match = keys.find((k) => {
+      const n = headerKey(k);
+      return n === 'ean' || n === 'ean13' || n === 'ean8' || n === 'barcode' || n === 'gtin' || n === 'isbn' || n === 'isbn13';
+    });
+    return match ? normalizeEan(row[match]) : null;
+  }
+
+  function productNamesMatch(a, b) {
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    return norm(a) === norm(b);
+  }
+
+  function isListedInShop(product) {
+    if (!product) return false;
+    return Number(product.is_active) === 1 && (product.catalog_status || 'listed') !== 'archived';
+  }
+
+  function isArchivedImport(product) {
+    return !!(product && (product.catalog_status || 'listed') === 'archived');
+  }
+
+  function findImportMatch(products, opts) {
+    const list = Array.isArray(products) ? products : [];
+    const ean = normalizeEan(opts && opts.ean);
+    const slug = opts && opts.slug ? String(opts.slug) : '';
+
+    function pick(matches, via) {
+      if (!matches.length) return null;
+      const archived = matches.find(isArchivedImport);
+      if (archived) return { product: archived, via };
+      const listed = matches.find(isListedInShop);
+      if (listed) return { product: listed, via };
+      return { product: matches[0], via };
+    }
+
+    if (ean) {
+      const byEan = list.filter((p) => normalizeEan(p.ean) === ean);
+      const found = pick(byEan, 'ean');
+      if (found) return found;
+    }
+    if (slug) {
+      const bySlug = list.filter((p) => p.slug === slug);
+      const found = pick(bySlug, 'slug');
+      if (found) return found;
+    }
+    return null;
+  }
+
   function importCategoryTag(raw) {
     const trimmed = String(raw || '').trim().replace(/\s+/g, ' ');
     if (!trimmed) return '';
@@ -143,22 +208,54 @@
     const category = categoryTags.length ? categoryTags.join(', ') : null;
     const slug = slugifyProductName(name);
     const pricePence = Number.isFinite(pounds) ? Math.round(pounds * 100) : null;
+    const ean = extractEanFromCsvRow(row);
 
     if (!description) notes.push('Empty description');
     if (!imageUrl) notes.push('No image URL');
     if (!category) notes.push('No categories');
+    if (!ean) notes.push('No EAN');
 
     const fullDescription = description
       ? `<p>${escapeHtml(description).replace(/\n/g, '<br>')}</p>`
       : null;
 
+    const match = findImportMatch(defaults && defaults.existingProducts, { ean, slug });
+    let skip = false;
+    let restore = false;
+    let nameMismatch = false;
+    let matchedName = '';
+    let skipReason = '';
+
+    if (match && match.product) {
+      matchedName = match.product.name || '';
+      if (isListedInShop(match.product)) {
+        skip = true;
+        skipReason = match.via === 'ean' ? 'EAN already in shop' : 'slug exists';
+        notes.push(skipReason + ' (will skip)');
+      } else {
+        restore = true;
+        notes.push('Will restore archived listing (categories, description, summary kept)');
+      }
+      if (!productNamesMatch(match.product.name, name)) {
+        nameMismatch = true;
+        notes.push('Name differs from stored listing: "' + match.product.name + '"');
+      }
+    }
+
     return {
       valid: !!name && pricePence != null && pricePence >= 0,
+      skip,
+      restore,
+      nameMismatch,
+      matchedName,
+      skipReason,
       notes,
       payload: {
         name,
         slug,
+        ean,
         summary: '',
+        description: description || null,
         full_description: fullDescription,
         price: pricePence,
         currency: 'GBP',
@@ -172,6 +269,7 @@
       preview: {
         name,
         slug,
+        ean: ean || '',
         category: category || '',
         pricePence,
         priceLabel: pricePence != null ? `£${(pricePence / 100).toFixed(2)}` : '—',
@@ -187,6 +285,12 @@
     slugifyProductName,
     mapBnwRowToProduct,
     escapeHtml,
-    stripBom
+    stripBom,
+    normalizeEan,
+    extractEanFromCsvRow,
+    productNamesMatch,
+    isListedInShop,
+    isArchivedImport,
+    findImportMatch
   };
 })(typeof window !== 'undefined' ? window : globalThis);

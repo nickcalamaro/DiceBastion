@@ -9,9 +9,9 @@ showDate: false
 <script src="/js/utils.js"></script>
 <script src="/js/modal.js"></script>
 <script src="/js/shopCategories.js"></script>
-<script src="/js/productCsvImport.js"></script>
+<script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
-<script src="/js/shopProductAdmin.js?v=20260817b"></script>
+<script src="/js/shopProductAdmin.js?v=20260831a"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -438,9 +438,10 @@ Expects BNW-style columns:
 <code>Manufacturer</code>,
 <code>Type</code>,
 <code>Description</code>,
-<code>Image_URL</code>.
-Type and Manufacturer become category labels (up to 3). Existing slugs are skipped (create-only).
-Each import is saved as a batch so you can remove unsold items later without touching sold order history.
+<code>Image_URL</code>,
+<code>EAN</code> (also accepts Barcode, GTIN, or ISBN).
+Type and Manufacturer become category labels (up to 3). EANs are stored on each product. If an EAN matches an archived import, that listing is restored with its categories, description, and summary. A notice is shown when the CSV title does not match the stored name. Products already in the shop are skipped.
+Each import is saved as a batch so you can hide the catalogue after the sale period without deleting rows.
 </p>
 <div class="admin-grid-2 admin-mb-1" style="align-items: end;">
 <div>
@@ -469,7 +470,7 @@ Each import is saved as a batch so you can remove unsold items later without tou
 <div class="card card-compact admin-mb-2">
 <h2 class="admin-section-heading admin-mt-0">Manage imports</h2>
 <p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
-Cleanup hard-deletes products from a batch that were never ordered. Products that appear on any order are kept inactive so purchase records stay intact.
+Cleanup hides every product in the batch from the shop and marks them <strong>archived</strong>. Rows stay in the database (including sold order history). Re-importing the same EAN restores categories, description, and summary from that archived listing.
 </p>
 <div class="admin-flex admin-mb-1" style="gap: 0.75rem;">
 <button type="button" id="csv-imports-refresh-btn" class="btn btn-secondary">Refresh imports</button>
@@ -511,6 +512,12 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <input type="text" id="product-slug" required class="form-input">
 <small class="admin-text-small">Auto-generated from name</small>
 </div>
+</div>
+
+<div class="admin-mb-1">
+<label class="form-label">EAN</label>
+<input type="text" id="product-ean" class="form-input" inputmode="numeric" autocomplete="off">
+<small class="admin-text-small">Barcode used to restore archived imports. Digits only; 8–14 characters.</small>
 </div>
 
 <div class="admin-mb-1">
@@ -598,7 +605,11 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <h2 id="admin-section-products" class="admin-section-heading">Products <a href="#products" class="admin-permalink" aria-label="Link to products">#</a></h2>
 <div class="admin-mb-1">
 <label class="form-label" for="admin-product-search">Search products</label>
-<input type="search" id="admin-product-search" class="form-input" placeholder="Name, slug, or category" autocomplete="off">
+<input type="search" id="admin-product-search" class="form-input" placeholder="Name, slug, EAN, or category" autocomplete="off">
+<label class="form-label" for="admin-show-archived" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;font-weight:400;">
+<input type="checkbox" id="admin-show-archived" class="checkbox-input">
+Show archived import products
+</label>
 </div>
 <p id="admin-product-count" class="admin-text-small"></p>
 <div id="products-list"></div>
@@ -3587,15 +3598,11 @@ function escapeCsvHtml(s) {
 
 function mapCsvRowToProduct(row, defaults) {
 
-  const mapped = ProductCsvImport.mapBnwRowToProduct(row, defaults);
+  return ProductCsvImport.mapBnwRowToProduct(row, Object.assign({}, defaults, {
 
-  if (adminProductsList.some(p => p.slug === mapped.payload.slug)) {
+    existingProducts: adminProductsList
 
-    mapped.notes.push('Slug already exists (will skip)');
-
-  }
-
-  return mapped;
+  }));
 
 }
 
@@ -3616,6 +3623,8 @@ function setCsvStatus(message, kind) {
     info: { bg: 'rgba(var(--color-primary-50), 0.5)', color: 'rgb(var(--color-neutral-800))' },
 
     ok: { bg: '#ecfdf5', color: '#065f46' },
+
+    warn: { bg: '#fffbeb', color: '#92400e' },
 
     err: { bg: '#fee2e2', color: '#991b1b' }
 
@@ -3643,9 +3652,11 @@ function renderCsvPreview(mappedRows) {
 
   const validCount = mappedRows.filter(r => r.valid).length;
 
+  const restoreCount = mappedRows.filter(r => r.valid && r.restore).length;
+
   const importableCount = mappedRows.filter(
 
-    r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+    r => r.valid && !r.skip
 
   ).length;
 
@@ -3683,7 +3694,7 @@ function renderCsvPreview(mappedRows) {
 
       <td style="padding:0.5rem;vertical-align:top;">${img}</td>
 
-      <td style="padding:0.5rem;vertical-align:top;"><strong>${escapeCsvHtml(r.preview.name)}</strong><div class="admin-text-small">${escapeCsvHtml(r.preview.slug)}</div></td>
+      <td style="padding:0.5rem;vertical-align:top;"><strong>${escapeCsvHtml(r.preview.name)}</strong><div class="admin-text-small">${escapeCsvHtml(r.preview.slug)}</div><div class="admin-text-small">${escapeCsvHtml(r.preview.ean ? 'EAN ' + r.preview.ean : 'No EAN')}</div></td>
 
       <td style="padding:0.5rem;vertical-align:top;font-size:0.875rem;">${escapeCsvHtml(r.preview.category || '—')}</td>
 
@@ -3701,7 +3712,7 @@ function renderCsvPreview(mappedRows) {
 
     <p class="admin-text-muted" style="margin:0 0 0.75rem;font-size:0.9375rem;">
 
-      ${mappedRows.length} row(s) parsed · ${validCount} valid · ${importableCount} new to import
+      ${mappedRows.length} row(s) parsed · ${validCount} valid · ${importableCount} to import${restoreCount ? ' · ' + restoreCount + ' restored from archive' : ''}
 
     </p>
 
@@ -3739,7 +3750,7 @@ function renderCsvPreview(mappedRows) {
 
     importBtn.textContent = importableCount
 
-      ? `Import ${importableCount} product${importableCount === 1 ? '' : 's'}`
+      ? `Import ${importableCount} product${importableCount === 1 ? '' : 's'}${restoreCount ? ' (' + restoreCount + ' from archive)' : ''}`
 
       : 'Import products';
 
@@ -3965,17 +3976,23 @@ async function runCsvImport() {
 
 
 
-  const existingSlugs = new Set(adminProductsList.map(p => p.slug));
-
-  const toImport = csvImportRows.filter(r => r.valid);
+  const toImport = csvImportRows.filter(r => r.valid && !r.skip);
 
   let created = 0;
 
-  let skipped = 0;
+  let restored = 0;
+
+  let skipped = csvImportRows.filter(r => r.valid && r.skip).length;
 
   let failed = 0;
 
-  const detailLines = [];
+  const detailLines = csvImportRows.filter(r => r.valid && r.skip).map(r =>
+
+    'Skipped ' + r.payload.name + (r.skipReason ? ' (' + r.skipReason + ')' : '')
+
+  );
+
+  const nameMismatchLines = [];
 
 
 
@@ -3986,18 +4003,6 @@ async function runCsvImport() {
     const payload = { ...row.payload, import_batch_id: batchId };
 
     setCsvStatus(`Importing ${i + 1} of ${toImport.length}: ${payload.name}`, 'info');
-
-
-
-    if (existingSlugs.has(payload.slug)) {
-
-      skipped++;
-
-      detailLines.push(`Skipped ${payload.name} (slug exists)`);
-
-      continue;
-
-    }
 
 
 
@@ -4023,15 +4028,49 @@ async function runCsvImport() {
 
       if (response.ok) {
 
-        created++;
+        const data = await response.json().catch(() => ({}));
 
-        existingSlugs.add(payload.slug);
+        if (data.name_mismatch) {
 
-        detailLines.push(`Created ${payload.name}`);
+          nameMismatchLines.push(
 
-        if (payload.category) {
+            payload.name + ' (stored as "' + (data.previous_name || row.matchedName || '') + '"' +
 
-          payload.category.split(',').forEach(cat => addCategoryTag(cat));
+            (payload.ean ? ', EAN ' + payload.ean : '') + ')'
+
+          );
+
+        }
+
+        if (data.action === 'skipped') {
+
+          skipped++;
+
+          detailLines.push(`Skipped ${payload.name} (${data.reason === 'ean_already_listed' ? 'EAN already in shop' : 'slug exists'})`);
+
+        } else if (data.action === 'restored') {
+
+          restored++;
+
+          detailLines.push(`Restored ${payload.name}` + (data.name_mismatch ? ' (name differs from stored listing)' : ''));
+
+          if (payload.category) {
+
+            payload.category.split(',').forEach(cat => addCategoryTag(cat));
+
+          }
+
+        } else {
+
+          created++;
+
+          detailLines.push(`Created ${payload.name}`);
+
+          if (payload.category) {
+
+            payload.category.split(',').forEach(cat => addCategoryTag(cat));
+
+          }
 
         }
 
@@ -4039,13 +4078,11 @@ async function runCsvImport() {
 
         const error = await response.json().catch(() => ({}));
 
-        if (error.error === 'slug_already_exists') {
+        if (error.error === 'slug_already_exists' || error.error === 'ean_already_exists') {
 
           skipped++;
 
-          existingSlugs.add(payload.slug);
-
-          detailLines.push(`Skipped ${payload.name} (slug exists)`);
+          detailLines.push(`Skipped ${payload.name} (${error.error === 'ean_already_exists' ? 'EAN exists' : 'slug exists'})`);
 
         } else {
 
@@ -4071,17 +4108,37 @@ async function runCsvImport() {
 
 
 
-  setCsvStatus(
+  csvImportRows.forEach(r => {
 
-    `Import #${batchId} finished: ${created} created, ${skipped} skipped, ${failed} failed.`,
+    if (r.valid && r.nameMismatch && r.matchedName && !nameMismatchLines.some(line => line.indexOf(r.payload.name) === 0)) {
 
-    failed ? 'err' : 'ok'
+      nameMismatchLines.push(r.payload.name + ' (stored as "' + r.matchedName + '"' + (r.payload.ean ? ', EAN ' + r.payload.ean : '') + ')');
 
-  );
+    }
+
+  });
+
+
+
+  const summary = `Import #${batchId} finished: ${created} created, ${restored} restored, ${skipped} skipped, ${failed} failed.` +
+
+    (nameMismatchLines.length ? ' ' + nameMismatchLines.length + ' name mismatch' + (nameMismatchLines.length === 1 ? '' : 'es') + ' to review.' : '');
+
+  setCsvStatus(summary, failed ? 'err' : (nameMismatchLines.length ? 'warn' : 'ok'));
 
   if (results) {
 
-    results.innerHTML = `<ul style="margin:0;padding-left:1.25rem;color:rgb(var(--color-neutral-700));font-size:0.875rem;">${
+    const mismatchHtml = nameMismatchLines.length
+
+      ? `<p style="margin:0 0 0.75rem;color:#92400e;font-size:0.9375rem;"><strong>Name mismatch:</strong> the CSV title did not match the stored product.</p><ul style="margin:0 0 1rem;padding-left:1.25rem;color:#92400e;font-size:0.875rem;">${
+
+        nameMismatchLines.map(line => `<li>${escapeCsvHtml(line)}</li>`).join('')
+
+      }</ul>`
+
+      : '';
+
+    results.innerHTML = mismatchHtml + `<ul style="margin:0;padding-left:1.25rem;color:rgb(var(--color-neutral-700));font-size:0.875rem;">${
 
       detailLines.map(line => `<li>${escapeCsvHtml(line)}</li>`).join('')
 
@@ -4127,7 +4184,7 @@ async function runCsvImport() {
 
     const remaining = csvImportRows.filter(
 
-      r => r.valid && !adminProductsList.some(p => p.slug === r.payload.slug)
+      r => r.valid && !r.skip
 
     ).length;
 
@@ -4205,9 +4262,11 @@ async function loadProductImports() {
 
             · ${Number(batch.total_products) || 0} products
 
-            · ${Number(batch.sold_count) || 0} sold (kept on cleanup)
+            · ${Number(batch.sold_count) || 0} sold
 
             · ${Number(batch.unsold_count) || 0} unsold
+
+            · ${Number(batch.active_count) || 0} listed in shop
 
             · ${cleaned}
 
@@ -4251,15 +4310,17 @@ async function loadProductImports() {
 
 async function cleanupProductImport(id, label, unsoldCount, soldCount) {
 
+  const total = (Number(unsoldCount) || 0) + (Number(soldCount) || 0);
+
   const ok = confirm(
 
-    'Clean up import "' + label + '"?\n\n' +
+    'Hide import "' + label + '" from the shop?\n\n' +
 
-    unsoldCount + ' unsold product(s) will be permanently deleted.\n' +
+    'All ' + total + ' product(s) in this batch will be archived: kept in the database, hidden from the store.\n' +
 
-    soldCount + ' sold product(s) will be kept inactive (order history preserved).\n\n' +
+    (soldCount ? soldCount + ' sold product(s) stay linked to order history.\n' : '') +
 
-    'This cannot be undone for deleted products.'
+    '\nRe-importing the same EAN later will restore categories, description, and summary.'
 
   );
 
@@ -4287,9 +4348,9 @@ async function cleanupProductImport(id, label, unsoldCount, soldCount) {
 
     alert(
 
-      'Cleanup done.\nDeleted unsold: ' + (data.deleted_unsold || 0) +
+      'Import archived.\nHidden from shop: ' + (data.archived || 0) +
 
-      '\nKept sold (inactive): ' + (data.kept_sold_inactive || 0)
+      '\nStill in database: ' + (data.remaining_products || 0)
 
     );
 
@@ -4521,6 +4582,7 @@ if (window.ShopProductAdmin && typeof ShopProductAdmin.render === 'function') {
 }
 
 adminProductsList.forEach(p => {
+if ((p.catalog_status || 'listed') === 'archived') return;
 if (p.category) {
 p.category.split(',').forEach(cat => addCategoryTag(cat));
 }
@@ -4550,6 +4612,7 @@ const releaseDate = preorderChecked ? document.getElementById('product-release-d
 const data = {
 name: document.getElementById('product-name').value,
 slug: document.getElementById('product-slug').value,
+ean: document.getElementById('product-ean').value,
 summary: document.getElementById('product-summary').value,
 full_description: document.getElementById('description-content').innerHTML,
 price: Math.round(parseFloat(document.getElementById('product-price').value) * 100),
@@ -4591,7 +4654,14 @@ uploadedProductImage = null;
 loadProducts();
 if (typeof loadShopCategories === 'function') loadShopCategories();
 } else {
+const errBody = await res.json().catch(() => ({}));
+if (errBody.error === 'ean_already_exists') {
+alert('That EAN is already used on another product.');
+} else if (errBody.error === 'slug_already_exists') {
+alert('That URL slug is already used on another product.');
+} else {
 alert('Failed to save product');
+}
 }
 } catch (err) {
 alert('Error saving product');
@@ -4624,6 +4694,7 @@ if (!product) return;
 document.getElementById('product-id').value = product.id;
 document.getElementById('product-name').value = product.name;
 document.getElementById('product-slug').value = product.slug;
+document.getElementById('product-ean').value = product.ean || '';
 document.getElementById('product-summary').value = product.summary || '';
 document.getElementById('description-content').innerHTML = product.full_description || '';
 document.getElementById('product-price').value = (product.price / 100).toFixed(2);
