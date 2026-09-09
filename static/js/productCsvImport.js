@@ -1,11 +1,88 @@
 /**
  * Product CSV import helpers (kept outside Hugo markdown to avoid Goldmark mangling).
- * Expects BNW-style columns: Title, Price, Manufacturer, Type, Description, Image_URL, EAN
+ * Expects BNW-style columns: Title, Price, Manufacturer, Type, Description, Image_URL, EAN,
+ * and optional Preorder Date (future dates mark the product as a pre-order via release_date).
  */
 (function (global) {
   function stripBom(text) {
     if (!text) return '';
     return String(text).replace(/^\uFEFF/, '');
+  }
+
+  /** Calendar YYYY-MM-DD in local time (matches <input type="date"> / admin form). */
+  function formatLocalYmd(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  /**
+   * Parse a CSV preorder/release date into YYYY-MM-DD, or null if blank/unparseable.
+   * Accepts YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY (UK-friendly).
+   */
+  function parsePreorderDateValue(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return { date: null, invalid: false };
+
+    let y;
+    let m;
+    let d;
+    const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    const uk = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+    if (iso) {
+      y = parseInt(iso[1], 10);
+      m = parseInt(iso[2], 10);
+      d = parseInt(iso[3], 10);
+    } else if (uk) {
+      d = parseInt(uk[1], 10);
+      m = parseInt(uk[2], 10);
+      y = parseInt(uk[3], 10);
+    } else {
+      return { date: null, invalid: true };
+    }
+
+    if (m < 1 || m > 12 || d < 1 || d > 31) return { date: null, invalid: true };
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+      return { date: null, invalid: true };
+    }
+    return { date: formatLocalYmd(dt), invalid: false };
+  }
+
+  function getPreorderDateRaw(row) {
+    return (
+      row['Preorder Date'] ||
+      row['Preorder_Date'] ||
+      row['Pre-order Date'] ||
+      row['Pre-Order Date'] ||
+      row['preorder date'] ||
+      row['Release Date'] ||
+      row['release_date'] ||
+      ''
+    );
+  }
+
+  /**
+   * If Preorder Date is non-blank and strictly in the future, return YYYY-MM-DD for release_date.
+   * Otherwise null (product is not imported as a pre-order).
+   */
+  function resolveImportReleaseDate(row, notes) {
+    const raw = getPreorderDateRaw(row);
+    if (!String(raw || '').trim()) return null;
+
+    const parsed = parsePreorderDateValue(raw);
+    if (parsed.invalid || !parsed.date) {
+      notes.push('Invalid Preorder Date');
+      return null;
+    }
+
+    const today = formatLocalYmd(new Date());
+    if (parsed.date <= today) {
+      notes.push('Preorder Date not in the future (ignored)');
+      return null;
+    }
+    return parsed.date;
   }
 
   function parseCsvText(text) {
@@ -219,6 +296,8 @@
       ? `<p>${escapeHtml(description).replace(/\n/g, '<br>')}</p>`
       : null;
 
+    const releaseDate = resolveImportReleaseDate(row, notes);
+
     const match = findImportMatch(defaults && defaults.existingProducts, { ean, slug });
     let skip = false;
     let restore = false;
@@ -263,7 +342,7 @@
         category,
         image_url: imageUrl || null,
         is_active: 1,
-        release_date: null,
+        release_date: releaseDate,
         import_batch_id: defaults.importBatchId || null
       },
       preview: {
@@ -274,7 +353,9 @@
         pricePence,
         priceLabel: pricePence != null ? `£${(pricePence / 100).toFixed(2)}` : '—',
         imageUrl,
-        pounds
+        pounds,
+        releaseDate,
+        preorderLabel: releaseDate || '—'
       }
     };
   }
@@ -284,6 +365,8 @@
     csvRowsToObjects,
     slugifyProductName,
     mapBnwRowToProduct,
+    parsePreorderDateValue,
+    resolveImportReleaseDate,
     escapeHtml,
     stripBom,
     normalizeEan,

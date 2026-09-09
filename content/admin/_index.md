@@ -439,7 +439,9 @@ Expects BNW-style columns:
 <code>Type</code>,
 <code>Description</code>,
 <code>Image_URL</code>,
-<code>EAN</code> (also accepts Barcode, GTIN, or ISBN).
+<code>EAN</code> (also accepts Barcode, GTIN, or ISBN),
+and optional <code>Preorder Date</code>
+(future dates mark the product as a pre-order; blank or past dates are ignored).
 Type and Manufacturer become category labels (up to 3). EANs are stored on each product. If an EAN matches an archived import, that listing is restored with its categories, description, and summary. A notice is shown when the CSV title does not match the stored name. Products already in the shop are skipped.
 Each import is saved as a batch so you can hide the catalogue after the sale period without deleting rows.
 </p>
@@ -3700,6 +3702,8 @@ function renderCsvPreview(mappedRows) {
 
       <td style="padding:0.5rem;vertical-align:top;">${escapeCsvHtml(r.preview.priceLabel)}</td>
 
+      <td style="padding:0.5rem;vertical-align:top;font-size:0.875rem;">${escapeCsvHtml(r.preview.preorderLabel || '—')}</td>
+
       <td style="padding:0.5rem;vertical-align:top;font-size:0.8rem;color:${r.valid ? 'rgb(var(--color-neutral-600))' : '#991b1b'};">${escapeCsvHtml(r.notes.join('; ') || 'Ready')}</td>
 
     </tr>`;
@@ -3731,6 +3735,8 @@ function renderCsvPreview(mappedRows) {
           <th style="padding:0.5rem;">Categories</th>
 
           <th style="padding:0.5rem;">Price</th>
+
+          <th style="padding:0.5rem;">Preorder</th>
 
           <th style="padding:0.5rem;">Notes</th>
 
