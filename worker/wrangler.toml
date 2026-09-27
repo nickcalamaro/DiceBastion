@@ -48,6 +48,8 @@ ALLOWED_ORIGIN = "http://localhost:1313,http://localhost:1314,http://localhost:8
 SUMUP_MERCHANT_CODE = "MUZHYEAH"
 # FREE_TRIAL_SETUP_AUTH_AMOUNT — optional dev override for SumUp setup auth (defaults to plan price)
 SUPPORT_CONTACT_EMAIL = "contact@dicebastion.com"
+# BUYBACK_NOTIFY_EMAIL — staff inbox for new TCG buyback cases (falls back to SUPPORT_CONTACT_EMAIL)
+BUYBACK_NOTIFY_EMAIL = "contact@dicebastion.com"
 ALLOW_TEST_BYPASS = "true"
 R2_PUBLIC_URL = "https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev"
 BUNNY_CDN_URL = "https://dicebastion.b-cdn.net"
@@ -67,6 +69,7 @@ INDEXNOW_KEY = "4d1ce8a5701f9b2c6e3a7d0f8b1c4e92"
 # - BGG_API_TOKEN (for BoardGameGeek API access)
 # - GOOGLE_SA_KEY (Google Indexing API service account JSON)
 # - BOOKING_SAME_DAY_WHATSAPP (JSON: [{"name":"Nicky","url":"https://wa.me/+34711042604"}, ...])
+# - SCRYDEX_API_KEY / SCRYDEX_TEAM_ID (Riftbound card search via Scrydex; optional until onboarded)
 
 # Cron trigger for membership renewals (daily at 2 AM UTC)
 [triggers]

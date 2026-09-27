@@ -6,9 +6,11 @@
 (function() {
   'use strict';
 
-  // Check if user is logged in by checking localStorage
+  // Check if user is logged in by checking localStorage / shared cookie
   function checkLoginStatus() {
-    const sessionToken = localStorage.getItem('admin_session');
+    const sessionToken = (window.utils && utils.session)
+      ? utils.session.get()
+      : localStorage.getItem('admin_session');
     const userDataStr = localStorage.getItem('admin_user');
     
     if (!sessionToken || !userDataStr) {
@@ -34,7 +36,7 @@
         loginContainer.innerHTML = `
           <span class="text-sm text-neutral-600 dark:text-neutral-400">
             <span class="hidden sm:inline">Logged in as </span>
-            <a href="'https://dicebastion.com/account'}" class="font-medium hover:text-primary-600 dark:hover:text-primary-400 hover:underline" title="${user.is_admin ? 'Go to Admin Dashboard' : 'Go to Account'}">
+            <a href="https://dicebastion.com/account" class="font-medium hover:text-primary-600 dark:hover:text-primary-400 hover:underline" title="${user.is_admin ? 'Go to Admin Dashboard' : 'Go to Account'}">
               ${escapeHtml(user.email)}
             </a>
             <span class="mx-2">|</span>
@@ -49,7 +51,7 @@
       } else {
         // User is not logged in
         loginContainer.innerHTML = `
-          <a href="https://dicebastion.com/login" class="text-sm text-neutral-600 dark:text-neutral-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline">
+          <a href="https://dicebastion.com/login?return=${encodeURIComponent(window.location.href)}" class="text-sm text-neutral-600 dark:text-neutral-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline">
             Login
           </a>
         `;
@@ -59,6 +61,7 @@
     // Update main navigation menu
     updateNavigationMenu(user);
   }
+  window.updateLoginUI = updateLoginUI;
   
   // Update navigation menu to show Login or Account
   function updateNavigationMenu(user) {

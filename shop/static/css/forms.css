@@ -200,6 +200,38 @@
 }
 
 /* Buttons */
+.page-container {
+  margin: 1rem auto 1.5rem;
+  max-width: 1100px;
+  padding: 0 1rem;
+}
+
+.hero-cta-banner {
+  background: linear-gradient(135deg, #4f46e5 0%, #2563eb 50%, #0ea5e9 100%);
+  border-radius: 12px;
+  padding: 1.75rem 2rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3);
+  text-align: center;
+}
+
+.hero-cta-title {
+  color: white;
+  font-size: clamp(1.25rem, 4vw, 1.75rem);
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  line-height: 1.2;
+}
+
+.hero-cta-subtitle {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: clamp(0.95rem, 2.5vw, 1.1rem);
+  margin: 0 0 1.25rem 0;
+  max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;

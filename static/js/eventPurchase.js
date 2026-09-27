@@ -80,6 +80,17 @@ function generateModal(eventId, isFree) {
           <p class="mt-0 mb-4 text-sm text-neutral-700 dark:text-neutral-300">
             <span class="evt-logged-message">${isFree ? 'Registering as' : 'Purchasing a ticket for'}</span> <strong class="text-neutral-800 dark:text-neutral-200 evt-user-email"></strong>
           </p>
+          ${!isFree ? `
+          <div class="evt-store-credit-box mt-2 mb-3 p-3 rounded-lg border border-neutral-200 dark:border-neutral-600" style="display:none;">
+            <label class="flex gap-2 items-start text-sm text-neutral-700 dark:text-neutral-300">
+              <input type="checkbox" class="evt-apply-credit mt-1" checked>
+              <span>
+                <strong>Apply store credit</strong>
+                <span class="evt-credit-available block text-neutral-600 dark:text-neutral-400" style="font-size:0.8125rem;margin-top:0.2rem;"></span>
+              </span>
+            </label>
+          </div>
+          ` : ''}
           <div class="mt-3">
             <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2">Security check</div>
             <div id="evt-ts-logged-${eventId}"></div>
@@ -230,6 +241,16 @@ window.initEventPurchase = function initEventPurchase(event) {
             
             // Update applicable price
             userApplicablePrice = hasActiveMembership ? memberPrice : nonMemberPrice;
+
+            const creditPence = Math.max(0, Number(data.store_credit_pence) || 0);
+            const creditBox = modal.querySelector('.evt-store-credit-box');
+            const creditAvail = modal.querySelector('.evt-credit-available');
+            if (creditBox && creditPence > 0) {
+              creditBox.style.display = 'block';
+              if (creditAvail) {
+                creditAvail.textContent = 'Available: £' + (creditPence / 100).toFixed(2) + ' (event tickets and shop only)';
+              }
+            }
             
             // Track if this is free for member, but don't change button text
             if (hasActiveMembership && memberPrice === 0) {
@@ -836,18 +857,24 @@ window.initEventPurchase = function initEventPurchase(event) {
   
   async function proceedWithRegularCheckout(email, name, privacy, turnstileToken) {
     let resp;
+    const sessionToken = localStorage.getItem('admin_session');
+    const applyCreditEl = root.querySelector('.evt-apply-credit');
+    const applyStoreCredit = !!(sessionToken && applyCreditEl && applyCreditEl.checked);
+    const headers = {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': newIdempotencyKey()
+    };
+    if (sessionToken) headers['X-Session-Token'] = sessionToken;
     try {
       resp = await fetch(API_BASE + '/events/' + encodeURIComponent(eventId) + '/checkout', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': newIdempotencyKey()
-        },
+        headers,
         body: JSON.stringify({
           email,
           name,
           privacyConsent: privacy,
-          turnstileToken
+          turnstileToken,
+          apply_store_credit: applyStoreCredit
         })
       });
     } catch(e) {
@@ -858,6 +885,11 @@ window.initEventPurchase = function initEventPurchase(event) {
     const data = await resp.json();
     if (!resp.ok) {
       showError(data?.message || data?.error || 'Checkout failed');
+      return;
+    }
+
+    if (data.paid_with_credit_only) {
+      showSuccess();
       return;
     }
     

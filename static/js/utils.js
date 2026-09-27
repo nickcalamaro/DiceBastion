@@ -3,7 +3,7 @@
  * Used across admin, account, events, memberships, and shop pages
  */
 
-// API Configuration — same-origin /api on production; local wrangler on Hugo dev
+// API Configuration — same-origin /api on production; remote API when previewing Hugo locally
 (function resolveApiBase() {
   if (window.__DB_API_BASE) return;
   const host = window.location.hostname || '';
@@ -15,11 +15,7 @@
     window.__DB_API_BASE = '/api';
     return;
   }
-  if (host === 'localhost' || host === '127.0.0.1') {
-    window.__DB_API_BASE = 'http://localhost:8787';
-    return;
-  }
-  // workers.dev subdomain is unreliable; custom-domain /api proxy is canonical
+  // Local Hugo only — always hit the deployed Worker via the public /api route
   window.__DB_API_BASE = 'https://dicebastion.com/api';
 })();
 // Blog API — Bunny Edge Script 75941
@@ -110,19 +106,80 @@ window.utils = {
    * Session management utilities
    */
   session: {
-    get: () => localStorage.getItem('admin_session'),
+    COOKIE_NAME: 'db_session',
+    _readCookie: () => {
+      try {
+        const match = document.cookie.match(/(?:^|;\s*)db_session=([^;]*)/);
+        return match ? decodeURIComponent(match[1]) : null;
+      } catch (_) {
+        return null;
+      }
+    },
+    _writeCookie: (token) => {
+      try {
+        if (!token) {
+          document.cookie = 'db_session=; Domain=.dicebastion.com; Path=/; Secure; SameSite=Lax; Max-Age=0';
+          return;
+        }
+        const maxAge = 7 * 24 * 60 * 60;
+        document.cookie = `db_session=${encodeURIComponent(token)}; Domain=.dicebastion.com; Path=/; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+      } catch (_) {}
+    },
+    get: () => {
+      const local = localStorage.getItem('admin_session');
+      if (local) return local;
+      const fromCookie = window.utils.session._readCookie();
+      if (fromCookie) {
+        localStorage.setItem('admin_session', fromCookie);
+        return fromCookie;
+      }
+      return null;
+    },
     getUser: () => JSON.parse(localStorage.getItem('admin_user') || 'null'),
     set: (token, user) => {
       localStorage.setItem('admin_session', token);
       localStorage.setItem('admin_user', JSON.stringify(user));
+      window.utils.session._writeCookie(token);
     },
     clear: () => {
       localStorage.removeItem('admin_session');
       localStorage.removeItem('admin_user');
       localStorage.removeItem('admin_token');
       localStorage.removeItem('user_membership_status');
+      window.utils.session._writeCookie(null);
     },
-    isLoggedIn: () => !!localStorage.getItem('admin_session'),
+    isLoggedIn: () => !!window.utils.session.get(),
+    /**
+     * Pull shared Domain=.dicebastion.com cookie into localStorage (shop ↔ main).
+     * Optionally hydrate user profile via /account/info.
+     */
+    syncFromSharedCookie: async (apiBase) => {
+      const token = window.utils.session.get();
+      if (!token) return null;
+      if (window.utils.session.getUser()) return { token, user: window.utils.session.getUser() };
+      if (!apiBase) return { token, user: null };
+      try {
+        const res = await fetch(String(apiBase).replace(/\/+$/, '') + '/account/info', {
+          headers: { 'X-Session-Token': token },
+          credentials: 'include'
+        });
+        if (!res.ok) {
+          if (res.status === 401) window.utils.session.clear();
+          return null;
+        }
+        const data = await res.json();
+        if (data.user) {
+          window.utils.session.set(token, {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.name,
+            is_admin: !!data.user.is_admin
+          });
+          return { token, user: window.utils.session.getUser() };
+        }
+      } catch (_) {}
+      return { token, user: null };
+    },
     
     /**
      * Get user info and role flags (no level calculation)
@@ -130,7 +187,7 @@ window.utils = {
      */
     getUserStatus: () => {
       const user = JSON.parse(localStorage.getItem('admin_user') || 'null');
-      const isLoggedIn = !!user;
+      const isLoggedIn = !!window.utils.session.get();
       const isAdmin = user?.is_admin === true;
       const membershipCache = JSON.parse(localStorage.getItem('user_membership_status') || 'null');
       const isMember = membershipCache && membershipCache.status === 'active';

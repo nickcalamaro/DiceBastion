@@ -45,9 +45,6 @@ async function loadEvents() {
     var apiBase = (typeof utils !== 'undefined' && utils.getApiBase)
       ? utils.getApiBase(true)
       : '/api';
-    if (apiBase.indexOf('localhost:8787') !== -1) {
-      apiBase = 'https://dicebastion.com/api';
-    }
     const res = await fetch(apiBase + '/events');
     if (!res.ok) throw new Error('Failed to fetch events');
     

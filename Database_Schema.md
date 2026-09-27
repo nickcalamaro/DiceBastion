@@ -31,7 +31,9 @@ CREATE TABLE users (
     email TEXT NOT NULL UNIQUE,
     name TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-, password_hash TEXT, is_admin INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1, last_login_at TEXT, updated_at TEXT);
+, password_hash TEXT, is_admin INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1, last_login_at TEXT, updated_at TEXT
+, store_credit_pence INTEGER NOT NULL DEFAULT 0);
+-- store_credit_pence: cached balance; every change also appends store_credit_ledger.
 CREATE TABLE memberships (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -100,7 +102,8 @@ CREATE TABLE transactions (
         updated_at TEXT,
         sumup_transaction_code TEXT,
         sca_fired INTEGER DEFAULT NULL
-      );
+      , credit_applied_pence INTEGER NOT NULL DEFAULT 0, card_charged_pence INTEGER);
+-- credit_applied_pence / card_charged_pence: store-credit split for event tickets (pence).
 CREATE TABLE products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -137,7 +140,9 @@ CREATE TABLE orders (
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         completed_at TEXT
-      );
+      , promo_code_id INTEGER, discount_pence INTEGER DEFAULT 0, promo_code_applied TEXT
+      , credit_applied_pence INTEGER NOT NULL DEFAULT 0, card_charged_pence INTEGER);
+-- credit_applied_pence / card_charged_pence: store-credit split for shop orders (pence).
 CREATE TABLE order_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER NOT NULL,
@@ -376,5 +381,64 @@ CREATE TABLE product_categories (
   keywords TEXT,                      -- comma-separated aliases (e.g. "mtg, magic")
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```
+
+### Store credit + TCG buyback
+
+Migration: `worker/migrations/0010_store_credit_buyback.sql`.
+
+```sql
+CREATE TABLE store_credit_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  delta_pence INTEGER NOT NULL,
+  balance_after_pence INTEGER NOT NULL,
+  entry_type TEXT NOT NULL CHECK(entry_type IN (
+    'buyback_credit', 'shop_spend', 'event_spend', 'adjustment', 'void'
+  )),
+  reference_type TEXT,
+  reference_id TEXT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  note TEXT,
+  created_by TEXT NOT NULL DEFAULT 'system',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE buyback_cases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN (
+    'submitted', 'under_review', 'quoted', 'accepted', 'rejected', 'completed', 'cancelled'
+  )),
+  tos_accepted_at TEXT NOT NULL,
+  game_systems_json TEXT,
+  customer_notes TEXT,
+  agreed_value_pence INTEGER,
+  staff_comments TEXT,
+  quoted_at TEXT,
+  resolved_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE buyback_case_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL,
+  game_system TEXT NOT NULL CHECK(game_system IN ('mtg', 'riftbound')),
+  external_id TEXT,
+  card_name TEXT NOT NULL,
+  set_code TEXT,
+  set_name TEXT,
+  collector_number TEXT,
+  image_url TEXT,
+  condition TEXT NOT NULL DEFAULT 'EX',
+  language TEXT NOT NULL DEFAULT 'EN',
+  notes TEXT,
+  line_quote_pence INTEGER,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (case_id) REFERENCES buyback_cases(id)
 );
 ```

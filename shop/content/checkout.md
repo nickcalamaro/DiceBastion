@@ -143,6 +143,15 @@ Place Order
 </div>
 <p id="promo-message" style="margin: 0.5rem 0 0; font-size: 0.8125rem; min-height: 1.2em;"></p>
 </div>
+<div id="store-credit-box" style="display: none; margin: 1rem 0 0; padding: 1rem; background: rgb(var(--color-primary-50)); border: 1px solid rgb(var(--color-primary-200)); border-radius: 8px;">
+<label class="checkbox-label" style="display: flex; gap: 0.5rem; align-items: flex-start; margin: 0;">
+<input type="checkbox" id="apply-store-credit" checked style="margin-top: 0.2rem;">
+<span>
+<span style="font-weight: 600;">Apply store credit</span>
+<span id="store-credit-available" class="text-muted" style="display: block; font-size: 0.8125rem; margin-top: 0.25rem;"></span>
+</span>
+</label>
+</div>
 <div class="summary-totals">
 <div class="summary-line">
 <span>Subtotal</span>
@@ -152,12 +161,16 @@ Place Order
 <span>Promotion</span>
 <span id="summary-discount">−£0.00</span>
 </div>
+<div class="summary-line" id="summary-credit-row" style="display: none; color: rgb(22, 163, 74);">
+<span>Store credit</span>
+<span id="summary-credit">−£0.00</span>
+</div>
 <div class="summary-line">
 <span>Shipping</span>
 <span id="summary-shipping">£0.00</span>
 </div>
 <div class="summary-line total">
-<span>Total</span>
+<span>Total due</span>
 <span id="summary-total">£0.00</span>
 </div>
 </div>
@@ -478,6 +491,8 @@ let cart = [];
 let currentOrderNumber = null;
 let currentCheckoutId = null;
 let appliedDiscountPence = 0;
+let storeCreditPence = 0;
+let sessionToken = null;
 
 const PROMO_ERR_MSG = {
   promo_not_found: 'That promo code could not be found.',
@@ -489,7 +504,8 @@ const PROMO_ERR_MSG = {
   promo_no_eligible_lines: 'No items in your basket qualify for this code.',
   promo_zero_discount: 'This code does not reduce your order.',
   promo_invalid_config: 'This promotion is misconfigured. Please contact support.',
-  checkout_total_below_minimum: 'Discount would make your order total too low; add items or reduce the discount.',
+  checkout_total_below_minimum: 'Order total or card remainder is too low; add items, reduce the discount, or cover the order fully with store credit.',
+  insufficient_credit: 'Store credit could not be applied. Refresh and try again.',
   missing_items: '',
   invalid_delivery_method: '',
   insufficient_stock: ''
@@ -556,7 +572,21 @@ const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 
 const deliveryMethod = document.querySelector('input[name="delivery_method"]:checked')?.value || 'collection';
 const shipping = deliveryMethod === 'delivery' ? 400 : 0;
 const disc = Math.max(0, appliedDiscountPence);
-const total = Math.max(0, subtotal + shipping - disc);
+const afterPromo = Math.max(0, subtotal + shipping - disc);
+const applyCredit = !!(sessionToken && storeCreditPence > 0 && document.getElementById('apply-store-credit')?.checked);
+let creditPreview = 0;
+let cardDue = afterPromo;
+if (applyCredit) {
+const maxCredit = Math.min(storeCreditPence, afterPromo);
+const rem = afterPromo - maxCredit;
+if (rem === 0 || rem >= 100) {
+creditPreview = maxCredit;
+cardDue = rem;
+} else {
+creditPreview = 0;
+cardDue = afterPromo;
+}
+}
 
 document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
 const discRow = document.getElementById('summary-discount-row');
@@ -566,8 +596,39 @@ document.getElementById('summary-discount').textContent = '−' + formatPrice(di
 } else if (discRow) {
 discRow.style.display = 'none';
 }
+const creditRow = document.getElementById('summary-credit-row');
+if (creditPreview > 0 && creditRow) {
+creditRow.style.display = 'flex';
+document.getElementById('summary-credit').textContent = '−' + formatPrice(creditPreview);
+} else if (creditRow) {
+creditRow.style.display = 'none';
+}
 document.getElementById('summary-shipping').textContent = formatPrice(shipping);
-document.getElementById('summary-total').textContent = formatPrice(total);
+document.getElementById('summary-total').textContent = formatPrice(cardDue);
+}
+
+async function loadStoreCredit() {
+sessionToken = (window.utils && utils.session) ? utils.session.get() : localStorage.getItem('admin_session');
+if (window.utils && utils.session && utils.session.syncFromSharedCookie) {
+try { await utils.session.syncFromSharedCookie(API_BASE); sessionToken = utils.session.get(); } catch (_) {}
+}
+const box = document.getElementById('store-credit-box');
+if (!sessionToken || !box) return;
+try {
+const res = await fetch(`${API_BASE}/account/info`, {
+headers: { 'X-Session-Token': sessionToken }
+});
+if (!res.ok) return;
+const data = await res.json();
+storeCreditPence = Math.max(0, Number(data.store_credit_pence) || 0);
+if (storeCreditPence > 0) {
+box.style.display = 'block';
+const avail = document.getElementById('store-credit-available');
+if (avail) avail.textContent = 'Available: ' + formatPrice(storeCreditPence) + ' (shop orders and event tickets only)';
+document.getElementById('apply-store-credit')?.addEventListener('change', updateTotals);
+updateTotals();
+}
+} catch (_) {}
 }
 
 async function fetchPromoQuote(opts) {
@@ -698,6 +759,10 @@ if (promoTrim) {
 orderData.promo_code = promoTrim;
 }
 
+if (sessionToken) {
+orderData.apply_store_credit = !!(document.getElementById('apply-store-credit')?.checked);
+}
+
 // Only include shipping address if delivery is selected
 if (deliveryMethod === 'delivery') {
 orderData.shipping_address = {
@@ -713,24 +778,37 @@ country: formData.get('country')
 document.getElementById('checkout-form-container').style.display = 'none';
 document.getElementById('payment-processing').style.display = 'block';
 
+const checkoutHeaders = { 'Content-Type': 'application/json' };
+if (sessionToken) checkoutHeaders['X-Session-Token'] = sessionToken;
+
 // Create order and get widget configuration
 const response = await fetch(`${API_BASE}/shop/checkout`, {
 method: 'POST',
-headers: {
-'Content-Type': 'application/json',
-},
+headers: checkoutHeaders,
 body: JSON.stringify(orderData)
 });
 
 const result = await response.json();
 
-if (!response.ok || !result.checkoutId) {
+if (!response.ok) {
 const detail = result.message || PROMO_ERR_MSG[result.error] || result.error || 'Failed to create checkout';
 throw new Error(detail);
 }
 
 currentOrderNumber = result.order_number;
-currentCheckoutId = result.checkoutId;
+currentCheckoutId = result.checkoutId || null;
+
+// Credit-only: skip SumUp and go to confirmation
+if (result.paid_with_credit_only || (!result.checkoutId && result.success)) {
+if (typeof ShopCartStorage !== 'undefined') ShopCartStorage.clear();
+else localStorage.removeItem('shop_cart');
+window.location.href = `/order-confirmation?order=${encodeURIComponent(result.order_number)}&email=${encodeURIComponent(orderData.email)}`;
+return;
+}
+
+if (!result.checkoutId) {
+throw new Error(result.message || 'Failed to create checkout');
+}
 
 function logShopPayment(type, body) {
 try {
@@ -819,6 +897,7 @@ submitBtn.textContent = 'Place Order';
 
 document.addEventListener('DOMContentLoaded', function() {
 renderOrderSummary();
+loadStoreCredit();
 
 const form = document.getElementById('checkout-form');
 if (form) {
