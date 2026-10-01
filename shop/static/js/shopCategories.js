@@ -46,11 +46,20 @@
     return !!ka && ka === kb;
   }
 
+  // Same replace as the event title field: lowercase, then hyphens for spaces and punctuation.
+  function slug(raw) {
+    return display(raw)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
   global.ShopCategories = {
     display: display,
     key: key,
     parseField: parseField,
     normalizeField: normalizeField,
-    same: same
+    same: same,
+    slug: slug
   };
 })(typeof window !== 'undefined' ? window : globalThis);

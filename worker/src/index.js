@@ -256,6 +256,13 @@ function getShopProductUrl(slug) {
   return value ? `https://shop.dicebastion.com/products/${encodeURIComponent(value)}` : ''
 }
 
+function categorySlug(name) {
+  return normalizeCategoryLabel(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 function parseProductCategories(categoryValue) {
   return [...new Set(
     String(categoryValue || '')
@@ -266,8 +273,8 @@ function parseProductCategories(categoryValue) {
 }
 
 function getShopCategoryUrl(categoryName) {
-  const value = String(categoryName || '').trim()
-  return value ? `https://shop.dicebastion.com/products/category/${encodeURIComponent(value)}` : ''
+  const slug = categorySlug(categoryName)
+  return slug ? `https://shop.dicebastion.com/products/category/${slug}` : ''
 }
 
 function getShopCategoryUrls(categoryValue) {
@@ -458,15 +465,6 @@ function isDrinksCategoryName(categoryName) {
 
 function isDrinksProduct(product) {
   return productBelongsToCategory(product, 'Drinks')
-}
-
-function canonicalCategoryName(products, requestedName) {
-  const wanted = categoryMatchKey(requestedName)
-  for (const product of products || []) {
-    const match = parseProductCategoryNames(product.category).find((c) => c.toLowerCase() === wanted)
-    if (match) return match
-  }
-  return normalizeCategoryLabel(requestedName)
 }
 
 function defaultCategoryDescription(categoryName) {
@@ -7951,8 +7949,8 @@ function generateProductSeoPage(product, allCategories) {
   const descTrunc = plainForMeta.length > 160 ? plainForMeta.substring(0, 157) + '...' : plainForMeta;
   const desc = e(descTrunc);
   const bodyHtml = product.full_description || product.description || product.summary || '';
-  const shopModalUrl = `${shop}/?product=${encodeURIComponent(slug)}`;
-  const url = `${shop}/products/${encodeURIComponent(slug)}`;
+  const url = getShopProductUrl(slug);
+  const shopModalUrl = url;
   const priceNum = (Number(product.price) || 0) / 100;
   const priceDisplay = priceNum.toFixed(2);
   const inStock = (product.stock_quantity || 0) > 0;
@@ -8020,7 +8018,7 @@ function generateProductSeoPage(product, allCategories) {
     '@type': 'BreadcrumbList',
     'itemListElement': [
       { '@type': 'ListItem', 'position': 1, 'name': 'Shop', 'item': shop },
-      ...(categories[0] ? [{ '@type': 'ListItem', 'position': 2, 'name': categories[0], 'item': `${shop}/products/category/${encodeURIComponent(categories[0])}` }] : []),
+      ...(categories[0] ? [{ '@type': 'ListItem', 'position': 2, 'name': categories[0], 'item': getShopCategoryUrl(categories[0]) }] : []),
       { '@type': 'ListItem', 'position': categories[0] ? 3 : 2, 'name': product.name || 'Product' }
     ]
   };
@@ -8084,13 +8082,13 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 </head><body>
 <div class="header"><a href="${shop}">Dice Bastion Shop</a></div>
 <div class="breadcrumb">
-<a href="${shop}">Shop</a>${categories[0] ? ` › <a href="${shop}/products/category/${encodeURIComponent(categories[0])}">${e(categories[0])}</a>` : ''} › ${name}
+<a href="${shop}">Shop</a>${categories[0] ? ` › <a href="${getShopCategoryUrl(categories[0])}">${e(categories[0])}</a>` : ''} › ${name}
 </div>
 <div class="card">
 ${img ? `<img src="${img}" alt="${name}" loading="eager" decoding="async" fetchpriority="high">` : ''}
 <div class="card-body">
 <h1>${name}</h1>
-${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${shop}/products/category/${encodeURIComponent(c)}">${e(c)}</a>`).join('')}</div>` : ''}
+${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${getShopCategoryUrl(c)}">${e(c)}</a>`).join('')}</div>` : ''}
 <div class="price">£${priceDisplay}</div>
 ${bodyHtml ? `<div class="desc">${bodyHtml}</div>` : `<div class="desc">${e(plainForMeta)}</div>`}
 <div class="meta">
@@ -8110,8 +8108,7 @@ function generateCategorySeoPage(categoryName, products, seoMeta) {
   const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
   const shop = 'https://shop.dicebastion.com';
   const catDisplay = e(categoryName);
-  const url = `${shop}/products/category/${encodeURIComponent(categoryName)}`;
-  const shopFilterUrl = `${shop}/?category=${encodeURIComponent(categoryName)}`;
+  const url = getShopCategoryUrl(categoryName);
   const seo = resolveCategorySeo(categoryName, products, seoMeta, shop);
   const title = e(seo.title);
   const desc = seo.description;
@@ -8133,7 +8130,7 @@ function generateCategorySeoPage(categoryName, products, seoMeta) {
       'itemListElement': products.map((p, i) => ({
         '@type': 'ListItem',
         'position': i + 1,
-        'url': `${shop}/products/${encodeURIComponent(p.slug)}`,
+        'url': getShopProductUrl(p.slug),
         'name': p.name,
         'image': resolveProductPrimaryImage(p, shop)
       }))
@@ -8145,14 +8142,15 @@ function generateCategorySeoPage(categoryName, products, seoMeta) {
     '@type': 'BreadcrumbList',
     'itemListElement': [
       { '@type': 'ListItem', 'position': 1, 'name': 'Shop', 'item': shop },
-      { '@type': 'ListItem', 'position': 2, 'name': categoryName }
+      { '@type': 'ListItem', 'position': 2, 'name': categoryName, 'item': url }
     ]
   };
 
   const productCards = products.map(p => {
     const price = ((Number(p.price) || 0) / 100).toFixed(2);
     const cardImg = resolveProductPrimaryImage(p, shop);
-    return `<a href="${shop}/products/${encodeURIComponent(p.slug)}" class="cat-product-card">
+    const productUrl = getShopProductUrl(p.slug);
+    return `<a href="${productUrl}" class="cat-product-card">
 <img src="${e(cardImg)}" alt="${e(p.name)}" loading="lazy" decoding="async">
 <div class="cat-product-info"><span class="cat-product-name">${e(p.name)}</span><span class="cat-product-price">£${price}</span></div></a>`;
   }).join('\n');
@@ -8207,7 +8205,7 @@ ${ogImage ? `<div class="cat-hero"><img src="${e(ogImage)}" alt="${previewAlt}">
 <div class="cat-heading">
 <h1>${catDisplay}</h1>
 <p>${products.length} product${products.length !== 1 ? 's' : ''}</p>
-<a class="cta" href="${shopFilterUrl}">Open category in shop</a>
+<a class="cta" href="${url}">Open category in shop</a>
 </div>
 <div class="cat-grid">${productCards}</div>
 <div class="footer"><a href="${shop}">Back to Shop</a></div>
@@ -8241,14 +8239,22 @@ app.get('/products/sitemap.xml', async c => {
     const shop = 'https://shop.dicebastion.com'
     const shopProducts = (results || []).filter((p) => !isDrinksProduct(p))
 
-    // Collect unique categories + newest product update per category for lastmod
+    // Category lastmod: newest of its products' updates and its own admin SEO edit
+    const { results: categoryRows } = await c.env.DB.prepare(
+      'SELECT name, updated_at FROM product_categories'
+    ).all().catch(() => ({ results: [] }))
+    const categoryEditedAt = new Map(
+      (categoryRows || []).map((row) => [categoryMatchKey(row.name), row.updated_at])
+    )
     const categoryLastMod = new Map()
     shopProducts.forEach(p => {
       parseProductCategoryNames(p.category).forEach(c => {
         if (isDrinksCategoryName(c)) return
-        const prev = categoryLastMod.get(c)
+        const prev = categoryLastMod.get(c) || categoryEditedAt.get(categoryMatchKey(c))
         if (!prev || String(p.updated_at || '') > String(prev)) {
           categoryLastMod.set(c, p.updated_at)
+        } else {
+          categoryLastMod.set(c, prev)
         }
       })
     })
@@ -8260,13 +8266,13 @@ app.get('/products/sitemap.xml', async c => {
     // Product pages
     for (const p of shopProducts) {
       const lastmod = formatProductSitemapLastMod(p.updated_at)
-      xml += `\n<url><loc>${shop}/products/${encodeURIComponent(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.8</priority></url>`
+      xml += `\n<url><loc>${getShopProductUrl(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.8</priority></url>`
     }
 
     // Category pages
     for (const [cat, updatedAt] of categoryLastMod) {
       const lastmod = formatProductSitemapLastMod(updatedAt)
-      xml += `\n<url><loc>${shop}/products/category/${encodeURIComponent(cat)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.6</priority></url>`
+      xml += `\n<url><loc>${getShopCategoryUrl(cat)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.6</priority></url>`
     }
 
     xml += '\n</urlset>'
@@ -8299,7 +8305,7 @@ app.get('/products/sitemap-images.xml', async c => {
     const shopProducts = (results || []).filter((p) => !isDrinksProduct(p))
 
     const entries = shopProducts.map((product) => ({
-      pageUrl: `${shop}/products/${encodeURIComponent(product.slug)}`,
+      pageUrl: getShopProductUrl(product.slug),
       title: product.name || product.slug,
       images: collectProductImageUrls(product, shop)
     }))
@@ -8315,7 +8321,7 @@ app.get('/products/sitemap-images.xml', async c => {
       const preview = resolveCategoryPreviewImage([product], shop)
       if (!preview) continue
       entries.push({
-        pageUrl: `${shop}/products/category/${encodeURIComponent(cat)}`,
+        pageUrl: getShopCategoryUrl(cat),
         title: cat,
         images: [preview]
       })
@@ -8337,56 +8343,94 @@ app.get('/products/sitemap-images.xml', async c => {
   }
 })
 
+const SHOP_SHELL_CACHE = { expiresAt: 0, html: '' }
+
+async function loadShopShellHtml(env) {
+  if (SHOP_SHELL_CACHE.html && Date.now() < SHOP_SHELL_CACHE.expiresAt) return SHOP_SHELL_CACHE.html
+  const pagesBase = String(env?.SHOP_PAGES_ORIGIN || 'https://dicebastion-shop.pages.dev').replace(/\/+$/, '')
+  try {
+    const res = await fetch(`${pagesBase}/`, {
+      headers: { Accept: 'text/html', 'User-Agent': 'DiceBastion-shop-shell/1' }
+    })
+    if (!res.ok) return ''
+    const html = await res.text()
+    SHOP_SHELL_CACHE.html = html
+    SHOP_SHELL_CACHE.expiresAt = Date.now() + 60 * 1000
+    return html
+  } catch (err) {
+    console.error('[shop shell]', err)
+    return ''
+  }
+}
+
+// Crawlers and share bots get the full SEO page; this shell is only what a person's browser shows.
+function applyShopShellSeo(html, { title, canonical }) {
+  return String(html || '')
+    .replace(/<title>[^<]*<\/title>/i, `<title>${escapeHtml(title)}</title>`)
+    .replace(/(<link rel="canonical" href=")[^"]*(")/i, `$1${escapeHtml(canonical)}$2`)
+}
+
+function shopSeoHtmlResponse(html, cacheSeconds) {
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': `public, max-age=${cacheSeconds}, s-maxage=${cacheSeconds}`
+    }
+  })
+}
+
 // ---------- Category SEO route (must be before /products/:slug) ----------
 app.get('/products/category/:name', async c => {
   try {
-    let categoryName = c.req.param('name') || ''
-    try { categoryName = decodeURIComponent(categoryName) } catch (_) { /* already decoded */ }
-    categoryName = categoryName.trim()
-
-    // Drinks are sold via dicebastion.com/drinks, not the online shop catalogue
-    if (isDrinksCategoryName(categoryName)) {
+    let requested = c.req.param('name') || ''
+    try { requested = decodeURIComponent(requested) } catch (_) { /* already decoded */ }
+    const slug = categorySlug(requested)
+    if (slug === 'drinks') {
       return Response.redirect('https://dicebastion.com/drinks/', 302)
     }
 
-    const { results } = await c.env.DB.prepare(`
-      SELECT id, name, slug, summary, description, full_description, price, currency, stock_quantity, image_url, category, release_date
-      FROM products WHERE is_active = 1
-      ORDER BY name ASC
-    `).all()
+    const [{ results: activeProducts }, categoryList] = await Promise.all([
+      c.env.DB.prepare(`
+        SELECT id, name, slug, summary, description, full_description, price, currency, stock_quantity, image_url, category, release_date
+        FROM products WHERE is_active = 1
+        ORDER BY name ASC
+      `).all(),
+      listProductCategoryMeta(c.env.DB)
+    ])
 
-    const catProducts = (results || []).filter(p => productBelongsToCategory(p, categoryName))
-
-    if (catProducts.length === 0) {
+    const results = (activeProducts || []).filter((product) => !isDrinksProduct(product))
+    const canonicalName = results
+      .flatMap((product) => parseProductCategoryNames(product.category))
+      .find((name) => categorySlug(name) === slug)
+    if (!canonicalName) {
       return Response.redirect('https://shop.dicebastion.com/', 302)
     }
 
-    const canonicalName = canonicalCategoryName(catProducts, categoryName)
-    const categoryList = await listProductCategoryMeta(c.env.DB)
-    const seoMeta = categoryList.find(row => categoryMatchKey(row.name) === categoryMatchKey(canonicalName)) || null
-
-    // Bots get category page, humans get redirect to shop filtered by category
-    const host = c.req.header('Host') || ''
-    if (host.includes('shop.dicebastion.com')) {
-      const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = SHOP_SEO_BOT_UA.test(ua)
-
-      if (isBot) {
-        const html = generateCategorySeoPage(canonicalName, catProducts, seoMeta)
-        return new Response(html, {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=1800' }
-        })
-      }
-
-      return Response.redirect(`https://shop.dicebastion.com/?category=${encodeURIComponent(canonicalName)}`, 302)
+    if (requested !== slug) {
+      const dest = new URL(`https://shop.dicebastion.com/products/category/${slug}`)
+      const q = c.req.query('q')
+      if (q) dest.searchParams.set('q', q)
+      return Response.redirect(dest.toString(), 301)
     }
 
-    const html = generateCategorySeoPage(canonicalName, catProducts, seoMeta)
-    return new Response(html, {
-      status: 200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    })
+    const catProducts = results.filter((product) => productBelongsToCategory(product, canonicalName))
+    const seoMeta = (categoryList || []).find((row) => categoryMatchKey(row.name) === categoryMatchKey(canonicalName)) || null
+    const host = c.req.header('Host') || ''
+    const ua = (c.req.header('User-Agent') || '').toLowerCase()
+    const isBot = SHOP_SEO_BOT_UA.test(ua)
+    const seoHtml = generateCategorySeoPage(canonicalName, catProducts, seoMeta)
+
+    if (!host.includes('shop.dicebastion.com') || isBot) {
+      return shopSeoHtmlResponse(seoHtml, 600)
+    }
+
+    const shell = await loadShopShellHtml(c.env)
+    if (!shell) return shopSeoHtmlResponse(seoHtml, 60)
+    return shopSeoHtmlResponse(applyShopShellSeo(shell, {
+      title: resolveCategorySeo(canonicalName, catProducts, seoMeta, 'https://shop.dicebastion.com').title,
+      canonical: getShopCategoryUrl(canonicalName)
+    }), 60)
   } catch (err) {
     console.error('Category page error:', err)
     return c.json({ error: 'internal_error' }, 500)
@@ -8403,41 +8447,31 @@ app.get('/products/:slug', async (c, next) => {
     const product = await c.env.DB.prepare(
       'SELECT * FROM products WHERE slug = ? AND is_active = 1'
     ).bind(slug).first()
-
-    if (!product) {
+    if (!product || isDrinksProduct(product)) {
       return Response.redirect('https://shop.dicebastion.com/', 302)
     }
 
-    // Shop UX: humans get the real shop + product modal. Bots get the SEO HTML
-    // at this canonical URL (same pattern as sitemap / Indexing API targets).
     const host = c.req.header('Host') || ''
-    if (host.includes('shop.dicebastion.com')) {
-      const ua = (c.req.header('User-Agent') || '').toLowerCase()
-      const isBot = SHOP_SEO_BOT_UA.test(ua)
-
-      if (isBot) {
-        const html = generateProductSeoPage(product)
-        return new Response(html, {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300, s-maxage=600' }
-        })
-      }
-
-      // Human → shop homepage with product modal (not a standalone product design)
-      return Response.redirect(`https://shop.dicebastion.com/?product=${encodeURIComponent(product.slug)}`, 302)
-    }
-
-    // Workers.dev → serve based on Accept header
     const accept = c.req.header('Accept') || ''
-    if (accept.includes('text/html') && !accept.includes('application/json')) {
-      const html = generateProductSeoPage(product)
-      return new Response(html, {
-        status: 200,
-        headers: { 'Content-Type': 'text/html; charset=utf-8' }
-      })
+    const wantsHtml = accept.includes('text/html') && !accept.includes('application/json')
+
+    // Bots get the indexable product page. People get the shop at the same URL,
+    // with the product modal opened by the shop script.
+    const ua = (c.req.header('User-Agent') || '').toLowerCase()
+    const isBot = SHOP_SEO_BOT_UA.test(ua)
+    if (!host.includes('shop.dicebastion.com') && !wantsHtml && !isBot) {
+      return c.json(product)
+    }
+    if (!host.includes('shop.dicebastion.com') || isBot) {
+      return shopSeoHtmlResponse(generateProductSeoPage(product), 300)
     }
 
-    return c.json(product)
+    const shell = await loadShopShellHtml(c.env)
+    if (!shell) return shopSeoHtmlResponse(generateProductSeoPage(product), 60)
+    return shopSeoHtmlResponse(applyShopShellSeo(shell, {
+      title: `${product.name || 'Product'} | Dice Bastion Shop, Gibraltar`,
+      canonical: getShopProductUrl(product.slug)
+    }), 60)
   } catch (err) {
     console.error('Product slug error:', err)
     return c.json({ error: 'internal_error' }, 500)
@@ -12924,12 +12958,12 @@ export default {
         return app.fetch(request, env, ctx)
       }
 
-      // /products/category/:name → Hono serves category SEO page
+      // /products/category/:slug → Hono serves the category page
       if (parts[2] === 'category' && parts.length >= 4 && parts[3]) {
         return app.fetch(request, env, ctx)
       }
 
-      // /products/:slug → Hono serves product SEO page (or 302 for humans)
+      // /products/:slug → Hono serves the product page
       const slug = parts.length === 3 ? parts[2] : null
       if (slug && !slug.includes('.')) {
         return app.fetch(request, env, ctx)
@@ -12968,7 +13002,7 @@ export default {
         ).join('\n          ')
 
         const categoryLinks = [...categories].map(c =>
-          `<a href="/products/category/${encodeURIComponent(c)}">${c}</a>`
+          `<a href="/products/category/${categorySlug(c)}">${c}</a>`
         ).join('\n          ')
 
         const navBlock = `

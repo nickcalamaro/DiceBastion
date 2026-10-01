@@ -698,6 +698,7 @@ let allProducts = [];
 let categoryMeta = [];
 let categoryMetaByName = new Map();
 let currentFilter = null;
+let shopCategoryNames = [];
 let currentSearchTerm = '';
 let visibleCount = PAGE_SIZE;
 let searchDebounceTimer = null;
@@ -711,6 +712,30 @@ function categoryDisplay(name) {
 
 function categoryKey(name) {
   return (window.ShopCategories && ShopCategories.key(name)) || String(name || '').trim().toLowerCase();
+}
+
+function categoryPath(name) {
+  return '/products/category/' + ShopCategories.slug(name);
+}
+
+function readShopLocation() {
+  const path = window.location.pathname;
+  const cat = path.match(/^\/products\/category\/([^/]+)/);
+  const prod = !cat && path.match(/^\/products\/([^/]+)/);
+  return {
+    category: cat ? cat[1] : '',
+    product: prod ? prod[1] : '',
+    q: new URLSearchParams(window.location.search).get('q') || ''
+  };
+}
+
+function categoryFromSlug(slug) {
+  return shopCategoryNames.find(name => ShopCategories.slug(name) === slug) || null;
+}
+
+function listUrl() {
+  const path = currentFilter ? categoryPath(currentFilter) : '/';
+  return currentSearchTerm ? path + '?q=' + encodeURIComponent(currentSearchTerm) : path;
 }
 
 function categoryTags(raw) {
@@ -731,7 +756,7 @@ function relatedCategoryLinksHtml(product) {
   if (!tags.length) return '';
   const links = tags.map(function (cat) {
     const label = escapeHtml(cat);
-    const href = '/products/category/' + encodeURIComponent(cat);
+    const href = categoryPath(cat);
     return '<li><a href="' + href + '" class="category-btn" data-category="' + label + '">' + label + '</a></li>';
   }).join('');
   return (
@@ -1236,7 +1261,7 @@ async function loadProducts() {
 
 function categoryButtonHtml(cat) {
   const label = escapeHtml(cat);
-  const href = `/products/category/${encodeURIComponent(cat)}`;
+  const href = categoryPath(cat);
   return `<a href="${href}" class="category-btn" data-category="${label}">${label}</a>`;
 }
 
@@ -1246,7 +1271,7 @@ function buildSeoCategoryLinks(categories) {
   nav.innerHTML = categories
     .map(cat => {
       const label = escapeHtml(cat);
-      return `<a href="/products/category/${encodeURIComponent(cat)}">${label}</a>`;
+      return `<a href="${categoryPath(cat)}">${label}</a>`;
     })
     .join('');
 }
@@ -1282,6 +1307,7 @@ function buildCategoryFilter(products) {
     return a.localeCompare(b);
   });
 
+  shopCategoryNames = sortedCategories;
   const topCategories = sortedCategories.slice(0, 5);
   const extraCategories = sortedCategories.slice(5);
 
@@ -1363,7 +1389,9 @@ function handleSearchInput() {
   const input = document.getElementById('search-input');
   currentSearchTerm = input ? input.value.toLowerCase().trim() : '';
   applyFilters({ resetList: true });
-  syncShopUrl({ replace: true });
+  const modal = document.getElementById('product-modal');
+  if (modal && modal.classList.contains('active')) return;
+  syncShopUrl();
 }
 
 function scheduleSearch() {
@@ -1484,36 +1512,8 @@ function setActiveCategoryButton(category) {
   }
 }
 
-function syncShopUrl({ replace = false } = {}) {
-  const params = new URLSearchParams(window.location.search);
-  if (currentFilter) {
-    params.set('category', currentFilter);
-  } else {
-    params.delete('category');
-  }
-  if (currentSearchTerm) {
-    params.set('q', currentSearchTerm);
-  } else {
-    params.delete('q');
-  }
-  params.delete('page');
-  const qs = params.toString();
-  const nextUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-  const method = replace ? 'replaceState' : 'pushState';
-  history[method]({}, '', nextUrl);
-}
-
-function shopQueryUrl(updates = {}) {
-  const params = new URLSearchParams(window.location.search);
-  Object.entries(updates).forEach(([key, value]) => {
-    if (value == null || value === '') {
-      params.delete(key);
-    } else {
-      params.set(key, value);
-    }
-  });
-  const qs = params.toString();
-  return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+function syncShopUrl() {
+  history.replaceState(null, '', listUrl());
 }
 
 function filterByCategory(category, btnElement, { syncUrl = true } = {}) {
@@ -1546,11 +1546,11 @@ function productCardHtml(product) {
   const quickAdd = renderQuickAddBlock(product);
   const slugRaw = product.slug || '';
   const slugAttr = escapeHtml(slugRaw);
-  const slugHref = encodeURIComponent(slugRaw);
+  const slugHref = '/products/' + encodeURIComponent(slugRaw);
 
   return `
 <div class="product-card">
-    <a href="/products/${slugHref}"
+    <a href="${slugHref}"
        class="product-card-link"
        data-product-id="${product.id}"
        data-product-slug="${slugAttr}">
@@ -1640,7 +1640,7 @@ function renderProducts(products, options) {
         if (input) input.value = '';
         setActiveCategoryButton(null);
         applyFilters({ resetList: true });
-        syncShopUrl({ replace: true });
+        syncShopUrl();
       });
     } else {
       grid.innerHTML = `
@@ -1689,22 +1689,16 @@ function scheduleFillViewport() {
 }
 
 // Show product detail modal
-window.showProductDetail = async function (productId, slug, skipPushState) {
+window.showProductDetail = async function (productId, slug) {
   try {
     const response = await fetch(`${API_BASE}/products/${productId}`);
     if (!response.ok) throw new Error('product_http_' + response.status);
     const product = await response.json();
     if (!product || product.error) throw new Error('product_not_found');
 
-    if (!skipPushState) {
-      const productSlug = slug || product.slug;
-      if (productSlug) {
-        history.pushState(
-          { product: productSlug },
-          '',
-          shopQueryUrl({ product: productSlug })
-        );
-      }
+    const productSlug = slug || product.slug;
+    if (productSlug) {
+      history.replaceState(null, '', '/products/' + encodeURIComponent(productSlug));
     }
 
     const isPreorder =
@@ -1800,30 +1794,22 @@ window.closeProductModal = function() {
     lastModalFocus.focus();
   }
   lastModalFocus = null;
-  const params = new URLSearchParams(window.location.search);
-  if (params.has('product')) {
-    history.pushState({}, '', shopQueryUrl({ product: null }));
-  }
+  syncShopUrl();
 };
 
-function applyShopStateFromUrl({ syncUrl = false } = {}) {
-  const params = new URLSearchParams(window.location.search);
-  const categoryParam = params.get('category');
-  const qParam = (params.get('q') || '').trim();
-  const pageParam = parseInt(params.get('page'), 10);
-
-  currentFilter = categoryParam ? categoryDisplay(categoryParam) : null;
-  currentSearchTerm = qParam.toLowerCase();
+function applyShopStateFromUrl() {
+  const loc = readShopLocation();
+  const pageParam = parseInt(new URLSearchParams(window.location.search).get('page'), 10);
+  currentFilter = loc.category ? categoryFromSlug(loc.category) : null;
+  currentSearchTerm = loc.q.toLowerCase();
   visibleCount = pageParam > 1 ? pageParam * PAGE_SIZE : PAGE_SIZE;
 
   const input = document.getElementById('search-input');
-  if (input && input.value !== qParam) input.value = qParam;
+  if (input) input.value = loc.q;
 
   setActiveCategoryButton(currentFilter);
   applyFilters();
-  if (syncUrl || (categoryParam && currentFilter && currentFilter !== categoryParam)) {
-    syncShopUrl({ replace: true });
-  }
+  return loc;
 }
 
 // Close modal on background click
@@ -1838,27 +1824,6 @@ document.addEventListener('keydown', function (e) {
   const modal = document.getElementById('product-modal');
   if (modal && modal.classList.contains('active')) {
     closeProductModal();
-  }
-});
-
-window.addEventListener('popstate', function() {
-  const params = new URLSearchParams(window.location.search);
-  const productSlug = params.get('product');
-
-  if (allProducts.length > 0) {
-    applyShopStateFromUrl();
-  }
-
-  if (productSlug && allProducts.length > 0) {
-    const match = allProducts.find(p => p.slug === productSlug);
-    if (match) showProductDetail(match.id, match.slug, true);
-  } else {
-    const modal = document.getElementById('product-modal');
-    if (modal) {
-      modal.classList.remove('active');
-      modal.hidden = true;
-    }
-    document.body.style.overflow = '';
   }
 });
 
@@ -1879,15 +1844,9 @@ document.addEventListener('DOMContentLoaded', async function() {
   updateCartBadge();
 
   if (allProducts.length > 0) {
-    applyShopStateFromUrl({ syncUrl: true });
-  }
-
-  const productSlug = new URLSearchParams(window.location.search).get('product');
-  if (productSlug && allProducts.length > 0) {
-    const match = allProducts.find(p => p.slug === productSlug);
-    if (match) {
-      showProductDetail(match.id, match.slug, true);
-    }
+    const loc = applyShopStateFromUrl();
+    const match = loc.product && allProducts.find(p => p.slug === loc.product);
+    if (match) showProductDetail(match.id, match.slug);
   }
 });
 </script>

@@ -28,7 +28,7 @@ Whether you're a new player or already have a tuned deck, we'd love for you to c
 
 Riftbound packs, boxes and accessories are available through the [Dice Bastion shop](https://shop.dicebastion.com):
 
-- [Riftbound products](https://shop.dicebastion.com/products/category/Riftbound)
+- [Riftbound products](https://shop.dicebastion.com/products/category/riftbound)
 - [Full shop](https://shop.dicebastion.com)
 
 ## More TCGs

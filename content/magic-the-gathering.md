@@ -28,7 +28,7 @@ If you're new to the club, Friday open night is the easiest way in. Bring a deck
 
 We stock Magic through the [Dice Bastion shop](https://shop.dicebastion.com):
 
-- [Magic: The Gathering products](https://shop.dicebastion.com/products/category/Magic%3A%20The%20Gathering)
+- [Magic: The Gathering products](https://shop.dicebastion.com/products/category/magic-the-gathering)
 - [Full shop](https://shop.dicebastion.com)
 
 ## More TCGs
