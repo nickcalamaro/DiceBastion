@@ -6527,7 +6527,7 @@ async function requestIndexing(type, slug, btn) {
   const urlMap = {
     event: `https://dicebastion.com/events/${encodeURIComponent(slug)}`,
     product: `https://shop.dicebastion.com/products/${encodeURIComponent(slug)}`,
-    category: `https://shop.dicebastion.com/products/category/${encodeURIComponent(slug)}`
+    category: `https://shop.dicebastion.com/products/category/${ShopCategories.slug(slug)}`
   };
   const url = urlMap[type];
   if (!url) return;

@@ -33,12 +33,10 @@ Implemented in `shop/static/js/shopCartStorage.js`. Checkout creates `orders` / 
 
 Pages Function [`functions/_middleware.js`](functions/_middleware.js):
 
-- Social bots on `/?product=` get OG HTML (canonical points at `/products/:slug`).
-- Social bots on `/?category=` get OG HTML (canonical points at `/products/category/:name`). Preview image is the category SEO image if set, otherwise the first product listed in that category (A–Z, same as the shop grid). Title and description can be edited on the main admin Products tab.
+- The address bar, the share link, and the canonical URL are the same path: `/products/:slug` and `/products/category/:slug`. A category slug is the category name with the same hyphen replace used for event slugs (`Board Games` → `board-games`).
+- Old `/?product=` and `/?category=` links redirect to that path.
+- Crawlers receive the SEO HTML at that path. Title and description come from the category fields on the admin Products tab. Everyone else gets the shop at the same path, with the category filter or product modal open.
 - Homepage responses inject crawlable product/category links for Google (footer nav).
-- Humans always get the Hugo shop; product cards and `/products/:slug` open the modal via `/?product=`. Category chips and `/products/category/:name` filter the shop via `/?category=`.
-
-Worker SEO at `/products/:slug` and `/products/category/:name` remains the canonical URL for sitemaps and crawlers (bots get rich HTML; people are redirected to the shop UI).
 
 ## Database Schema
 
@@ -152,7 +150,7 @@ hugo --minify
 wrangler pages deploy public --project-name=dicebastion-shop
 ```
 
-`shop/functions/` (Pages Functions) sits beside the Hugo `public/` output. Deploying from the `shop/` directory picks up `_middleware.js` so bots that hit `/?product=slug` (WhatsApp, Facebook, Discord, etc.) receive product Open Graph tags (image + summary/description). Humans still get the normal Hugo shop. Redeploy **Pages** after changing Functions; Worker deploy is not required for share previews.
+`shop/functions/` (Pages Functions) sits beside the Hugo `public/` output. It redirects legacy `/?product=` and `/?category=` links to the product and category paths, and injects crawlable links on the homepage. Share previews for those paths come from the Worker. Redeploy **Pages** and the **Worker** together after changing either.
 
 **Option B: Via Cloudflare Dashboard**
 1. Go to Cloudflare Pages

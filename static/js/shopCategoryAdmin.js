@@ -37,7 +37,7 @@
   }
 
   function categoryCanonicalUrl(name) {
-    return 'https://shop.dicebastion.com/products/category/' + encodeURIComponent(name);
+    return 'https://shop.dicebastion.com/products/category/' + ShopCategories.slug(name);
   }
 
   async function copyUrlToClipboard(url, btn) {
@@ -110,6 +110,7 @@
           '<h3 style="margin:0;">' + name + ' <span class="admin-text-small">' + count + ' product' + plural + '</span></h3>' +
           '<div class="admin-flex" style="gap:0.5rem;flex-wrap:wrap;">' +
             '<button type="button" class="btn-copy shop-cat-copy-url" data-name="' + nameAttr + '">Copy URL</button>' +
+            '<button type="button" class="btn-index shop-cat-index" data-name="' + nameAttr + '">Index</button>' +
             '<button type="button" class="btn btn-primary btn-sm shop-cat-save" data-name="' + nameAttr + '">Save</button>' +
           '</div>' +
         '</div>' +
@@ -224,6 +225,11 @@
       if (copyBtn) {
         const name = decodeURIComponent(copyBtn.getAttribute('data-name') || '');
         copyCategorySeoUrl(name, copyBtn);
+        return;
+      }
+      const indexBtn = e.target.closest('.shop-cat-index');
+      if (indexBtn && typeof global.requestIndexing === 'function') {
+        global.requestIndexing('category', decodeURIComponent(indexBtn.getAttribute('data-name') || ''), indexBtn);
         return;
       }
       const btn = e.target.closest('.shop-cat-save');
