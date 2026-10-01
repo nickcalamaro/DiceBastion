@@ -22,6 +22,7 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
     <a href="/" class="category-btn active" data-category="">All Products</a>
   </div>
   <nav id="seo-category-links" class="seo-crawl-links" aria-label="Shop categories"></nav>
+  <div id="shop-category-intro" class="shop-category-intro" hidden></div>
 
   <div class="shop-results-toolbar">
     <p id="shop-results-count" class="shop-results-count" aria-live="polite"></p>
@@ -609,6 +610,17 @@ color: rgb(var(--color-neutral-800));
 .empty-state p {
   color: rgb(var(--color-neutral-600));
   margin-bottom: 1rem;
+}
+
+.shop-category-intro {
+  max-width: 70ch;
+  margin: 0 0 1rem;
+  color: rgb(var(--color-neutral-700));
+  line-height: 1.6;
+}
+
+.shop-category-intro p + p {
+  margin-top: 0.5rem;
 }
 
 .shop-results-toolbar {
@@ -1417,8 +1429,21 @@ function getFilteredProducts() {
   return filteredProducts;
 }
 
+function renderCategoryIntro() {
+  const el = document.getElementById('shop-category-intro');
+  if (!el) return;
+  const meta = currentFilter && categoryMetaByName.get(categoryKey(currentFilter));
+  const paragraphs = String((meta && meta.intro) || '')
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(Boolean);
+  el.innerHTML = paragraphs.map(p => '<p>' + escapeHtml(p) + '</p>').join('');
+  el.hidden = !paragraphs.length;
+}
+
 function applyFilters({ resetList = false } = {}) {
   if (resetList) visibleCount = PAGE_SIZE;
+  renderCategoryIntro();
   renderProducts(getFilteredProducts());
 }
 

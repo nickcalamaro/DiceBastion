@@ -7967,7 +7967,6 @@ function generateProductSeoPage(product, allCategories) {
     'image': productImages.length ? (productImages.length === 1 ? productImages[0] : productImages) : img,
     'url': url,
     'sku': slug,
-    'brand': { '@type': 'Brand', 'name': 'Dice Bastion' },
     'category': primaryCategory,
     'offers': {
       '@type': 'Offer',
@@ -8103,6 +8102,16 @@ ${bodyHtml ? `<div class="desc">${bodyHtml}</div>` : `<div class="desc">${e(plai
 </body></html>`;
 }
 
+// Admin intro is plain text; a blank line starts a new paragraph.
+function introParagraphsHtml(intro) {
+  return String(intro || '')
+    .split(/\n\s*\n/)
+    .map((para) => para.trim())
+    .filter(Boolean)
+    .map((para) => `<p class="cat-intro">${escapeHtml(para)}</p>`)
+    .join('\n')
+}
+
 // ---------- Product Category SEO Page ----------
 function generateCategorySeoPage(categoryName, products, seoMeta) {
   const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
@@ -8184,6 +8193,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .cat-heading{max-width:900px;width:100%;margin:1rem auto;padding:0 1rem}
 .cat-heading h1{font-size:2rem;color:#fff}
 .cat-heading p{color:#808090;margin-top:.25rem}
+.cat-heading .cat-intro{color:#c0c0d0;line-height:1.6;margin-top:.75rem;max-width:70ch}
 .cat-hero{max-width:900px;width:100%;margin:0 auto 0.5rem;padding:0 1rem}
 .cat-hero img{width:100%;max-height:360px;object-fit:cover;border-radius:12px;border:1px solid #2a2a4a;display:block}
 .cta{display:inline-block;margin-top:1rem;padding:.65rem 1.5rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600}
@@ -8204,6 +8214,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 ${ogImage ? `<div class="cat-hero"><img src="${e(ogImage)}" alt="${previewAlt}"></div>` : ''}
 <div class="cat-heading">
 <h1>${catDisplay}</h1>
+${introParagraphsHtml(seoMeta?.intro)}
 <p>${products.length} product${products.length !== 1 ? 's' : ''}</p>
 <a class="cta" href="${url}">Open category in shop</a>
 </div>
@@ -8548,7 +8559,7 @@ async function ensureProductCategoriesSchema(db) {
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     )
   `).run()
-  for (const col of ['seo_title', 'seo_description', 'seo_image']) {
+  for (const col of ['seo_title', 'seo_description', 'seo_image', 'intro']) {
     try {
       await db.prepare(`ALTER TABLE product_categories ADD COLUMN ${col} TEXT`).run()
     } catch (_) {
@@ -8618,7 +8629,7 @@ async function canonicalizeStoredProductCategories(db) {
 
   await ensureProductCategoriesSchema(db)
   const metaRows = await db.prepare(`
-    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image
+    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image, intro
     FROM product_categories
   `).all()
   const groups = new Map()
@@ -8644,6 +8655,7 @@ async function canonicalizeStoredProductCategories(db) {
     const seoTitle = rows.map((r) => String(r.seo_title || '').trim()).find(Boolean) || null
     const seoDescription = rows.map((r) => String(r.seo_description || '').trim()).find(Boolean) || null
     const seoImage = rows.map((r) => String(r.seo_image || '').trim()).find(Boolean) || null
+    const intro = rows.map((r) => String(r.intro || '').trim()).find(Boolean) || null
 
     const needsUpdate =
       keep.name !== canon ||
@@ -8653,7 +8665,8 @@ async function canonicalizeStoredProductCategories(db) {
       String(keep.keywords || '') !== String(keywords || '') ||
       String(keep.seo_title || '') !== String(seoTitle || '') ||
       String(keep.seo_description || '') !== String(seoDescription || '') ||
-      String(keep.seo_image || '') !== String(seoImage || '')
+      String(keep.seo_image || '') !== String(seoImage || '') ||
+      String(keep.intro || '') !== String(intro || '')
 
     for (const other of others) {
       metaStmts.push(db.prepare('DELETE FROM product_categories WHERE id = ?').bind(other.id))
@@ -8662,7 +8675,7 @@ async function canonicalizeStoredProductCategories(db) {
       metaStmts.push(
         db.prepare(`
           UPDATE product_categories
-          SET name = ?, featured = ?, sort_order = ?, keywords = ?, seo_title = ?, seo_description = ?, seo_image = ?, updated_at = ?
+          SET name = ?, featured = ?, sort_order = ?, keywords = ?, seo_title = ?, seo_description = ?, seo_image = ?, intro = ?, updated_at = ?
           WHERE id = ?
         `).bind(
           canon,
@@ -8672,6 +8685,7 @@ async function canonicalizeStoredProductCategories(db) {
           seoTitle,
           seoDescription,
           seoImage,
+          intro,
           now,
           keep.id
         )
@@ -8720,7 +8734,7 @@ async function listProductCategoryMeta(db) {
   `).all()
   const counts = collectProductCategoryNames(products.results || [])
   const metaRows = await db.prepare(`
-    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image, created_at, updated_at
+    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image, intro, created_at, updated_at
     FROM product_categories
     ORDER BY featured DESC, sort_order ASC, name COLLATE NOCASE ASC
   `).all()
@@ -8749,6 +8763,7 @@ async function listProductCategoryMeta(db) {
       seo_title: meta?.seo_title || '',
       seo_description: meta?.seo_description || '',
       seo_image: meta?.seo_image || '',
+      intro: meta?.intro || '',
       id: meta?.id || null
     }
   }).sort((a, b) => {
@@ -8772,7 +8787,7 @@ app.get('/product-categories', async (c) => {
     return c.json({
       categories: categories
         .filter((row) => !isDrinksCategoryName(row.name))
-        .map(({ name, featured, sort_order, keywords, product_count, seo_title, seo_description, seo_image }) => ({
+        .map(({ name, featured, sort_order, keywords, product_count, seo_title, seo_description, seo_image, intro }) => ({
         name,
         featured,
         sort_order,
@@ -8780,7 +8795,8 @@ app.get('/product-categories', async (c) => {
         product_count,
         seo_title,
         seo_description,
-        seo_image
+        seo_image,
+        intro
       }))
     })
   } catch (e) {
@@ -8816,6 +8832,7 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
     const seoImage = seoImageRaw
       ? (ensureAbsoluteImageUrl(seoImageRaw, 'https://shop.dicebastion.com') || null)
       : null
+    const intro = clampSeoText(body.intro, 2000) || null
     const now = toIso(new Date())
     invalidateProductCategoryMetaCache()
 
@@ -8827,8 +8844,8 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
     }
 
     await c.env.DB.prepare(`
-      INSERT INTO product_categories (name, featured, sort_order, keywords, seo_title, seo_description, seo_image, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO product_categories (name, featured, sort_order, keywords, seo_title, seo_description, seo_image, intro, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(name) DO UPDATE SET
         featured = excluded.featured,
         sort_order = excluded.sort_order,
@@ -8836,8 +8853,9 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
         seo_title = excluded.seo_title,
         seo_description = excluded.seo_description,
         seo_image = excluded.seo_image,
+        intro = excluded.intro,
         updated_at = excluded.updated_at
-    `).bind(name, featured, sortOrder, keywords || null, seoTitle, seoDescription, seoImage, now, now).run()
+    `).bind(name, featured, sortOrder, keywords || null, seoTitle, seoDescription, seoImage, intro, now, now).run()
 
     const categoryUrl = getShopCategoryUrl(name)
     if (categoryUrl) {
