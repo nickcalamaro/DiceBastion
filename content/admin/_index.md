@@ -988,7 +988,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Includes memberships, renewals, donations, event+membership bundles (membership portion only — event ticket fees are excluded), and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
+<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net figures exclude a 3% SumUp fee (97% of gross). Includes memberships, renewals, donations, event+membership bundles (membership portion only, event ticket fees are excluded), and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="accounts-from">From</label>
@@ -1012,7 +1012,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="stat-card-value" id="accounts-stat-gross">-</div>
 </div>
 <div class="stat-card" style="background: rgb(var(--color-neutral-700));">
-<div class="stat-card-label">Net payout</div>
+<div class="stat-card-label">Net (excluding 3% SumUp fees)</div>
 <div class="stat-card-value" id="accounts-stat-net">-</div>
 </div>
 </div>
@@ -1025,7 +1025,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <th>Category</th>
 <th style="text-align: right;">Qty</th>
 <th style="text-align: right;">Gross</th>
-<th style="text-align: right;">Net</th>
+<th style="text-align: right;">Net (excluding 3% SumUp fees)</th>
 </tr>
 </thead>
 <tbody id="accounts-category-list">
@@ -1045,7 +1045,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <th>Date</th>
 <th>Category</th>
 <th style="text-align: right;">Amount</th>
-<th style="text-align: right;">Net</th>
+<th style="text-align: right;">Net (excluding 3% SumUp fees)</th>
 </tr>
 </thead>
 <tbody id="accounts-line-list">
@@ -3431,7 +3431,7 @@ async function loadAccountsReport() {
 
 function downloadAccountsCsv() {
   if (!accountsReportRows.length) return;
-  const header = ['date', 'category', 'amount_pounds', 'net_payout'];
+  const header = ['date', 'category', 'amount_pounds', 'net_excluding_3pct_sumup_fees'];
   const lines = [header.join(',')].concat(accountsReportRows.map(row => {
     const cells = [
       row.created_at,

@@ -6911,6 +6911,9 @@ app.get('/admin/cron-logs', async c => {
 // ADMIN ACCOUNTS (owner-only sales report)
 // ============================================================================
 
+/** Gross minus 3% SumUp fees (net payout to the club). */
+const ACCOUNTS_SUMUP_NET_FACTOR = 0.97
+
 app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => {
   try {
     const url = new URL(c.req.url)
@@ -7018,7 +7021,7 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
         created_at: row.created_at,
         category: row.category || 'other',
         amount_pounds: Math.round(amount * 100) / 100,
-        net_payout: Math.round(amount * 0.95 * 100) / 100
+        net_payout: Math.round(amount * ACCOUNTS_SUMUP_NET_FACTOR * 100) / 100
       }
     }).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
 
