@@ -11,7 +11,7 @@ showDate: false
 <script src="/js/shopCategories.js"></script>
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
-<script src="/js/shopProductAdmin.js?v=20260831a"></script>
+<script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -593,6 +593,11 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <div id="preorder-date-container" class="admin-mb-1" style="display: none;">
 <label class="form-label">Expected Release Date</label>
 <input type="date" id="product-release-date" class="form-input">
+</div>
+
+<div class="checkbox-group admin-mb-1">
+<input type="checkbox" id="product-create-more" class="checkbox-input">
+<label for="product-create-more" class="checkbox-label">Create more (after adding, keep these details filled for another product)</label>
 </div>
 
 <div class="admin-flex">
@@ -1618,6 +1623,10 @@ Loading cron job logs...
 .dark .btn-edit { background: rgb(var(--color-primary-500)); }
 .btn-edit:hover { background: rgb(var(--color-primary-700)); }
 .dark .btn-edit:hover { background: rgb(var(--color-primary-600)); }
+.btn-duplicate { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-600)); color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.dark .btn-duplicate { background: rgb(var(--color-neutral-500)); }
+.btn-duplicate:hover { background: rgb(var(--color-neutral-700)); }
+.dark .btn-duplicate:hover { background: rgb(var(--color-neutral-600)); }
 .btn-delete { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
 .dark .btn-delete { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
 .btn-delete:hover { background: #fee; color: #c00; }
@@ -4643,20 +4652,14 @@ body: JSON.stringify(data)
 });
 
 if (res.ok) {
-document.getElementById('product-form').reset();
-document.getElementById('product-id').value = '';
-document.getElementById('description-content').innerHTML = '';
-document.getElementById('product-form-title').textContent = 'Add New Product';
-document.getElementById('product-submit-text').textContent = 'Add Product';
-document.getElementById('cancel-product-edit').style.display = 'none';
-document.getElementById('product-image-preview').innerHTML = '';
-document.getElementById('product-preorder').checked = false;
-document.getElementById('product-release-date').value = '';
-document.getElementById('preorder-date-container').style.display = 'none';
-selectedCategories = [];
-window.selectedCategories = selectedCategories;
-renderCategoryTags();
-uploadedProductImage = null;
+const createMore = !id && document.getElementById('product-create-more') && document.getElementById('product-create-more').checked;
+if (createMore) {
+  document.getElementById('product-id').value = '';
+  setProductFormAddMode();
+  scrollToProductForm();
+} else {
+  resetProductForm();
+}
 loadProducts();
 if (typeof loadShopCategories === 'function') loadShopCategories();
 } else {
@@ -4675,12 +4678,33 @@ alert('Error saving product');
 });
 
 document.getElementById('cancel-product-edit').addEventListener('click', () => {
-document.getElementById('product-form').reset();
-document.getElementById('product-id').value = '';
-document.getElementById('description-content').innerHTML = '';
+resetProductForm();
+});
+
+function scrollToProductForm() {
+const heading = document.getElementById('product-form-title');
+if (heading && heading.scrollIntoView) {
+  heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+}
+
+function setProductFormAddMode() {
 document.getElementById('product-form-title').textContent = 'Add New Product';
 document.getElementById('product-submit-text').textContent = 'Add Product';
 document.getElementById('cancel-product-edit').style.display = 'none';
+}
+
+function setProductFormEditMode() {
+document.getElementById('product-form-title').textContent = 'Edit Product';
+document.getElementById('product-submit-text').textContent = 'Update Product';
+document.getElementById('cancel-product-edit').style.display = 'block';
+}
+
+function resetProductForm() {
+document.getElementById('product-form').reset();
+document.getElementById('product-id').value = '';
+document.getElementById('description-content').innerHTML = '';
+setProductFormAddMode();
 document.getElementById('product-image-preview').innerHTML = '';
 document.getElementById('product-preorder').checked = false;
 document.getElementById('product-release-date').value = '';
@@ -4690,14 +4714,11 @@ window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 uploadedProductImage = null;
-});
+const uploadInput = document.getElementById('product-image-upload');
+if (uploadInput) uploadInput.value = '';
+}
 
-async function editProduct(id) {
-try {
-const product = (adminProductsList || []).find(p => Number(p.id) === Number(id));
-if (!product) return;
-
-document.getElementById('product-id').value = product.id;
+function fillProductFormFromProduct(product) {
 document.getElementById('product-name').value = product.name;
 document.getElementById('product-slug').value = product.slug;
 document.getElementById('product-ean').value = product.ean || '';
@@ -4715,7 +4736,6 @@ window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 
-// Pre-order fields
 if (product.release_date) {
 document.getElementById('product-preorder').checked = true;
 document.getElementById('product-release-date').value = product.release_date;
@@ -4727,19 +4747,49 @@ document.getElementById('preorder-date-container').style.display = 'none';
 }
 
 if (product.image_url) {
-document.getElementById('product-image-preview').innerHTML = 
+document.getElementById('product-image-preview').innerHTML =
 `<img src="${product.image_url}" class="image-preview" alt="Current">`;
+} else {
+document.getElementById('product-image-preview').innerHTML = '';
+}
+uploadedProductImage = null;
+const uploadInput = document.getElementById('product-image-upload');
+if (uploadInput) uploadInput.value = '';
 }
 
-document.getElementById('product-form-title').textContent = 'Edit Product';
-document.getElementById('product-submit-text').textContent = 'Update Product';
-document.getElementById('cancel-product-edit').style.display = 'block';
-uploadedProductImage = null;
-document.getElementById('product-form').scrollIntoView({ behavior: 'smooth' });
+function getAdminProductById(id) {
+return (adminProductsList || []).find(p => Number(p.id) === Number(id));
+}
+
+async function editProduct(id) {
+try {
+const product = getAdminProductById(id);
+if (!product) return;
+
+document.getElementById('product-id').value = product.id;
+fillProductFormFromProduct(product);
+setProductFormEditMode();
+scrollToProductForm();
 } catch (err) {
 alert('Error loading product');
 }
 }
+
+function duplicateProduct(id) {
+try {
+const product = getAdminProductById(id);
+if (!product) return;
+
+document.getElementById('product-id').value = '';
+fillProductFormFromProduct(product);
+setProductFormAddMode();
+scrollToProductForm();
+} catch (err) {
+alert('Error duplicating product');
+}
+}
+
+window.duplicateProduct = duplicateProduct;
 
 async function deleteProduct(id, name) {
 if (!confirm(`Delete product "${name}"?`)) return;

@@ -126,6 +126,7 @@
             '</div>' +
             '<div class="item-actions">' +
               '<button type="button" class="btn-edit" data-id="' + p.id + '">Edit</button>' +
+              '<button type="button" class="btn-duplicate" data-id="' + p.id + '">Duplicate</button>' +
               '<button type="button" class="btn-delete" data-id="' + p.id + '" data-name="' + nameAttr + '">Delete</button>' +
               copyBtn +
               indexBtn +
@@ -366,6 +367,11 @@
         const editBtn = e.target.closest('.btn-edit');
         if (editBtn && typeof global.editProduct === 'function') {
           global.editProduct(Number(editBtn.getAttribute('data-id')));
+          return;
+        }
+        const duplicateBtn = e.target.closest('.btn-duplicate');
+        if (duplicateBtn && typeof global.duplicateProduct === 'function') {
+          global.duplicateProduct(Number(duplicateBtn.getAttribute('data-id')));
           return;
         }
         const deleteBtn = e.target.closest('.btn-delete');
