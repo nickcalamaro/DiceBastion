@@ -1,0 +1,13 @@
+<link rel="stylesheet" href="/css/forms.css">
+<script src="/js/utils.js"></script>
+{{ partial "inquiry-form.html" (dict
+  "title" "Contact us"
+  "intro" "Looking for more info about the club? We'd love to hear from you."
+  "categoryLabel" "Subject"
+  "messageLabel" "Your message"
+  "messagePlaceholder" "Tell us what's on your mind. The more detail you can share, the easier it is for us to help."
+  "successLead" "Thanks. We've received your message and we'll be in touch at the email address you provided."
+  "successFollowUp" `While you wait, our <a href="/FAQs/" class="link">FAQs</a> cover many common questions about the club, memberships, and events.`
+  "unavailableMsg" "Contact form is temporarily unavailable."
+) }}
+<script src="/js/inquiry-form.js"></script>

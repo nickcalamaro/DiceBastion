@@ -1,0 +1,13 @@
+<link rel="stylesheet" href="/css/forms.css">
+<script src="/js/utils.js"></script>
+{{ partial "inquiry-form.html" (dict
+  "title" "Contact support"
+  "intro" "Report a problem, ask a question, or let us know if something isn't working. We'll get back to you by email as soon as we can."
+  "categoryLabel" "Subject?"
+  "messageLabel" "Message"
+  "messagePlaceholder" "Please describe the issue or question in as much detail as you can."
+  "successLead" "Thanks. Your message has been sent. We'll reply to the email address you provided."
+  "successFollowUp" `If your question is urgent, please check our <a href="/FAQs/" class="link">FAQs</a> or your <a href="/account/" class="link">account page</a> for membership details.`
+  "unavailableMsg" "Support form is temporarily unavailable."
+) }}
+<script src="/js/inquiry-form.js"></script>

@@ -10,7 +10,7 @@ description: Gibraltar's home for tabletop games, including board games, wargame
 
 <meta name="description" content="Dice Bastion is part of the Gibraltar Warhammer Club. Gibraltar's home for board games, card games, RPGs, and wargames since 2016. Learn about our venue, partners, and memberships at Casemates Vaults.">
 
-**Dice Bastion is a part of the Gibraltar Warhammer Club.** The Gibraltar Warhammer Club was founded in 2016 as Gibraltar's primary club for all things Warhammer; it has since evolved into Gibraltar's home for all tabletop games.
+The Gibraltar Warhammer Club was founded in 2016 as Gibraltar's primary club for all things Warhammer. We are also home to Dice Bastion, formed in 2025, who host a wide range of TCG, Board Game and Roleplaying Game events, and SN Battle Reports who run a massively successful YouTube channel and major international Warhammer tournaments.
 
 Our venue offers a board game library, comfortable seating, and gaming tables, providing a space for players to meet, compete, and enjoy a wide variety of games.
 
@@ -23,6 +23,8 @@ Members receive exclusive benefits, including local discounts and free access to
 <div class="donate-about-grid">
 
 <div class="donate-about-item">
+
+<img src="/img/childline/Club%20logo.png" alt="Gibraltar Warhammer Club" class="donate-about-logo" width="80" height="80">
 
 <h3>Gibraltar Warhammer Club</h3>
 
@@ -48,7 +50,7 @@ Members receive exclusive benefits, including local discounts and free access to
 
 <div class="donate-about-item">
 
-<img src="/img/childline/Club%20logo.png" alt="Dice Bastion" class="donate-about-logo" width="80" height="80">
+<img src="/img/DB_Logo_2025.png" alt="Dice Bastion" class="donate-about-logo" width="80" height="80">
 
 <h3>Dice Bastion</h3>
 
@@ -61,6 +63,10 @@ Members receive exclusive benefits, including local discounts and free access to
 </div>
 
 Any Gibraltar Warhammer Club or Dice Bastion membership are interchangeable and provide the same benefits.
+
+## Contact us
+
+Questions about the club, memberships, events, or bookings? [Get in touch](/contact/) and we will reply by email as soon as we can.
 
 ## Find us
 
