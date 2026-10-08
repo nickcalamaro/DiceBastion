@@ -12,7 +12,7 @@ showDate: false
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
-<script src="/js/shopPosAdmin.js?v=20260408a"></script>
+<script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -1017,7 +1017,14 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </div>
 <p id="pos-status" class="admin-text-small admin-mb-0" style="margin-top: 0.75rem;"></p>
 </div>
-<h3 class="admin-section-heading">Recent orders</h3>
+<div class="admin-flex-between admin-mb-1" style="flex-wrap: wrap; align-items: center; gap: 0.75rem;">
+<h3 class="admin-section-heading admin-m-0">Shop orders</h3>
+<label class="admin-text-small" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+<input type="checkbox" id="orders-show-delivered">
+Show delivered
+</label>
+</div>
+<p class="admin-text-muted admin-mb-1">Undelivered shop orders only by default (online + POS). Drinks sales are not listed here.</p>
 <div id="orders-list"></div>
 </div>
 

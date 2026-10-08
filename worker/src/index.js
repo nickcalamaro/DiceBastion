@@ -9584,22 +9584,38 @@ app.post('/admin/images', requireAdmin, async (c) => {
   }
 })
 
-// Get recent shop orders (admin only) with line items
+// Shop orders only (excludes /drinks walk-ins). Default: undelivered.
 app.get('/admin/orders', requireAdmin, async (c) => {
   try {
     const limitRaw = parseInt(c.req.query('limit') || '50', 10)
     const limit = Math.min(200, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50))
+    const includeDelivered = ['1', 'true', 'yes'].includes(String(c.req.query('include_delivered') || '').toLowerCase())
+    const deliveryFilter = includeDelivered
+      ? ''
+      : `AND LOWER(COALESCE(delivery_status, 'undelivered')) = 'undelivered'`
+
+    // Exclude /drinks walk-ins (Walk-in + not POS). Include online shop + admin POS.
+    const shopOnlySql = `
+      NOT (
+        (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
+        AND IFNULL(o.sale_channel, '') != 'pos'
+      )
+    `
+
     const ordersResult = await c.env.DB.prepare(`
-      SELECT id, order_number, email, name, status, subtotal, tax, shipping, total, currency,
-             payment_status, payment_method, sale_channel, discount_pence, promo_code_applied,
-             notes, created_at, updated_at, completed_at
-      FROM orders
-      ORDER BY datetime(COALESCE(completed_at, created_at)) DESC
+      SELECT o.id, o.order_number, o.email, o.name, o.status, o.subtotal, o.tax, o.shipping, o.total, o.currency,
+             o.payment_status, o.payment_method, o.sale_channel, o.discount_pence, o.promo_code_applied,
+             o.notes, o.created_at, o.updated_at, o.completed_at,
+             COALESCE(o.delivery_status, 'undelivered') AS delivery_status
+      FROM orders o
+      WHERE ${shopOnlySql}
+        ${deliveryFilter}
+      ORDER BY datetime(COALESCE(o.completed_at, o.created_at)) DESC
       LIMIT ?
     `).bind(limit).all()
     const orders = ordersResult.results || []
     if (!orders.length) {
-      return c.json({ orders: [] })
+      return c.json({ orders: [], include_delivered: includeDelivered })
     }
 
     const ids = orders.map(o => o.id)
@@ -9618,6 +9634,7 @@ app.get('/admin/orders', requireAdmin, async (c) => {
     }
 
     return c.json({
+      include_delivered: includeDelivered,
       orders: orders.map(o => ({
         ...o,
         items: byOrder.get(o.id) || []
@@ -9625,6 +9642,41 @@ app.get('/admin/orders', requireAdmin, async (c) => {
     })
   } catch (e) {
     console.error('Get orders error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/** Mark a shop order as delivered (or undelivered). */
+app.post('/admin/orders/:id/delivery-status', requireAdmin, async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    if (!id) return c.json({ error: 'invalid_id' }, 400)
+    const body = await c.req.json().catch(() => ({}))
+    const status = String(body.delivery_status || body.status || 'delivered').toLowerCase().trim()
+    if (status !== 'delivered' && status !== 'undelivered') {
+      return c.json({ error: 'invalid_delivery_status' }, 400)
+    }
+
+    const order = await c.env.DB.prepare('SELECT id, sale_channel, name, email FROM orders WHERE id = ?').bind(id).first()
+    if (!order) return c.json({ error: 'not_found' }, 404)
+    const isDrinks =
+      (order.name === 'Walk-in' || String(order.email || '').toLowerCase() === 'walk-in') &&
+      String(order.sale_channel || '') !== 'pos'
+    if (isDrinks) {
+      return c.json({ error: 'not_shop_order', message: 'Drinks orders are not managed here' }, 400)
+    }
+
+    const now = toIso(new Date())
+    await c.env.DB.prepare(`
+      UPDATE orders SET delivery_status = ?, updated_at = ? WHERE id = ?
+    `).bind(status, now, id).run()
+
+    const updated = await c.env.DB.prepare(`
+      SELECT id, order_number, delivery_status, updated_at FROM orders WHERE id = ?
+    `).bind(id).first()
+    return c.json({ success: true, order: updated })
+  } catch (e) {
+    console.error('[admin/orders/delivery-status] Error:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
@@ -9722,9 +9774,9 @@ app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
         order_number, email, name, status,
         subtotal, tax, shipping, total, currency,
         payment_status, payment_method, sale_channel,
-        notes, discount_pence,
+        notes, discount_pence, delivery_status,
         created_at, updated_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       orderNumber,
       email,
@@ -9740,6 +9792,7 @@ app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
       'pos',
       notes,
       discountPence,
+      'undelivered',
       now,
       now,
       now
@@ -12886,9 +12939,9 @@ app.post('/shop/checkout', async c => {
         payment_status, checkout_id,
         shipping_address, billing_address, notes,
         promo_code_id, discount_pence, promo_code_applied,
-        payment_method, sale_channel,
+        payment_method, sale_channel, delivery_status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       orderNumber,
       clampStr(email, 320).trim(),
@@ -12909,6 +12962,7 @@ app.post('/shop/checkout', async c => {
       promoCodeSnap,
       'sumup',
       'online',
+      'undelivered',
       now,
       now
     ).run()

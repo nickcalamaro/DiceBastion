@@ -138,9 +138,10 @@ CREATE TABLE orders (
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         completed_at TEXT
       , promo_code_id INTEGER, discount_pence INTEGER DEFAULT 0, promo_code_applied TEXT
-      , payment_method TEXT, sale_channel TEXT);
+      , payment_method TEXT, sale_channel TEXT, delivery_status TEXT DEFAULT 'undelivered');
 -- payment_method: 'sumup' | 'cash' | 'bank_transfer'
 -- sale_channel: 'online' (shop website) | 'pos' (admin manual sale); drinks walk-ins leave NULL
+-- delivery_status: 'undelivered' (default for new shop orders) | 'delivered'
 CREATE TABLE sumup_payouts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sumup_id INTEGER NOT NULL UNIQUE,

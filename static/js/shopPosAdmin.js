@@ -206,22 +206,37 @@
     if (!Array.isArray(productsCache)) productsCache = [];
   }
 
-  function renderOrders(orders) {
+  function showDeliveredChecked() {
+    const el = document.getElementById('orders-show-delivered');
+    return !!(el && el.checked);
+  }
+
+  function deliveryLabel(status) {
+    return String(status || 'undelivered').toLowerCase() === 'delivered' ? 'Delivered' : 'Undelivered';
+  }
+
+  function renderOrders(orders, apiBase, sessionToken) {
     const list = document.getElementById('orders-list');
     if (!list) return;
     if (!orders.length) {
-      list.innerHTML = '<p class="admin-text-muted">No orders yet.</p>';
+      list.innerHTML = showDeliveredChecked()
+        ? '<p class="admin-text-muted">No shop orders found.</p>'
+        : '<p class="admin-text-muted">No undelivered shop orders.</p>';
       return;
     }
     list.innerHTML = (
       '<div class="table-wrapper"><div style="overflow-x: auto;"><table>' +
       '<thead><tr>' +
-      '<th>When</th><th>Order</th><th>Customer</th><th>Channel</th><th>Method</th><th>Items</th><th style="text-align:right;">Total</th>' +
+      '<th>When</th><th>Order</th><th>Customer</th><th>Channel</th><th>Method</th><th>Items</th><th style="text-align:right;">Total</th><th>Delivery</th><th></th>' +
       '</tr></thead><tbody>' +
       orders.map(function (o) {
         const items = (o.items || []).map(function (it) {
           return escapeHtml(it.product_name) + ' ×' + escapeHtml(it.quantity);
         }).join('; ') || '—';
+        const isDelivered = String(o.delivery_status || '').toLowerCase() === 'delivered';
+        const action = isDelivered
+          ? '<button type="button" class="btn btn-secondary pos-mark-undelivered" data-order-id="' + o.id + '">Mark undelivered</button>'
+          : '<button type="button" class="btn btn-primary pos-mark-delivered" data-order-id="' + o.id + '">Mark delivered</button>';
         return (
           '<tr>' +
           '<td>' + escapeHtml(formatWhen(o.completed_at || o.created_at)) + '</td>' +
@@ -231,22 +246,58 @@
           '<td>' + escapeHtml(methodLabel(o.payment_method, o.sale_channel)) + '</td>' +
           '<td class="admin-text-small">' + items + '</td>' +
           '<td style="text-align:right;">' + formatGbp(o.total) + '</td>' +
+          '<td>' + escapeHtml(deliveryLabel(o.delivery_status)) + '</td>' +
+          '<td>' + action + '</td>' +
           '</tr>'
         );
       }).join('') +
       '</tbody></table></div></div>'
     );
+
+    list.querySelectorAll('.pos-mark-delivered, .pos-mark-undelivered').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const id = btn.getAttribute('data-order-id');
+        const next = btn.classList.contains('pos-mark-delivered') ? 'delivered' : 'undelivered';
+        markDeliveryStatus(apiBase, sessionToken, id, next);
+      });
+    });
+  }
+
+  async function markDeliveryStatus(apiBase, sessionToken, orderId, deliveryStatus) {
+    try {
+      const res = await fetch(apiBase + '/admin/orders/' + encodeURIComponent(orderId) + '/delivery-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify({ delivery_status: deliveryStatus })
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.message || data.error || res.statusText);
+      await loadOrders(apiBase, sessionToken);
+    } catch (err) {
+      const list = document.getElementById('orders-list');
+      if (list) {
+        const note = document.createElement('p');
+        note.className = 'admin-text-muted';
+        note.textContent = 'Could not update delivery status: ' + String(err.message || err);
+        list.prepend(note);
+      }
+    }
   }
 
   async function loadOrders(apiBase, sessionToken) {
     const list = document.getElementById('orders-list');
     if (list) list.innerHTML = '<p class="admin-text-muted">Loading orders…</p>';
-    const res = await fetch(apiBase + '/admin/orders?limit=50', {
+    const qs = new URLSearchParams({ limit: '50' });
+    if (showDeliveredChecked()) qs.set('include_delivered', '1');
+    const res = await fetch(apiBase + '/admin/orders?' + qs.toString(), {
       headers: { 'X-Session-Token': sessionToken }
     });
     if (!res.ok) throw new Error('Failed to load orders');
     const data = await res.json();
-    renderOrders(data.orders || []);
+    renderOrders(data.orders || [], apiBase, sessionToken);
   }
 
   async function submitSale(apiBase, sessionToken) {
@@ -330,6 +381,7 @@
     bindLineEvents();
     const addBtn = document.getElementById('pos-add-line-btn');
     const submitBtn = document.getElementById('pos-submit-btn');
+    const showDelivered = document.getElementById('orders-show-delivered');
     if (addBtn && !addBtn._posBound) {
       addBtn._posBound = true;
       addBtn.addEventListener('click', function () { addLine(); });
@@ -337,6 +389,15 @@
     if (submitBtn && !submitBtn._posBound) {
       submitBtn._posBound = true;
       submitBtn.addEventListener('click', function () { submitSale(apiBase, sessionToken); });
+    }
+    if (showDelivered && !showDelivered._posBound) {
+      showDelivered._posBound = true;
+      showDelivered.addEventListener('change', function () {
+        loadOrders(apiBase, sessionToken).catch(function () {
+          const list = document.getElementById('orders-list');
+          if (list) list.innerHTML = '<p class="admin-text-muted">Could not load orders.</p>';
+        });
+      });
     }
     setStatus('Loading products…');
     try {
