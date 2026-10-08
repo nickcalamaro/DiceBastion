@@ -5,7 +5,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -4667,7 +4671,7 @@ var CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization"
 };
 var BOOKING_TZ = "Europe/Gibraltar";
-var SAME_DAY_CONTACT_MESSAGE = "We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.";
+var SAME_DAY_MEMBER_REQUIRED_MESSAGE = "Same-day bookings are for club members. Please log in or register, then take out a membership to book a table for today.";
 function getGibraltarNow() {
   const now = /* @__PURE__ */ new Date();
   const dateStr = now.toLocaleDateString("en-CA", { timeZone: BOOKING_TZ });
@@ -4694,8 +4698,7 @@ var VALID_WEEKDAYS = /* @__PURE__ */ new Set([
   "Saturday"
 ]);
 function parseDayHourRules(raw) {
-  if (raw == null || raw === "")
-    return [];
+  if (raw == null || raw === "") return [];
   let parsed = raw;
   if (typeof raw === "string") {
     try {
@@ -4705,16 +4708,13 @@ function parseDayHourRules(raw) {
       return [];
     }
   }
-  if (!Array.isArray(parsed))
-    return [];
+  if (!Array.isArray(parsed)) return [];
   const rules = [];
   for (const item of parsed) {
-    if (!item || typeof item !== "object")
-      continue;
+    if (!item || typeof item !== "object") continue;
     const record = item;
     const days = Array.isArray(record.days) ? record.days.filter((d) => typeof d === "string" && VALID_WEEKDAYS.has(d)) : [];
-    if (!days.length)
-      continue;
+    if (!days.length) continue;
     const rule = { days };
     if (record.start_hour != null) {
       const hour = Number(record.start_hour);
@@ -4742,8 +4742,7 @@ function getEffectiveHoursForDate(dateStr, globalStart, globalEnd, rules) {
   let startHour = globalStart;
   let endHour = globalEnd;
   for (const rule of rules) {
-    if (!rule.days.includes(weekday))
-      continue;
+    if (!rule.days.includes(weekday)) continue;
     if (rule.start_hour != null) {
       startHour = Math.max(startHour, rule.start_hour);
     }
@@ -4775,8 +4774,7 @@ async function checkActiveMembership(email) {
   const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
   try {
     const res = await fetch(`${workerUrl}/membership/status?email=${encodeURIComponent(email)}`);
-    if (!res.ok)
-      return false;
+    if (!res.ok) return false;
     const data = await res.json();
     return !!data.active;
   } catch (error) {
@@ -4785,7 +4783,7 @@ async function checkActiveMembership(email) {
   }
 }
 function validateBookingAdvance(params) {
-  const { dateStr: todayStr } = getGibraltarNow();
+  const { dateStr: todayStr, minutesSinceMidnight } = getGibraltarNow();
   if (params.bookingDate < todayStr) {
     return {
       ok: false,
@@ -4794,20 +4792,27 @@ function validateBookingAdvance(params) {
     };
   }
   if (params.bookingDate === todayStr) {
-    return {
-      ok: false,
-      error: params.isMember ? "member_same_day_not_allowed" : "same_day_not_allowed",
-      message: params.isMember ? SAME_DAY_CONTACT_MESSAGE : "Tables must be booked at least the day before. Please contact us if you need a last-minute table."
-    };
+    if (!params.isMember) {
+      return {
+        ok: false,
+        error: "same_day_not_allowed",
+        message: SAME_DAY_MEMBER_REQUIRED_MESSAGE
+      };
+    }
+    if (parseTimeToMinutes(params.startTime) <= minutesSinceMidnight) {
+      return {
+        ok: false,
+        error: "past_slot",
+        message: "That time slot has already started. Please choose a later slot."
+      };
+    }
   }
   return { ok: true };
 }
 function isCheckoutPaid(payment) {
-  if (!payment)
-    return false;
+  if (!payment) return false;
   const status = payment.status;
-  if (status === "PAID" || status === "SUCCESSFUL")
-    return true;
+  if (status === "PAID" || status === "SUCCESSFUL") return true;
   const transactions = payment.transactions;
   if (Array.isArray(transactions)) {
     return transactions.some(
@@ -4847,8 +4852,7 @@ async function fetchPaymentByReference(orderRef) {
     { method: "GET" }
   );
   const data = await res.json();
-  if (res.status === 404)
-    return null;
+  if (res.status === 404) return null;
   if (!res.ok) {
     throw new Error(String(data.error || "Failed to fetch payment"));
   }
@@ -4859,8 +4863,7 @@ async function getTableTypePrices(tableTypeId) {
     sql: "SELECT member_price, non_member_price FROM booking_table_types WHERE id = ? AND active = 1",
     args: [tableTypeId]
   });
-  if (result.rows.length === 0)
-    return null;
+  if (result.rows.length === 0) return null;
   const row = result.rows[0];
   return {
     member_price: Number(row.member_price),
@@ -4882,8 +4885,7 @@ async function memberHasUsedBenefitInSlot(userEmail, bookingDate, startTime, end
 }
 async function resolveBookingPricing(tableTypeId, userEmail, bookingDate, startTime, endTime) {
   const prices = await getTableTypePrices(tableTypeId);
-  if (!prices)
-    return null;
+  if (!prices) return null;
   const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
   if (!isMember) {
     return { amount: prices.non_member_price, usesMemberBenefit: false };
@@ -5201,16 +5203,16 @@ async function getAvailableSlots(date, tableTypeId, userEmail) {
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) {
       return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
     }
-    const { dateStr: todayStr } = getGibraltarNow();
+    const { dateStr: todayStr, minutesSinceMidnight } = getGibraltarNow();
     if (date < todayStr) {
       return jsonResponse({ error: "past_date", message: "Cannot book dates in the past." }, 400);
     }
     const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
     const tablePrices = isMember ? await getTableTypePrices(tableTypeId) : null;
-    if (date === todayStr) {
+    if (date === todayStr && !isMember) {
       return jsonResponse({
         slots: [],
-        message: isMember ? SAME_DAY_CONTACT_MESSAGE : "Tables must be booked at least the day before."
+        message: SAME_DAY_MEMBER_REQUIRED_MESSAGE
       });
     }
     const schedule = await loadBookingConfig();
@@ -5236,7 +5238,19 @@ async function getAvailableSlots(date, tableTypeId, userEmail) {
     for (let hour = startHour; hour + slotDuration <= endHour; hour += slotDuration) {
       const startTime = `${hour.toString().padStart(2, "0")}:00`;
       const endTime = `${(hour + slotDuration).toString().padStart(2, "0")}:00`;
+      if (date === todayStr && parseTimeToMinutes(startTime) <= minutesSinceMidnight) {
+        continue;
+      }
       timeSlots.push({ start: startTime, end: endTime });
+    }
+    if (timeSlots.length === 0) {
+      return jsonResponse({
+        date,
+        table_type_id: tableTypeId,
+        max_bookings: maxBookings,
+        slots: [],
+        message: date === todayStr ? "There are no remaining time slots left today." : "No bookable hours on this day with the current schedule rules."
+      });
     }
     console.log("Generated time slots:", timeSlots);
     const blocksResult = await client.execute({

@@ -254,7 +254,8 @@
   <div id="alert-container"></div>
 
   <div class="alert alert-info" id="booking-advance-notice" style="margin-bottom: 1.5rem;">
-    <p style="margin: 0 0 0.75rem 0;"><strong>Advance booking required.</strong> Please always try to ensure that you book your table at least one day in advance.</p>
+    <p style="margin: 0 0 0.75rem 0;"><strong>Booking ahead.</strong> Please book your table at least one day in advance when you can. Same-day online bookings are reserved for club members.</p>
+    <p style="margin: 0 0 0.75rem 0;"><strong>Same-day bookings.</strong> Need a table today? You'll need an active membership. <button type="button" class="link-button" onclick="window.authModal?.show()" style="padding: 0; font: inherit; color: rgb(var(--color-primary-700)); text-decoration: underline; cursor: pointer; background: none; border: none;">Log in or register</button>, then <a href="/memberships/">take out a membership</a> to unlock same-day bookings.</p>
     <p style="margin: 0 0 0.75rem 0;"><strong>Member table bookings.</strong> Members receive one free table booking per session. If you need an additional table in the same session, standard non-member pricing applies.</p>
     <p style="margin: 0;"><strong>Looking to book an event?</strong> Please refer to our <u><a href="/events-policy/">events policy</u> before booking anything in.</a></p>
   </div>
@@ -369,8 +370,6 @@ let picker = null;
 let userSession = null;
 let membershipStatus = null;
 let paymentModal = null;
-let sameDayBookingModal = null;
-let sameDayTurnstileWidgetId = null;
 let authModal = null;
 let bookingTurnstileWidgetId = null; // Track Turnstile widget for cleanup
 let userBookings = []; // Cache of user's bookings
@@ -455,10 +454,6 @@ function getGibraltarTodayStr() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Gibraltar' });
 }
 
-function isMemberSameDayDate(dateStr) {
-  return !!(membershipStatus?.active && dateStr && dateStr === getGibraltarTodayStr());
-}
-
 function escapeHtml(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -489,154 +484,46 @@ function formatPriceDetail(price) {
   return `£${Number(price).toFixed(2)}`;
 }
 
-async function fetchSameDayContacts(turnstileToken) {
-  const email = userSession?.email;
-  if (!email) {
-    throw new Error('Please log in to view contact options.');
-  }
-
-  const response = await fetch(`${window.MAIN_API}/bookings/same-day-contacts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, turnstileToken })
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.message || data.error || 'Could not load contact options.');
-  }
-  return Array.isArray(data.contacts) ? data.contacts : [];
-}
-
-function buildSameDayContactsHtml(contacts) {
-  if (!contacts.length) {
-    return '<p class="modal-help-text modal-text-center">Please email contact@dicebastion.com and we will help you arrange your booking.</p>';
-  }
-  return contacts.map((contact) => `
-    <a href="${escapeHtml(contact.url)}" class="modal-btn modal-btn-primary" target="_blank" rel="noopener noreferrer" style="text-decoration: none; display: block; margin-bottom: 0.5rem; text-align: center;">
-      Message ${escapeHtml(contact.name)} on WhatsApp
-    </a>
-  `).join('');
-}
-
-function resetSlotsAndBookingForm() {
-  const slotsSection = document.getElementById('slots-section');
-  const formSection = document.getElementById('booking-form-section');
-  slotsSection.style.opacity = '0.5';
-  slotsSection.style.pointerEvents = 'none';
-  document.getElementById('slots-instruction').style.display = 'block';
-  document.getElementById('slots-container').style.display = 'none';
-  document.getElementById('slots-container').innerHTML = '';
-  formSection.style.opacity = '0.5';
-  formSection.style.pointerEvents = 'none';
-  document.getElementById('booking-form-instruction').style.display = 'block';
-  document.getElementById('booking-form-wrapper').style.display = 'none';
-  selectedSlot = null;
-}
-
-function closeSameDayBookingModal() {
-  utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
-  sameDayTurnstileWidgetId = null;
-  if (sameDayBookingModal) {
-    sameDayBookingModal.close();
-    sameDayBookingModal = null;
-  }
-}
-
-async function showSameDayBookingModal() {
-  if (sameDayBookingModal) {
-    closeSameDayBookingModal();
-  }
-
-  sameDayBookingModal = new Modal({
-    title: 'Same-day booking',
+function showSameDayMemberRequiredModal() {
+  const modal = new Modal({
+    title: 'Same-day bookings for members',
     size: 'md',
     closeOnBackdrop: true,
     content: `
       <div class="modal-prose">
-        <p>We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.</p>
+        <p>Same-day online bookings are reserved for club members. Everyone else needs to book at least one day ahead.</p>
+        <p>Already have an account? Log in or register, then take out a membership to book a table for today.</p>
       </div>
-      <div id="same-day-contacts-area" class="modal-actions" style="margin-top: 1rem; display: none;"></div>
-      <div id="same-day-turnstile-container" class="form-group" style="margin-top: 1rem;"></div>
-      <div id="same-day-contacts-error" class="modal-error" style="display: none;"></div>
     `,
     footer: `
-      <button type="button" class="modal-btn modal-btn-primary db-modal-show-same-day-contacts">Show WhatsApp contacts</button>
-      <button type="button" class="modal-btn modal-btn-secondary db-modal-close-same-day">Close</button>
-    `,
-    onClose: () => {
-      utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
-      sameDayTurnstileWidgetId = null;
-      sameDayBookingModal = null;
-    }
+      <button type="button" class="modal-btn modal-btn-primary db-modal-same-day-auth">Log in / Register</button>
+      <a href="/memberships/" class="modal-btn modal-btn-secondary" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">View memberships</a>
+    `
   });
 
-  sameDayBookingModal.open();
-
-  setTimeout(() => {
-    utils.renderTurnstile('same-day-turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST })
-      .then((id) => { sameDayTurnstileWidgetId = id; })
-      .catch((err) => console.error('Same-day Turnstile render failed:', err));
-  }, 100);
-
-  const closeBtn = sameDayBookingModal.contentEl.querySelector('.db-modal-close-same-day');
-  const showBtn = sameDayBookingModal.contentEl.querySelector('.db-modal-show-same-day-contacts');
-  const errorEl = sameDayBookingModal.contentEl.querySelector('#same-day-contacts-error');
-  const contactsArea = sameDayBookingModal.contentEl.querySelector('#same-day-contacts-area');
-
-  closeBtn?.addEventListener('click', closeSameDayBookingModal);
-
-  showBtn?.addEventListener('click', async () => {
-    if (errorEl) {
-      errorEl.style.display = 'none';
-      errorEl.textContent = '';
-    }
-    showBtn.disabled = true;
-    const originalText = showBtn.textContent;
-    showBtn.textContent = 'Loading...';
-
-    try {
-      const turnstileToken = await utils.getTurnstileToken('same-day-turnstile-container', sameDayTurnstileWidgetId, IS_LOCALHOST);
-      const contacts = await fetchSameDayContacts(turnstileToken);
-      if (contactsArea) {
-        contactsArea.innerHTML = buildSameDayContactsHtml(contacts);
-        contactsArea.style.display = 'block';
-      }
-      const turnstileWrap = sameDayBookingModal.contentEl.querySelector('#same-day-turnstile-container');
-      if (turnstileWrap) turnstileWrap.style.display = 'none';
-      showBtn.style.display = 'none';
-    } catch (error) {
-      console.error('Same-day contacts:', error);
-      if (errorEl) {
-        errorEl.textContent = error.message || 'Could not load contact options.';
-        errorEl.style.display = 'block';
-      }
-      utils.cleanupTurnstile(sameDayTurnstileWidgetId, 'same-day-turnstile-container');
-      sameDayTurnstileWidgetId = await utils.renderTurnstile('same-day-turnstile-container', TS_SITE_KEY, { skipOnLocalhost: IS_LOCALHOST });
-    } finally {
-      showBtn.disabled = false;
-      showBtn.textContent = originalText;
-    }
+  modal.open();
+  modal.contentEl.querySelector('.db-modal-same-day-auth')?.addEventListener('click', () => {
+    modal.close();
+    window.authModal?.show();
   });
 }
 
 function getBookingMinDate() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   if (membershipStatus?.active) {
-    return today;
+    // Flatpickr accepts Y-m-d; use Gibraltar "today" so travellers match club hours
+    return getGibraltarTodayStr();
   }
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  return tomorrow;
+  const tomorrow = new Date(`${getGibraltarTodayStr()}T12:00:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow.toISOString().slice(0, 10);
 }
 
 function refreshDatePickerMinDate() {
   if (!picker) return;
-  picker.set('minDate', getBookingMinDate());
+  const minDateStr = getBookingMinDate();
+  picker.set('minDate', minDateStr);
   if (picker.selectedDates.length) {
     const selected = picker.formatDate(picker.selectedDates[0], 'Y-m-d');
-    const minDateStr = picker.formatDate(getBookingMinDate(), 'Y-m-d');
     if (selected < minDateStr) {
       picker.clear();
       currentDate = null;
@@ -686,10 +573,10 @@ async function loadTableTypes() {
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 250px;">
             <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; color: rgb(var(--color-neutral-900));">
-              💡 Have an account?
+              Have an account?
             </h3>
             <p style="margin: 0; color: rgb(var(--color-neutral-700)); font-size: 0.95rem;">
-              Login or register to get membership discounts and save your booking history.
+              Log in or register for membership discounts, same-day bookings, and to save your booking history.
             </p>
           </div>
           <button type="button" class="btn btn-primary" onclick="window.authModal?.show()">
@@ -711,7 +598,7 @@ async function loadTableTypes() {
   memberMessage.classList.add('menu-item');
   memberMessage.innerHTML = `
     <div class="alert alert-success" style="margin-bottom: 1.5rem;">
-      <p style="margin: 0 0 0.5rem 0;">You have member pricing on your first table booking in each session.</p>
+      <p style="margin: 0 0 0.5rem 0;">You have member pricing on your first table booking in each session, and you can book a table for today.</p>
       <p style="margin: 0;">Additional tables in the same session are charged at standard rates.</p>
     </div>
   `;
@@ -792,13 +679,13 @@ async function loadTableTypes() {
       promoDiv.style.cssText = 'margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, rgba(var(--color-primary-500), 0.1), rgba(var(--color-primary-600), 0.05)); border-radius: 12px; text-align: center; border: 2px solid rgba(var(--color-primary-500), 0.3);';
       promoDiv.innerHTML = `
         <div style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.75rem; color: rgb(var(--color-primary-700));">
-          💎 Want free table bookings?
+          Want free table bookings?
         </div>
         <p style="margin: 0 0 1rem 0; color: rgb(var(--color-neutral-700)); font-size: 1rem;">
-          Sign up now as a member for as low as £7.50 / month*
+          Sign up as a member for as low as £7.50 / month* and unlock same-day bookings.
         </p>
-        <a href="/memberships" class="btn btn-primary" style="display: inline-block;">
-          View Membership Options →
+        <a href="/memberships/" class="btn btn-primary" style="display: inline-block;">
+          View membership options
         </a>
         <div style="margin-top: 0.75rem; font-size: 0.85rem; color: rgb(var(--color-neutral-600)); font-style: italic;">
           * based on an annual membership
@@ -837,6 +724,27 @@ function selectTableType(type, cardElement) {
   dateSection.style.pointerEvents = 'auto';
   document.getElementById('date-instruction').style.display = 'none';
   document.getElementById('date-input-wrapper').style.display = 'block';
+
+  let sameDayHint = document.getElementById('same-day-member-hint');
+  if (!membershipStatus?.active) {
+    if (!sameDayHint) {
+      sameDayHint = document.createElement('div');
+      sameDayHint.id = 'same-day-member-hint';
+      sameDayHint.className = 'alert alert-info';
+      sameDayHint.style.margin = '0 0 1rem 0';
+      document.getElementById('date-input-wrapper').prepend(sameDayHint);
+    }
+    sameDayHint.innerHTML = `
+      <p style="margin: 0 0 0.5rem 0;"><strong>Same-day bookings</strong> are for club members only. Today's date is locked unless you have an active membership.</p>
+      <p style="margin: 0;">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="window.authModal?.show()">Log in / Register</button>
+        <a href="/memberships/" class="btn btn-primary btn-sm" style="margin-left: 0.5rem;">View memberships</a>
+      </p>
+    `;
+    sameDayHint.style.display = 'block';
+  } else if (sameDayHint) {
+    sameDayHint.style.display = 'none';
+  }
   
   // Scroll to date section
   setTimeout(() => {
@@ -850,14 +758,6 @@ function selectTableType(type, cardElement) {
 async function handleDateChange(date) {
   if (!date || !selectedTableType) return;
 
-  if (isMemberSameDayDate(date)) {
-    if (picker) picker.clear();
-    currentDate = null;
-    resetSlotsAndBookingForm();
-    await showSameDayBookingModal();
-    return;
-  }
-  
   currentDate = date;
   selectedSlot = null;
   
@@ -905,8 +805,19 @@ async function loadAvailableSlots(date) {
     const slots = data.slots || [];
     
     if (slots.length === 0) {
-      const emptyMessage = data.message || '📭 No available slots for this date. All tables are fully booked.';
-      container.innerHTML = `<div class="alert alert-info">${emptyMessage}</div>`;
+      const emptyMessage = data.message || 'No available slots for this date. All tables are fully booked.';
+      const isSameDayGate = /same-day bookings are for club members/i.test(emptyMessage || '');
+      container.innerHTML = `
+        <div class="alert alert-info">
+          <p style="margin: 0 0 ${isSameDayGate ? '0.75rem' : '0'} 0;">${escapeHtml(emptyMessage)}</p>
+          ${isSameDayGate ? `
+            <p style="margin: 0;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="window.authModal?.show()">Log in / Register</button>
+              <a href="/memberships/" class="btn btn-primary btn-sm" style="margin-left: 0.5rem;">View memberships</a>
+            </p>
+          ` : ''}
+        </div>
+      `;
       return;
     }
     
@@ -936,11 +847,6 @@ async function loadAvailableSlots(date) {
 }
 
 function selectSlot(slot, btnElement) {
-  if (isMemberSameDayDate(currentDate)) {
-    showSameDayBookingModal();
-    return;
-  }
-
   document.querySelectorAll('.slot-btn').forEach(btn => btn.classList.remove('selected'));
   btnElement.classList.add('selected');
   selectedSlot = {
@@ -1002,11 +908,6 @@ async function handleBookingSubmit(e) {
     showAlert('⚠️ Please select a table type, date and time slot', 'error');
     return;
   }
-
-  if (isMemberSameDayDate(currentDate)) {
-    await showSameDayBookingModal();
-    return;
-  }
   
   const userEmail = document.getElementById('user-email').value.trim();
   const userName = document.getElementById('user-name').value.trim();
@@ -1058,6 +959,10 @@ async function handleBookingSubmit(e) {
 
     if (!bookingResponse.ok) {
       console.error('Booking creation failed:', bookingResponse.status, bookingData);
+      if (bookingData.error === 'same_day_not_allowed') {
+        showSameDayMemberRequiredModal();
+        return;
+      }
       throw new Error(bookingData.message || bookingData.error || bookingData.details || 'Booking creation failed');
     }
     
