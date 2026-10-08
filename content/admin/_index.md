@@ -12,6 +12,7 @@ showDate: false
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
+<script src="/js/shopPosAdmin.js?v=20260408a"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -979,7 +980,44 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 
 <!-- Orders Tab -->
 <div id="orders-tab" class="tab-content" style="display: none;">
-<h2 id="admin-section-orders" class="admin-section-heading">Recent Orders <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
+<h2 id="admin-section-orders" class="admin-section-heading">Record in-person sale <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
+<p class="admin-text-muted admin-mb-1">Cash or bank transfer sales for the shop. Adjust the unit price for discounts. Stock is reduced when the sale is saved.</p>
+<div class="admin-mb-2" style="padding: 1rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px;">
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="pos-payment-method">Payment method</label>
+<select id="pos-payment-method" class="form-select">
+<option value="cash">Cash</option>
+<option value="bank_transfer">Bank transfer</option>
+</select>
+</div>
+<div>
+<label class="form-label">Cart total</label>
+<div id="pos-cart-total" style="font-size: 1.25rem; font-weight: 600; padding: 0.5rem 0;">£0.00</div>
+</div>
+</div>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="pos-customer-name">Customer name (optional)</label>
+<input type="text" id="pos-customer-name" class="form-input" placeholder="Walk-in" autocomplete="name">
+</div>
+<div>
+<label class="form-label" for="pos-customer-email">Customer email (optional)</label>
+<input type="email" id="pos-customer-email" class="form-input" placeholder="walk-in" autocomplete="email">
+</div>
+</div>
+<div class="admin-mb-1">
+<label class="form-label" for="pos-notes">Notes (optional)</label>
+<input type="text" id="pos-notes" class="form-input" placeholder="e.g. bulk discount, invoice ref">
+</div>
+<div id="pos-lines" class="admin-mb-1"></div>
+<div class="admin-flex" style="flex-wrap: wrap; align-items: center;">
+<button type="button" id="pos-add-line-btn" class="btn btn-secondary">Add line</button>
+<button type="button" id="pos-submit-btn" class="btn btn-primary">Record sale</button>
+</div>
+<p id="pos-status" class="admin-text-small admin-mb-0" style="margin-top: 0.75rem;"></p>
+</div>
+<h3 class="admin-section-heading">Recent orders</h3>
 <div id="orders-list"></div>
 </div>
 
@@ -988,7 +1026,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net figures exclude a 3% SumUp fee (97% of gross). Includes memberships, renewals, donations, event+membership bundles (membership portion only, event ticket fees are excluded), and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
+<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net = gross minus SumUp payout fees synced from SumUp for the same dates. Includes memberships, renewals, donations, event+membership bundles (membership portion only), /drinks walk-ins, online shop orders, and admin POS cash/bank sales.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="accounts-from">From</label>
@@ -999,6 +1037,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <input type="date" id="accounts-to" class="form-input">
 </div>
 <button type="button" id="accounts-run-btn" class="btn btn-primary">Run report</button>
+<button type="button" id="accounts-sync-fees-btn" class="btn btn-secondary">Sync SumUp fees</button>
 <button type="button" id="accounts-csv-btn" class="btn btn-secondary" disabled>Download CSV</button>
 </div>
 <p id="accounts-status" class="admin-text-small admin-mb-1"></p>
@@ -1011,8 +1050,12 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="stat-card-label">Gross</div>
 <div class="stat-card-value" id="accounts-stat-gross">-</div>
 </div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-600));">
+<div class="stat-card-label">SumUp fees (synced)</div>
+<div class="stat-card-value" id="accounts-stat-fees">-</div>
+</div>
 <div class="stat-card" style="background: rgb(var(--color-neutral-700));">
-<div class="stat-card-label">Net (excluding 3% SumUp fees)</div>
+<div class="stat-card-label">Net (gross − SumUp fees)</div>
 <div class="stat-card-value" id="accounts-stat-net">-</div>
 </div>
 </div>
@@ -1025,12 +1068,11 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <th>Category</th>
 <th style="text-align: right;">Qty</th>
 <th style="text-align: right;">Gross</th>
-<th style="text-align: right;">Net (excluding 3% SumUp fees)</th>
 </tr>
 </thead>
 <tbody id="accounts-category-list">
 <tr>
-<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+<td colspan="3" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
 </tr>
 </tbody>
 </table>
@@ -1044,8 +1086,8 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <tr>
 <th>Date</th>
 <th>Category</th>
+<th>Method</th>
 <th style="text-align: right;">Amount</th>
-<th style="text-align: right;">Net (excluding 3% SumUp fees)</th>
 </tr>
 </thead>
 <tbody id="accounts-line-list">
@@ -3328,9 +3370,20 @@ function accountsCategoryLabel(raw) {
     bundle: 'Bundle membership only',
     renewal: 'Renewal',
     donation: 'Donation',
-    drinks: 'Drinks'
+    drinks: 'Drinks',
+    shop_sumup: 'Shop (SumUp)',
+    shop_cash: 'Shop (cash)',
+    shop_bank_transfer: 'Shop (bank transfer)'
   };
   return map[raw] || raw;
+}
+
+function accountsMethodLabel(raw) {
+  const m = String(raw || '').toLowerCase();
+  if (m === 'cash') return 'Cash';
+  if (m === 'bank_transfer') return 'Bank transfer';
+  if (m === 'sumup') return 'SumUp';
+  return m || '—';
 }
 
 function formatAccountsGbp(n) {
@@ -3383,25 +3436,25 @@ async function loadAccountsReport() {
 
     document.getElementById('accounts-stat-qty').textContent = String(totals.quantity || 0);
     document.getElementById('accounts-stat-gross').textContent = formatAccountsGbp(totals.total_pounds);
+    const feesEl = document.getElementById('accounts-stat-fees');
+    if (feesEl) feesEl.textContent = formatAccountsGbp(totals.sumup_fees_pounds ?? data.sumup_fees?.pounds ?? 0);
     document.getElementById('accounts-stat-net').textContent = formatAccountsGbp(totals.net_payout);
 
     const catBody = document.getElementById('accounts-category-list');
     if (!categories.length) {
-      catBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+      catBody.innerHTML = '<tr><td colspan="3" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
     } else {
       catBody.innerHTML = categories.map(row => `
         <tr>
           <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
           <td style="text-align: right;">${escapeAccountsHtml(row.quantity)}</td>
           <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.total_pounds))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
         </tr>
       `).join('') + `
         <tr>
-          <td><strong>Total</strong></td>
+          <td><strong>Total gross</strong></td>
           <td style="text-align: right;"><strong>${escapeAccountsHtml(totals.quantity || 0)}</strong></td>
           <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.total_pounds))}</strong></td>
-          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.net_payout))}</strong></td>
         </tr>`;
     }
 
@@ -3413,14 +3466,21 @@ async function loadAccountsReport() {
         <tr>
           <td>${escapeAccountsHtml(formatAccountsWhen(row.created_at))}</td>
           <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
+          <td>${escapeAccountsHtml(accountsMethodLabel(row.payment_method))}</td>
           <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.amount_pounds))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
         </tr>
       `).join('');
     }
 
     if (csvBtn) csvBtn.disabled = !lines.length;
-    if (status) status.textContent = `${lines.length} line item${lines.length === 1 ? '' : 's'} from ${from} to ${to}.`;
+    const feeInfo = data.sumup_fees || {};
+    let statusMsg = `${lines.length} line item${lines.length === 1 ? '' : 's'} from ${from} to ${to}.`;
+    if (!feeInfo.synced) {
+      statusMsg += ' No SumUp payout fees synced for this range yet — use Sync SumUp fees.';
+    } else {
+      statusMsg += ` SumUp fees: ${formatAccountsGbp(feeInfo.pounds)} (${feeInfo.payout_rows} payout row${feeInfo.payout_rows === 1 ? '' : 's'}).`;
+    }
+    if (status) status.textContent = statusMsg;
   } catch (err) {
     console.error('Accounts report error:', err);
     if (status) status.textContent = 'Could not load the report. ' + String(err.message || err);
@@ -3429,15 +3489,47 @@ async function loadAccountsReport() {
   }
 }
 
+async function syncAccountsSumUpFees() {
+  if (!isAccountsOwnerClient() || !sessionToken) return;
+  const from = document.getElementById('accounts-from')?.value;
+  const to = document.getElementById('accounts-to')?.value;
+  const status = document.getElementById('accounts-status');
+  const syncBtn = document.getElementById('accounts-sync-fees-btn');
+  if (!from || !to) {
+    if (status) status.textContent = 'Choose a from and to date before syncing fees.';
+    return;
+  }
+  if (syncBtn) syncBtn.disabled = true;
+  if (status) status.textContent = 'Syncing SumUp payout fees…';
+  try {
+    const res = await fetch(`${API_BASE}/admin/accounts/sync-sumup-fees`, {
+      method: 'POST',
+      headers: adminJsonHeaders(),
+      body: JSON.stringify({ from, to })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || data.error || res.statusText);
+    if (status) {
+      status.textContent = `Synced ${data.upserted || 0} payout row(s); fees in range ≈ ${formatAccountsGbp((data.fee_pence || 0) / 100)}. Reloading report…`;
+    }
+    await loadAccountsReport();
+  } catch (err) {
+    console.error('SumUp fee sync error:', err);
+    if (status) status.textContent = 'Fee sync failed. ' + String(err.message || err);
+  } finally {
+    if (syncBtn) syncBtn.disabled = false;
+  }
+}
+
 function downloadAccountsCsv() {
   if (!accountsReportRows.length) return;
-  const header = ['date', 'category', 'amount_pounds', 'net_excluding_3pct_sumup_fees'];
+  const header = ['date', 'category', 'payment_method', 'amount_pounds'];
   const lines = [header.join(',')].concat(accountsReportRows.map(row => {
     const cells = [
       row.created_at,
       accountsCategoryLabel(row.category),
-      Number(row.amount_pounds).toFixed(2),
-      Number(row.net_payout).toFixed(2)
+      accountsMethodLabel(row.payment_method),
+      Number(row.amount_pounds).toFixed(2)
     ];
     return cells.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
   }));
@@ -3474,6 +3566,7 @@ function switchAdminTab(tab, options = {}) {
   if (tab === 'activity') loadRecentActivity();
   if (tab === 'bookings') loadBookingsAndCalendar();
   if (tab === 'memberships') loadMemberships();
+  if (tab === 'orders') loadOrders();
   if (tab === 'accounts') loadAccountsReport();
   if (tab === 'newsletter') {
     loadNewsletterRecipients();
@@ -3525,6 +3618,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 document.getElementById('accounts-run-btn')?.addEventListener('click', () => loadAccountsReport());
+document.getElementById('accounts-sync-fees-btn')?.addEventListener('click', () => syncAccountsSumUpFees());
 document.getElementById('accounts-csv-btn')?.addEventListener('click', () => downloadAccountsCsv());
 
 // Image Upload Handlers
@@ -5378,10 +5472,14 @@ async function loadRecentActivity() {
   }
 }
 
-// Orders
+// Orders / POS
 async function loadOrders() {
-  const list = document.getElementById('orders-list');
-  list.innerHTML = '<p class="admin-text-muted">Order management coming soon. Use SQL queries for now.</p>';
+  if (!sessionToken || typeof ShopPosAdmin === 'undefined') {
+    const list = document.getElementById('orders-list');
+    if (list) list.innerHTML = '<p class="admin-text-muted">POS UI failed to load.</p>';
+    return;
+  }
+  await ShopPosAdmin.init(API_BASE, sessionToken);
 }
 
 // Registrations

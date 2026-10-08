@@ -137,6 +137,22 @@ CREATE TABLE orders (
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         completed_at TEXT
+      , promo_code_id INTEGER, discount_pence INTEGER DEFAULT 0, promo_code_applied TEXT
+      , payment_method TEXT, sale_channel TEXT);
+-- payment_method: 'sumup' | 'cash' | 'bank_transfer'
+-- sale_channel: 'online' (shop website) | 'pos' (admin manual sale); drinks walk-ins leave NULL
+CREATE TABLE sumup_payouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sumup_id INTEGER NOT NULL UNIQUE,
+        type TEXT NOT NULL,
+        amount_pence INTEGER NOT NULL,
+        fee_pence INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'GBP',
+        payout_date TEXT NOT NULL,
+        status TEXT,
+        reference TEXT,
+        transaction_code TEXT,
+        synced_at TEXT NOT NULL
       );
 CREATE TABLE order_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

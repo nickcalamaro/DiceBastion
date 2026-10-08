@@ -9,7 +9,8 @@ import {
   fetchPayment,
   savePaymentInstrument,
   chargePaymentInstrument,
-  verifyWebhook
+  verifyWebhook,
+  listPayouts
 } from './payments-client.js'
 
 // Replace generic cors with strict configurable CORS + debug logging
@@ -6911,9 +6912,6 @@ app.get('/admin/cron-logs', async c => {
 // ADMIN ACCOUNTS (owner-only sales report)
 // ============================================================================
 
-/** Gross minus 3% SumUp fees (net payout to the club). */
-const ACCOUNTS_SUMUP_NET_FACTOR = 0.97
-
 app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => {
   try {
     const url = new URL(c.req.url)
@@ -6955,7 +6953,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
             WHEN 'annual' THEN 'membership_annual'
             ELSE 'membership'
           END AS category,
-          t.amount * 1.0 AS amount_pounds
+          t.amount * 1.0 AS amount_pounds,
+          'sumup' AS payment_method
         FROM memberships m
         JOIN transactions t ON t.order_ref = m.order_ref
         WHERE t.transaction_type = 'membership'
@@ -6965,7 +6964,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
       runLines(`
         SELECT t.id AS id, t.created_at AS created_at,
           'renewal' AS category,
-          t.amount * 1.0 AS amount_pounds
+          t.amount * 1.0 AS amount_pounds,
+          'sumup' AS payment_method
         FROM transactions t
         WHERE t.transaction_type = 'renewal'
           AND ${paidSql('t')}
@@ -6974,7 +6974,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
       runLines(`
         SELECT t.id AS id, t.created_at AS created_at,
           'donation' AS category,
-          t.amount * 1.0 AS amount_pounds
+          t.amount * 1.0 AS amount_pounds,
+          'sumup' AS payment_method
         FROM transactions t
         WHERE t.transaction_type = 'donation'
           AND ${paidSql('t')}
@@ -6994,34 +6995,83 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
             WHEN 'quarterly' THEN 25
             WHEN 'annual' THEN 90
             ELSE t.amount * 1.0
-          END AS amount_pounds
+          END AS amount_pounds,
+          'sumup' AS payment_method
         FROM memberships m
         JOIN transactions t ON t.order_ref = m.order_ref
         WHERE t.transaction_type = 'event_membership_bundle'
           AND ${paidSql('t')}
           AND ${dateSql('t')}
       `),
-      // /drinks checkout stores name 'Walk-in' / email 'walk-in' (single or mixed baskets).
-      // Online shop.dicebastion.com orders are intentionally excluded from this report.
+      // /drinks walk-ins (SumUp at the bar). Admin POS may also use Walk-in defaults but sets sale_channel='pos'.
       runLines(`
         SELECT o.id AS id, o.created_at AS created_at,
           'drinks' AS category,
-          o.total / 100.0 AS amount_pounds
+          o.total / 100.0 AS amount_pounds,
+          COALESCE(NULLIF(o.payment_method, ''), 'sumup') AS payment_method
         FROM orders o
         WHERE ${paidSql('o')}
           AND (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
+          AND IFNULL(o.sale_channel, '') != 'pos'
           AND ${dateSql('o')}
+      `),
+      // Shop: admin POS (any customer name) + online shop (non–walk-in drinks).
+      runLines(`
+        SELECT o.id AS id, COALESCE(o.completed_at, o.created_at) AS created_at,
+          CASE
+            WHEN IFNULL(o.payment_method, '') = 'cash' THEN 'shop_cash'
+            WHEN IFNULL(o.payment_method, '') = 'bank_transfer' THEN 'shop_bank_transfer'
+            ELSE 'shop_sumup'
+          END AS category,
+          o.total / 100.0 AS amount_pounds,
+          COALESCE(NULLIF(o.payment_method, ''), 'sumup') AS payment_method
+        FROM orders o
+        WHERE ${paidSql('o')}
+          AND (
+            IFNULL(o.sale_channel, '') = 'pos'
+            OR (
+              IFNULL(o.sale_channel, '') = 'online'
+              AND NOT (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
+            )
+            OR (
+              IFNULL(o.sale_channel, '') = ''
+              AND NOT (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
+            )
+          )
+          AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) >= ?
+          AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) <= ?
       `)
     ])
 
+    // Shop query uses completed_at date binds (same from/to)
+    // runLines always binds (from, to) once — shop query has its own ? placeholders matching that.
+
+    let sumupFeesPounds = 0
+    let payoutRows = 0
+    try {
+      const feeRows = await db.prepare(`
+        SELECT COALESCE(SUM(fee_pence), 0) AS fee_pence, COUNT(*) AS n
+        FROM sumup_payouts
+        WHERE payout_date >= ? AND payout_date <= ?
+      `).bind(from, to).first()
+      sumupFeesPounds = accountsPounds((Number(feeRows?.fee_pence) || 0) / 100)
+      payoutRows = Number(feeRows?.n) || 0
+    } catch (e) {
+      console.warn('[admin/accounts/sales] sumup_payouts query failed:', e.message)
+    }
+
     const lineItems = chunks.flat().map(row => {
-      const amount = accountsPounds(row.amount_pounds)
+      const amount = Math.round(accountsPounds(row.amount_pounds) * 100) / 100
+      const method = String(row.payment_method || 'sumup').toLowerCase()
+      // Per-line net: cash/bank keep full amount; SumUp lines stay at gross (fees deducted in totals)
+      const netPayout = (method === 'cash' || method === 'bank_transfer') ? amount : amount
       return {
         id: row.id,
         created_at: row.created_at,
         category: row.category || 'other',
-        amount_pounds: Math.round(amount * 100) / 100,
-        net_payout: Math.round(amount * ACCOUNTS_SUMUP_NET_FACTOR * 100) / 100
+        payment_method: method,
+        amount_pounds: amount,
+        net_payout: netPayout
       }
     }).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
 
@@ -7043,22 +7093,48 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
       .sort((a, b) => a.category.localeCompare(b.category))
 
     const gross = lineItems.reduce((sum, row) => sum + row.amount_pounds, 0)
-    const net = lineItems.reduce((sum, row) => sum + row.net_payout, 0)
+    const net = Math.round((gross - sumupFeesPounds) * 100) / 100
 
     return c.json({
       from,
       to,
       categories,
       line_items: lineItems,
+      sumup_fees: {
+        pounds: Math.round(sumupFeesPounds * 100) / 100,
+        payout_rows: payoutRows,
+        synced: payoutRows > 0
+      },
       totals: {
         quantity: lineItems.length,
         total_pounds: Math.round(gross * 100) / 100,
-        net_payout: Math.round(net * 100) / 100
+        sumup_fees_pounds: Math.round(sumupFeesPounds * 100) / 100,
+        net_payout: net
       }
     })
   } catch (error) {
     console.error('[admin/accounts/sales] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/** Pull SumUp payout fees into D1 for the selected date range (owner Accounts). */
+app.post('/admin/accounts/sync-sumup-fees', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const from = parseAccountsIsoDate(body.from || c.req.query('from'))
+    const to = parseAccountsIsoDate(body.to || c.req.query('to'))
+    if (!from || !to) {
+      return c.json({ error: 'invalid_date_range' }, 400)
+    }
+    if (from > to) {
+      return c.json({ error: 'from_after_to' }, 400)
+    }
+    const result = await syncSumUpPayouts(c.env, from, to)
+    return c.json({ success: true, ...result })
+  } catch (error) {
+    console.error('[admin/accounts/sync-sumup-fees] ERROR:', error)
+    return c.json({ error: 'sync_failed', message: String(error?.message || error) }, 502)
   }
 })
 
@@ -9508,23 +9584,228 @@ app.post('/admin/images', requireAdmin, async (c) => {
   }
 })
 
-// Get all orders (admin only)
-app.get('/admin/orders', async (c) => {
+// Get recent shop orders (admin only) with line items
+app.get('/admin/orders', requireAdmin, async (c) => {
   try {
-    const adminKey = c.req.header('X-Admin-Key')
-    if (adminKey !== c.env.ADMIN_KEY) {
-      return c.json({ error: 'unauthorized' }, 401)
+    const limitRaw = parseInt(c.req.query('limit') || '50', 10)
+    const limit = Math.min(200, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50))
+    const ordersResult = await c.env.DB.prepare(`
+      SELECT id, order_number, email, name, status, subtotal, tax, shipping, total, currency,
+             payment_status, payment_method, sale_channel, discount_pence, promo_code_applied,
+             notes, created_at, updated_at, completed_at
+      FROM orders
+      ORDER BY datetime(COALESCE(completed_at, created_at)) DESC
+      LIMIT ?
+    `).bind(limit).all()
+    const orders = ordersResult.results || []
+    if (!orders.length) {
+      return c.json({ orders: [] })
     }
-    
-    const orders = await c.env.DB.prepare(`
-      SELECT * FROM orders 
-      ORDER BY created_at DESC
-    `).all()
-    
-    return c.json({ orders: orders.results || [] })
+
+    const ids = orders.map(o => o.id)
+    const placeholders = ids.map(() => '?').join(',')
+    const itemsResult = await c.env.DB.prepare(`
+      SELECT order_id, product_id, product_name, quantity, unit_price, subtotal
+      FROM order_items
+      WHERE order_id IN (${placeholders})
+      ORDER BY id ASC
+    `).bind(...ids).all()
+    const byOrder = new Map()
+    for (const item of itemsResult.results || []) {
+      const list = byOrder.get(item.order_id) || []
+      list.push(item)
+      byOrder.set(item.order_id, list)
+    }
+
+    return c.json({
+      orders: orders.map(o => ({
+        ...o,
+        items: byOrder.get(o.id) || []
+      }))
+    })
   } catch (e) {
     console.error('Get orders error:', e)
     return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * Record an in-person shop sale (cash or bank transfer).
+ * POST /admin/shop/pos-sale
+ */
+app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
+  try {
+    const body = await c.req.json()
+    const paymentMethod = String(body.payment_method || '').toLowerCase().trim()
+    if (paymentMethod !== 'cash' && paymentMethod !== 'bank_transfer') {
+      return c.json({ error: 'invalid_payment_method', message: 'payment_method must be cash or bank_transfer' }, 400)
+    }
+    const rawItems = Array.isArray(body.items) ? body.items : []
+    if (!rawItems.length) {
+      return c.json({ error: 'no_items', message: 'Add at least one product line' }, 400)
+    }
+
+    const now = toIso(new Date())
+    const name = clampStr(body.name || '', 200) || 'Walk-in'
+    const email = clampStr(String(body.email || '').trim().toLowerCase() || 'walk-in', 320)
+    const notes = body.notes ? clampStr(String(body.notes), 1000) : null
+
+    const lineSpecs = []
+    for (const raw of rawItems) {
+      const productId = parseInt(raw.product_id ?? raw.id, 10)
+      const quantity = parseInt(raw.quantity ?? raw.qty, 10)
+      if (!productId || productId <= 0) {
+        return c.json({ error: 'invalid_product_id' }, 400)
+      }
+      if (!quantity || quantity <= 0 || quantity > 999) {
+        return c.json({ error: 'invalid_quantity', product_id: productId }, 400)
+      }
+      let unitOverride = null
+      if (raw.unit_price_pence != null && raw.unit_price_pence !== '') {
+        unitOverride = parseInt(raw.unit_price_pence, 10)
+        if (!Number.isFinite(unitOverride) || unitOverride < 0) {
+          return c.json({ error: 'invalid_unit_price', product_id: productId }, 400)
+        }
+      }
+      lineSpecs.push({ productId, quantity, unitOverride })
+    }
+
+    const ids = [...new Set(lineSpecs.map(l => l.productId))]
+    const { results: products } = await c.env.DB.prepare(
+      `SELECT id, name, price, currency, stock_quantity, is_active, catalog_status
+       FROM products WHERE id IN (${ids.map(() => '?').join(',')})`
+    ).bind(...ids).all()
+    const productMap = new Map((products || []).map(p => [p.id, p]))
+
+    const orderItemsPayload = []
+    let catalogueSubtotal = 0
+    let chargedSubtotal = 0
+    let currency = 'GBP'
+
+    for (const spec of lineSpecs) {
+      const product = productMap.get(spec.productId)
+      if (!product) {
+        return c.json({ error: 'product_not_found', product_id: spec.productId }, 404)
+      }
+      if (!Number(product.is_active) || (product.catalog_status || 'listed') === 'archived') {
+        return c.json({ error: 'product_unavailable', product_id: spec.productId, message: product.name }, 400)
+      }
+      const stock = Number(product.stock_quantity) || 0
+      if (stock < spec.quantity) {
+        return c.json({
+          error: 'insufficient_stock',
+          product_id: spec.productId,
+          message: `${product.name}: only ${stock} in stock`,
+          stock
+        }, 400)
+      }
+      const cataloguePrice = Number(product.price) || 0
+      const unitPrice = spec.unitOverride != null ? spec.unitOverride : cataloguePrice
+      const lineSubtotal = unitPrice * spec.quantity
+      catalogueSubtotal += cataloguePrice * spec.quantity
+      chargedSubtotal += lineSubtotal
+      currency = product.currency || currency
+      orderItemsPayload.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: spec.quantity,
+        unit_price: unitPrice,
+        subtotal: lineSubtotal
+      })
+    }
+
+    const discountPence = Math.max(0, catalogueSubtotal - chargedSubtotal)
+    const orderNumber = `ORD-${crypto.randomUUID()}`
+
+    const insertOrder = await c.env.DB.prepare(`
+      INSERT INTO orders (
+        order_number, email, name, status,
+        subtotal, tax, shipping, total, currency,
+        payment_status, payment_method, sale_channel,
+        notes, discount_pence,
+        created_at, updated_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      orderNumber,
+      email,
+      name,
+      'completed',
+      chargedSubtotal,
+      0,
+      0,
+      chargedSubtotal,
+      currency,
+      'PAID',
+      paymentMethod,
+      'pos',
+      notes,
+      discountPence,
+      now,
+      now,
+      now
+    ).run()
+
+    const orderId = insertOrder.meta?.last_row_id
+    if (!orderId) {
+      return c.json({ error: 'order_creation_failed' }, 500)
+    }
+
+    const batchStatements = orderItemsPayload.map(r =>
+      c.env.DB.prepare(`
+        INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(orderId, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal)
+    )
+    if (batchStatements.length) await c.env.DB.batch(batchStatements)
+
+    const stock = await decrementOrderStock(c.env.DB, orderId, now)
+    if (!stock.ok) {
+      // Sale already committed; surface failure so admin can reconcile stock manually
+      console.error('[pos-sale] stock decrement failed', stock.failedProductId, orderNumber)
+      return c.json({
+        error: 'stock_update_failed',
+        message: 'Order was recorded but stock could not be fully updated. Check inventory.',
+        order_number: orderNumber,
+        order_id: orderId,
+        failed_product_id: stock.failedProductId
+      }, 409)
+    }
+
+    try {
+      const adminContent = getAdminNotificationEmail('shop_order', {
+        orderNumber,
+        customerName: name,
+        customerEmail: email,
+        total: chargedSubtotal / 100,
+        discountPence,
+        promoCodeApplied: '',
+        deliveryMethod: `POS (${paymentMethod === 'bank_transfer' ? 'bank transfer' : 'cash'})`,
+        orderNotes: notes || '',
+        shippingPlain: '',
+        items: orderItemsPayload
+      })
+      await sendEmail(c.env, {
+        to: 'admin@dicebastion.com',
+        ...adminContent,
+        emailType: 'admin_shop_pos_sale',
+        relatedId: orderId,
+        relatedType: 'order',
+        metadata: { order_number: orderNumber, payment_method: paymentMethod }
+      })
+    } catch (adminErr) {
+      console.error('[pos-sale] Admin notification failed:', adminErr)
+    }
+
+    const order = await c.env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
+    return c.json({
+      success: true,
+      order_number: orderNumber,
+      order,
+      items: orderItemsPayload
+    })
+  } catch (e) {
+    console.error('[admin/shop/pos-sale] Error:', e)
+    return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
   }
 })
 
@@ -12079,6 +12360,29 @@ function buildShopBuyerEmail(order, items) {
   }
 }
 
+/**
+ * Decrement product stock for all lines on an order.
+ * Returns { ok, failedProductId } — fails if any line cannot be fulfilled.
+ */
+async function decrementOrderStock(db, orderId, nowIso = toIso(new Date())) {
+  const itemsQuery = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(orderId).all()
+  const itemRows = itemsQuery.results || []
+  for (const item of itemRows) {
+    const q = Number(item.quantity) || 0
+    if (q <= 0) continue
+    const updateResult = await db.prepare(`
+      UPDATE products
+      SET stock_quantity = stock_quantity - ?,
+          updated_at = ?
+      WHERE id = ? AND stock_quantity >= ?
+    `).bind(q, nowIso, item.product_id, q).run()
+    if (!Number(updateResult.meta?.changes ?? 0)) {
+      return { ok: false, failedProductId: item.product_id }
+    }
+  }
+  return { ok: true, failedProductId: null }
+}
+
 async function completePaidShopOrder(db, env, orderRow, paymentId) {
   const orderId = orderRow.id
   const nowIso = toIso(new Date())
@@ -12088,6 +12392,8 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
     SET status = 'completed',
         payment_status = 'PAID',
         payment_id = ?,
+        payment_method = COALESCE(payment_method, 'sumup'),
+        sale_channel = COALESCE(sale_channel, 'online'),
         updated_at = ?,
         completed_at = COALESCE(completed_at, ?)
     WHERE id = ?
@@ -12107,17 +12413,9 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
     }
   }
 
-  const itemsQuery = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(orderId).all()
-  const itemRows = itemsQuery.results || []
-
-  for (const item of itemRows) {
-    const q = Number(item.quantity) || 0
-    await db.prepare(`
-      UPDATE products
-      SET stock_quantity = stock_quantity - ?,
-          updated_at = ?
-      WHERE id = ? AND stock_quantity >= ?
-    `).bind(q, nowIso, item.product_id, q).run()
+  const stock = await decrementOrderStock(db, orderId, nowIso)
+  if (!stock.ok) {
+    console.error('[shop] stock decrement failed for product', stock.failedProductId, 'order', orderId)
   }
 
   const refreshed = await db.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
@@ -12588,8 +12886,9 @@ app.post('/shop/checkout', async c => {
         payment_status, checkout_id,
         shipping_address, billing_address, notes,
         promo_code_id, discount_pence, promo_code_applied,
+        payment_method, sale_channel,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       orderNumber,
       clampStr(email, 320).trim(),
@@ -12608,6 +12907,8 @@ app.post('/shop/checkout', async c => {
       promoRowId,
       discountPence,
       promoCodeSnap,
+      'sumup',
+      'online',
       now,
       now
     ).run()
@@ -12751,8 +13052,11 @@ app.post('/orders/checkout', async c => {
     const orderName = clampStr(name || '', 200) || 'Walk-in'
 
     const batch = [
-      c.env.DB.prepare('INSERT INTO orders (order_number, email, name, subtotal, total, currency, checkout_id, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(orderNumber, orderEmail, orderName, total, total, currency, checkout.id, 'pending'),
+      c.env.DB.prepare(`INSERT INTO orders (
+        order_number, email, name, subtotal, total, currency, checkout_id, payment_status,
+        payment_method
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(orderNumber, orderEmail, orderName, total, total, currency, checkout.id, 'pending', 'sumup'),
       ...orderItems.map(r =>
         c.env.DB.prepare('INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal) VALUES ((SELECT id FROM orders WHERE order_number = ?), ?, ?, ?, ?, ?)')
           .bind(orderNumber, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal))
@@ -12777,11 +13081,93 @@ app.get('/orders/confirm', async c => {
   const payment = await fetchPayment(c.env, order.checkout_id)
   if (!isCheckoutPaid(payment)) return c.json({ ok: false, status: payment?.status || 'PENDING' })
 
-  await c.env.DB.prepare('UPDATE orders SET payment_status = ?, payment_id = ?, status = ?, updated_at = ? WHERE order_number = ?')
+  await c.env.DB.prepare(`UPDATE orders SET payment_status = ?, payment_id = ?, status = ?,
+    payment_method = COALESCE(payment_method, 'sumup'),
+    updated_at = ? WHERE order_number = ?`)
     .bind('PAID', payment.id, 'completed', toIso(new Date()), ref).run()
 
   return c.json({ ok: true, status: 'active' })
 })
+
+/**
+ * Upsert SumUp payout rows from payments-worker into D1.
+ * @returns {{ upserted: number, fee_pence: number, start_date: string, end_date: string }}
+ */
+async function syncSumUpPayouts(env, startDate, endDate) {
+  const result = await listPayouts(env, startDate, endDate)
+  const payouts = Array.isArray(result?.payouts) ? result.payouts : []
+  const nowIso = toIso(new Date())
+  let upserted = 0
+  let feePence = 0
+
+  for (const row of payouts) {
+    const sumupId = Number(row.id)
+    if (!Number.isFinite(sumupId) || sumupId <= 0) continue
+    const payoutDate = String(row.date || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(payoutDate)) continue
+    const amountPence = Math.round(Number(row.amount || 0) * 100)
+    const fee = Math.round(Number(row.fee || 0) * 100)
+
+    await env.DB.prepare(`
+      INSERT INTO sumup_payouts (
+        sumup_id, type, amount_pence, fee_pence, currency, payout_date,
+        status, reference, transaction_code, synced_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(sumup_id) DO UPDATE SET
+        type = excluded.type,
+        amount_pence = excluded.amount_pence,
+        fee_pence = excluded.fee_pence,
+        currency = excluded.currency,
+        payout_date = excluded.payout_date,
+        status = excluded.status,
+        reference = excluded.reference,
+        transaction_code = excluded.transaction_code,
+        synced_at = excluded.synced_at
+    `).bind(
+      sumupId,
+      String(row.type || 'PAYOUT'),
+      amountPence,
+      fee,
+      String(row.currency || 'GBP'),
+      payoutDate,
+      row.status != null ? String(row.status) : null,
+      row.reference != null ? String(row.reference) : null,
+      row.transaction_code != null ? String(row.transaction_code) : null,
+      nowIso
+    ).run()
+    upserted += 1
+    feePence += fee
+  }
+
+  return { upserted, fee_pence: feePence, start_date: startDate, end_date: endDate }
+}
+
+async function processSumUpPayoutSync(env) {
+  const jobName = 'sync_sumup_payouts'
+  const end = new Date()
+  const start = new Date(end.getTime() - 35 * 24 * 60 * 60 * 1000)
+  const startDate = start.toISOString().slice(0, 10)
+  const endDate = end.toISOString().slice(0, 10)
+  try {
+    const result = await syncSumUpPayouts(env, startDate, endDate)
+    await logCronJob(env.DB, jobName, 'completed', {
+      records_processed: result.upserted,
+      records_succeeded: result.upserted,
+      records_failed: 0,
+      extra: result
+    })
+    return result
+  } catch (e) {
+    console.error('[CRON] sync_sumup_payouts failed:', e)
+    await logCronJob(env.DB, jobName, 'failed', {
+      records_processed: 0,
+      records_succeeded: 0,
+      records_failed: 1,
+      extra: { error: String(e?.message || e), start_date: startDate, end_date: endDate }
+    })
+    throw e
+  }
+}
 
 /**
  * Main scheduled handler - runs all cron jobs
@@ -12799,7 +13185,8 @@ async function handleScheduled(event, env, ctx) {
     auto_renewals: null,
     event_reminders: null,
     delayed_account_setup_emails: null,
-    seo_freshness: null
+    seo_freshness: null,
+    sync_sumup_payouts: null
   }
   
   // Run all cron jobs sequentially, catching errors individually
@@ -12845,6 +13232,14 @@ async function handleScheduled(event, env, ctx) {
     console.error('[CRON MASTER] SEO freshness failed:', e)
     jobResults.seo_freshness = 'failed'
   }
+
+  try {
+    await processSumUpPayoutSync(env)
+    jobResults.sync_sumup_payouts = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] SumUp payout sync failed:', e)
+    jobResults.sync_sumup_payouts = 'failed'
+  }
   
   console.log('============================================')
   console.log('All cron jobs completed at:', new Date().toISOString())
@@ -12853,11 +13248,11 @@ async function handleScheduled(event, env, ctx) {
   
   // Log the master cron run
   const allSucceeded = Object.values(jobResults).every(r => r === 'completed')
-  const someFailed = Object.values(jobResults).some(r => r === 'failed')
+  const jobCount = Object.keys(jobResults).length
     try {
     await logCronJob(env.DB, 'cron_master', allSucceeded ? 'completed' : 'partial', {
       started_at: runStarted,
-      records_processed: 5,
+      records_processed: jobCount,
       records_succeeded: Object.values(jobResults).filter(r => r === 'completed').length,
       records_failed: Object.values(jobResults).filter(r => r === 'failed').length,
       extra: jobResults

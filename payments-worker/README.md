@@ -119,13 +119,12 @@ Some SumUp accounts require the authorization flow:
 
 If you're unsure which flow you need, try without `SUMUP_REFRESH_TOKEN` first.
 
-**Required scopes:** `payments`, `payment_instruments`, `transactions.history`.
+**Required scopes:** `payments`, `payment_instruments`, `transactions.history`, `user.profile_readonly`.
 
 > A refresh token only carries the scopes granted when it was first authorized.
-> To add a scope (e.g. `transactions.history`, needed to read transaction-level
-> decline reasons via `GET /v0.1/me/transactions` and the auth-gated
-> `/internal/transaction?code=...` endpoint) you must re-run the authorization
-> code flow and replace the token.
+> To add a scope (e.g. `transactions.history` for decline detail, or
+> `user.profile_readonly` for payout fees via `/internal/payouts`) you must
+> re-run the authorization code flow and replace the token.
 
 **Re-authorize with the full scope set** using the helper script:
 

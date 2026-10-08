@@ -191,3 +191,18 @@ export async function verifyWebhook(env, payload) {
 	})
 	return result.valid
 }
+
+/**
+ * List SumUp payouts (with fees) via payments worker.
+ * @param {string} startDate YYYY-MM-DD
+ * @param {string} endDate YYYY-MM-DD
+ */
+export async function listPayouts(env, startDate, endDate) {
+	const qs = new URLSearchParams({
+		start_date: startDate,
+		end_date: endDate
+	})
+	return callPaymentsWorker(env, `/internal/payouts?${qs}`, {
+		method: 'GET'
+	})
+}
