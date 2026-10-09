@@ -1127,14 +1127,20 @@ async function activateMembership(db, env, { membershipId, membership, paymentId
  * Activate a ticket and increment event ticket count.
  * Also updates the related transaction row.
  */
+/**
+ * Returns false when another request (webhook vs browser confirm) already activated
+ * the ticket, so callers can skip tickets_sold and confirmation emails.
+ */
 async function activateTicket(db, { ticketId, eventId, transactionId, paymentId }) {
+  const claim = await db.prepare('UPDATE tickets SET status = "active" WHERE id = ? AND status != "active"').bind(ticketId).run()
+  if (!claim?.meta?.changes) return false
   await db.batch([
-    db.prepare('UPDATE tickets SET status = "active" WHERE id = ?').bind(ticketId),
     db.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
       .bind(paymentId, toIso(new Date()), transactionId),
     db.prepare('UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)')
       .bind(eventId)
   ])
+  return true
 }
 
 /**
@@ -1214,7 +1220,11 @@ async function confirmTicketPurchase(db, env, { orderRef, payment = null }) {
   }
 
   // Activate ticket + mark transaction PAID + increment tickets_sold (atomic batch).
-  await activateTicket(db, { ticketId: ticket.id, eventId: ticket.event_id, transactionId: transaction.id, paymentId: pmt.id })
+  const claimed = await activateTicket(db, { ticketId: ticket.id, eventId: ticket.event_id, transactionId: transaction.id, paymentId: pmt.id })
+  if (!claimed) {
+    console.log('[confirmTicket] Ticket activated concurrently, skipping emails:', ticket.id)
+    return { ok: true, alreadyActive: true, transaction, ticket, event: ev }
+  }
   console.log('[confirmTicket] Activated ticket', ticket.id, 'for order', orderRef)
 
   // Confirmation email (non-blocking — payment already captured + ticket active).
@@ -5473,7 +5483,7 @@ app.post('/membership/sponsor/claim', async (c) => {
 
 app.post('/webhooks/sumup', async (c) => {
   const payload = await c.req.json()
-  const { id: paymentId, checkout_reference: orderRef, currency } = payload
+  const paymentId = payload?.id
   
   // Verify webhook via payments worker
   try {
@@ -5487,7 +5497,19 @@ app.post('/webhooks/sumup', async (c) => {
     return c.json({ error: 'verification_failed' }, 500)
   }
   
-  if (!paymentId || !orderRef) return c.json({ ok: false }, 400)
+  if (!paymentId) return c.json({ ok: false }, 400)
+
+  // Fetch + verify the payment BEFORE marking the webhook processed. SumUp can emit
+  // webhooks on non-terminal states; recording those would dedupe (and drop) the later
+  // PAID event. Activation is idempotent in every branch, so deferring the mark is safe.
+  // SumUp's payload is only { event_type, id }, so the order ref and currency come from
+  // the API rather than the (unauthenticated) request body.
+  let payment
+  try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
+  const orderRef = payment?.checkout_reference
+  const currency = payment?.currency
+  if (!orderRef) return c.json({ ok: false, error: 'missing_checkout_reference' }, 400)
+  if (!isCheckoutPaid(payment)) return c.json({ ok: true })
 
   // Detect if this is a bundle purchase (BUNDLE-{eventId}-{uuid})
   const isBundle = orderRef.startsWith('BUNDLE-')
@@ -5502,13 +5524,6 @@ app.post('/webhooks/sumup', async (c) => {
       ).bind(orderRef).first()
     : null
   const isSponsorship = !!sponsorshipTx
-
-  // Fetch + verify the payment BEFORE marking the webhook processed. SumUp can emit
-  // webhooks on non-terminal states; recording those would dedupe (and drop) the later
-  // PAID event. Activation is idempotent in every branch, so deferring the mark is safe.
-  let payment
-  try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
-  if (!isCheckoutPaid(payment)) return c.json({ ok: true })
 
   // Check for duplicate webhook processing (only paid webhooks reach here)
   const webhookId = `${paymentId}-${orderRef}`
@@ -7545,7 +7560,10 @@ app.post('/events/:id/checkout', async c => {
         orderRef: order_ref,
         title: ev.event_name,
         description: `Ticket for ${ev.event_name}`,
-        redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`
+        redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`,
+        // Webhooks are only enabled for flows whose activation is race-safe against the
+        // browser confirm. Membership/bundle activation charges a saved card and is not.
+        webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
       })
     } catch (e) {
       console.error('SumUp checkout failed for event', evId, e)

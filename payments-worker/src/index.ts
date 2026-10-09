@@ -228,8 +228,8 @@ async function getOrCreateSumUpCustomer(env: Bindings, user: { user_id: number; 
  * The actual verification happens when we fetch the payment from SumUp API
  */
 function verifySumUpWebhook(payload: any): boolean {
-	// Basic validation: ensure required fields exist
-	if (!payload || !payload.id || !payload.checkout_reference) {
+	// SumUp sends only { event_type, id }; checkout_reference is resolved from the API.
+	if (!payload || !payload.id) {
 		console.warn('Invalid webhook payload: missing required fields')
 		return false
 	}
@@ -264,9 +264,10 @@ app.post('/internal/checkout', async (c) => {
 			customerId?: string
 			isFreeTrialSetup?: boolean
 			redirectUrl?: string
+			webhookUrl?: string
 		}>()
 		
-		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup, redirectUrl } = body
+		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup, redirectUrl, webhookUrl } = body
 
 		const { access_token } = await sumupToken(c.env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
 		
@@ -280,6 +281,11 @@ app.post('/internal/checkout', async (c) => {
 		// away during SCA and the customer lands back on the page with no orderRef context.
 		if (redirectUrl) {
 			checkoutBody.redirect_url = redirectUrl
+		}
+
+		// SumUp POSTs CHECKOUT_STATUS_CHANGED to return_url; without it no webhook is ever sent.
+		if (webhookUrl) {
+			checkoutBody.return_url = webhookUrl
 		}
 
 		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose. The auth hold is

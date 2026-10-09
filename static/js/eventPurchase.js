@@ -71,7 +71,7 @@ window.renderEventPurchase = function renderEventPurchase(event) {
 function generateModal(eventId, isFree) {
   return `
     <div class="evt-modal" id="evt-modal-${eventId}" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:99999; align-items:center; justify-content:center;">
-      <div class="evt-modal-inner bg-neutral dark:bg-neutral-800 rounded-xl p-5 relative shadow-2xl" style="width:min(520px,95vw);">
+      <div class="evt-modal-inner bg-neutral dark:bg-neutral-800 rounded-xl p-5 relative shadow-2xl" style="width:min(520px,95vw); max-height:90vh; max-height:90dvh; overflow-y:auto; -webkit-overflow-scrolling:touch;">
         <button type="button" class="evt-close bg-transparent border-none text-2xl cursor-pointer text-neutral-700 dark:text-neutral-300" aria-label="Close" style="position:absolute; top:10px; right:10px;">×</button>
         <h3 class="mt-0 mb-3 text-lg font-bold text-neutral-800 dark:text-neutral-200 evt-modal-title">${isFree ? 'Event Registration' : 'Ticket Checkout'}</h3>
         
@@ -112,7 +112,8 @@ function generateModal(eventId, isFree) {
           </p>
         </div>
         
-        ${!isFree ? `<div id="evt-card-${eventId}" class="evt-card mt-2" style="display:none;"></div>` : ''}
+        ${!isFree ? `<div id="evt-card-${eventId}" class="evt-card mt-2" style="display:none;"></div>
+        <p class="evt-sca-note mt-3 mb-0 text-sm" style="display:none; padding:0.75rem 1rem; border-left:3px solid rgb(var(--color-primary-600)); background:rgba(var(--color-primary-50), 0.5); color:rgb(var(--color-neutral-700));">Waiting for your bank to confirm the payment. Complete any verification shown above or in your banking app, and keep this window open.</p>` : ''}
         ${window.utils.paymentSupportNoteHtml()}
         <div class="evt-error mt-2.5 text-sm font-semibold" style="display:none; color:#b00020;"></div>
         <div class="evt-success mt-4 py-3 px-4 rounded-lg font-semibold" style="display:none; background:#e9fbe9; border:1px solid #b9e8b9; color:#1a5d1a;">${isFree ? 'Registration confirmed! See you there.' : 'Ticket confirmed! See you there.'}</div>
@@ -621,40 +622,89 @@ window.initEventPurchase = function initEventPurchase(event) {
     
     return await window.utils.getTurnstileToken(tsElId, currentWidgetId, IS_LOCALHOST);
   }
+  function onPaymentConfirmed(ref, data) {
+    // Check if user needs account setup and store data in sessionStorage
+    if (data.needsAccountSetup && data.userEmail) {
+      const setupInfo = {
+        email: data.userEmail,
+        eventName: data.eventName || 'this event'
+      };
+      
+      // For bundles, note that they also got a membership
+      if (data.isBundle) {
+        setupInfo.isBundle = true;
+        setupInfo.membershipPlan = data.membershipPlan;
+      }
+      
+      sessionStorage.setItem('pendingAccountSetup', JSON.stringify(setupInfo));
+    }
+    
+    // Log if email failed but still redirect - payment succeeded
+    if (!data.emailSent) {
+      console.warn('[eventPurchase] Payment succeeded but email failed. User:', data.userEmail);
+    }
+    
+    // Redirect to thank-you page with event details
+    const redirectUrl = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
+      (data.emailSent === false ? '&emailPending=1' : '');
+    console.log('[confirmPayment] Redirecting to:', redirectUrl);
+    window.location.href = redirectUrl;
+  }
+
+  let scaWatcher = null;
+  let checkoutHadFailure = false;
+  let paymentConfirmed = false;
+
+  function setScaNote(visible) {
+    const note = modal.querySelector('.evt-sca-note');
+    if (note) note.style.display = visible ? 'block' : 'none';
+  }
+
+  async function stopScaWatcher() {
+    const w = scaWatcher;
+    scaWatcher = null;
+    setScaNote(false);
+    if (w) await w.stop();
+  }
+
+  // The widget does not always report the outcome of a 3DS challenge, so confirm server-side.
+  function startScaWatcher(orderRef) {
+    if (scaWatcher || checkoutHadFailure) return;
+    setScaNote(true);
+    scaWatcher = window.utils.watchScaPayment('/events/confirm', orderRef, {
+      onPaid: (data) => {
+        scaWatcher = null;
+        paymentConfirmed = true;
+        onPaymentConfirmed(orderRef, data);
+      },
+      onFailed: (msg) => {
+        scaWatcher = null;
+        returnToDetailsStep();
+        showError(msg);
+      }
+    });
+  }
+
+  /** A failed SumUp checkout cannot be retried cleanly, so the next attempt creates a new one. */
+  function returnToDetailsStep() {
+    unmountWidget();
+    const user = getLoggedInUser();
+    const isLoggedIn = !!(user && user.email);
+    const detailsEl = modal.querySelector('.evt-details');
+    const confirmLoggedEl = modal.querySelector('.evt-confirm-logged-in');
+    if (detailsEl) detailsEl.style.display = isLoggedIn ? 'none' : 'block';
+    if (confirmLoggedEl) confirmLoggedEl.style.display = isLoggedIn ? 'block' : 'none';
+    renderTurnstile(isLoggedIn).catch((e) => console.error('Failed to render Turnstile:', e));
+  }
+
   async function confirmPayment(ref, pollOptions = {}) {
     console.log('[confirmPayment] Starting confirmation for ref:', ref, 'options:', pollOptions);
     const result = await window.utils.pollPaymentConfirmation('/events/confirm', ref, {
       pollInterval: pollOptions.pollInterval,
       maxAttempts: pollOptions.maxAttempts,
       onSuccess: (data) => {
-        console.log('[confirmPayment] ✅ Success callback triggered with data:', data);
-        
-        // Check if user needs account setup and store data in sessionStorage
-        if (data.needsAccountSetup && data.userEmail) {
-          const setupInfo = {
-            email: data.userEmail,
-            eventName: data.eventName || 'this event'
-          };
-          
-          // For bundles, note that they also got a membership
-          if (data.isBundle) {
-            setupInfo.isBundle = true;
-            setupInfo.membershipPlan = data.membershipPlan;
-          }
-          
-          sessionStorage.setItem('pendingAccountSetup', JSON.stringify(setupInfo));
-        }
-        
-        // Log if email failed but still redirect - payment succeeded
-        if (!data.emailSent) {
-          console.warn('[eventPurchase] Payment succeeded but email failed. User:', data.userEmail);
-        }
-        
-        // Redirect to thank-you page with event details
-        const redirectUrl = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
-          (data.emailSent === false ? '&emailPending=1' : '');
-        console.log('[confirmPayment] Redirecting to:', redirectUrl);
-        window.location.href = redirectUrl;
+        console.log('[confirmPayment] Success callback triggered with data:', data);
+        onPaymentConfirmed(ref, data);
       },
       onError: (errorMsg) => {
         console.error('[confirmPayment] ❌ Error callback triggered:', errorMsg);
@@ -672,6 +722,7 @@ window.initEventPurchase = function initEventPurchase(event) {
     return result !== null;
   }
     function unmountWidget() {
+    stopScaWatcher();
     // Properly unmount SumUp widget if it exists
     if (window.SumUpCard && window.SumUpCard.unmount) {
       try {
@@ -693,6 +744,8 @@ window.initEventPurchase = function initEventPurchase(event) {
       
       // First unmount any existing widget to ensure clean state
       unmountWidget();
+      checkoutHadFailure = false;
+      paymentConfirmed = false;
       
       // Hide all form steps and show payment section
       const detailsEl = modal.querySelector('.evt-details');
@@ -724,19 +777,28 @@ window.initEventPurchase = function initEventPurchase(event) {
               sumupBody: body
             });
           } catch (_) {}
-          // 3DS/SCA: widget may navigate away; do not treat as a failure or start confirm yet.
+          // 3DS/SCA in progress: not a failure. Watch server-side in case the widget never reports back.
           if (t === 'auth-screen' || t === 'sent') {
+            startScaWatcher(orderRef);
             return;
           }
+          if (paymentConfirmed) return;
           clearError();
           if (t === 'success') {
+            await stopScaWatcher();
+            if (paymentConfirmed) return;
             const bodyStatus = String((body && body.status) || '').toUpperCase();
             if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+              checkoutHadFailure = true;
               showError((body && body.message) || 'Payment failed. Please try again.');
               return;
             }
             await confirmPayment(orderRef, { pollInterval: 3000, maxAttempts: 20 });
           } else if (t === 'error' || t === 'fail') {
+            // An earlier failed attempt makes /events/confirm report FAILED for this checkout,
+            // so in-widget retries are left to the widget's own response.
+            checkoutHadFailure = true;
+            await stopScaWatcher();
             showError((body && body.message) || 'Payment failed. Please try again.');
           } else if (t === 'cancel') {
             showError('Payment cancelled. You can try again when ready.');

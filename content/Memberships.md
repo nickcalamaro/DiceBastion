@@ -858,6 +858,7 @@ For those able to give a bit more, or for those of you who can't afford a member
 
   /** After a failed/cancelled card attempt, return to the Continue step so a fresh checkout can be created. */
   async function resetToContinueStep() {
+    await stopScaWatcher();
     regenerateCheckoutSession();
     unmountSumUpWidget();
     if (!membershipModal) return;
@@ -920,6 +921,7 @@ For those able to give a bit more, or for those of you who can't afford a member
   }
   
   function closeModal() {
+    stopScaWatcher();
     if (membershipModal) {
       const sumupCardEl = membershipModal.querySelector('#sumup-card');
       if (sumupCardEl) sumupCardEl.innerHTML = '';
@@ -1005,6 +1007,7 @@ For those able to give a bit more, or for those of you who can't afford a member
         ${guestForm}
         ${loggedInForm}
         <div id="sumup-card" class="modal-widget-container"></div>
+        <p id="sumup-sca-note" class="modal-muted-text" style="display:none; margin:0.75rem 0 0; padding:0.75rem 1rem; border-left:3px solid rgb(var(--color-primary-600)); background:rgba(var(--color-primary-50), 0.5);">Waiting for your bank to confirm the payment. Complete any verification shown above or in your banking app, and keep this window open.</p>
         <div id="sumup-error" class="modal-error"></div>
         ${PAYMENT_SUPPORT_NOTE}
       `,
@@ -1068,6 +1071,65 @@ For those able to give a bit more, or for those of you who can't afford a member
     return await window.utils.getTurnstileToken(elId, null, IS_LOCALHOST);
   }
 
+  function onMembershipConfirmed(ref, data) {
+    paymentConfirmed = true;
+    clearPendingPayment();
+    // Store in sessionStorage for thank-you page if account setup needed
+    if (data.needsAccountSetup) {
+      sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
+        email: data.userEmail,
+        eventName: null,  // Not an event
+        isMembership: true
+      }));
+    }
+    
+    // Log if email failed but still redirect - payment succeeded
+    if (!data.emailSent) {
+      console.warn('[Memberships] Payment succeeded but email failed. User:', data.userEmail);
+    }
+    
+    // Redirect to thank-you page (even if email pending)
+    const redirectUrl = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
+      (data.emailSent === false ? '&emailPending=1' : '');
+    console.log('[confirmOrder] Redirecting to:', redirectUrl);
+    window.location.href = redirectUrl;
+  }
+
+  let scaWatcher = null;
+  let paymentConfirmed = false;
+
+  function setScaNote(visible) {
+    const note = membershipModal ? membershipModal.querySelector('#sumup-sca-note') : null;
+    if (note) note.style.display = visible ? 'block' : 'none';
+  }
+
+  async function stopScaWatcher() {
+    const w = scaWatcher;
+    scaWatcher = null;
+    setScaNote(false);
+    if (w) await w.stop();
+  }
+
+  // The widget does not always report the outcome of a 3DS challenge, so confirm server-side.
+  // /membership/confirm charges the saved card, so this must be stopped before confirmOrder runs.
+  function startScaWatcher(ref) {
+    if (scaWatcher) return;
+    setScaNote(true);
+    scaWatcher = window.utils.watchScaPayment('/membership/confirm', ref, {
+      onPaid: (data) => {
+        scaWatcher = null;
+        setScaNote(false);
+        onMembershipConfirmed(ref, data);
+      },
+      onFailed: async (msg) => {
+        scaWatcher = null;
+        clearPendingPayment();
+        await resetToContinueStep();
+        displayPaymentError(msg);
+      }
+    });
+  }
+
   async function confirmOrder(ref, pollOptions = {}){ 
     console.log('[confirmOrder] Starting payment confirmation for orderRef:', ref);
     const result = await window.utils.pollPaymentConfirmation('/membership/confirm', ref, {
@@ -1075,26 +1137,7 @@ For those able to give a bit more, or for those of you who can't afford a member
       maxAttempts: pollOptions.maxAttempts,
       onSuccess: (data) => {
         console.log('[confirmOrder] Payment confirmed successfully:', data);
-        
-        // Store in sessionStorage for thank-you page if account setup needed
-        if (data.needsAccountSetup) {
-          sessionStorage.setItem('pendingAccountSetup', JSON.stringify({
-            email: data.userEmail,
-            eventName: null,  // Not an event
-            isMembership: true
-          }));
-        }
-        
-        // Log if email failed but still redirect - payment succeeded
-        if (!data.emailSent) {
-          console.warn('[Memberships] Payment succeeded but email failed. User:', data.userEmail);
-        }
-        
-        // Redirect to thank-you page (even if email pending)
-        const redirectUrl = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
-          (data.emailSent === false ? '&emailPending=1' : '');
-        console.log('[confirmOrder] Redirecting to:', redirectUrl);
-        window.location.href = redirectUrl;
+        onMembershipConfirmed(ref, data);
       },
       onError: (errorMsg) => {
         console.error('[confirmOrder] Payment failed:', errorMsg);
@@ -1141,12 +1184,16 @@ For those able to give a bit more, or for those of you who can't afford a member
     } catch (_) {}
 
     const t = String(type || '').toLowerCase();
+    if (paymentConfirmed) return;
     if (t === 'auth-screen' || t === 'sent') {
       savePendingPayment(ref, checkoutId);
+      startScaWatcher(ref);
       return;
     }
 
     clearError();
+    await stopScaWatcher();
+    if (paymentConfirmed) return;
     if (t === 'success') {
       const bodyStatus = String((body && body.status) || '').toUpperCase();
       if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
@@ -1184,6 +1231,7 @@ For those able to give a bit more, or for those of you who can't afford a member
     try {
       clearError();
       savePendingPayment(ref, checkoutId);
+      paymentConfirmed = false;
       console.log('[mountSumUpWidget] orderRef (checkout_reference):', ref, 'sumupCheckoutId:', checkoutId);
       unmountSumUpWidget();
       const emailStepEl = membershipModal ? membershipModal.querySelector('#sumup-email-step') : null;
