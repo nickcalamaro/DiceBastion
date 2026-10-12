@@ -1033,7 +1033,7 @@ Show delivered
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net = gross minus SumUp payout fees synced from SumUp for the same dates. Includes memberships, renewals, donations, event+membership bundles (membership portion only), /drinks walk-ins, online shop orders, and admin POS cash/bank sales.</p>
+<p class="admin-text-muted admin-mb-1">Paid sales for the selected dates: drinks, memberships, membership renewals, the membership part of event bundles, and donations. Shop orders and event tickets are not included. Net is gross minus the SumUp fee on each sale. Fees come from synced SumUp payouts where the sale can be matched; otherwise they are estimated at the effective SumUp rate and marked as estimated.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="accounts-from">From</label>
@@ -1058,7 +1058,7 @@ Show delivered
 <div class="stat-card-value" id="accounts-stat-gross">-</div>
 </div>
 <div class="stat-card" style="background: rgb(var(--color-neutral-600));">
-<div class="stat-card-label">SumUp fees (synced)</div>
+<div class="stat-card-label">SumUp fees</div>
 <div class="stat-card-value" id="accounts-stat-fees">-</div>
 </div>
 <div class="stat-card" style="background: rgb(var(--color-neutral-700));">
@@ -1075,11 +1075,13 @@ Show delivered
 <th>Category</th>
 <th style="text-align: right;">Qty</th>
 <th style="text-align: right;">Gross</th>
+<th style="text-align: right;">SumUp fees</th>
+<th style="text-align: right;">Net</th>
 </tr>
 </thead>
 <tbody id="accounts-category-list">
 <tr>
-<td colspan="3" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+<td colspan="5" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
 </tr>
 </tbody>
 </table>
@@ -1094,12 +1096,14 @@ Show delivered
 <th>Date</th>
 <th>Category</th>
 <th>Method</th>
-<th style="text-align: right;">Amount</th>
+<th style="text-align: right;">Gross</th>
+<th style="text-align: right;">SumUp fee</th>
+<th style="text-align: right;">Net</th>
 </tr>
 </thead>
 <tbody id="accounts-line-list">
 <tr>
-<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+<td colspan="6" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
 </tr>
 </tbody>
 </table>
@@ -3377,10 +3381,7 @@ function accountsCategoryLabel(raw) {
     bundle: 'Bundle membership only',
     renewal: 'Renewal',
     donation: 'Donation',
-    drinks: 'Drinks',
-    shop_sumup: 'Shop (SumUp)',
-    shop_cash: 'Shop (cash)',
-    shop_bank_transfer: 'Shop (bank transfer)'
+    drinks: 'Drinks'
   };
   return map[raw] || raw;
 }
@@ -3447,45 +3448,60 @@ async function loadAccountsReport() {
     if (feesEl) feesEl.textContent = formatAccountsGbp(totals.sumup_fees_pounds ?? data.sumup_fees?.pounds ?? 0);
     document.getElementById('accounts-stat-net').textContent = formatAccountsGbp(totals.net_payout);
 
+    const num = 'text-align: right; white-space: nowrap;';
     const catBody = document.getElementById('accounts-category-list');
     if (!categories.length) {
-      catBody.innerHTML = '<tr><td colspan="3" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+      catBody.innerHTML = '<tr><td colspan="5" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
     } else {
       catBody.innerHTML = categories.map(row => `
         <tr>
           <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(row.quantity)}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.total_pounds))}</td>
+          <td style="${num}">${escapeAccountsHtml(row.quantity)}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.total_pounds))}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.fee_pounds))}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
         </tr>
       `).join('') + `
         <tr>
-          <td><strong>Total gross</strong></td>
-          <td style="text-align: right;"><strong>${escapeAccountsHtml(totals.quantity || 0)}</strong></td>
-          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.total_pounds))}</strong></td>
+          <td><strong>Total</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(totals.quantity || 0)}</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.total_pounds))}</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.sumup_fees_pounds))}</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.net_payout))}</strong></td>
         </tr>`;
     }
 
     const lineBody = document.getElementById('accounts-line-list');
     if (!lines.length) {
-      lineBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+      lineBody.innerHTML = '<tr><td colspan="6" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
     } else {
-      lineBody.innerHTML = lines.map(row => `
+      lineBody.innerHTML = lines.map(row => {
+        const feeNote = row.fee_basis === 'estimated' ? ' <span class="admin-text-muted admin-text-small">est.</span>'
+          : row.fee_basis === 'unknown' ? ' <span class="admin-text-muted admin-text-small">not synced</span>' : '';
+        return `
         <tr>
-          <td>${escapeAccountsHtml(formatAccountsWhen(row.created_at))}</td>
+          <td style="white-space: nowrap;">${escapeAccountsHtml(formatAccountsWhen(row.created_at))}</td>
           <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
           <td>${escapeAccountsHtml(accountsMethodLabel(row.payment_method))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.amount_pounds))}</td>
-        </tr>
-      `).join('');
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.amount_pounds))}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.fee_pounds))}${feeNote}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
+        </tr>`;
+      }).join('');
     }
 
     if (csvBtn) csvBtn.disabled = !lines.length;
     const feeInfo = data.sumup_fees || {};
     let statusMsg = `${lines.length} line item${lines.length === 1 ? '' : 's'} from ${from} to ${to}.`;
-    if (!feeInfo.synced) {
-      statusMsg += ' No SumUp payout fees synced for this range yet — use Sync SumUp fees.';
-    } else {
-      statusMsg += ` SumUp fees: ${formatAccountsGbp(feeInfo.pounds)} (${feeInfo.payout_rows} payout row${feeInfo.payout_rows === 1 ? '' : 's'}).`;
+    if (feeInfo.actual_lines) {
+      statusMsg += ` Actual SumUp fees on ${feeInfo.actual_lines} sale${feeInfo.actual_lines === 1 ? '' : 's'} (${formatAccountsGbp(feeInfo.actual_pounds)}).`;
+    }
+    if (feeInfo.estimated_lines) {
+      const pct = (Number(feeInfo.estimate_rate || 0) * 100).toFixed(2);
+      statusMsg += ` Estimated at ${pct}% on ${feeInfo.estimated_lines} sale${feeInfo.estimated_lines === 1 ? '' : 's'} (${formatAccountsGbp(feeInfo.estimated_pounds)}).`;
+    }
+    if (feeInfo.unknown_lines) {
+      statusMsg += ` No SumUp payout data synced yet, so ${feeInfo.unknown_lines} sale${feeInfo.unknown_lines === 1 ? ' has' : 's have'} no fee. Use Sync SumUp fees.`;
     }
     if (status) status.textContent = statusMsg;
   } catch (err) {
@@ -3530,13 +3546,16 @@ async function syncAccountsSumUpFees() {
 
 function downloadAccountsCsv() {
   if (!accountsReportRows.length) return;
-  const header = ['date', 'category', 'payment_method', 'amount_pounds'];
+  const header = ['date', 'category', 'payment_method', 'gross_pounds', 'sumup_fee_pounds', 'fee_basis', 'net_pounds'];
   const lines = [header.join(',')].concat(accountsReportRows.map(row => {
     const cells = [
       row.created_at,
       accountsCategoryLabel(row.category),
       accountsMethodLabel(row.payment_method),
-      Number(row.amount_pounds).toFixed(2)
+      Number(row.amount_pounds).toFixed(2),
+      Number(row.fee_pounds || 0).toFixed(2),
+      row.fee_basis || '',
+      Number(row.net_payout ?? row.amount_pounds).toFixed(2)
     ];
     return cells.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
   }));

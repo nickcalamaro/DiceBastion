@@ -6969,6 +6969,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
             ELSE 'membership'
           END AS category,
           t.amount * 1.0 AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
           'sumup' AS payment_method
         FROM memberships m
         JOIN transactions t ON t.order_ref = m.order_ref
@@ -6980,6 +6982,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
         SELECT t.id AS id, t.created_at AS created_at,
           'renewal' AS category,
           t.amount * 1.0 AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
           'sumup' AS payment_method
         FROM transactions t
         WHERE t.transaction_type = 'renewal'
@@ -6990,6 +6994,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
         SELECT t.id AS id, t.created_at AS created_at,
           'donation' AS category,
           t.amount * 1.0 AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
           'sumup' AS payment_method
         FROM transactions t
         WHERE t.transaction_type = 'donation'
@@ -7011,6 +7017,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
             WHEN 'annual' THEN 90
             ELSE t.amount * 1.0
           END AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
           'sumup' AS payment_method
         FROM memberships m
         JOIN transactions t ON t.order_ref = m.order_ref
@@ -7023,78 +7031,91 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
         SELECT o.id AS id, o.created_at AS created_at,
           'drinks' AS category,
           o.total / 100.0 AS amount_pounds,
+          o.total / 100.0 AS charged_pounds,
+          NULL AS tx_code,
           COALESCE(NULLIF(o.payment_method, ''), 'sumup') AS payment_method
         FROM orders o
         WHERE ${paidSql('o')}
           AND (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
           AND IFNULL(o.sale_channel, '') != 'pos'
           AND ${dateSql('o')}
-      `),
-      // Shop: admin POS (any customer name) + online shop (non–walk-in drinks).
-      runLines(`
-        SELECT o.id AS id, COALESCE(o.completed_at, o.created_at) AS created_at,
-          CASE
-            WHEN IFNULL(o.payment_method, '') = 'cash' THEN 'shop_cash'
-            WHEN IFNULL(o.payment_method, '') = 'bank_transfer' THEN 'shop_bank_transfer'
-            ELSE 'shop_sumup'
-          END AS category,
-          o.total / 100.0 AS amount_pounds,
-          COALESCE(NULLIF(o.payment_method, ''), 'sumup') AS payment_method
-        FROM orders o
-        WHERE ${paidSql('o')}
-          AND (
-            IFNULL(o.sale_channel, '') = 'pos'
-            OR (
-              IFNULL(o.sale_channel, '') = 'online'
-              AND NOT (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
-            )
-            OR (
-              IFNULL(o.sale_channel, '') = ''
-              AND NOT (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
-            )
-          )
-          AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) >= ?
-          AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) <= ?
       `)
     ])
+    const rows = chunks.flat()
 
-    // Shop query uses completed_at date binds (same from/to)
-    // runLines always binds (from, to) once — shop query has its own ? placeholders matching that.
-
-    let sumupFeesPounds = 0
-    let payoutRows = 0
+    // Exact fees: SumUp payout rows are per transaction (amount_pence is net of fee_pence).
+    const feeByCode = new Map()
+    const codes = [...new Set(rows.map(r => r.tx_code).filter(Boolean).map(String))]
     try {
-      const feeRows = await db.prepare(`
-        SELECT COALESCE(SUM(fee_pence), 0) AS fee_pence, COUNT(*) AS n
-        FROM sumup_payouts
-        WHERE payout_date >= ? AND payout_date <= ?
-      `).bind(from, to).first()
-      sumupFeesPounds = accountsPounds((Number(feeRows?.fee_pence) || 0) / 100)
-      payoutRows = Number(feeRows?.n) || 0
+      for (let i = 0; i < codes.length; i += 90) {
+        const batch = codes.slice(i, i + 90)
+        const res = await db.prepare(`
+          SELECT transaction_code, SUM(fee_pence) AS fee_pence
+          FROM sumup_payouts
+          WHERE transaction_code IN (${batch.map(() => '?').join(',')})
+          GROUP BY transaction_code
+        `).bind(...batch).all()
+        for (const r of res.results || []) feeByCode.set(String(r.transaction_code), Number(r.fee_pence) || 0)
+      }
     } catch (e) {
-      console.warn('[admin/accounts/sales] sumup_payouts query failed:', e.message)
+      console.warn('[admin/accounts/sales] sumup_payouts fee lookup failed:', e.message)
     }
 
-    const lineItems = chunks.flat().map(row => {
-      const amount = Math.round(accountsPounds(row.amount_pounds) * 100) / 100
+    // Estimate for SumUp lines with no matching payout row (drinks orders store no transaction code):
+    // the effective rate on payout rows that match our own online transactions.
+    let estimateRate = null
+    try {
+      const rateRow = await db.prepare(`
+        SELECT COALESCE(SUM(p.fee_pence), 0) AS fee_pence,
+               COALESCE(SUM(p.amount_pence + p.fee_pence), 0) AS gross_pence
+        FROM sumup_payouts p
+        JOIN transactions t ON t.sumup_transaction_code = p.transaction_code
+      `).first()
+      const feeP = Number(rateRow?.fee_pence) || 0
+      const grossP = Number(rateRow?.gross_pence) || 0
+      if (grossP > 0) estimateRate = feeP / grossP
+    } catch (e) {
+      console.warn('[admin/accounts/sales] fee rate query failed:', e.message)
+    }
+
+    const round2 = (n) => Math.round(n * 100) / 100
+    const lineItems = rows.map(row => {
+      const amount = round2(accountsPounds(row.amount_pounds))
+      const charged = accountsPounds(row.charged_pounds) || amount
       const method = String(row.payment_method || 'sumup').toLowerCase()
-      // Per-line net: cash/bank keep full amount; SumUp lines stay at gross (fees deducted in totals)
-      const netPayout = (method === 'cash' || method === 'bank_transfer') ? amount : amount
+      let fee = 0
+      let feeBasis = 'none'
+      if (method === 'sumup') {
+        const code = row.tx_code ? String(row.tx_code) : null
+        if (code && feeByCode.has(code)) {
+          // Bundles: SumUp charged the full bundle, so apportion the fee to the membership part.
+          fee = round2((feeByCode.get(code) / 100) * (charged > 0 ? amount / charged : 1))
+          feeBasis = 'actual'
+        } else if (estimateRate != null) {
+          fee = round2(amount * estimateRate)
+          feeBasis = 'estimated'
+        } else {
+          feeBasis = 'unknown'
+        }
+      }
       return {
         id: row.id,
         created_at: row.created_at,
         category: row.category || 'other',
         payment_method: method,
         amount_pounds: amount,
-        net_payout: netPayout
+        fee_pounds: fee,
+        fee_basis: feeBasis,
+        net_payout: round2(amount - fee)
       }
     }).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
 
     const grouped = new Map()
     for (const item of lineItems) {
-      const prev = grouped.get(item.category) || { category: item.category, quantity: 0, total_pounds: 0, net_payout: 0 }
+      const prev = grouped.get(item.category) || { category: item.category, quantity: 0, total_pounds: 0, fee_pounds: 0, net_payout: 0 }
       prev.quantity += 1
       prev.total_pounds += item.amount_pounds
+      prev.fee_pounds += item.fee_pounds
       prev.net_payout += item.net_payout
       grouped.set(item.category, prev)
     }
@@ -7102,13 +7123,16 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
     const categories = [...grouped.values()]
       .map(row => ({
         ...row,
-        total_pounds: Math.round(row.total_pounds * 100) / 100,
-        net_payout: Math.round(row.net_payout * 100) / 100
+        total_pounds: round2(row.total_pounds),
+        fee_pounds: round2(row.fee_pounds),
+        net_payout: round2(row.net_payout)
       }))
       .sort((a, b) => a.category.localeCompare(b.category))
 
-    const gross = lineItems.reduce((sum, row) => sum + row.amount_pounds, 0)
-    const net = Math.round((gross - sumupFeesPounds) * 100) / 100
+    const sumBy = (key, basis) => round2(lineItems
+      .filter(r => !basis || r.fee_basis === basis)
+      .reduce((sum, r) => sum + r[key], 0))
+    const countBasis = (basis) => lineItems.filter(r => r.fee_basis === basis).length
 
     return c.json({
       from,
@@ -7116,15 +7140,19 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
       categories,
       line_items: lineItems,
       sumup_fees: {
-        pounds: Math.round(sumupFeesPounds * 100) / 100,
-        payout_rows: payoutRows,
-        synced: payoutRows > 0
+        pounds: sumBy('fee_pounds'),
+        actual_pounds: sumBy('fee_pounds', 'actual'),
+        estimated_pounds: sumBy('fee_pounds', 'estimated'),
+        actual_lines: countBasis('actual'),
+        estimated_lines: countBasis('estimated'),
+        unknown_lines: countBasis('unknown'),
+        estimate_rate: estimateRate
       },
       totals: {
         quantity: lineItems.length,
-        total_pounds: Math.round(gross * 100) / 100,
-        sumup_fees_pounds: Math.round(sumupFeesPounds * 100) / 100,
-        net_payout: net
+        total_pounds: sumBy('amount_pounds'),
+        sumup_fees_pounds: sumBy('fee_pounds'),
+        net_payout: sumBy('net_payout')
       }
     })
   } catch (error) {
