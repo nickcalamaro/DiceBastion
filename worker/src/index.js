@@ -9788,7 +9788,7 @@ app.get('/admin/products/barcode-lookup/:ean', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
     const existing = await c.env.DB.prepare(
-      'SELECT id, name, catalog_status FROM products WHERE ean = ? LIMIT 1'
+      'SELECT id, name, catalog_status, price, summary, full_description, category FROM products WHERE ean = ? LIMIT 1'
     ).bind(gtin).first()
 
     let result
@@ -9815,6 +9815,7 @@ app.get('/admin/products/barcode-lookup/:ean', requireAdmin, async (c) => {
       quotaRemaining: result.quotaRemaining,
       checked: result.checked,
       gameupcConfigured: !!result.gameupcConfigured,
+      eandataConfigured: !!result.eandataConfigured,
       catalogError: result.catalogError || null,
       existingProduct: existing || null
     })

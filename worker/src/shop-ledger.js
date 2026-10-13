@@ -331,8 +331,12 @@ function cleanEan(raw) {
   return digits
 }
 
-function blankCopy(value) {
-  return !String(value || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim()
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 function safeDescriptionHtml(html) {
@@ -343,42 +347,54 @@ function safeDescriptionHtml(html) {
   return cleaned ? cleaned.slice(0, 8000) : null
 }
 
+/** Stores catalog HTML as-is, and plain text typed in the import form as paragraphs. */
+function toStoredDescription(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  if (/<\/?[a-z][^>]*>/i.test(raw)) return safeDescriptionHtml(raw)
+  const html = raw.split(/\n{2,}/).map((part) => {
+    const paragraph = part.trim()
+    if (!paragraph) return ''
+    return `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`
+  }).filter(Boolean).join('')
+  return html ? html.slice(0, 8000) : null
+}
+
 function copyFromInput(input) {
   const summary = input.summary ? String(input.summary).trim().slice(0, 500) : null
   return {
     summary: summary || null,
-    fullDescription: safeDescriptionHtml(input.description),
+    fullDescription: toStoredDescription(input.description),
     image: cleanUrl(input.image_url),
     category: input.category ? String(input.category).trim().slice(0, 200) : null
   }
 }
 
-/** Fills summary, description and image only where the product does not already have them. */
-async function fillBlankProductCopy(db, productId, input) {
+/** Writes the summary, description and selling price entered on the import form. */
+async function applySubmittedCopy(db, productId, input) {
   const copy = copyFromInput(input)
   if (copy.image === undefined) copy.image = null
-  const row = await db.prepare(
-    'SELECT summary, description, full_description, image_url, category FROM products WHERE id = ?'
-  ).bind(productId).first()
+  const price = parsePence(input.price_pence)
+  const row = await db.prepare('SELECT image_url, category FROM products WHERE id = ?').bind(productId).first()
   if (!row) return []
 
   const sets = []
   const binds = []
   const filled = []
-  if (copy.summary && blankCopy(row.summary)) {
-    sets.push('summary = ?')
-    binds.push(copy.summary)
+  if (copy.summary) {
+    sets.push('summary = ?', 'description = ?')
+    binds.push(copy.summary, copy.summary)
     filled.push('summary')
   }
-  if (copy.summary && blankCopy(row.description)) {
-    sets.push('description = ?')
-    binds.push(copy.summary)
-    filled.push('description')
-  }
-  if (copy.fullDescription && blankCopy(row.full_description)) {
+  if (copy.fullDescription) {
     sets.push('full_description = ?')
     binds.push(copy.fullDescription)
     filled.push('full_description')
+  }
+  if (price != null && price > 0) {
+    sets.push('price = ?')
+    binds.push(price)
+    filled.push('price')
   }
   if (copy.image && !String(row.image_url || '').trim()) {
     sets.push('image_url = ?')
@@ -586,7 +602,7 @@ export async function addImportLine(db, sessionId, input) {
         UPDATE products SET is_active = 1, catalog_status = 'listed', updated_at = ? WHERE id = ?
       `).bind(new Date().toISOString(), product.id).run()
     }
-    filledCopy = await fillBlankProductCopy(db, product.id, input)
+    filledCopy = await applySubmittedCopy(db, product.id, input)
   }
 
   const received = await receiveStock(db, {

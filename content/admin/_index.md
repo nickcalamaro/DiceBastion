@@ -13,8 +13,8 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/barcodeScanner.js?v=20261013c"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261013c"></script>
+<script src="/js/barcodeScanner.js?v=20261013e"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261013e"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -528,7 +528,7 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <button type="button" id="product-ean-scan-btn" class="btn btn-primary">Scan barcode</button>
 <button type="button" id="product-ean-lookup-btn" class="btn btn-secondary">Look up</button>
 </div>
-<small class="admin-text-small">Scan with your phone camera, or type the barcode and press Enter to fill details from the UPCitemdb catalog. Digits only; 8–14 characters.</small>
+<small class="admin-text-small">Scan with your phone camera, or type the barcode and press Enter. Board games are filled from the board game catalog, and other shop items from EAN-Data. Digits only; 8–14 characters.</small>
 <div id="product-ean-status" class="admin-text-small" role="status" aria-live="polite" style="display: none; margin-top: 0.5rem; padding: 0.5rem 0.75rem; border-left: 3px solid rgb(var(--color-primary-500)); background: rgba(var(--color-primary-50), 0.5); border-radius: 4px; line-height: 1.6;"></div>
 </div>
 

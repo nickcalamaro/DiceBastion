@@ -450,9 +450,12 @@
 
   function catalogMissText(data) {
     if (data && data.catalogError) {
-      return 'The board game catalog refused the lookup. Try again. The barcode is saved; enter the details by hand.';
+      return 'The product catalog refused the lookup. The barcode is saved; enter the details by hand.';
     }
-    return 'Not found in the board game catalog. The barcode is saved; enter the details by hand.';
+    if (data && !data.eandataConfigured) {
+      return 'Not found as a board game. Packs, decks and other shop items are looked up on EAN-Data once that key is set. The barcode is saved; enter the details by hand.';
+    }
+    return 'Not found in the product catalogs. The barcode is saved; enter the details by hand.';
   }
 
   async function lookup(rawEan, fromScan) {

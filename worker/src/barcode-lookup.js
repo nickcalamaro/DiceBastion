@@ -58,79 +58,6 @@ function plainTextToHtml(text) {
   return paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('')
 }
 
-function toAmount(value) {
-  const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null
-}
-
-function parseResetHeader(res) {
-  const reset = Number(res.headers.get('X-RateLimit-Reset'))
-  return Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000).toISOString() : null
-}
-
-function parseRemainingHeader(res) {
-  const remaining = res.headers.get('X-RateLimit-Remaining')
-  if (remaining == null || remaining === '') return null
-  const n = Number(remaining)
-  return Number.isFinite(n) ? n : null
-}
-
-async function lookupUpcitemdb(gtin, env) {
-  const key = env.UPCITEMDB_API_KEY
-  const url = key
-    ? `https://api.upcitemdb.com/prod/v1/lookup?upc=${gtin}`
-    : `https://api.upcitemdb.com/prod/trial/lookup?upc=${gtin}`
-  const headers = { Accept: 'application/json', 'User-Agent': 'DiceBastion-Admin/1.0' }
-  if (key) {
-    headers.user_key = key
-    headers.key_type = '3scale'
-  }
-
-  const res = await fetch(url, { headers })
-  const quotaRemaining = parseRemainingHeader(res)
-  const body = await res.json().catch(() => ({}))
-
-  if (res.status === 429 || body.code === 'TOO_FAST' || body.code === 'EXCEED_LIMIT') {
-    throw new BarcodeQuotaError('UPCitemdb', parseResetHeader(res))
-  }
-  if (res.status === 400 || body.code === 'INVALID_UPC') {
-    return { product: null, quotaRemaining }
-  }
-  if (!res.ok) {
-    throw new Error(`upcitemdb_${res.status}`)
-  }
-
-  const item = Array.isArray(body.items) ? body.items[0] : null
-  if (!item) return { product: null, quotaRemaining }
-
-  const offers = Array.isArray(item.offers) ? item.offers : []
-  const low = toAmount(item.lowest_recorded_price)
-  const high = toAmount(item.highest_recorded_price)
-  const currency = cleanText(item.currency) || cleanText(offers[0]?.currency) || 'USD'
-  const categoryHints = cleanText(item.category)
-    .split('>')
-    .map(cleanText)
-    .filter(Boolean)
-    .slice(-2)
-    .reverse()
-
-  return {
-    quotaRemaining,
-    product: {
-      name: cleanText(item.title),
-      brand: cleanText(item.brand),
-      summary: summarise(item.description),
-      descriptionHtml: plainTextToHtml(item.description),
-      imageUrls: (Array.isArray(item.images) ? item.images : [])
-        .map(cleanText)
-        .filter((u) => /^https?:\/\//i.test(u)),
-      categoryHints,
-      priceHint: low || high ? { low, high, currency } : null,
-      source: 'UPCitemdb'
-    }
-  }
-}
-
 export class BarcodeCatalogError extends Error {
   constructor(source) {
     super('catalog_unauthorized')
@@ -225,11 +152,81 @@ async function lookupGameUpc(gtin, env) {
   }
 }
 
-function providersFor() {
-  return [
-    { id: 'gameupc', label: 'GameUPC', lookup: lookupGameUpc },
-    { id: 'upcitemdb', label: 'UPCitemdb', lookup: lookupUpcitemdb }
-  ]
+/** EAN-Data accepts 8, 12 or 13 digits. A GTIN-14 with a leading zero is the EAN-13. */
+function eandataCode(gtin) {
+  if (gtin.length === 14 && gtin.startsWith('0')) return gtin.slice(1)
+  return gtin
+}
+
+/**
+ * General retail catalog (packs, decks, and anything else with a barcode).
+ * Used when EANDATA_KEYCODE is set. https://eandata.com/feed/
+ */
+async function lookupEandata(gtin, env) {
+  const key = env.EANDATA_KEYCODE
+  if (!key) return { product: null, skipped: true }
+  const code = eandataCode(gtin)
+  if (![8, 12, 13].includes(code.length)) return { product: null }
+
+  const res = await fetch(`https://eandata.com/feed/v3/find/${encodeURIComponent(code)}/`, {
+    headers: {
+      Accept: 'application/json',
+      'x-api-key': key,
+      'User-Agent': 'DiceBastion-Admin/1.0'
+    }
+  })
+  const body = await res.json().catch(() => ({}))
+  const statusCode = String(body?.status?.code || res.status)
+  const message = cleanText(body?.status?.message)
+  if (statusCode === '404' || statusCode === '500') return { product: null }
+  if (statusCode === '401' || statusCode === '403') throw new BarcodeCatalogError('EAN-Data')
+  if (statusCode === '429' || /limit|quota/i.test(message)) throw new BarcodeQuotaError('EAN-Data', null)
+  if (statusCode !== '200') throw new Error(`eandata_${statusCode}`)
+
+  const attrs = body?.product?.attributes || {}
+  const name = cleanText(attrs.product)
+  const description = cleanText(attrs.long_desc) || cleanText(attrs.description) || cleanText(attrs.features)
+  const category = cleanText(attrs.category_text_long || attrs.category_text)
+  const image = cleanText(body?.product?.image)
+  const imageUrls = /^https?:\/\//i.test(image) ? [image] : []
+  if (!name && !description && !category && !imageUrls.length) return { product: null }
+
+  return {
+    product: {
+      name,
+      brand: cleanText(attrs.brand) || cleanText(body?.company?.name),
+      summary: summarise(description),
+      descriptionHtml: description ? plainTextToHtml(description) : '',
+      imageUrls,
+      categoryHints: category ? [category] : [],
+      priceHint: null,
+      source: 'EAN-Data'
+    }
+  }
+}
+
+function mergeProducts(primary, extra) {
+  if (!primary) return extra
+  if (!extra) return primary
+  const sameSource = primary.source === extra.source
+  return {
+    name: primary.name || extra.name,
+    brand: primary.brand || extra.brand,
+    summary: primary.summary || extra.summary,
+    descriptionHtml: primary.descriptionHtml || extra.descriptionHtml,
+    imageUrls: primary.imageUrls?.length ? primary.imageUrls : (extra.imageUrls || []),
+    categoryHints: primary.categoryHints?.length ? primary.categoryHints : (extra.categoryHints || []),
+    priceHint: primary.priceHint || extra.priceHint,
+    source: sameSource ? primary.source : `${primary.source}, ${extra.source}`
+  }
+}
+
+function providersFor(env) {
+  const providers = [{ id: 'gameupc', label: 'GameUPC', lookup: lookupGameUpc }]
+  if (env?.EANDATA_KEYCODE) {
+    providers.push({ id: 'eandata', label: 'EAN-Data', lookup: lookupEandata })
+  }
+  return providers
 }
 
 function cacheRequest(providerId, gtin) {
@@ -266,30 +263,31 @@ export async function lookupBarcode(gtin, env, ctx) {
   let quotaRemaining = null
   let quotaError = null
   let catalogError = null
+  let merged = null
+  let anyFresh = false
+  const eandataConfigured = !!env?.EANDATA_KEYCODE
 
-  for (const provider of providersFor()) {
+  for (const provider of providersFor(env)) {
     const cached = await readCache(provider.id, gtin)
     if (cached) {
       checked.push(provider.label)
-      if (cached.product) {
-        return { product: cached.product, cached: true, quotaRemaining: null, checked, gameupcConfigured: true }
-      }
+      if (cached.product) merged = mergeProducts(merged, cached.product)
       continue
     }
 
     try {
       const result = await provider.lookup(gtin, env)
       if (result.skipped) continue
+      anyFresh = true
       checked.push(provider.label)
       if (result.quotaRemaining != null) quotaRemaining = result.quotaRemaining
-      const hasCopy = !!(result.product && (result.product.summary || result.product.descriptionHtml))
-      const ttl = result.product
-        ? (hasCopy ? FOUND_TTL_SECONDS : NOT_FOUND_TTL_SECONDS)
-        : NOT_FOUND_TTL_SECONDS
+      const retryForDescription = provider.id === 'gameupc'
+        && result.product
+        && !result.product.summary
+        && !result.product.descriptionHtml
+      const ttl = !result.product || retryForDescription ? NOT_FOUND_TTL_SECONDS : FOUND_TTL_SECONDS
       await writeCache(provider.id, gtin, { product: result.product }, ttl, ctx)
-      if (result.product) {
-        return { product: result.product, cached: false, quotaRemaining, checked, gameupcConfigured: true }
-      }
+      if (result.product) merged = mergeProducts(merged, result.product)
     } catch (e) {
       if (e instanceof BarcodeQuotaError) {
         quotaError = e
@@ -303,6 +301,24 @@ export async function lookupBarcode(gtin, env, ctx) {
     }
   }
 
+  if (merged) {
+    return {
+      product: merged,
+      cached: !anyFresh,
+      quotaRemaining,
+      checked,
+      gameupcConfigured: true,
+      eandataConfigured
+    }
+  }
   if (quotaError && checked.length === 0 && !catalogError) throw quotaError
-  return { product: null, cached: false, quotaRemaining, checked, gameupcConfigured: true, catalogError }
+  return {
+    product: null,
+    cached: false,
+    quotaRemaining,
+    checked,
+    gameupcConfigured: true,
+    eandataConfigured,
+    catalogError
+  }
 }

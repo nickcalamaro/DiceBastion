@@ -1057,8 +1057,8 @@
         ? 'New product added to the shop and to this receipt, including the catalog summary and description.'
         : 'New product added to the shop and to this receipt.');
     } else if (result.matched_existing) {
-      setStatus(filledText
-        ? 'Stock was added to the existing product, and the empty summary and description were filled from the catalog.'
+      setStatus(filledText || copy.indexOf('price') !== -1
+        ? 'Stock was added, and the selling price, summary or description you entered was saved on the product.'
         : 'That barcode is already in the shop, so the stock was added to the existing product.');
     } else setStatus('Item added to this receipt.');
     refreshAfterChange();
@@ -1072,9 +1072,34 @@
 
   function catalogMissText(data) {
     if (data && data.catalogError) {
-      return 'The board game catalog refused the lookup. Try again, or enter the product name and selling price yourself.';
+      return 'The product catalog refused the lookup. Type the name, selling price, summary and description below.';
     }
-    return 'Not found in the board game catalog. Enter the product name and selling price yourself.';
+    if (data && !data.eandataConfigured) {
+      return 'Not found as a board game. Packs, decks and other shop items are looked up on EAN-Data once that key is set. Type the name, selling price, summary and description below.';
+    }
+    return 'Not found in the product catalogs. Type the name, selling price, summary and description below.';
+  }
+
+  function plainFromHtml(html) {
+    return String(html || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function productDetailFields() {
+    return field('Product name', '<input name="name" class="modal-form-input session-line-name">') +
+      field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input session-line-price">', 'The price you will charge in the shop.') +
+      field('Category', '<input name="category" class="modal-form-input session-line-category">') +
+      field('Summary', '<textarea name="summary" rows="2" class="modal-form-input session-line-summary"></textarea>', 'Short text on the product card.') +
+      field('Description', '<textarea name="description" rows="5" class="modal-form-input session-line-description"></textarea>');
   }
 
   function openBarcodeLine() {
@@ -1091,15 +1116,9 @@
           '</div>' +
           '<p class="session-line-status admin-text-small" style="margin-top: 0.5rem;"></p>' +
         '</div>' +
-        '<div class="session-line-new" style="display: none;">' +
-          field('Product name', '<input name="name" class="modal-form-input session-line-name">') +
-          field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input session-line-price">', 'What you charge in the shop.') +
-          field('Category', '<input name="category" class="modal-form-input session-line-category">') +
-        '</div>' +
+        productDetailFields() +
         '<input type="hidden" name="product_id" class="session-line-product-id">' +
         '<input type="hidden" name="image_url" class="session-line-image">' +
-        '<input type="hidden" name="summary" class="session-line-summary">' +
-        '<textarea name="description" class="session-line-description" hidden></textarea>' +
         qtyCostFields(),
       onSubmit: async function (fd, m) {
         const productId = fd.get('product_id');
@@ -1123,8 +1142,16 @@
     });
 
     const status = modal.querySelector('.session-line-status');
-    const newBox = modal.querySelector('.session-line-new');
     const eanInput = modal.querySelector('.session-line-ean');
+    const nameInput = modal.querySelector('.session-line-name');
+    const priceInput = modal.querySelector('.session-line-price');
+    const categoryInput = modal.querySelector('.session-line-category');
+    const summaryInput = modal.querySelector('.session-line-summary');
+    const descriptionInput = modal.querySelector('.session-line-description');
+
+    function fillEmpty(input, value) {
+      if (input && !String(input.value || '').trim() && value) input.value = value;
+    }
 
     async function lookup() {
       const ean = global.BarcodeScanner && global.BarcodeScanner.validateGtin
@@ -1137,7 +1164,6 @@
       eanInput.value = ean;
       status.textContent = 'Looking up ' + ean + '...';
       modal.querySelector('.session-line-product-id').value = '';
-      newBox.style.display = 'none';
       try {
         const res = await fetch(opts.apiBase() + '/admin/products/barcode-lookup/' + encodeURIComponent(ean), {
           headers: { 'X-Session-Token': opts.token() || '' }
@@ -1146,56 +1172,41 @@
         if (!res.ok && data.error !== 'quota_exceeded') throw new Error(errorText(data, 'Lookup failed.'));
         const existing = data.existingProduct;
         const catalog = data.product;
-        function applyCatalog(item) {
-          if (!item) return;
-          modal.querySelector('.session-line-name').value = item.name || modal.querySelector('.session-line-name').value;
-          modal.querySelector('.session-line-summary').value = item.summary || '';
-          modal.querySelector('.session-line-description').value = item.descriptionHtml || '';
-          modal.querySelector('.session-line-category').value = (item.categoryHints && item.categoryHints[0]) || '';
-        }
         if (existing) {
           modal.querySelector('.session-line-product-id').value = existing.id;
-          modal.querySelector('.session-line-name').value = existing.name || '';
-          applyCatalog(catalog);
-          status.textContent = 'Already in the shop as ' + existing.name + '. Enter the quantity and what you paid.';
-          if (catalog && (catalog.summary || catalog.descriptionHtml)) {
-            status.textContent += ' Empty summary and description will be filled from the catalog.';
-          }
-          if (catalog && catalog.imageUrls && catalog.imageUrls[0] && !modal.querySelector('.session-line-image').value) {
-            try {
-              const copied = await api('/admin/images/from-url', { method: 'POST', body: { url: catalog.imageUrls[0] } });
-              modal.querySelector('.session-line-image').value = copied.url || '';
-            } catch (imgErr) { /* the product can keep its current image */ }
-          }
-          return;
+          fillEmpty(nameInput, existing.name);
+          if (existing.price) fillEmpty(priceInput, (Number(existing.price) / 100).toFixed(2));
+          fillEmpty(categoryInput, existing.category);
+          fillEmpty(summaryInput, existing.summary);
+          fillEmpty(descriptionInput, plainFromHtml(existing.full_description));
         }
-        newBox.style.display = '';
         if (catalog) {
-          applyCatalog(catalog);
-          function foundNewText(extra) {
-            let text = 'Not in the shop yet. Check the name and enter the selling price, quantity and cost.';
-            if (catalog.summary || catalog.descriptionHtml) text += ' Summary and description will be saved with the product.';
-            if (extra) text += ' ' + extra;
-            return text;
+          fillEmpty(nameInput, catalog.name);
+          fillEmpty(categoryInput, catalog.categoryHints && catalog.categoryHints[0]);
+          fillEmpty(summaryInput, catalog.summary);
+          fillEmpty(descriptionInput, plainFromHtml(catalog.descriptionHtml));
+          const hint = catalog.priceHint;
+          if (hint && hint.low && String(hint.currency || '').toUpperCase() === 'GBP') {
+            fillEmpty(priceInput, Number(hint.low).toFixed(2));
           }
-          status.textContent = foundNewText();
-          if (catalog.imageUrls && catalog.imageUrls[0]) {
-            status.textContent = foundNewText('Saving the catalog photo...');
-            try {
-              const copied = await api('/admin/images/from-url', { method: 'POST', body: { url: catalog.imageUrls[0] } });
-              modal.querySelector('.session-line-image').value = copied.url || '';
-              status.textContent = foundNewText();
-            } catch (imgErr) {
-              status.textContent = foundNewText('The catalog photo could not be saved; you can add one on the product later.');
-            }
-          }
-          if (catalog.priceHint && catalog.priceHint.low) {
-            status.textContent += ' Catalog price hint: ' + catalog.priceHint.low + ' ' + (catalog.priceHint.currency || '') + '.';
+        }
+        if (existing) {
+          status.textContent = 'Already in the shop as ' + existing.name + '. Check the selling price, summary and description, then enter the quantity and what you paid.';
+        } else if (catalog) {
+          status.textContent = 'Found in ' + (catalog.source || 'the catalog') + '. Check the details, set the selling price, then enter the quantity and what you paid.';
+          if (catalog.priceHint && catalog.priceHint.low && String(catalog.priceHint.currency || '').toUpperCase() !== 'GBP') {
+            status.textContent += ' Retailers list it at ' + catalog.priceHint.low + ' ' + catalog.priceHint.currency + '.';
           }
         } else if (data.error === 'quota_exceeded') {
-          status.textContent = 'Daily lookup limit reached. Enter the product name and selling price yourself.';
+          status.textContent = 'Daily lookup limit reached. Type the details below.';
         } else {
           status.textContent = catalogMissText(data);
+        }
+        if (catalog && catalog.imageUrls && catalog.imageUrls[0] && !modal.querySelector('.session-line-image').value) {
+          try {
+            const copied = await api('/admin/images/from-url', { method: 'POST', body: { url: catalog.imageUrls[0] } });
+            modal.querySelector('.session-line-image').value = copied.url || '';
+          } catch (imgErr) { /* a photo can be added on the product later */ }
         }
       } catch (err) {
         status.textContent = err.message;
@@ -1231,10 +1242,12 @@
         '</label>' +
         '<div class="session-line-new" style="display: none;">' +
           field('Product name', '<input name="name" class="modal-form-input">') +
-          field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input">') +
           field('Barcode', '<input name="ean" class="modal-form-input" inputmode="numeric">', 'Optional.') +
           field('Category', '<input name="category" class="modal-form-input">') +
         '</div>' +
+        field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input">', 'The price you will charge in the shop. Filled in for a new product, and updates an existing one when you enter it.') +
+        field('Summary', '<textarea name="summary" rows="2" class="modal-form-input"></textarea>') +
+        field('Description', '<textarea name="description" rows="5" class="modal-form-input"></textarea>') +
         qtyCostFields(),
       onSubmit: async function (fd, m) {
         const isNew = fd.get('new_product') === 'on';
@@ -1247,8 +1260,10 @@
           product_id: isNew ? null : fd.get('product_id'),
           ean: isNew ? fd.get('ean') : null,
           name: isNew ? fd.get('name') : null,
-          price: isNew ? fd.get('price') : null,
+          price: fd.get('price'),
           category: isNew ? fd.get('category') : null,
+          summary: fd.get('summary'),
+          description: fd.get('description'),
           needs_price: isNew
         }, m);
       }
