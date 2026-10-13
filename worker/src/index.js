@@ -9814,6 +9814,8 @@ app.get('/admin/products/barcode-lookup/:ean', requireAdmin, async (c) => {
       cached: result.cached,
       quotaRemaining: result.quotaRemaining,
       checked: result.checked,
+      gameupcConfigured: !!result.gameupcConfigured,
+      catalogError: result.catalogError || null,
       existingProduct: existing || null
     })
   } catch (e) {

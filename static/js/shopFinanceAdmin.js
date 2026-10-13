@@ -1044,14 +1044,23 @@
       price_pence: body.price != null && body.price !== '' ? toPence(body.price) : null,
       category: body.category || null,
       summary: body.summary || null,
+      description: body.description || null,
       image_url: body.image_url || null
     };
     if (!payload.product_id && payload.price_pence == null && body.needs_price) throw new Error(ERROR_MESSAGES.missing_price);
     const result = await api('/admin/finance/import-sessions/' + openSessionId + '/lines', { method: 'POST', body: payload });
     modal.close();
-    if (result.created_product) setStatus('New product added to the shop and to this receipt.');
-    else if (result.matched_existing) setStatus('That barcode is already in the shop, so the stock was added to the existing product.');
-    else setStatus('Item added to this receipt.');
+    const copy = result.filled_copy || [];
+    const filledText = copy.indexOf('summary') !== -1 || copy.indexOf('full_description') !== -1;
+    if (result.created_product) {
+      setStatus(filledText
+        ? 'New product added to the shop and to this receipt, including the catalog summary and description.'
+        : 'New product added to the shop and to this receipt.');
+    } else if (result.matched_existing) {
+      setStatus(filledText
+        ? 'Stock was added to the existing product, and the empty summary and description were filled from the catalog.'
+        : 'That barcode is already in the shop, so the stock was added to the existing product.');
+    } else setStatus('Item added to this receipt.');
     refreshAfterChange();
   }
 
@@ -1059,6 +1068,13 @@
     if (!openSessionId) return;
     if (mode === 'barcode') openBarcodeLine();
     else openManualLine();
+  }
+
+  function catalogMissText(data) {
+    if (data && data.catalogError) {
+      return 'The board game catalog refused the lookup. Try again, or enter the product name and selling price yourself.';
+    }
+    return 'Not found in the board game catalog. Enter the product name and selling price yourself.';
   }
 
   function openBarcodeLine() {
@@ -1083,6 +1099,7 @@
         '<input type="hidden" name="product_id" class="session-line-product-id">' +
         '<input type="hidden" name="image_url" class="session-line-image">' +
         '<input type="hidden" name="summary" class="session-line-summary">' +
+        '<textarea name="description" class="session-line-description" hidden></textarea>' +
         qtyCostFields(),
       onSubmit: async function (fd, m) {
         const productId = fd.get('product_id');
@@ -1098,6 +1115,7 @@
           price: fd.get('price'),
           category: fd.get('category'),
           summary: fd.get('summary'),
+          description: fd.get('description'),
           image_url: fd.get('image_url'),
           needs_price: !productId
         }, m);
@@ -1128,26 +1146,47 @@
         if (!res.ok && data.error !== 'quota_exceeded') throw new Error(errorText(data, 'Lookup failed.'));
         const existing = data.existingProduct;
         const catalog = data.product;
+        function applyCatalog(item) {
+          if (!item) return;
+          modal.querySelector('.session-line-name').value = item.name || modal.querySelector('.session-line-name').value;
+          modal.querySelector('.session-line-summary').value = item.summary || '';
+          modal.querySelector('.session-line-description').value = item.descriptionHtml || '';
+          modal.querySelector('.session-line-category').value = (item.categoryHints && item.categoryHints[0]) || '';
+        }
         if (existing) {
           modal.querySelector('.session-line-product-id').value = existing.id;
           modal.querySelector('.session-line-name').value = existing.name || '';
+          applyCatalog(catalog);
           status.textContent = 'Already in the shop as ' + existing.name + '. Enter the quantity and what you paid.';
+          if (catalog && (catalog.summary || catalog.descriptionHtml)) {
+            status.textContent += ' Empty summary and description will be filled from the catalog.';
+          }
+          if (catalog && catalog.imageUrls && catalog.imageUrls[0] && !modal.querySelector('.session-line-image').value) {
+            try {
+              const copied = await api('/admin/images/from-url', { method: 'POST', body: { url: catalog.imageUrls[0] } });
+              modal.querySelector('.session-line-image').value = copied.url || '';
+            } catch (imgErr) { /* the product can keep its current image */ }
+          }
           return;
         }
         newBox.style.display = '';
         if (catalog) {
-          modal.querySelector('.session-line-name').value = catalog.name || '';
-          modal.querySelector('.session-line-summary').value = catalog.summary || '';
-          modal.querySelector('.session-line-category').value = (catalog.categoryHints && catalog.categoryHints[0]) || '';
-          status.textContent = 'Not in the shop yet. Check the name and enter the selling price, quantity and cost.';
+          applyCatalog(catalog);
+          function foundNewText(extra) {
+            let text = 'Not in the shop yet. Check the name and enter the selling price, quantity and cost.';
+            if (catalog.summary || catalog.descriptionHtml) text += ' Summary and description will be saved with the product.';
+            if (extra) text += ' ' + extra;
+            return text;
+          }
+          status.textContent = foundNewText();
           if (catalog.imageUrls && catalog.imageUrls[0]) {
-            status.textContent += ' Saving the catalog photo...';
+            status.textContent = foundNewText('Saving the catalog photo...');
             try {
               const copied = await api('/admin/images/from-url', { method: 'POST', body: { url: catalog.imageUrls[0] } });
               modal.querySelector('.session-line-image').value = copied.url || '';
-              status.textContent = 'Not in the shop yet. Check the name and enter the selling price, quantity and cost.';
+              status.textContent = foundNewText();
             } catch (imgErr) {
-              status.textContent = 'Not in the shop yet. The catalog photo could not be saved; you can add one on the product later.';
+              status.textContent = foundNewText('The catalog photo could not be saved; you can add one on the product later.');
             }
           }
           if (catalog.priceHint && catalog.priceHint.low) {
@@ -1156,7 +1195,7 @@
         } else if (data.error === 'quota_exceeded') {
           status.textContent = 'Daily lookup limit reached. Enter the product name and selling price yourself.';
         } else {
-          status.textContent = 'No catalog match. Enter the product name and selling price yourself.';
+          status.textContent = catalogMissText(data);
         }
       } catch (err) {
         status.textContent = err.message;

@@ -131,9 +131,106 @@ async function lookupUpcitemdb(gtin, env) {
   }
 }
 
-const PROVIDERS = [
-  { id: 'upcitemdb', label: 'UPCitemdb', lookup: lookupUpcitemdb }
-]
+export class BarcodeCatalogError extends Error {
+  constructor(source) {
+    super('catalog_unauthorized')
+    this.source = source
+  }
+}
+
+/** Turns a BoardGameGeek thing description into plain text. */
+export function descriptionFromBggXml(xml) {
+  const match = String(xml || '').match(/<description>([\s\S]*?)<\/description>/i)
+  if (!match) return ''
+  return match[1]
+    .replace(/&amp;/g, '&')
+    .replace(/&#10;|&#13;/g, '\n')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 6000)
+}
+
+async function fetchBggDescription(gameId, token) {
+  const url = `https://boardgamegeek.com/xmlapi2/thing?id=${encodeURIComponent(gameId)}&type=boardgame,boardgameexpansion`
+  const headers = {
+    Accept: 'application/xml',
+    Authorization: `Bearer ${token}`,
+    'User-Agent': 'DiceBastion-Admin/1.0'
+  }
+  let res = await fetch(url, { headers })
+  if (res.status === 202) {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    res = await fetch(url, { headers })
+  }
+  if (!res.ok) return ''
+  return descriptionFromBggXml(await res.text())
+}
+
+function bestBggMatch(body) {
+  const matches = Array.isArray(body?.bgg_info) ? body.bgg_info : []
+  if (!matches.length) return null
+  if (body.bgg_info_status === 'verified') return matches[0]
+  const ranked = [...matches].sort((a, b) => (Number(b.confidence) || 0) - (Number(a.confidence) || 0))
+  return (Number(ranked[0].confidence) || 0) >= 80 ? ranked[0] : null
+}
+
+// The public test host expects this placeholder. A real account key is not required.
+const GAMEUPC_TEST_KEY = 'test_test_test_test_test'
+
+/**
+ * Board-game barcode catalog (GameUPC test API).
+ * BGG_API_TOKEN, when set, adds the description and summary from BoardGameGeek.
+ */
+async function lookupGameUpc(gtin, env) {
+  const res = await fetch(`https://api.gameupc.com/test/upc/${encodeURIComponent(gtin)}`, {
+    headers: {
+      Accept: 'application/json',
+      'x-api-key': GAMEUPC_TEST_KEY,
+      'User-Agent': 'DiceBastion-Admin/1.0'
+    }
+  })
+  if (res.status === 401 || res.status === 403) throw new BarcodeCatalogError('GameUPC')
+  if (res.status === 404) return { product: null }
+  if (res.status === 429) throw new BarcodeQuotaError('GameUPC', null)
+  if (!res.ok) throw new Error(`gameupc_${res.status}`)
+
+  const body = await res.json().catch(() => ({}))
+  const name = cleanText(body.name)
+  if (!name || body.status === 'not_found') return { product: null }
+
+  const match = bestBggMatch(body)
+  const description = match?.id && env.BGG_API_TOKEN
+    ? await fetchBggDescription(match.id, env.BGG_API_TOKEN)
+    : ''
+  const image = cleanText(match?.image_url) || cleanText(match?.thumbnail_url)
+
+  return {
+    product: {
+      name: cleanText(match?.name) || name,
+      brand: '',
+      summary: summarise(description),
+      descriptionHtml: description ? plainTextToHtml(description) : '',
+      imageUrls: /^https?:\/\//i.test(image) ? [image] : [],
+      categoryHints: ['Board games'],
+      priceHint: null,
+      source: 'GameUPC'
+    }
+  }
+}
+
+function providersFor() {
+  return [
+    { id: 'gameupc', label: 'GameUPC', lookup: lookupGameUpc },
+    { id: 'upcitemdb', label: 'UPCitemdb', lookup: lookupUpcitemdb }
+  ]
+}
 
 function cacheRequest(providerId, gtin) {
   return new Request(`${CACHE_ORIGIN}/${providerId}/${gtin}`)
@@ -168,31 +265,44 @@ export async function lookupBarcode(gtin, env, ctx) {
   const checked = []
   let quotaRemaining = null
   let quotaError = null
+  let catalogError = null
 
-  for (const provider of PROVIDERS) {
+  for (const provider of providersFor()) {
     const cached = await readCache(provider.id, gtin)
     if (cached) {
       checked.push(provider.label)
-      if (cached.product) return { product: cached.product, cached: true, quotaRemaining: null, checked }
+      if (cached.product) {
+        return { product: cached.product, cached: true, quotaRemaining: null, checked, gameupcConfigured: true }
+      }
       continue
     }
 
     try {
       const result = await provider.lookup(gtin, env)
+      if (result.skipped) continue
       checked.push(provider.label)
       if (result.quotaRemaining != null) quotaRemaining = result.quotaRemaining
-      const ttl = result.product ? FOUND_TTL_SECONDS : NOT_FOUND_TTL_SECONDS
+      const hasCopy = !!(result.product && (result.product.summary || result.product.descriptionHtml))
+      const ttl = result.product
+        ? (hasCopy ? FOUND_TTL_SECONDS : NOT_FOUND_TTL_SECONDS)
+        : NOT_FOUND_TTL_SECONDS
       await writeCache(provider.id, gtin, { product: result.product }, ttl, ctx)
-      if (result.product) return { product: result.product, cached: false, quotaRemaining, checked }
+      if (result.product) {
+        return { product: result.product, cached: false, quotaRemaining, checked, gameupcConfigured: true }
+      }
     } catch (e) {
       if (e instanceof BarcodeQuotaError) {
         quotaError = e
+        continue
+      }
+      if (e instanceof BarcodeCatalogError) {
+        catalogError = e.source
         continue
       }
       console.error(`Barcode lookup via ${provider.label} failed:`, e)
     }
   }
 
-  if (quotaError && checked.length === 0) throw quotaError
-  return { product: null, cached: false, quotaRemaining, checked }
+  if (quotaError && checked.length === 0 && !catalogError) throw quotaError
+  return { product: null, cached: false, quotaRemaining, checked, gameupcConfigured: true, catalogError }
 }

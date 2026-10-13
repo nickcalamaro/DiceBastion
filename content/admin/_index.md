@@ -13,8 +13,8 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/barcodeScanner.js?v=20261012a"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261013a"></script>
+<script src="/js/barcodeScanner.js?v=20261013c"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261013c"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->

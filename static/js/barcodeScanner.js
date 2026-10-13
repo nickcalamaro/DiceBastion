@@ -448,6 +448,13 @@
     return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   }
 
+  function catalogMissText(data) {
+    if (data && data.catalogError) {
+      return 'The board game catalog refused the lookup. Try again. The barcode is saved; enter the details by hand.';
+    }
+    return 'Not found in the board game catalog. The barcode is saved; enter the details by hand.';
+  }
+
   async function lookup(rawEan, fromScan) {
     if (!opts || lookupInFlight) return;
     const eanInput = el('product-ean');
@@ -493,7 +500,7 @@
         return;
       }
       if (!data.found || !data.product) {
-        setStatus('Not found in the catalog. The barcode is saved in the EAN field; enter the details by hand.' +
+        setStatus(catalogMissText(data) +
           (data.quotaRemaining != null ? '<br><span style="color: rgb(var(--color-neutral-500));">' + data.quotaRemaining + ' free lookups left today.</span>' : ''), 'info');
         return;
       }

@@ -331,6 +331,72 @@ function cleanEan(raw) {
   return digits
 }
 
+function blankCopy(value) {
+  return !String(value || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim()
+}
+
+function safeDescriptionHtml(html) {
+  const cleaned = String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .trim()
+  return cleaned ? cleaned.slice(0, 8000) : null
+}
+
+function copyFromInput(input) {
+  const summary = input.summary ? String(input.summary).trim().slice(0, 500) : null
+  return {
+    summary: summary || null,
+    fullDescription: safeDescriptionHtml(input.description),
+    image: cleanUrl(input.image_url),
+    category: input.category ? String(input.category).trim().slice(0, 200) : null
+  }
+}
+
+/** Fills summary, description and image only where the product does not already have them. */
+async function fillBlankProductCopy(db, productId, input) {
+  const copy = copyFromInput(input)
+  if (copy.image === undefined) copy.image = null
+  const row = await db.prepare(
+    'SELECT summary, description, full_description, image_url, category FROM products WHERE id = ?'
+  ).bind(productId).first()
+  if (!row) return []
+
+  const sets = []
+  const binds = []
+  const filled = []
+  if (copy.summary && blankCopy(row.summary)) {
+    sets.push('summary = ?')
+    binds.push(copy.summary)
+    filled.push('summary')
+  }
+  if (copy.summary && blankCopy(row.description)) {
+    sets.push('description = ?')
+    binds.push(copy.summary)
+    filled.push('description')
+  }
+  if (copy.fullDescription && blankCopy(row.full_description)) {
+    sets.push('full_description = ?')
+    binds.push(copy.fullDescription)
+    filled.push('full_description')
+  }
+  if (copy.image && !String(row.image_url || '').trim()) {
+    sets.push('image_url = ?')
+    binds.push(copy.image)
+    filled.push('image')
+  }
+  if (copy.category && !String(row.category || '').trim()) {
+    sets.push('category = ?')
+    binds.push(copy.category)
+    filled.push('category')
+  }
+  if (!sets.length) return []
+  sets.push('updated_at = ?')
+  binds.push(new Date().toISOString(), productId)
+  await db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).bind(...binds).run()
+  return filled
+}
+
 /** https URL or site path. null when blank, undefined when not a usable URL. */
 function cleanUrl(value) {
   if (value == null || String(value).trim() === '') return null
@@ -477,6 +543,7 @@ export async function addImportLine(db, sessionId, input) {
     product = await db.prepare('SELECT id, name, catalog_status FROM products WHERE ean = ?').bind(ean).first()
   }
 
+  let filledCopy = []
   if (!product) {
     const name = String(input.name || '').trim().slice(0, 200)
     const price = parsePence(input.price_pence)
@@ -484,36 +551,42 @@ export async function addImportLine(db, sessionId, input) {
     if (price == null || price <= 0) return { error: 'missing_price' }
     const slug = await uniqueProductSlug(db, name)
     const now = new Date().toISOString()
-    const image = cleanUrl(input.image_url)
-    if (image === undefined) return { error: 'invalid_image' }
+    const copy = copyFromInput(input)
+    if (copy.image === undefined) return { error: 'invalid_image' }
     try {
       const row = await db.prepare(`
-        INSERT INTO products (name, slug, description, summary, price, currency, stock_quantity, image_url, category, ean, catalog_status, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'GBP', 0, ?, ?, ?, 'listed', 1, ?, ?) RETURNING id
+        INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, ean, catalog_status, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'GBP', 0, ?, ?, ?, 'listed', 1, ?, ?) RETURNING id
       `).bind(
         name,
         slug,
-        input.description ? String(input.description).trim().slice(0, 4000) : null,
-        input.summary ? String(input.summary).trim().slice(0, 500) : null,
+        copy.summary,
+        copy.summary,
+        copy.fullDescription,
         price,
-        image,
-        input.category ? String(input.category).trim().slice(0, 200) : null,
+        copy.image,
+        copy.category,
         ean,
         now,
         now
       ).first()
       product = { id: row.id, name }
       created = true
+      if (copy.summary) filledCopy.push('summary')
+      if (copy.fullDescription) filledCopy.push('full_description')
     } catch (e) {
       const msg = String(e?.message || '')
       if (msg.includes('UNIQUE') && /ean/i.test(msg)) return { error: 'ean_already_exists' }
       if (msg.includes('UNIQUE')) return { error: 'slug_already_exists' }
       throw e
     }
-  } else if (product.catalog_status === 'archived') {
-    await db.prepare(`
-      UPDATE products SET is_active = 1, catalog_status = 'listed', updated_at = ? WHERE id = ?
-    `).bind(new Date().toISOString(), product.id).run()
+  } else {
+    if (product.catalog_status === 'archived') {
+      await db.prepare(`
+        UPDATE products SET is_active = 1, catalog_status = 'listed', updated_at = ? WHERE id = ?
+      `).bind(new Date().toISOString(), product.id).run()
+    }
+    filledCopy = await fillBlankProductCopy(db, product.id, input)
   }
 
   const received = await receiveStock(db, {
@@ -540,7 +613,8 @@ export async function addImportLine(db, sessionId, input) {
     lot_id: received.lot_id,
     product_id: product.id,
     created_product: created,
-    matched_existing: !created && !(productId > 0)
+    matched_existing: !created && !(productId > 0),
+    filled_copy: filledCopy
   }
 }
 
