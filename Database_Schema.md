@@ -114,8 +114,105 @@ CREATE TABLE products (
         is_active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-      , summary TEXT, full_description TEXT, release_date TEXT, import_batch_id INTEGER, ean TEXT, catalog_status TEXT DEFAULT 'listed');
+      , summary TEXT, full_description TEXT, release_date TEXT, import_batch_id INTEGER, ean TEXT, catalog_status TEXT DEFAULT 'listed'
+      , cost_tracked INTEGER DEFAULT 0);
 -- catalog_status: 'listed' (in the shop when is_active = 1) | 'archived' (hidden after CSV import cleanup, kept for EAN restore).
+-- cost_tracked: 1 once the product has a stock batch (stock_lots); stock then changes only via Receive stock / Write off / sales.
+
+-- Shop and events accounts (migration 0014). Amounts in pence; dates YYYY-MM-DD.
+CREATE TABLE supplier_bills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier TEXT NOT NULL,
+  bill_date TEXT NOT NULL,
+  reference TEXT,
+  total_pence INTEGER NOT NULL,
+  paid_date TEXT,
+  paid_from TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+-- paid_from: 'bank' | 'cash' | 'owner' (paid personally, counts as owner capital). NULL paid_date = unpaid.
+-- Bill total minus the cost of its stock batches is expensed as "Supplier bill costs not in stock".
+CREATE TABLE stock_lots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  received_date TEXT NOT NULL,
+  supplier TEXT,
+  quantity_received INTEGER NOT NULL,
+  quantity_remaining INTEGER NOT NULL,
+  unit_cost_pence INTEGER NOT NULL,
+  supplier_bill_id INTEGER,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE stock_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  lot_id INTEGER,
+  order_id INTEGER,
+  order_item_id INTEGER,
+  movement_type TEXT NOT NULL,
+  quantity INTEGER NOT NULL,
+  unit_cost_pence INTEGER NOT NULL DEFAULT 0,
+  occurred_at TEXT NOT NULL,
+  reason TEXT
+);
+-- movement_type: 'sale' (from decrementOrderStock, FIFO oldest batch first) | 'write_off'.
+-- lot_id NULL + reason 'no_cost_batch': sold with no batch left, recorded at zero cost.
+CREATE TABLE business_expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  expense_date TEXT NOT NULL,
+  category TEXT NOT NULL,
+  event_id INTEGER,
+  description TEXT,
+  amount_pence INTEGER NOT NULL,
+  paid_date TEXT,
+  paid_from TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+-- category: 'event_costs' | 'postage' | 'packaging' | 'supplies' | 'software' | 'other'
+CREATE TABLE owner_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  movement_date TEXT NOT NULL,
+  type TEXT NOT NULL,
+  account TEXT NOT NULL DEFAULT 'bank',
+  amount_pence INTEGER NOT NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+-- type: 'capital_in' | 'drawing'. account: 'bank' | 'cash'.
+CREATE TABLE finance_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+-- books_start_date: shop and ticket sales before this date are left out of Shop and events accounts.
+CREATE TABLE stock_import_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier TEXT NOT NULL,
+  received_date TEXT NOT NULL,
+  reference TEXT,
+  receipt_url TEXT,
+  notes TEXT,
+  paid_date TEXT,
+  paid_from TEXT,
+  supplier_bill_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+-- One supplier receipt. supplier_bill_id is the bill whose total is the sum of the session's stock lines.
+-- This is separate from products.import_batch_id, which belongs to CSV catalog imports.
+CREATE TABLE stock_import_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL,
+  product_id INTEGER NOT NULL,
+  ean TEXT,
+  name TEXT,
+  quantity INTEGER NOT NULL,
+  unit_cost_pence INTEGER NOT NULL,
+  entry_method TEXT NOT NULL,
+  lot_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+-- entry_method: 'barcode' | 'manual'. lot_id is the stock batch created for the line.
 CREATE TABLE orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_number TEXT UNIQUE NOT NULL,

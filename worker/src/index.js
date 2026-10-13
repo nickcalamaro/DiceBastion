@@ -12,6 +12,29 @@ import {
   verifyWebhook,
   listPayouts
 } from './payments-client.js'
+import { validateGtin, lookupBarcode, BarcodeQuotaError } from './barcode-lookup.js'
+import {
+  ensureLedgerSchema,
+  recordOrderCosts,
+  receiveStock,
+  writeOffStock,
+  loadSumUpFeeContext,
+  buildPnl,
+  buildBalanceSheet,
+  createImportSession,
+  updateImportSession,
+  listImportSessions,
+  getImportSession,
+  addImportLine,
+  removeImportLine,
+  parseLedgerDate,
+  parsePence,
+  getBooksStartDate,
+  todayIso,
+  EXPENSE_CATEGORIES,
+  PAID_FROM,
+  OWNER_ACCOUNTS
+} from './shop-ledger.js'
 
 // Replace generic cors with strict configurable CORS + debug logging
 const app = new Hono()
@@ -7044,39 +7067,8 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
     const rows = chunks.flat()
 
     // Exact fees: SumUp payout rows are per transaction (amount_pence is net of fee_pence).
-    const feeByCode = new Map()
-    const codes = [...new Set(rows.map(r => r.tx_code).filter(Boolean).map(String))]
-    try {
-      for (let i = 0; i < codes.length; i += 90) {
-        const batch = codes.slice(i, i + 90)
-        const res = await db.prepare(`
-          SELECT transaction_code, SUM(fee_pence) AS fee_pence
-          FROM sumup_payouts
-          WHERE transaction_code IN (${batch.map(() => '?').join(',')})
-          GROUP BY transaction_code
-        `).bind(...batch).all()
-        for (const r of res.results || []) feeByCode.set(String(r.transaction_code), Number(r.fee_pence) || 0)
-      }
-    } catch (e) {
-      console.warn('[admin/accounts/sales] sumup_payouts fee lookup failed:', e.message)
-    }
-
-    // Estimate for SumUp lines with no matching payout row (drinks orders store no transaction code):
-    // the effective rate on payout rows that match our own online transactions.
-    let estimateRate = null
-    try {
-      const rateRow = await db.prepare(`
-        SELECT COALESCE(SUM(p.fee_pence), 0) AS fee_pence,
-               COALESCE(SUM(p.amount_pence + p.fee_pence), 0) AS gross_pence
-        FROM sumup_payouts p
-        JOIN transactions t ON t.sumup_transaction_code = p.transaction_code
-      `).first()
-      const feeP = Number(rateRow?.fee_pence) || 0
-      const grossP = Number(rateRow?.gross_pence) || 0
-      if (grossP > 0) estimateRate = feeP / grossP
-    } catch (e) {
-      console.warn('[admin/accounts/sales] fee rate query failed:', e.message)
-    }
+    // Lines with no matching payout row (drinks orders store no transaction code) are estimated.
+    const { feeByCode, estimateRate } = await loadSumUpFeeContext(db, rows.map(r => r.tx_code))
 
     const round2 = (n) => Math.round(n * 100) / 100
     const lineItems = rows.map(row => {
@@ -7178,6 +7170,485 @@ app.post('/admin/accounts/sync-sumup-fees', requireAdmin, requireAccountsOwner, 
   } catch (error) {
     console.error('[admin/accounts/sync-sumup-fees] ERROR:', error)
     return c.json({ error: 'sync_failed', message: String(error?.message || error) }, 502)
+  }
+})
+
+// ============================================================================
+// SHOP AND EVENTS ACCOUNTS (stock batches, bills, expenses, P&L, balance sheet)
+// ============================================================================
+
+const LEDGER_ERROR_STATUS = {
+  product_not_found: 404,
+  bill_not_found: 404,
+  session_not_found: 404,
+  line_not_found: 404,
+  insufficient_stock: 409,
+  line_already_used: 409,
+  unsupported_file: 415
+}
+
+function ledgerText(value, max) {
+  const s = String(value == null ? '' : value).trim()
+  return s ? s.slice(0, max) : null
+}
+
+function ledgerPaid(body) {
+  const paidDate = body.paid_date === null || body.paid_date === '' ? null : parseLedgerDate(body.paid_date)
+  if (body.paid_date && !paidDate) return { error: 'invalid_paid_date' }
+  const paidFrom = paidDate ? (PAID_FROM.includes(body.paid_from) ? body.paid_from : 'bank') : null
+  return { paidDate, paidFrom }
+}
+
+// Any admin can receive stock so new deliveries are costed; reports stay owner-only.
+app.post('/admin/stock/receive', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const result = await receiveStock(c.env.DB, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[stock/receive] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/stock/write-off', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const result = await writeOffStock(c.env.DB, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[stock/write-off] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/stock/lots', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const productId = parseInt(c.req.query('product_id') || '', 10)
+    const onlyRemaining = c.req.query('remaining') === '1'
+    const where = []
+    const binds = []
+    if (productId > 0) { where.push('l.product_id = ?'); binds.push(productId) }
+    if (onlyRemaining) where.push('l.quantity_remaining > 0')
+    const { results } = await c.env.DB.prepare(`
+      SELECT l.*, p.name AS product_name, b.reference AS bill_reference, b.paid_date AS bill_paid_date
+      FROM stock_lots l
+      LEFT JOIN products p ON p.id = l.product_id
+      LEFT JOIN supplier_bills b ON b.id = l.supplier_bill_id
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY l.received_date DESC, l.id DESC
+      LIMIT 500
+    `).bind(...binds).all()
+    return c.json({ lots: results || [] })
+  } catch (e) {
+    console.error('[stock/lots] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/bills', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const unpaidOnly = c.req.query('status') === 'unpaid'
+    const { results } = await c.env.DB.prepare(`
+      SELECT b.*,
+        COALESCE((SELECT SUM(l.quantity_received * l.unit_cost_pence) FROM stock_lots l WHERE l.supplier_bill_id = b.id), 0) AS stock_pence,
+        (SELECT COUNT(*) FROM stock_lots l WHERE l.supplier_bill_id = b.id) AS lot_count
+      FROM supplier_bills b
+      ${unpaidOnly ? 'WHERE b.paid_date IS NULL' : ''}
+      ORDER BY b.bill_date DESC, b.id DESC
+      LIMIT 500
+    `).all()
+    return c.json({ bills: results || [] })
+  } catch (e) {
+    console.error('[finance/bills] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/bills', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const body = await c.req.json().catch(() => ({}))
+    const supplier = ledgerText(body.supplier, 200)
+    const billDate = parseLedgerDate(body.bill_date)
+    const total = parsePence(body.total_pence)
+    if (!supplier) return c.json({ error: 'missing_supplier' }, 400)
+    if (!billDate) return c.json({ error: 'invalid_bill_date' }, 400)
+    if (total == null) return c.json({ error: 'invalid_total' }, 400)
+    const paid = ledgerPaid(body)
+    if (paid.error) return c.json(paid, 400)
+    const row = await c.env.DB.prepare(`
+      INSERT INTO supplier_bills (supplier, bill_date, reference, total_pence, paid_date, paid_from, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `).bind(supplier, billDate, ledgerText(body.reference, 200), total, paid.paidDate, paid.paidFrom, ledgerText(body.notes, 1000)).first()
+    return c.json({ success: true, id: row.id })
+  } catch (e) {
+    console.error('[finance/bills POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/bills/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const updates = []
+    const binds = []
+    if (body.supplier !== undefined) {
+      const supplier = ledgerText(body.supplier, 200)
+      if (!supplier) return c.json({ error: 'missing_supplier' }, 400)
+      updates.push('supplier = ?'); binds.push(supplier)
+    }
+    if (body.bill_date !== undefined) {
+      const d = parseLedgerDate(body.bill_date)
+      if (!d) return c.json({ error: 'invalid_bill_date' }, 400)
+      updates.push('bill_date = ?'); binds.push(d)
+    }
+    if (body.total_pence !== undefined) {
+      const t = parsePence(body.total_pence)
+      if (t == null) return c.json({ error: 'invalid_total' }, 400)
+      updates.push('total_pence = ?'); binds.push(t)
+    }
+    if (body.reference !== undefined) { updates.push('reference = ?'); binds.push(ledgerText(body.reference, 200)) }
+    if (body.notes !== undefined) { updates.push('notes = ?'); binds.push(ledgerText(body.notes, 1000)) }
+    if (body.paid_date !== undefined) {
+      const paid = ledgerPaid(body)
+      if (paid.error) return c.json(paid, 400)
+      updates.push('paid_date = ?', 'paid_from = ?'); binds.push(paid.paidDate, paid.paidFrom)
+    }
+    if (!updates.length) return c.json({ error: 'no_fields_to_update' }, 400)
+    const res = await c.env.DB.prepare(`UPDATE supplier_bills SET ${updates.join(', ')} WHERE id = ?`).bind(...binds, id).run()
+    if (!Number(res.meta?.changes ?? 0)) return c.json({ error: 'bill_not_found' }, 404)
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/bills PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+function parseExpenseBody(body, partial) {
+  const out = {}
+  if (!partial || body.expense_date !== undefined) {
+    out.expense_date = parseLedgerDate(body.expense_date)
+    if (!out.expense_date) return { error: 'invalid_expense_date' }
+  }
+  if (!partial || body.category !== undefined) {
+    if (!EXPENSE_CATEGORIES.includes(body.category)) return { error: 'invalid_category' }
+    out.category = body.category
+  }
+  if (!partial || body.amount_pence !== undefined) {
+    out.amount_pence = parsePence(body.amount_pence)
+    if (out.amount_pence == null) return { error: 'invalid_amount' }
+  }
+  if (!partial || body.description !== undefined) out.description = ledgerText(body.description, 500)
+  if (!partial || body.event_id !== undefined) {
+    const ev = parseInt(body.event_id, 10)
+    out.event_id = ev > 0 ? ev : null
+  }
+  if (!partial || body.paid_date !== undefined) {
+    const paid = ledgerPaid(body)
+    if (paid.error) return paid
+    out.paid_date = paid.paidDate
+    out.paid_from = paid.paidFrom
+  }
+  return out
+}
+
+app.get('/admin/finance/expenses', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const { results } = await c.env.DB.prepare(`
+      SELECT be.*, e.event_name
+      FROM business_expenses be
+      LEFT JOIN events e ON e.event_id = be.event_id
+      ORDER BY be.expense_date DESC, be.id DESC
+      LIMIT 500
+    `).all()
+    const { results: events } = await c.env.DB.prepare(`
+      SELECT event_id, event_name, event_datetime
+      FROM events
+      WHERE event_datetime >= date('now', '-400 days')
+      ORDER BY event_datetime DESC
+      LIMIT 300
+    `).all()
+    return c.json({ expenses: results || [], events: events || [], categories: EXPENSE_CATEGORIES })
+  } catch (e) {
+    console.error('[finance/expenses] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/expenses', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const parsed = parseExpenseBody(await c.req.json().catch(() => ({})), false)
+    if (parsed.error) return c.json(parsed, 400)
+    const row = await c.env.DB.prepare(`
+      INSERT INTO business_expenses (expense_date, category, event_id, description, amount_pence, paid_date, paid_from)
+      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `).bind(parsed.expense_date, parsed.category, parsed.event_id, parsed.description, parsed.amount_pence, parsed.paid_date, parsed.paid_from).first()
+    return c.json({ success: true, id: row.id })
+  } catch (e) {
+    console.error('[finance/expenses POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/expenses/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const id = parseInt(c.req.param('id'), 10)
+    const parsed = parseExpenseBody(await c.req.json().catch(() => ({})), true)
+    if (parsed.error) return c.json(parsed, 400)
+    const cols = Object.keys(parsed)
+    if (!cols.length) return c.json({ error: 'no_fields_to_update' }, 400)
+    const res = await c.env.DB.prepare(
+      `UPDATE business_expenses SET ${cols.map(k => `${k} = ?`).join(', ')} WHERE id = ?`
+    ).bind(...cols.map(k => parsed[k]), id).run()
+    if (!Number(res.meta?.changes ?? 0)) return c.json({ error: 'expense_not_found' }, 404)
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/expenses PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.delete('/admin/finance/expenses/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    await c.env.DB.prepare('DELETE FROM business_expenses WHERE id = ?').bind(parseInt(c.req.param('id'), 10)).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/expenses DELETE] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+function parseOwnerMovementBody(body) {
+  const movementDate = parseLedgerDate(body.movement_date)
+  if (!movementDate) return { error: 'invalid_date' }
+  if (body.type !== 'capital_in' && body.type !== 'drawing') return { error: 'invalid_type' }
+  const amount = parsePence(body.amount_pence)
+  if (!amount) return { error: 'invalid_amount' }
+  return {
+    movement_date: movementDate,
+    type: body.type,
+    account: OWNER_ACCOUNTS.includes(body.account) ? body.account : 'bank',
+    amount_pence: amount,
+    notes: ledgerText(body.notes, 500)
+  }
+}
+
+app.get('/admin/finance/owner-movements', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const { results } = await c.env.DB.prepare(
+      'SELECT * FROM owner_movements ORDER BY movement_date DESC, id DESC LIMIT 500'
+    ).all()
+    return c.json({ movements: results || [] })
+  } catch (e) {
+    console.error('[finance/owner-movements] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/owner-movements', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const m = parseOwnerMovementBody(await c.req.json().catch(() => ({})))
+    if (m.error) return c.json(m, 400)
+    const row = await c.env.DB.prepare(`
+      INSERT INTO owner_movements (movement_date, type, account, amount_pence, notes)
+      VALUES (?, ?, ?, ?, ?) RETURNING id
+    `).bind(m.movement_date, m.type, m.account, m.amount_pence, m.notes).first()
+    return c.json({ success: true, id: row.id })
+  } catch (e) {
+    console.error('[finance/owner-movements POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/owner-movements/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const m = parseOwnerMovementBody(await c.req.json().catch(() => ({})))
+    if (m.error) return c.json(m, 400)
+    const res = await c.env.DB.prepare(`
+      UPDATE owner_movements SET movement_date = ?, type = ?, account = ?, amount_pence = ?, notes = ? WHERE id = ?
+    `).bind(m.movement_date, m.type, m.account, m.amount_pence, m.notes, parseInt(c.req.param('id'), 10)).run()
+    if (!Number(res.meta?.changes ?? 0)) return c.json({ error: 'movement_not_found' }, 404)
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/owner-movements PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.delete('/admin/finance/owner-movements/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    await c.env.DB.prepare('DELETE FROM owner_movements WHERE id = ?').bind(parseInt(c.req.param('id'), 10)).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/owner-movements DELETE] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/pnl', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const from = parseLedgerDate(c.req.query('from'))
+    const to = parseLedgerDate(c.req.query('to'))
+    if (!from || !to) return c.json({ error: 'invalid_date_range' }, 400)
+    if (from > to) return c.json({ error: 'from_after_to' }, 400)
+    return c.json(await buildPnl(c.env.DB, from, to))
+  } catch (e) {
+    console.error('[finance/pnl] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/balance-sheet', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const asOf = parseLedgerDate(c.req.query('as_of')) || todayIso()
+    return c.json(await buildBalanceSheet(c.env.DB, asOf))
+  } catch (e) {
+    console.error('[finance/balance-sheet] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/settings', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    return c.json({ books_start_date: await getBooksStartDate(c.env.DB) })
+  } catch (e) {
+    console.error('[finance/settings] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/settings', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const body = await c.req.json().catch(() => ({}))
+    const start = parseLedgerDate(body.books_start_date)
+    if (!start) return c.json({ error: 'invalid_books_start_date' }, 400)
+    await c.env.DB.prepare(`
+      INSERT INTO finance_settings (key, value) VALUES ('books_start_date', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).bind(start).run()
+    return c.json({ success: true, books_start_date: start })
+  } catch (e) {
+    console.error('[finance/settings PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// One receipt (supplier, date, file) and the stock lines added to it.
+app.get('/admin/finance/import-sessions', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    return c.json({ sessions: await listImportSessions(c.env.DB) })
+  } catch (e) {
+    console.error('[finance/import-sessions] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/import-sessions', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const result = await createImportSession(c.env.DB, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[finance/import-sessions POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/import-sessions/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const result = await getImportSession(c.env.DB, id)
+    if (!result) return c.json({ error: 'session_not_found' }, 404)
+    return c.json(result)
+  } catch (e) {
+    console.error('[finance/import-sessions GET] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/import-sessions/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const result = await updateImportSession(c.env.DB, id, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    return c.json(result)
+  } catch (e) {
+    console.error('[finance/import-sessions PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/import-sessions/:id/lines', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const result = await addImportLine(c.env.DB, id, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[finance/import-sessions lines POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.delete('/admin/finance/import-sessions/:id/lines/:lineId', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const lineId = parseInt(c.req.param('lineId'), 10)
+    const result = await removeImportLine(c.env.DB, id, lineId)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json(result)
+  } catch (e) {
+    console.error('[finance/import-sessions lines DELETE] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/receipts', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const { file, filename } = await c.req.json().catch(() => ({}))
+    const match = String(file || '').match(/^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/)
+    if (!match) return c.json({ error: 'invalid_file' }, 400)
+    const contentType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase()
+    const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' }
+    const ext = extensions[contentType]
+    if (!ext) return c.json({ error: 'unsupported_file' }, 415)
+    if (!c.env.IMAGES) return c.json({ error: 'storage_not_configured' }, 500)
+
+    const binary = atob(match[2].replace(/\s/g, ''))
+    if (binary.length > 8 * 1024 * 1024) return c.json({ error: 'file_too_large' }, 413)
+    const buffer = Uint8Array.from(binary, ch => ch.charCodeAt(0))
+    const safeName = String(filename || 'receipt').replace(/[^a-z0-9._-]+/gi, '-').slice(0, 40) || 'receipt'
+    const key = `receipts/${Date.now()}-${safeName}.${ext}`
+    await c.env.IMAGES.put(key, buffer, { httpMetadata: { contentType } })
+    const publicUrl = c.env.R2_PUBLIC_URL ? `${c.env.R2_PUBLIC_URL}/${key}` : `/r2-placeholder/${key}`
+    return c.json({ success: true, url: publicUrl, key })
+  } catch (e) {
+    console.error('[finance/receipts] ERROR:', e)
+    return c.json({ error: 'upload_failed' }, 500)
   }
 })
 
@@ -9289,10 +9760,18 @@ function uniqueConstraintError(e) {
 app.get('/admin/products', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
+    await ensureLedgerSchema(c.env.DB)
     const products = await c.env.DB.prepare(`
-      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at, ean, catalog_status, import_batch_id
-      FROM products
-      ORDER BY name ASC
+      SELECT p.id, p.name, p.slug, p.description, p.summary, p.full_description, p.price, p.currency, p.stock_quantity, p.image_url, p.category, p.is_active, p.release_date, p.created_at, p.ean, p.catalog_status, p.import_batch_id,
+             IFNULL(p.cost_tracked, 0) AS cost_tracked,
+             COALESCE(lots.stock_value_pence, 0) AS stock_value_pence
+      FROM products p
+      LEFT JOIN (
+        SELECT product_id, SUM(quantity_remaining * unit_cost_pence) AS stock_value_pence
+        FROM stock_lots
+        GROUP BY product_id
+      ) lots ON lots.product_id = p.id
+      ORDER BY p.name ASC
     `).all()
     return c.json((products.results || []).map(withNormalizedProductCategory))
   } catch (e) {
@@ -9301,15 +9780,110 @@ app.get('/admin/products', requireAdmin, async (c) => {
   }
 })
 
+// Look up product details for a scanned barcode from external catalogs
+app.get('/admin/products/barcode-lookup/:ean', requireAdmin, async (c) => {
+  const gtin = validateGtin(c.req.param('ean'))
+  if (!gtin) return c.json({ error: 'invalid_barcode' }, 400)
+
+  try {
+    await ensureProductImportSchema(c.env.DB)
+    const existing = await c.env.DB.prepare(
+      'SELECT id, name, catalog_status FROM products WHERE ean = ? LIMIT 1'
+    ).bind(gtin).first()
+
+    let result
+    try {
+      result = await lookupBarcode(gtin, c.env, c.executionCtx)
+    } catch (e) {
+      if (e instanceof BarcodeQuotaError) {
+        return c.json({
+          error: 'quota_exceeded',
+          source: e.source,
+          resetAt: e.resetAt,
+          ean: gtin,
+          existingProduct: existing || null
+        }, 429)
+      }
+      throw e
+    }
+
+    return c.json({
+      ean: gtin,
+      found: !!result.product,
+      product: result.product,
+      cached: result.cached,
+      quotaRemaining: result.quotaRemaining,
+      checked: result.checked,
+      existingProduct: existing || null
+    })
+  } catch (e) {
+    console.error('Barcode lookup error:', e)
+    return c.json({ error: 'lookup_failed' }, 500)
+  }
+})
+
+// Copy a remote image (e.g. from a barcode catalog) into R2 so product images are not hotlinked
+app.post('/admin/images/from-url', requireAdmin, async (c) => {
+  try {
+    const { url } = await c.req.json()
+    let source
+    try {
+      source = new URL(String(url || ''))
+    } catch {
+      return c.json({ error: 'invalid_url' }, 400)
+    }
+    if (source.protocol !== 'https:' && source.protocol !== 'http:') {
+      return c.json({ error: 'invalid_url' }, 400)
+    }
+    if (!c.env.IMAGES) return c.json({ error: 'storage_not_configured' }, 500)
+
+    const res = await fetch(source.toString(), {
+      headers: { 'User-Agent': 'DiceBastion-Admin/1.0', Accept: 'image/*' },
+      redirect: 'follow'
+    })
+    if (!res.ok) return c.json({ error: 'fetch_failed', status: res.status }, 502)
+
+    const contentType = (res.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase()
+    const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
+    const ext = extensions[contentType]
+    if (!ext) return c.json({ error: 'not_an_image' }, 415)
+
+    const maxBytes = 8 * 1024 * 1024
+    const declared = Number(res.headers.get('Content-Length') || 0)
+    if (declared > maxBytes) return c.json({ error: 'image_too_large' }, 413)
+    const buffer = await res.arrayBuffer()
+    if (buffer.byteLength > maxBytes) return c.json({ error: 'image_too_large' }, 413)
+
+    const key = `images/${Date.now()}-product-image.${ext}`
+    await c.env.IMAGES.put(key, buffer, { httpMetadata: { contentType } })
+
+    const publicUrl = c.env.R2_PUBLIC_URL ? `${c.env.R2_PUBLIC_URL}/${key}` : `/r2-placeholder/${key}`
+    return c.json({ success: true, url: publicUrl, key })
+  } catch (e) {
+    console.error('Image copy error:', e)
+    return c.json({ error: 'upload_failed' }, 500)
+  }
+})
+
 // Create or restore a product (CSV import restores archived rows by EAN / slug)
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
+    await ensureLedgerSchema(c.env.DB)
     const body = await c.req.json()
     const {
       name, slug, description, summary, full_description, price, currency,
       stock_quantity, image_url, category, release_date, import_batch_id, ean: rawEan
     } = body
+    const openingCost = body.opening_stock && body.opening_stock.unit_cost_pence != null && body.opening_stock.unit_cost_pence !== ''
+      ? body.opening_stock
+      : null
+    if (openingCost && parsePence(openingCost.unit_cost_pence) == null) {
+      return c.json({ error: 'invalid_unit_cost' }, 400)
+    }
+    if (openingCost && !String(openingCost.supplier || '').trim()) {
+      return c.json({ error: 'missing_supplier' }, 400)
+    }
 
     if (!name || !slug || price === undefined) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -9372,7 +9946,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
         restoredFull || null,
         price,
         currency || existing.currency || 'GBP',
-        stock_quantity || 0,
+        Number(existing.cost_tracked) ? (Number(existing.stock_quantity) || 0) : (stock_quantity || 0),
         restoredImage,
         restoredCategory,
         release_date || null,
@@ -9416,7 +9990,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
       full_description || null,
       price,
       currency || 'GBP',
-      stock_quantity || 0,
+      openingCost ? 0 : (stock_quantity || 0),
       image_url || null,
       incomingCategory,
       release_date || null,
@@ -9425,6 +9999,19 @@ app.post('/admin/products', requireAdmin, async (c) => {
       now,
       now
     ).run()
+
+    const newProductId = result.meta.last_row_id
+    let openingStock = null
+    if (openingCost && Number(stock_quantity) > 0) {
+      openingStock = await receiveStock(c.env.DB, {
+        ...openingCost,
+        product_id: newProductId,
+        quantity: stock_quantity
+      })
+      if (openingStock.error) {
+        console.error('Opening stock batch failed:', openingStock.error, newProductId)
+      }
+    }
 
     if (Number.isFinite(batchId)) await refreshImportBatchProductCount(c.env.DB, batchId)
 
@@ -9436,7 +10023,12 @@ app.post('/admin/products', requireAdmin, async (c) => {
     invalidateProductCategoryMetaCache()
     scheduleCategoryCanonicalize(c)
 
-    return c.json({ success: true, action: 'created', product_id: result.meta.last_row_id })
+    return c.json({
+      success: true,
+      action: 'created',
+      product_id: newProductId,
+      ...(openingStock ? { opening_stock: openingStock } : {})
+    })
   } catch (e) {
     console.error('Create product error:', e)
     const uniqueErr = uniqueConstraintError(e)
@@ -9451,9 +10043,14 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
     const id = c.req.param('id')
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, ean } = await c.req.json()
-    const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url FROM products WHERE id = ?')
+    await ensureLedgerSchema(c.env.DB)
+    const body = await c.req.json()
+    const { name, slug, description, summary, full_description, price, currency, image_url, category, is_active, release_date, ean } = body
+    let { stock_quantity } = body
+    const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url, cost_tracked FROM products WHERE id = ?')
       .bind(id).first()
+    // Tracked stock only changes through Receive stock / Write off so batches stay in step.
+    if (Number(previousProduct?.cost_tracked)) stock_quantity = undefined
     
     const updates = []
     const binds = []
@@ -12478,6 +13075,11 @@ async function decrementOrderStock(db, orderId, nowIso = toIso(new Date())) {
     if (!Number(updateResult.meta?.changes ?? 0)) {
       return { ok: false, failedProductId: item.product_id }
     }
+  }
+  try {
+    await recordOrderCosts(db, orderId, nowIso)
+  } catch (e) {
+    console.error('[ledger] cost of goods sold not recorded for order', orderId, e)
   }
   return { ok: true, failedProductId: null }
 }

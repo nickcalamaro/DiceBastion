@@ -13,6 +13,8 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
+<script src="/js/barcodeScanner.js?v=20261012a"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261013a"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -324,7 +326,8 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
-<button class="admin-tab-btn tab-btn" data-tab="accounts" id="accounts-tab-btn" style="display: none;">Accounts</button>
+<button class="admin-tab-btn tab-btn" data-tab="accounts" id="accounts-tab-btn" style="display: none;">Club accounts</button>
+<button class="admin-tab-btn tab-btn" data-tab="finance" id="finance-tab-btn" style="display: none;">Shop and events accounts</button>
 <button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings & Calendar</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 <button class="admin-tab-btn tab-btn" data-tab="newsletter">Newsletter</button>
@@ -340,7 +343,8 @@ Logout
 <a href="#registrations">Registrations</a>
 <a href="#orders">Orders</a>
 <a href="#memberships">Memberships</a>
-<a href="#accounts" id="accounts-jump-link" style="display: none;">Accounts</a>
+<a href="#accounts" id="accounts-jump-link" style="display: none;">Club accounts</a>
+<a href="#finance" id="finance-jump-link" style="display: none;">Shop and events accounts</a>
 <a href="#bookings">Bookings</a>
 <a href="#bookings-upcoming">Upcoming</a>
 <a href="#cron">Cron</a>
@@ -519,8 +523,13 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 
 <div class="admin-mb-1">
 <label class="form-label">EAN</label>
-<input type="text" id="product-ean" class="form-input" inputmode="numeric" autocomplete="off">
-<small class="admin-text-small">Barcode used to restore archived imports. Digits only; 8–14 characters.</small>
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+<input type="text" id="product-ean" class="form-input" inputmode="numeric" autocomplete="off" style="flex: 1 1 12rem;">
+<button type="button" id="product-ean-scan-btn" class="btn btn-primary">Scan barcode</button>
+<button type="button" id="product-ean-lookup-btn" class="btn btn-secondary">Look up</button>
+</div>
+<small class="admin-text-small">Scan with your phone camera, or type the barcode and press Enter to fill details from the UPCitemdb catalog. Digits only; 8–14 characters.</small>
+<div id="product-ean-status" class="admin-text-small" role="status" aria-live="polite" style="display: none; margin-top: 0.5rem; padding: 0.5rem 0.75rem; border-left: 3px solid rgb(var(--color-primary-500)); background: rgba(var(--color-primary-50), 0.5); border-radius: 4px; line-height: 1.6;"></div>
 </div>
 
 <div class="admin-mb-1">
@@ -552,7 +561,32 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <div>
 <label class="form-label">Stock Quantity *</label>
 <input type="number" id="product-stock" required class="form-input">
+<small id="product-stock-tracked-note" class="admin-text-small" style="display: none;">Stock for this product is tracked in cost batches. Change it with Receive stock, a stock import session, or Write off.</small>
 </div>
+</div>
+
+<div id="product-cost-fields" class="admin-mb-1" style="padding: 0.75rem 1rem; border-left: 3px solid rgb(var(--color-primary-500)); background: rgba(var(--color-primary-50), 0.5); border-radius: 4px;">
+<p class="form-label" style="margin-top: 0;">What you paid for this stock</p>
+<div class="admin-grid-3">
+<div>
+<label class="form-label" for="product-cost">Cost per unit (£)</label>
+<input type="number" id="product-cost" step="0.01" min="0" class="form-input" placeholder="e.g. 18.50">
+</div>
+<div>
+<label class="form-label" for="product-supplier">Supplier</label>
+<input type="text" id="product-supplier" class="form-input" autocomplete="off" placeholder="e.g. Asmodee UK">
+</div>
+<div>
+<label class="form-label" for="product-cost-paid">Paid</label>
+<select id="product-cost-paid" class="form-select">
+<option value="">Not paid yet</option>
+<option value="bank">Paid from bank</option>
+<option value="cash">Paid in cash</option>
+<option value="owner">Paid personally</option>
+</select>
+</div>
+</div>
+<small class="admin-text-small">Used for Shop and events accounts. The stock quantity above becomes the first stock batch at this cost. Leave the cost blank to skip cost tracking.</small>
 </div>
 
 <div class="admin-mb-1">
@@ -1028,12 +1062,12 @@ Show delivered
 <div id="orders-list"></div>
 </div>
 
-<!-- Accounts Tab (owner-only) -->
+<!-- Club Accounts Tab (owner-only) -->
 <div id="accounts-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
+<h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Club accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Paid sales for the selected dates: drinks, memberships, membership renewals, the membership part of event bundles, and donations. Shop orders and event tickets are not included. Net is gross minus the SumUp fee on each sale. Fees come from synced SumUp payouts where the sale can be matched; otherwise they are estimated at the effective SumUp rate and marked as estimated.</p>
+<p class="admin-text-muted admin-mb-1">Paid sales for the selected dates: drinks, memberships, membership renewals, the membership part of event bundles, and donations. Shop orders and event tickets are reported in Shop and events accounts. Net is gross minus the SumUp fee on each sale. Fees come from synced SumUp payouts where the sale can be matched; otherwise they are estimated at the effective SumUp rate and marked as estimated.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="accounts-from">From</label>
@@ -1109,6 +1143,98 @@ Show delivered
 </table>
 </div>
 </div>
+</div>
+
+<!-- Shop and Events Accounts Tab (owner-only) -->
+<div id="finance-tab" class="tab-content" style="display: none;">
+<div class="admin-flex-between admin-mb-2">
+<h2 id="admin-section-finance" class="admin-section-heading admin-m-0">Shop and events accounts <a href="#finance" class="admin-permalink" aria-label="Link to shop and events accounts">#</a></h2>
+</div>
+<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first.</p>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="finance-books-start">Books start date</label>
+<input type="date" id="finance-books-start" class="form-input">
+</div>
+<button type="button" id="finance-books-start-save" class="btn btn-secondary">Save start date</button>
+<small class="admin-text-small" style="flex-basis: 100%;">Shop sales and ticket sales before this date are not counted.</small>
+</div>
+<p id="finance-status" class="admin-text-small admin-mb-1" role="status" aria-live="polite"></p>
+
+<h3 id="admin-section-finance-imports" class="admin-section-heading">Stock import sessions</h3>
+<p class="admin-text-muted admin-mb-1">One session is one receipt. Add each item by scanning its barcode or by entering it yourself. Every item is linked to that receipt and added to stock at the cost you paid.</p>
+<button type="button" id="finance-session-new" class="btn btn-primary admin-mb-1">New import session</button>
+<div id="finance-sessions-list" class="admin-mb-2"></div>
+<div id="finance-session-panel" class="admin-mb-2" style="display: none;"></div>
+
+<h3 id="admin-section-finance-pnl" class="admin-section-heading">Profit and loss</h3>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="finance-pnl-from">From</label>
+<input type="date" id="finance-pnl-from" class="form-input">
+</div>
+<div>
+<label class="form-label" for="finance-pnl-to">To</label>
+<input type="date" id="finance-pnl-to" class="form-input">
+</div>
+<button type="button" id="finance-pnl-run" class="btn btn-primary">Run P&amp;L</button>
+<button type="button" id="finance-pnl-csv" class="btn btn-secondary" disabled>Download CSV</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+<div class="stat-card" style="background: rgb(var(--color-primary-700));">
+<div class="stat-card-label">Revenue</div>
+<div class="stat-card-value" id="finance-stat-revenue">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-primary-600));">
+<div class="stat-card-label">Gross profit</div>
+<div class="stat-card-value" id="finance-stat-gross">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-600));">
+<div class="stat-card-label">Expenses</div>
+<div class="stat-card-value" id="finance-stat-expenses">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-700));">
+<div class="stat-card-label">Net profit</div>
+<div class="stat-card-value" id="finance-stat-net">-</div>
+</div>
+</div>
+<div id="finance-pnl-body" class="admin-mb-2"><p class="admin-text-muted">Choose dates and run the P&amp;L.</p></div>
+
+<h3 id="admin-section-finance-balance" class="admin-section-heading">Balance sheet</h3>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="finance-bs-asof">As of</label>
+<input type="date" id="finance-bs-asof" class="form-input">
+</div>
+<button type="button" id="finance-bs-run" class="btn btn-primary">Run balance sheet</button>
+<button type="button" id="finance-bs-csv" class="btn btn-secondary" disabled>Download CSV</button>
+</div>
+<div id="finance-bs-body" class="admin-mb-2"><p class="admin-text-muted">Choose a date and run the balance sheet.</p></div>
+
+<h3 id="admin-section-finance-bills" class="admin-section-heading">Supplier bills</h3>
+<div class="admin-flex admin-mb-1" style="flex-wrap: wrap; align-items: center;">
+<button type="button" id="finance-bill-add" class="btn btn-primary">Add supplier bill</button>
+<label class="checkbox-label" style="display: inline-flex; gap: 0.5rem; align-items: center;"><input type="checkbox" id="finance-bills-unpaid" class="checkbox-input"> Unpaid only</label>
+</div>
+<div id="finance-bills-list" class="admin-mb-2"></div>
+
+<h3 id="admin-section-finance-expenses" class="admin-section-heading">Expenses</h3>
+<div class="admin-flex admin-mb-1">
+<button type="button" id="finance-expense-add" class="btn btn-primary">Add expense</button>
+</div>
+<div id="finance-expenses-list" class="admin-mb-2"></div>
+
+<h3 id="admin-section-finance-owner" class="admin-section-heading">Owner money in and out</h3>
+<div class="admin-flex admin-mb-1">
+<button type="button" id="finance-owner-add" class="btn btn-primary">Record money in or out</button>
+</div>
+<div id="finance-owner-list" class="admin-mb-2"></div>
+
+<h3 id="admin-section-finance-batches" class="admin-section-heading">Stock batches</h3>
+<div class="admin-flex admin-mb-1">
+<label class="checkbox-label" style="display: inline-flex; gap: 0.5rem; align-items: center;"><input type="checkbox" id="finance-lots-remaining" class="checkbox-input" checked> Only batches with stock left</label>
+</div>
+<div id="finance-lots-list"></div>
 </div>
 
 <!-- Memberships Tab -->
@@ -1684,6 +1810,11 @@ Loading cron job logs...
 .dark .btn-delete { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
 .btn-delete:hover { background: #fee; color: #c00; }
 .dark .btn-delete:hover { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
+.btn-receive-stock { padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.btn-receive-stock:hover { background: rgb(var(--color-primary-700)); }
+.btn-write-off { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.dark .btn-write-off { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
+.btn-write-off:hover { background: rgb(var(--color-neutral-300)); }
 .btn-index { padding: 0.5rem 1rem; background: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
 .dark .btn-index { background: #10b981; }
 .btn-index:hover { background: #047857; }
@@ -3330,7 +3461,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 });
 
 // Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
-const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'accounts', 'bookings', 'cron', 'newsletter', 'blog'];
+const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'accounts', 'finance', 'bookings', 'cron', 'newsletter', 'blog'];
 const ACCOUNTS_OWNER_EMAIL = 'ncalamaro@gmail.com';
 let accountsReportRows = [];
 
@@ -3345,6 +3476,10 @@ function revealAccountsTabIfOwner() {
   const jump = document.getElementById('accounts-jump-link');
   if (btn) btn.style.display = show ? '' : 'none';
   if (jump) jump.style.display = show ? '' : 'none';
+  const financeBtn = document.getElementById('finance-tab-btn');
+  const financeJump = document.getElementById('finance-jump-link');
+  if (financeBtn) financeBtn.style.display = show ? '' : 'none';
+  if (financeJump) financeJump.style.display = show ? '' : 'none';
   if (show) setDefaultAccountsDates();
 }
 
@@ -3564,7 +3699,7 @@ function downloadAccountsCsv() {
   const from = document.getElementById('accounts-from')?.value || 'from';
   const to = document.getElementById('accounts-to')?.value || 'to';
   a.href = URL.createObjectURL(blob);
-  a.download = `dicebastion-accounts-${from}-to-${to}.csv`;
+  a.download = `dicebastion-club-accounts-${from}-to-${to}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -3575,7 +3710,7 @@ function scrollToAdminSection(sectionId) {
 }
 
 function switchAdminTab(tab, options = {}) {
-  if (tab === 'accounts' && !isAccountsOwnerClient()) return false;
+  if ((tab === 'accounts' || tab === 'finance') && !isAccountsOwnerClient()) return false;
   const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
   if (!btn) return false;
   document.querySelectorAll('.tab-btn').forEach(b => {
@@ -3594,6 +3729,7 @@ function switchAdminTab(tab, options = {}) {
   if (tab === 'memberships') loadMemberships();
   if (tab === 'orders') loadOrders();
   if (tab === 'accounts') loadAccountsReport();
+  if (tab === 'finance' && window.ShopFinance) ShopFinance.load();
   if (tab === 'newsletter') {
     loadNewsletterRecipients();
     loadNewsletterEvents();
@@ -3646,6 +3782,15 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 document.getElementById('accounts-run-btn')?.addEventListener('click', () => loadAccountsReport());
 document.getElementById('accounts-sync-fees-btn')?.addEventListener('click', () => syncAccountsSumUpFees());
 document.getElementById('accounts-csv-btn')?.addEventListener('click', () => downloadAccountsCsv());
+
+if (window.ShopFinance) {
+  ShopFinance.init({
+    apiBase: () => API_BASE,
+    token: () => sessionToken || (utils.session && utils.session.get()) || '',
+    isOwner: () => isAccountsOwnerClient(),
+    onStockChanged: () => loadProducts()
+  });
+}
 
 // Image Upload Handlers
 document.getElementById('product-image-upload').addEventListener('change', (e) => {
@@ -4505,6 +4650,16 @@ async function cleanupProductImport(id, label, unsoldCount, soldCount) {
 
 
 
+if (window.ProductBarcodeLookup) {
+  ProductBarcodeLookup.init({
+    apiBase: () => API_BASE,
+    token: () => sessionToken || (utils.session && utils.session.get()) || '',
+    hasUploadedImage: () => !!uploadedProductImage,
+    addCategory: (name) => addExistingCategory(name),
+    editExisting: (id) => editProduct(id)
+  });
+}
+
 document.getElementById('product-name').addEventListener('input', (e) => {
 
 const slug = slugifyProductName(e.target.value);
@@ -4758,6 +4913,28 @@ is_active: document.getElementById('product-active').checked ? 1 : 0,
 release_date: releaseDate
 };
 
+const costRaw = document.getElementById('product-cost').value.trim();
+if (!id && costRaw !== '') {
+  const unitCost = Math.round(parseFloat(costRaw) * 100);
+  const supplier = document.getElementById('product-supplier').value.trim();
+  const paidFrom = document.getElementById('product-cost-paid').value;
+  if (!Number.isFinite(unitCost) || unitCost < 0) {
+    alert('Enter a valid cost per unit, or leave it blank.');
+    return;
+  }
+  if (!supplier) {
+    alert('Enter the supplier for this stock, or leave the cost blank.');
+    return;
+  }
+  data.opening_stock = {
+    unit_cost_pence: unitCost,
+    supplier,
+    paid: !!paidFrom,
+    paid_from: paidFrom || null,
+    received_date: formatAccountsIsoDate(new Date())
+  };
+}
+
 try {
 const url = id ? `${API_BASE}/admin/products/${id}` : `${API_BASE}/admin/products`;
 const method = id ? 'PUT' : 'POST';
@@ -4780,6 +4957,7 @@ if (createMore) {
 } else {
   resetProductForm();
 }
+if (!id && window.ProductBarcodeLookup) ProductBarcodeLookup.afterSave();
 loadProducts();
 if (typeof loadShopCategories === 'function') loadShopCategories();
 } else {
@@ -4808,16 +4986,25 @@ if (heading && heading.scrollIntoView) {
 }
 }
 
+function setProductStockTracked(tracked) {
+const stockInput = document.getElementById('product-stock');
+stockInput.readOnly = !!tracked;
+document.getElementById('product-stock-tracked-note').style.display = tracked ? 'block' : 'none';
+}
+
 function setProductFormAddMode() {
 document.getElementById('product-form-title').textContent = 'Add New Product';
 document.getElementById('product-submit-text').textContent = 'Add Product';
 document.getElementById('cancel-product-edit').style.display = 'none';
+document.getElementById('product-cost-fields').style.display = 'block';
+setProductStockTracked(false);
 }
 
 function setProductFormEditMode() {
 document.getElementById('product-form-title').textContent = 'Edit Product';
 document.getElementById('product-submit-text').textContent = 'Update Product';
 document.getElementById('cancel-product-edit').style.display = 'block';
+document.getElementById('product-cost-fields').style.display = 'none';
 }
 
 function resetProductForm() {
@@ -4836,6 +5023,7 @@ renderExistingCategories();
 uploadedProductImage = null;
 const uploadInput = document.getElementById('product-image-upload');
 if (uploadInput) uploadInput.value = '';
+if (window.ProductBarcodeLookup) ProductBarcodeLookup.clear();
 }
 
 function fillProductFormFromProduct(product) {
@@ -4889,6 +5077,7 @@ if (!product) return;
 document.getElementById('product-id').value = product.id;
 fillProductFormFromProduct(product);
 setProductFormEditMode();
+setProductStockTracked(Number(product.cost_tracked) === 1);
 scrollToProductForm();
 } catch (err) {
 alert('Error loading product');
