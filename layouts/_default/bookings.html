@@ -430,7 +430,7 @@ async function checkMembershipStatus() {
   }
 
   try {
-    const response = await fetch(`${window.MAIN_API}/membership/status?email=${encodeURIComponent(userSession.email)}`);
+    const response = await fetch(`${window.MAIN_API}/membership/status?email=${encodeURIComponent(userSession.email)}&_=${Date.now()}`, { cache: 'no-store' });
     if (response.ok) {
       const data = await response.json();
       membershipStatus = data;
@@ -853,7 +853,12 @@ function selectSlot(slot, btnElement) {
     startTime: slot.start_time,
     endTime: slot.end_time,
     price: resolveTableTypeDisplayPrice(selectedTableType, slot),
-    usesMemberBenefit: slot.member_benefit_available !== false && (membershipStatus?.active || false)
+    // Only claim member pricing when the slots API explicitly confirmed it
+    // for this slot. It omits member_benefit_available entirely when the
+    // server does not recognise the email as a member, so treating an
+    // absent flag as "yes" (from the locally cached status alone) made the
+    // create call send is_member_booking=true and fail with 403.
+    usesMemberBenefit: slot.member_benefit_available === true
   };
   
   const formSection = document.getElementById('booking-form-section');

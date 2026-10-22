@@ -8,7 +8,7 @@
  *   - BUNNY_DATABASE_URL: Database connection URL
  *   - BUNNY_DATABASE_AUTH_TOKEN: Database access token
  *   - EMAIL_API_URL: URL of the DiceBastionEmails edge script (e.g., https://dicebastionemails-xxxxx.bunny.run/send)
- *   - WORKER_API_URL: Cloudflare worker base URL for membership verification
+ *   - WORKER_API_URL: Cloudflare worker base URL for membership verification (default https://dicebastion.com/api — do NOT use the workers.dev subdomain, it 404s)
  *   - PAYMENTS_API_URL: Payments worker base URL (SumUp checkouts)
  *   - INTERNAL_SECRET: Shared secret for payments worker internal routes
  * 
@@ -176,17 +176,36 @@ async function loadBookingConfig(): Promise<BookingScheduleConfig> {
   };
 }
 
+// Canonical main-worker base: the workers.dev subdomain currently 404s
+// (error 1042), while dicebastion.com/api/* is the live route — the same
+// base the frontend uses (see static/js/utils.js). Never fail closed on a
+// dead base URL: a non-OK response or network error falls through to the
+// next candidate instead of reporting every member as inactive.
+const DEFAULT_WORKER_API_URL = "https://dicebastion.com/api";
+
+function workerApiCandidates(): string[] {
+  const configured = (process.env.WORKER_API_URL || "").replace(/\/+$/, "");
+  return [...new Set([configured, DEFAULT_WORKER_API_URL].filter(Boolean))];
+}
+
 async function checkActiveMembership(email: string): Promise<boolean> {
-  const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
-  try {
-    const res = await fetch(`${workerUrl}/membership/status?email=${encodeURIComponent(email)}`);
-    if (!res.ok) return false;
-    const data = (await res.json()) as { active?: boolean };
-    return !!data.active;
-  } catch (error) {
-    console.error("Membership check failed:", error);
-    return false;
+  for (const workerUrl of workerApiCandidates()) {
+    try {
+      const res = await fetch(
+        `${workerUrl}/membership/status?email=${encodeURIComponent(email)}&_=${Date.now()}`,
+        { headers: { Accept: "application/json" } }
+      );
+      if (!res.ok) {
+        console.error(`Membership check via ${workerUrl} failed: HTTP ${res.status}`);
+        continue;
+      }
+      const data = (await res.json()) as { active?: boolean };
+      return !!data.active;
+    } catch (error) {
+      console.error(`Membership check via ${workerUrl} failed:`, error);
+    }
   }
+  return false;
 }
 
 function validateBookingAdvance(params: {

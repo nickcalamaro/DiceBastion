@@ -133,7 +133,12 @@ window.utils = {
       const isLoggedIn = !!user;
       const isAdmin = user?.is_admin === true;
       const membershipCache = JSON.parse(localStorage.getItem('user_membership_status') || 'null');
-      const isMember = membershipCache && membershipCache.status === 'active';
+      // Cache is written in two shapes: the /account/info membership row
+      // ({status: 'active', ...} via loginStatus.js) and the
+      // /membership/status payload ({active: true, ...} via bookings and
+      // memberships pages). Accept both, or members get treated as
+      // non-members by every data-visibility control.
+      const isMember = !!membershipCache && (membershipCache.status === 'active' || membershipCache.active === true);
       
       return { user, isMember, isAdmin, isLoggedIn };
     },

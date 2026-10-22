@@ -4770,17 +4770,29 @@ async function loadBookingConfig() {
     dayHourRules: parseDayHourRules(config.day_hour_rules)
   };
 }
+var DEFAULT_WORKER_API_URL = "https://dicebastion.com/api";
+function workerApiCandidates() {
+  const configured = (process.env.WORKER_API_URL || "").replace(/\/+$/, "");
+  return [...new Set([configured, DEFAULT_WORKER_API_URL].filter(Boolean))];
+}
 async function checkActiveMembership(email) {
-  const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
-  try {
-    const res = await fetch(`${workerUrl}/membership/status?email=${encodeURIComponent(email)}`);
-    if (!res.ok) return false;
-    const data = await res.json();
-    return !!data.active;
-  } catch (error) {
-    console.error("Membership check failed:", error);
-    return false;
+  for (const workerUrl of workerApiCandidates()) {
+    try {
+      const res = await fetch(
+        `${workerUrl}/membership/status?email=${encodeURIComponent(email)}&_=${Date.now()}`,
+        { headers: { Accept: "application/json" } }
+      );
+      if (!res.ok) {
+        console.error(`Membership check via ${workerUrl} failed: HTTP ${res.status}`);
+        continue;
+      }
+      const data = await res.json();
+      return !!data.active;
+    } catch (error) {
+      console.error(`Membership check via ${workerUrl} failed:`, error);
+    }
   }
+  return false;
 }
 function validateBookingAdvance(params) {
   const { dateStr: todayStr, minutesSinceMidnight } = getGibraltarNow();
