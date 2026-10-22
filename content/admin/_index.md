@@ -13,8 +13,7 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/barcodeScanner.js?v=20261013e"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261013e"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261013f"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -523,13 +522,8 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 
 <div class="admin-mb-1">
 <label class="form-label">EAN</label>
-<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-<input type="text" id="product-ean" class="form-input" inputmode="numeric" autocomplete="off" style="flex: 1 1 12rem;">
-<button type="button" id="product-ean-scan-btn" class="btn btn-primary">Scan barcode</button>
-<button type="button" id="product-ean-lookup-btn" class="btn btn-secondary">Look up</button>
-</div>
-<small class="admin-text-small">Scan with your phone camera, or type the barcode and press Enter. Board games are filled from the board game catalog, and other shop items from EAN-Data. Digits only; 8–14 characters.</small>
-<div id="product-ean-status" class="admin-text-small" role="status" aria-live="polite" style="display: none; margin-top: 0.5rem; padding: 0.5rem 0.75rem; border-left: 3px solid rgb(var(--color-primary-500)); background: rgba(var(--color-primary-50), 0.5); border-radius: 4px; line-height: 1.6;"></div>
+<input type="text" id="product-ean" class="form-input" inputmode="numeric" autocomplete="off">
+<small class="admin-text-small">Optional. Used to match this product when the same EAN is imported again from a CSV.</small>
 </div>
 
 <div class="admin-mb-1">
@@ -1162,7 +1156,7 @@ Show delivered
 <p id="finance-status" class="admin-text-small admin-mb-1" role="status" aria-live="polite"></p>
 
 <h3 id="admin-section-finance-imports" class="admin-section-heading">Stock import sessions</h3>
-<p class="admin-text-muted admin-mb-1">One session is one receipt. Add each item by scanning its barcode or by entering it yourself. Every item is linked to that receipt and added to stock at the cost you paid.</p>
+<p class="admin-text-muted admin-mb-1">One session is one receipt. Add each item yourself. Every item is linked to that receipt and added to stock at the cost you paid.</p>
 <button type="button" id="finance-session-new" class="btn btn-primary admin-mb-1">New import session</button>
 <div id="finance-sessions-list" class="admin-mb-2"></div>
 <div id="finance-session-panel" class="admin-mb-2" style="display: none;"></div>
@@ -4650,16 +4644,6 @@ async function cleanupProductImport(id, label, unsoldCount, soldCount) {
 
 
 
-if (window.ProductBarcodeLookup) {
-  ProductBarcodeLookup.init({
-    apiBase: () => API_BASE,
-    token: () => sessionToken || (utils.session && utils.session.get()) || '',
-    hasUploadedImage: () => !!uploadedProductImage,
-    addCategory: (name) => addExistingCategory(name),
-    editExisting: (id) => editProduct(id)
-  });
-}
-
 document.getElementById('product-name').addEventListener('input', (e) => {
 
 const slug = slugifyProductName(e.target.value);
@@ -4957,7 +4941,6 @@ if (createMore) {
 } else {
   resetProductForm();
 }
-if (!id && window.ProductBarcodeLookup) ProductBarcodeLookup.afterSave();
 loadProducts();
 if (typeof loadShopCategories === 'function') loadShopCategories();
 } else {
@@ -5023,7 +5006,6 @@ renderExistingCategories();
 uploadedProductImage = null;
 const uploadInput = document.getElementById('product-image-upload');
 if (uploadInput) uploadInput.value = '';
-if (window.ProductBarcodeLookup) ProductBarcodeLookup.clear();
 }
 
 function fillProductFormFromProduct(product) {

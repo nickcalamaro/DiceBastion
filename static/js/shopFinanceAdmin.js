@@ -36,7 +36,7 @@
     line_already_used: 'Some of that stock has already been sold or written off, so the line cannot be removed.',
     missing_name: 'Enter the product name.',
     missing_price: 'Enter the selling price.',
-    ean_already_exists: 'That barcode is already used by another product.',
+    ean_already_exists: 'That EAN is already used by another product.',
     invalid_receipt: 'The receipt link is not valid.',
     invalid_file: 'Choose a photo or PDF of the receipt.',
     unsupported_file: 'Receipts must be a JPEG, PNG, WEBP, GIF or PDF.',
@@ -920,8 +920,7 @@
         '<button type="submit" class="btn btn-secondary" style="margin-top: 0.75rem;">Save receipt details</button>' +
       '</form>' +
       '<div class="admin-flex admin-mb-1">' +
-        '<button type="button" id="finance-session-add-barcode" class="btn btn-primary">Add by barcode</button>' +
-        '<button type="button" id="finance-session-add-manual" class="btn btn-secondary">Add manually</button>' +
+        '<button type="button" id="finance-session-add-manual" class="btn btn-primary">Add item</button>' +
       '</div>' +
       '<p class="admin-text-small admin-mb-1">' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', ' + esc(gbp(total)) + ' at cost.</p>' +
       table(
@@ -1054,170 +1053,19 @@
     const filledText = copy.indexOf('summary') !== -1 || copy.indexOf('full_description') !== -1;
     if (result.created_product) {
       setStatus(filledText
-        ? 'New product added to the shop and to this receipt, including the catalog summary and description.'
+        ? 'New product added to the shop and to this receipt, including the summary and description.'
         : 'New product added to the shop and to this receipt.');
     } else if (result.matched_existing) {
       setStatus(filledText || copy.indexOf('price') !== -1
         ? 'Stock was added, and the selling price, summary or description you entered was saved on the product.'
-        : 'That barcode is already in the shop, so the stock was added to the existing product.');
+        : 'That product is already in the shop, so the stock was added to the existing product.');
     } else setStatus('Item added to this receipt.');
     refreshAfterChange();
   }
 
-  function openSessionLine(mode) {
+  function openSessionLine() {
     if (!openSessionId) return;
-    if (mode === 'barcode') openBarcodeLine();
-    else openManualLine();
-  }
-
-  function catalogMissText(data) {
-    if (data && data.catalogError) {
-      return 'The product catalog refused the lookup. Type the name, selling price, summary and description below.';
-    }
-    if (data && !data.eandataConfigured) {
-      return 'Not found as a board game. Packs, decks and other shop items are looked up on EAN-Data once that key is set. Type the name, selling price, summary and description below.';
-    }
-    return 'Not found in the product catalogs. Type the name, selling price, summary and description below.';
-  }
-
-  function plainFromHtml(html) {
-    return String(html || '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;|&apos;/g, "'")
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-
-  function productDetailFields() {
-    return field('Product name', '<input name="name" class="modal-form-input session-line-name">') +
-      field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input session-line-price">', 'The price you will charge in the shop.') +
-      field('Category', '<input name="category" class="modal-form-input session-line-category">') +
-      field('Summary', '<textarea name="summary" rows="2" class="modal-form-input session-line-summary"></textarea>', 'Short text on the product card.') +
-      field('Description', '<textarea name="description" rows="5" class="modal-form-input session-line-description"></textarea>');
-  }
-
-  function openBarcodeLine() {
-    const modal = Modal.form({
-      title: 'Add by barcode',
-      submitText: 'Add to receipt',
-      size: 'lg',
-      formContent:
-        '<div class="modal-form-group"><label class="modal-form-label">Barcode</label>' +
-          '<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">' +
-            '<input name="ean" class="modal-form-input session-line-ean" inputmode="numeric" autocomplete="off" style="flex: 1 1 8rem;">' +
-            '<button type="button" class="btn btn-primary session-line-scan">Scan barcode</button>' +
-            '<button type="button" class="btn btn-secondary session-line-lookup">Look up</button>' +
-          '</div>' +
-          '<p class="session-line-status admin-text-small" style="margin-top: 0.5rem;"></p>' +
-        '</div>' +
-        productDetailFields() +
-        '<input type="hidden" name="product_id" class="session-line-product-id">' +
-        '<input type="hidden" name="image_url" class="session-line-image">' +
-        qtyCostFields(),
-      onSubmit: async function (fd, m) {
-        const productId = fd.get('product_id');
-        const name = String(fd.get('name') || '').trim();
-        if (!productId && !name) throw new Error('Look up a barcode, or enter the product name.');
-        await submitSessionLine({
-          entry_method: 'barcode',
-          quantity: fd.get('quantity'),
-          unit_cost: fd.get('unit_cost'),
-          product_id: productId,
-          ean: fd.get('ean'),
-          name: name,
-          price: fd.get('price'),
-          category: fd.get('category'),
-          summary: fd.get('summary'),
-          description: fd.get('description'),
-          image_url: fd.get('image_url'),
-          needs_price: !productId
-        }, m);
-      }
-    });
-
-    const status = modal.querySelector('.session-line-status');
-    const eanInput = modal.querySelector('.session-line-ean');
-    const nameInput = modal.querySelector('.session-line-name');
-    const priceInput = modal.querySelector('.session-line-price');
-    const categoryInput = modal.querySelector('.session-line-category');
-    const summaryInput = modal.querySelector('.session-line-summary');
-    const descriptionInput = modal.querySelector('.session-line-description');
-
-    function fillEmpty(input, value) {
-      if (input && !String(input.value || '').trim() && value) input.value = value;
-    }
-
-    async function lookup() {
-      const ean = global.BarcodeScanner && global.BarcodeScanner.validateGtin
-        ? global.BarcodeScanner.validateGtin(eanInput.value)
-        : String(eanInput.value || '').replace(/\D/g, '');
-      if (!ean) {
-        status.textContent = 'That does not look like a valid barcode.';
-        return;
-      }
-      eanInput.value = ean;
-      status.textContent = 'Looking up ' + ean + '...';
-      modal.querySelector('.session-line-product-id').value = '';
-      try {
-        const res = await fetch(opts.apiBase() + '/admin/products/barcode-lookup/' + encodeURIComponent(ean), {
-          headers: { 'X-Session-Token': opts.token() || '' }
-        });
-        const data = await res.json().catch(function () { return {}; });
-        if (!res.ok && data.error !== 'quota_exceeded') throw new Error(errorText(data, 'Lookup failed.'));
-        const existing = data.existingProduct;
-        const catalog = data.product;
-        if (existing) {
-          modal.querySelector('.session-line-product-id').value = existing.id;
-          fillEmpty(nameInput, existing.name);
-          if (existing.price) fillEmpty(priceInput, (Number(existing.price) / 100).toFixed(2));
-          fillEmpty(categoryInput, existing.category);
-          fillEmpty(summaryInput, existing.summary);
-          fillEmpty(descriptionInput, plainFromHtml(existing.full_description));
-        }
-        if (catalog) {
-          fillEmpty(nameInput, catalog.name);
-          fillEmpty(categoryInput, catalog.categoryHints && catalog.categoryHints[0]);
-          fillEmpty(summaryInput, catalog.summary);
-          fillEmpty(descriptionInput, plainFromHtml(catalog.descriptionHtml));
-          const hint = catalog.priceHint;
-          if (hint && hint.low && String(hint.currency || '').toUpperCase() === 'GBP') {
-            fillEmpty(priceInput, Number(hint.low).toFixed(2));
-          }
-        }
-        if (existing) {
-          status.textContent = 'Already in the shop as ' + existing.name + '. Check the selling price, summary and description, then enter the quantity and what you paid.';
-        } else if (catalog) {
-          status.textContent = 'Found in ' + (catalog.source || 'the catalog') + '. Check the details, set the selling price, then enter the quantity and what you paid.';
-          if (catalog.priceHint && catalog.priceHint.low && String(catalog.priceHint.currency || '').toUpperCase() !== 'GBP') {
-            status.textContent += ' Retailers list it at ' + catalog.priceHint.low + ' ' + catalog.priceHint.currency + '.';
-          }
-        } else if (data.error === 'quota_exceeded') {
-          status.textContent = 'Daily lookup limit reached. Type the details below.';
-        } else {
-          status.textContent = catalogMissText(data);
-        }
-        if (catalog && catalog.imageUrls && catalog.imageUrls[0] && !modal.querySelector('.session-line-image').value) {
-          try {
-            const copied = await api('/admin/images/from-url', { method: 'POST', body: { url: catalog.imageUrls[0] } });
-            modal.querySelector('.session-line-image').value = copied.url || '';
-          } catch (imgErr) { /* a photo can be added on the product later */ }
-        }
-      } catch (err) {
-        status.textContent = err.message;
-      }
-    }
-
-    modal.querySelector('.session-line-lookup').addEventListener('click', lookup);
-    modal.querySelector('.session-line-scan').addEventListener('click', function () {
-      if (!global.BarcodeScanner) { status.textContent = 'The barcode scanner is not loaded.'; return; }
-      global.BarcodeScanner.open({ onDetected: function (code) { eanInput.value = code; lookup(); } });
-    });
+    openManualLine();
   }
 
   async function openManualLine() {
@@ -1234,7 +1082,7 @@
       size: 'lg',
       formContent:
         '<div class="session-line-existing">' +
-          field('Find a product', '<input class="modal-form-input session-line-filter" placeholder="Name or barcode">') +
+          field('Find a product', '<input class="modal-form-input session-line-filter" placeholder="Name or EAN">') +
           '<select name="product_id" class="modal-form-input session-line-products" size="6">' + productOptions(products, '') + '</select>' +
         '</div>' +
         '<label class="checkbox-label" style="display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;">' +
@@ -1242,7 +1090,7 @@
         '</label>' +
         '<div class="session-line-new" style="display: none;">' +
           field('Product name', '<input name="name" class="modal-form-input">') +
-          field('Barcode', '<input name="ean" class="modal-form-input" inputmode="numeric">', 'Optional.') +
+          field('EAN', '<input name="ean" class="modal-form-input" inputmode="numeric">', 'Optional. Stored on a new product so a later import can match it.') +
           field('Category', '<input name="category" class="modal-form-input">') +
         '</div>' +
         field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input">', 'The price you will charge in the shop. Filled in for a new product, and updates an existing one when you enter it.') +
@@ -1301,8 +1149,7 @@
         const btn = e.target.closest('button');
         if (!btn || !tab.contains(btn)) return;
         if (btn.id === 'finance-session-back') { closeSessionPanel(); return; }
-        if (btn.id === 'finance-session-add-barcode') { openSessionLine('barcode'); return; }
-        if (btn.id === 'finance-session-add-manual') { openSessionLine('manual'); return; }
+        if (btn.id === 'finance-session-add-manual') { openSessionLine(); return; }
         const id = btn.getAttribute('data-id');
         if (!id) return;
         if (btn.classList.contains('finance-bill-pay')) openMarkPaid('bill', findById(bills, id));

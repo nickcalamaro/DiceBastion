@@ -12,7 +12,6 @@ import {
   verifyWebhook,
   listPayouts
 } from './payments-client.js'
-import { validateGtin, lookupBarcode, BarcodeQuotaError } from './barcode-lookup.js'
 import {
   ensureLedgerSchema,
   recordOrderCosts,
@@ -489,6 +488,15 @@ function isDrinksCategoryName(categoryName) {
 
 function isDrinksProduct(product) {
   return productBelongsToCategory(product, 'Drinks')
+}
+
+/** Bar walk-ins from /drinks. Shop checkout sets sale_channel; these rows leave it empty. */
+function isDrinksWalkInOrder(order) {
+  if (!order) return false
+  const email = String(order.email || '').trim().toLowerCase()
+  const name = String(order.name || '').trim()
+  const channel = String(order.sale_channel || '').trim()
+  return channel === '' && (name === 'Walk-in' || email === 'walk-in')
 }
 
 function defaultCategoryDescription(categoryName) {
@@ -5592,6 +5600,17 @@ app.post('/webhooks/sumup', async (c) => {
       console.warn('[webhook-shop] Order not found for checkout reference:', orderRef)
       return c.json({ ok: true })
     }
+    if (isDrinksWalkInOrder(shopOrderRow)) {
+      console.log('[webhook-drinks] Processing drinks order:', orderRef)
+      try {
+        const outcome = await completePaidDrinksOrder(c.env.DB, shopOrderRow, paymentId)
+        console.log('[webhook-drinks] Completed drinks order', shopOrderRow.id, outcome)
+      } catch (err) {
+        console.error('[webhook-drinks] Failed to complete drinks order:', err)
+        return c.json({ ok: false, error: String(err?.message || err) }, 400)
+      }
+      return c.json({ ok: true })
+    }
     try {
       const outcome = await completePaidShopOrder(c.env.DB, c.env, shopOrderRow, paymentId)
       console.log('[webhook-shop] Completed shop order', shopOrderRow.id, outcome)
@@ -9780,94 +9799,6 @@ app.get('/admin/products', requireAdmin, async (c) => {
   }
 })
 
-// Look up product details for a scanned barcode from external catalogs
-app.get('/admin/products/barcode-lookup/:ean', requireAdmin, async (c) => {
-  const gtin = validateGtin(c.req.param('ean'))
-  if (!gtin) return c.json({ error: 'invalid_barcode' }, 400)
-
-  try {
-    await ensureProductImportSchema(c.env.DB)
-    const existing = await c.env.DB.prepare(
-      'SELECT id, name, catalog_status, price, summary, full_description, category FROM products WHERE ean = ? LIMIT 1'
-    ).bind(gtin).first()
-
-    let result
-    try {
-      result = await lookupBarcode(gtin, c.env, c.executionCtx)
-    } catch (e) {
-      if (e instanceof BarcodeQuotaError) {
-        return c.json({
-          error: 'quota_exceeded',
-          source: e.source,
-          resetAt: e.resetAt,
-          ean: gtin,
-          existingProduct: existing || null
-        }, 429)
-      }
-      throw e
-    }
-
-    return c.json({
-      ean: gtin,
-      found: !!result.product,
-      product: result.product,
-      cached: result.cached,
-      quotaRemaining: result.quotaRemaining,
-      checked: result.checked,
-      gameupcConfigured: !!result.gameupcConfigured,
-      eandataConfigured: !!result.eandataConfigured,
-      catalogError: result.catalogError || null,
-      existingProduct: existing || null
-    })
-  } catch (e) {
-    console.error('Barcode lookup error:', e)
-    return c.json({ error: 'lookup_failed' }, 500)
-  }
-})
-
-// Copy a remote image (e.g. from a barcode catalog) into R2 so product images are not hotlinked
-app.post('/admin/images/from-url', requireAdmin, async (c) => {
-  try {
-    const { url } = await c.req.json()
-    let source
-    try {
-      source = new URL(String(url || ''))
-    } catch {
-      return c.json({ error: 'invalid_url' }, 400)
-    }
-    if (source.protocol !== 'https:' && source.protocol !== 'http:') {
-      return c.json({ error: 'invalid_url' }, 400)
-    }
-    if (!c.env.IMAGES) return c.json({ error: 'storage_not_configured' }, 500)
-
-    const res = await fetch(source.toString(), {
-      headers: { 'User-Agent': 'DiceBastion-Admin/1.0', Accept: 'image/*' },
-      redirect: 'follow'
-    })
-    if (!res.ok) return c.json({ error: 'fetch_failed', status: res.status }, 502)
-
-    const contentType = (res.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase()
-    const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
-    const ext = extensions[contentType]
-    if (!ext) return c.json({ error: 'not_an_image' }, 415)
-
-    const maxBytes = 8 * 1024 * 1024
-    const declared = Number(res.headers.get('Content-Length') || 0)
-    if (declared > maxBytes) return c.json({ error: 'image_too_large' }, 413)
-    const buffer = await res.arrayBuffer()
-    if (buffer.byteLength > maxBytes) return c.json({ error: 'image_too_large' }, 413)
-
-    const key = `images/${Date.now()}-product-image.${ext}`
-    await c.env.IMAGES.put(key, buffer, { httpMetadata: { contentType } })
-
-    const publicUrl = c.env.R2_PUBLIC_URL ? `${c.env.R2_PUBLIC_URL}/${key}` : `/r2-placeholder/${key}`
-    return c.json({ success: true, url: publicUrl, key })
-  } catch (e) {
-    console.error('Image copy error:', e)
-    return c.json({ error: 'upload_failed' }, 500)
-  }
-})
-
 // Create or restore a product (CSV import restores archived rows by EAN / slug)
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
@@ -13087,6 +13018,22 @@ async function decrementOrderStock(db, orderId, nowIso = toIso(new Date())) {
   return { ok: true, failedProductId: null }
 }
 
+/** Mark a /drinks walk-in paid. No shop email: the address is the placeholder "walk-in". */
+async function completePaidDrinksOrder(db, orderRow, paymentId) {
+  const nowIso = toIso(new Date())
+  const updateResult = await db.prepare(`
+    UPDATE orders
+    SET status = 'completed',
+        payment_status = 'PAID',
+        payment_id = COALESCE(?, payment_id),
+        payment_method = COALESCE(payment_method, 'sumup'),
+        updated_at = ?
+    WHERE id = ?
+      AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(paymentId || null, nowIso, orderRow.id).run()
+  return { alreadyCompleted: !Number(updateResult.meta?.changes ?? 0) }
+}
+
 async function completePaidShopOrder(db, env, orderRow, paymentId) {
   const orderId = orderRow.id
   const nowIso = toIso(new Date())
@@ -13747,7 +13694,11 @@ app.post('/orders/checkout', async c => {
       currency,
       orderRef: orderNumber,
       title: `Dice Bastion Shop – ${orderItems.length} item(s)`,
-      description: formatShopCheckoutDescription(orderItems)
+      description: formatShopCheckoutDescription(orderItems),
+      // 3DS sends the customer back here. Without redirect_url the card widget
+      // reports a failure while the bank challenge is still unfinished.
+      redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(orderNumber)}&type=drinks`,
+      webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
     })
     if (!checkout?.id) return c.json({ error: 'checkout_failed' }, 502)
 
@@ -13779,17 +13730,23 @@ app.get('/orders/confirm', async c => {
   const ref = c.req.query('orderRef')
   if (!ref) return c.json({ error: 'missing_ref' }, 400)
 
-  const order = await c.env.DB.prepare('SELECT checkout_id, payment_status FROM orders WHERE order_number = ?').bind(ref).first()
+  const order = await c.env.DB.prepare(
+    'SELECT id, email, name, sale_channel, checkout_id, payment_status FROM orders WHERE order_number = ?'
+  ).bind(ref).first()
   if (!order) return c.json({ error: 'not_found' }, 404)
   if (String(order.payment_status || '').toUpperCase() === 'PAID') return c.json({ ok: true, status: 'active' })
 
   const payment = await fetchPayment(c.env, order.checkout_id)
   if (!isCheckoutPaid(payment)) return c.json({ ok: false, status: payment?.status || 'PENDING' })
 
-  await c.env.DB.prepare(`UPDATE orders SET payment_status = ?, payment_id = ?, status = ?,
-    payment_method = COALESCE(payment_method, 'sumup'),
-    updated_at = ? WHERE order_number = ?`)
-    .bind('PAID', payment.id, 'completed', toIso(new Date()), ref).run()
+  if (isDrinksWalkInOrder(order)) {
+    await completePaidDrinksOrder(c.env.DB, order, payment.id)
+  } else {
+    await c.env.DB.prepare(`UPDATE orders SET payment_status = ?, payment_id = ?, status = ?,
+      payment_method = COALESCE(payment_method, 'sumup'),
+      updated_at = ? WHERE order_number = ?`)
+      .bind('PAID', payment.id, 'completed', toIso(new Date()), ref).run()
+  }
 
   return c.json({ ok: true, status: 'active' })
 })

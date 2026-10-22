@@ -33,6 +33,8 @@ showPagination: false
 (function () {
   var API = utils.getApiBase();
   var products = [], modal = null, cart = {};
+  var scaWatcher = null;
+  var paymentConfirmed = false;
 
   function inCategory(product, name) {
     var wanted = String(name || '').trim().toLowerCase();
@@ -106,14 +108,75 @@ showPagination: false
       content:
         '<div id="pay-widget" class="modal-widget-container"></div>' +
         '<div id="pay-error" class="modal-error"></div>' +
+        '<p id="pay-sca-note" class="modal-muted-text" style="display:none; margin:0.75rem 0 0; padding:0.75rem 1rem; border-left:3px solid rgb(var(--color-primary-600)); background:rgba(var(--color-primary-50), 0.5);">Waiting for your bank to confirm the payment. Complete any verification shown above or in your banking app, and keep this window open.</p>' +
         (window.utils.paymentSupportNoteHtml ? window.utils.paymentSupportNoteHtml() : ''),
-      onClose: function () { if (modal) { var w = modal.querySelector('#pay-widget'); if (w) w.innerHTML = ''; modal = null; } }
+      onClose: function () {
+        stopScaWatcher();
+        if (modal) { var w = modal.querySelector('#pay-widget'); if (w) w.innerHTML = ''; modal = null; }
+      }
     });
     modal.open();
     await handlePay();
   });
 
   function showErr(msg) { utils.showError('pay-error', msg || 'Payment error.'); }
+
+  function setScaNote(visible) {
+    var note = modal && modal.querySelector('#pay-sca-note');
+    if (note) note.style.display = visible ? 'block' : 'none';
+  }
+
+  function stopScaWatcher() {
+    var w = scaWatcher;
+    scaWatcher = null;
+    setScaNote(false);
+    return w ? w.stop() : Promise.resolve();
+  }
+
+  function drinksThankYou(ref) {
+    location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&type=drinks';
+  }
+
+  // The card widget often never reports the end of a bank check, so confirm on the server.
+  function startScaWatcher(ref) {
+    if (scaWatcher || paymentConfirmed) return;
+    utils.hideError('pay-error');
+    setScaNote(true);
+    scaWatcher = window.utils.watchScaPayment('/orders/confirm', ref, {
+      onPaid: function () {
+        scaWatcher = null;
+        paymentConfirmed = true;
+        drinksThankYou(ref);
+      },
+      onFailed: function (msg) {
+        scaWatcher = null;
+        setScaNote(false);
+        showErr(msg);
+      }
+    });
+  }
+
+  // A widget "fail" during bank verification is not final while SumUp is still pending.
+  function settleWidgetOutcome(ref) {
+    if (paymentConfirmed) return;
+    fetch(API + '/orders/confirm?orderRef=' + encodeURIComponent(ref) + '&_=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (paymentConfirmed) return;
+        if (data && data.ok && (data.status === 'active' || data.status === 'already_active')) {
+          paymentConfirmed = true;
+          drinksThankYou(ref);
+          return;
+        }
+        var status = String((data && data.status) || '').toUpperCase();
+        if (status === 'FAILED' || status === 'DECLINED') {
+          showErr('Payment failed. Please try again.');
+          return;
+        }
+        startScaWatcher(ref);
+      })
+      .catch(function () { startScaWatcher(ref); });
+  }
 
   async function handlePay() {
     utils.hideError('pay-error');
@@ -132,6 +195,8 @@ showPagination: false
 
   async function mountWidget(checkoutId, ref) {
     try {
+      paymentConfirmed = false;
+      await stopScaWatcher();
       utils.hideError('pay-error');
       var widget = document.getElementById('pay-widget');
       if (widget) {
@@ -142,11 +207,43 @@ showPagination: false
         id: 'pay-widget',
         checkoutId: checkoutId,
         onResponse: function (type, body) {
-          utils.hideError('pay-error');
           var t = String(type || '').toLowerCase();
-          if (t === 'success') confirmOrder(ref);
-          else if (t === 'error' || t === 'fail') showErr('Payment failed. Please try again.');
-          else if (t === 'cancel') showErr('Payment cancelled.');
+          try {
+            window.utils.logPaymentEvent({
+              flow: 'drinks',
+              type: t,
+              orderRef: ref,
+              checkoutId: checkoutId,
+              message: (body && body.message) || null,
+              sumupBody: body
+            });
+          } catch (err) {}
+          if (paymentConfirmed) return;
+          if (t === 'auth-screen' || t === 'sent') {
+            startScaWatcher(ref);
+            return;
+          }
+          utils.hideError('pay-error');
+          if (t === 'success') {
+            var bodyStatus = String((body && body.status) || '').toUpperCase();
+            stopScaWatcher().then(function () {
+              if (paymentConfirmed) return;
+              if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+                showErr((body && body.message) || 'Payment failed. Please try again.');
+                return;
+              }
+              confirmOrder(ref);
+            });
+            return;
+          }
+          if (t === 'error' || t === 'fail') {
+            stopScaWatcher().then(function () { settleWidgetOutcome(ref); });
+            return;
+          }
+          if (t === 'cancel') {
+            stopScaWatcher();
+            showErr('Payment cancelled.');
+          }
         }
       });
     } catch (e) { console.error('mountWidget error:', e); showErr('Could not load payment widget.'); }
@@ -156,9 +253,12 @@ showPagination: false
     await utils.pollPaymentConfirmation('/orders/confirm', ref, {
       pollInterval: 3000,
       maxAttempts: 20,
-      onSuccess: function () { location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&type=drinks'; },
+      onSuccess: function () {
+        paymentConfirmed = true;
+        drinksThankYou(ref);
+      },
       onError: function (msg) { showErr(msg); },
-      onTimeout: function () { location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&processing=1'; }
+      onTimeout: function () { location.href = '/thank-you?orderRef=' + encodeURIComponent(ref) + '&type=drinks&processing=1'; }
     });
   }
 

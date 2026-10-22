@@ -533,8 +533,8 @@ export async function getImportSession(db, id) {
 }
 
 /**
- * Adds one stock line to a session, by barcode or by hand.
- * Uses an existing product when product_id or the barcode matches, otherwise creates one.
+ * Adds one stock line to a session.
+ * Uses an existing product when product_id or the EAN matches, otherwise creates one.
  * The line's cost is added to the session's supplier bill.
  */
 export async function addImportLine(db, sessionId, input) {
