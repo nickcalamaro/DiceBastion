@@ -5665,6 +5665,24 @@ app.post('/webhooks/sumup', async (c) => {
     return c.json({ ok: true })
   }
 
+  // ==================== DONATION WEBHOOK ====================
+  if (isDonation) {
+    console.log('[webhook-donation] Processing donation:', orderRef)
+    const donation = await c.env.DB.prepare('SELECT * FROM donations WHERE order_ref = ?').bind(orderRef).first()
+    if (!donation) {
+      console.warn('[webhook-donation] Donation not found:', orderRef)
+      return c.json({ ok: true })
+    }
+    try {
+      const outcome = await completePaidDonation(c.env, donation, payment.id || paymentId, payment)
+      console.log('[webhook-donation] Completed donation', donation.id, outcome)
+    } catch (err) {
+      console.error('[webhook-donation] Failed to complete donation:', err)
+      return c.json({ ok: false, error: String(err?.message || err) }, 400)
+    }
+    return c.json({ ok: true })
+  }
+
   // ==================== REGULAR MEMBERSHIP WEBHOOK ====================
   const pending = await c.env.DB.prepare('SELECT * FROM memberships WHERE order_ref = ?').bind(orderRef).first()
   if (!pending) return c.json({ ok: false, error: 'order_not_found' }, 404)
@@ -12625,6 +12643,82 @@ app.get('/donations/wall', async c => {
   }
 })
 
+/** Mark a donation paid and send the donor and admin emails once. */
+async function completePaidDonation(env, donation, paymentId, payment) {
+  const nowIso = toIso(new Date())
+  const updateResult = await env.DB.prepare(`
+    UPDATE donations
+    SET payment_status = 'PAID', payment_id = COALESCE(?, payment_id), updated_at = ?
+    WHERE id = ? AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(paymentId || null, nowIso, donation.id).run()
+  const changed = Number(updateResult.meta?.changes ?? 0)
+
+  await env.DB.prepare(`
+    UPDATE transactions
+    SET payment_status = 'PAID', payment_id = COALESCE(?, payment_id), updated_at = ?
+    WHERE order_ref = ? AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(paymentId || null, nowIso, donation.order_ref).run()
+
+  if (payment) {
+    try {
+      await updateTransactionPaymentMeta(env.DB, { orderRef: donation.order_ref, payment })
+    } catch (metaErr) {
+      console.error('[donations] transaction code not stored:', metaErr)
+    }
+  }
+
+  if (!changed) return { alreadyCompleted: true }
+
+  const orderRef = donation.order_ref
+  try {
+    await sendEmail(env, {
+      to: 'admin@dicebastion.com',
+      subject: `New Donation: £${donation.amount} - Dice Bastion and the Gibraltar Warhammer Club`,
+      html: `<h2>New Donation Received!</h2>
+             <p><strong>Amount:</strong> £${donation.amount}</p>
+             <p><strong>Donor:</strong> ${donation.donor_name || 'Anonymous'}</p>
+             <p><strong>Email:</strong> ${donation.donor_email || 'Not provided'}</p>
+             <p><strong>Message:</strong> ${donation.message || 'No message'}</p>
+             <p><strong>Order Ref:</strong> ${orderRef}</p>`,
+      text: `New Donation: £${donation.amount} from ${donation.donor_name || 'Anonymous'}`,
+      emailType: 'admin_donation_notification',
+      relatedId: donation.id,
+      relatedType: 'donation'
+    })
+  } catch (emailError) {
+    console.error('[donations] Failed to send admin notification:', emailError)
+  }
+
+  if (donation.donor_email) {
+    try {
+      const donorDisplayName = donation.donor_name || 'there'
+      await sendEmail(env, {
+        to: donation.donor_email,
+        subject: 'Thank you for your donation to Dice Bastion and the Gibraltar Warhammer Club',
+        html: `<h2>Thank you for your generosity, ${donorDisplayName}!</h2>
+               <p>We've received your donation of <strong>&pound;${donation.amount}</strong> to Dice Bastion and the Gibraltar Warhammer Club.</p>
+               <p>Your support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.</p>
+               <p><strong>Donation details:</strong></p>
+               <ul>
+                 <li>Amount: &pound;${donation.amount}</li>
+                 <li>Purpose: club improvements (Aircon &amp; venue fund)</li>
+                 <li>Reference: ${orderRef}</li>
+               </ul>
+               <p>If you have any questions, feel free to get in touch at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+               <p>Thanks again,<br>Dice Bastion and the Gibraltar Warhammer Club</p>`,
+        text: `Thank you for your generosity, ${donorDisplayName}!\n\nWe've received your donation of £${donation.amount} to Dice Bastion and the Gibraltar Warhammer Club.\n\nYour support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.\n\nDonation details:\n- Amount: £${donation.amount}\n- Purpose: club improvements (Aircon & venue fund)\n- Reference: ${orderRef}\n\nIf you have any questions, feel free to get in touch at admin@dicebastion.com.\n\nThanks again,\nDice Bastion and the Gibraltar Warhammer Club`,
+        emailType: 'donation_thank_you',
+        relatedId: donation.id,
+        relatedType: 'donation'
+      })
+    } catch (emailError) {
+      console.error('[donations] Failed to send donor thank-you email:', emailError)
+    }
+  }
+
+  return { alreadyCompleted: false }
+}
+
 /**
  * Create a donation checkout
  * POST /donations/checkout
@@ -12689,7 +12783,11 @@ app.post('/donations/checkout', async c => {
         currency,
         orderRef: order_ref,
         title: 'Dice Bastion and the Gibraltar Warhammer Club donation',
-        description: `Donation of £${donationAmount.toFixed(2)} to Dice Bastion and the Gibraltar Warhammer Club (club improvements fund)`
+        description: `Donation of £${donationAmount.toFixed(2)} to Dice Bastion and the Gibraltar Warhammer Club (club improvements fund)`,
+        // 3DS sends the donor back here. Without redirect_url the card widget
+        // reports a failure while the bank challenge is still unfinished.
+        redirectUrl: `${siteUrl(c.env)}/donations/?orderRef=${encodeURIComponent(order_ref)}`,
+        webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
       })
     } catch (e) {
       console.error('[donations/checkout] SumUp checkout failed:', e)
@@ -12782,76 +12880,27 @@ app.get('/donations/confirm', async c => {
     }
 
     if (!isCheckoutPaid(payment)) {
-      const currentStatus = payment?.status || 'PENDING'
-      const txStatuses = payment?.transactions?.map(t => t.status) || []
-      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
-      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+      // One failed card attempt must not abort the checkout while bank verification is still pending.
+      if (isCheckoutFailed(payment)) {
+        const status = String(payment?.status || '').toUpperCase()
+        const declined = status === 'DECLINED'
+        return c.json({
+          ok: false,
+          status: declined ? 'DECLINED' : 'FAILED',
+          message: declined
+            ? 'Your card was declined. Please try a different payment method.'
+            : 'Payment failed. Please try again.'
+        })
+      }
       return c.json({
         ok: false,
-        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
-        message: hasFailed ? 'Payment failed. Please try again.' :
-                 hasDeclined ? 'Your card was declined. Please try a different payment method.' :
-                 'Payment is still processing.'
+        status: payment?.status || 'PENDING',
+        message: 'Payment is still processing.'
       })
     }
 
     console.log('[donations/confirm] Payment verified as paid (top-level or transactions[])')
-
-    // Update donation and transaction records
-    await c.env.DB.batch([
-      c.env.DB.prepare('UPDATE donations SET payment_status = ?, payment_id = ?, updated_at = ? WHERE id = ?')
-        .bind('PAID', payment.id, toIso(new Date()), donation.id),
-      c.env.DB.prepare('UPDATE transactions SET payment_status = ?, payment_id = ?, updated_at = ? WHERE order_ref = ?')
-        .bind('PAID', payment.id, toIso(new Date()), orderRef)
-    ])
-
-    // Send admin notification
-    try {
-      await sendEmail(c.env, {
-        to: 'admin@dicebastion.com',
-        subject: `💰 New Donation: £${donation.amount} - Dice Bastion and the Gibraltar Warhammer Club`,
-        html: `<h2>New Donation Received!</h2>
-               <p><strong>Amount:</strong> £${donation.amount}</p>
-               <p><strong>Donor:</strong> ${donation.donor_name || 'Anonymous'}</p>
-               <p><strong>Email:</strong> ${donation.donor_email || 'Not provided'}</p>
-               <p><strong>Message:</strong> ${donation.message || 'No message'}</p>
-               <p><strong>Order Ref:</strong> ${orderRef}</p>`,
-        text: `New Donation: £${donation.amount} from ${donation.donor_name || 'Anonymous'}`,
-        emailType: 'admin_donation_notification',
-        relatedId: donation.id,
-        relatedType: 'donation'
-      })
-    } catch (emailError) {
-      console.error('[donations/confirm] Failed to send admin notification:', emailError)
-    }
-
-    // Send thank-you email to the donor (only if they provided an email)
-    if (donation.donor_email) {
-      try {
-        const donorDisplayName = donation.donor_name || 'there'
-        await sendEmail(c.env, {
-          to: donation.donor_email,
-          subject: `Thank you for your donation to Dice Bastion and the Gibraltar Warhammer Club`,
-          html: `<h2>Thank you for your generosity, ${donorDisplayName}!</h2>
-                 <p>We've received your donation of <strong>&pound;${donation.amount}</strong> to Dice Bastion and the Gibraltar Warhammer Club.</p>
-                 <p>Your support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.</p>
-                 <p><strong>Donation details:</strong></p>
-                 <ul>
-                   <li>Amount: &pound;${donation.amount}</li>
-                   <li>Purpose: club improvements (Aircon &amp; venue fund)</li>
-                   <li>Reference: ${orderRef}</li>
-                 </ul>
-                 <p>If you have any questions, feel free to get in touch at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
-                 <p>Thanks again,<br>Dice Bastion and the Gibraltar Warhammer Club</p>`,
-          text: `Thank you for your generosity, ${donorDisplayName}!\n\nWe've received your donation of £${donation.amount} to Dice Bastion and the Gibraltar Warhammer Club.\n\nYour support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.\n\nDonation details:\n- Amount: £${donation.amount}\n- Purpose: club improvements (Aircon & venue fund)\n- Reference: ${orderRef}\n\nIf you have any questions, feel free to get in touch at admin@dicebastion.com.\n\nThanks again,\nDice Bastion and the Gibraltar Warhammer Club`,
-          emailType: 'donation_thank_you',
-          relatedId: donation.id,
-          relatedType: 'donation'
-        })
-      } catch (emailError) {
-        console.error('[donations/confirm] Failed to send donor thank-you email:', emailError)
-      }
-    }
+    await completePaidDonation(c.env, donation, payment.id, payment)
 
     return c.json({
       ok: true,
