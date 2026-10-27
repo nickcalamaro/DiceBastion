@@ -133,6 +133,12 @@
           '</div>' +
         '</div>' +
         '<div class="admin-mb-1">' +
+          '<label class="form-label">Page intro</label>' +
+          '<textarea class="form-textarea shop-cat-intro" rows="5" maxlength="2000" placeholder="Shown on the category page above the products. Leave a blank line between paragraphs.">' +
+            escapeHtml(row.intro || '') +
+          '</textarea>' +
+        '</div>' +
+        '<div class="admin-mb-1">' +
           '<label class="form-label">SEO title</label>' +
           '<input type="text" class="form-input shop-cat-seo-title" maxlength="120" value="' + escapeHtml(row.seo_title || '') + '" placeholder="Category | Dice Bastion Shop, Gibraltar">' +
         '</div>' +
@@ -243,6 +249,7 @@
       const seo_title = card.querySelector('.shop-cat-seo-title')?.value || '';
       const seo_description = card.querySelector('.shop-cat-seo-description')?.value || '';
       const seo_image = card.querySelector('.shop-cat-seo-image')?.value || '';
+      const intro = card.querySelector('.shop-cat-intro')?.value || '';
       btn.disabled = true;
       try {
         const res = await fetch(apiBase() + '/admin/product-categories', {
@@ -255,7 +262,8 @@
             keywords: keywords,
             seo_title: seo_title,
             seo_description: seo_description,
-            seo_image: seo_image
+            seo_image: seo_image,
+            intro: intro
           })
         });
         const data = await res.json().catch(function () { return {}; });

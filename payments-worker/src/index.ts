@@ -228,8 +228,8 @@ async function getOrCreateSumUpCustomer(env: Bindings, user: { user_id: number; 
  * The actual verification happens when we fetch the payment from SumUp API
  */
 function verifySumUpWebhook(payload: any): boolean {
-	// Basic validation: ensure required fields exist
-	if (!payload || !payload.id || !payload.checkout_reference) {
+	// SumUp sends only { event_type, id }; checkout_reference is resolved from the API.
+	if (!payload || !payload.id) {
 		console.warn('Invalid webhook payload: missing required fields')
 		return false
 	}
@@ -264,9 +264,10 @@ app.post('/internal/checkout', async (c) => {
 			customerId?: string
 			isFreeTrialSetup?: boolean
 			redirectUrl?: string
+			webhookUrl?: string
 		}>()
 		
-		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup, redirectUrl } = body
+		const { amount, currency, orderRef, description, savePaymentInstrument, customerId, isFreeTrialSetup, redirectUrl, webhookUrl } = body
 
 		const { access_token } = await sumupToken(c.env, savePaymentInstrument ? 'payments payment_instruments' : 'payments')
 		
@@ -280,6 +281,11 @@ app.post('/internal/checkout', async (c) => {
 		// away during SCA and the customer lands back on the page with no orderRef context.
 		if (redirectUrl) {
 			checkoutBody.redirect_url = redirectUrl
+		}
+
+		// SumUp POSTs CHECKOUT_STATUS_CHANGED to return_url; without it no webhook is ever sent.
+		if (webhookUrl) {
+			checkoutBody.return_url = webhookUrl
 		}
 
 		// For card tokenization, use SETUP_RECURRING_PAYMENT purpose. The auth hold is
@@ -742,6 +748,61 @@ app.post('/internal/charge', async (c) => {
 	} catch (error: any) {
 		console.error('Charge payment instrument error:', error)
 		return c.json({ error: error.message || 'Payment charge failed' }, 500)
+	}
+})
+
+/**
+ * List merchant payouts (includes fee per payout record).
+ * GET /internal/payouts?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+ *
+ * SumUp: GET /v1.0/merchants/{merchant_code}/payouts
+ * Scopes: user.profile | user.profile_readonly | payouts.read
+ */
+app.get('/internal/payouts', async (c) => {
+	try {
+		const startDate = c.req.query('start_date')
+		const endDate = c.req.query('end_date')
+		if (!startDate || !endDate) {
+			return c.json({ error: 'missing start_date or end_date (YYYY-MM-DD)' }, 400)
+		}
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+			return c.json({ error: 'invalid_date_format' }, 400)
+		}
+		if (startDate > endDate) {
+			return c.json({ error: 'start_after_end' }, 400)
+		}
+
+		const { access_token } = await sumupToken(c.env, 'user.profile_readonly payments')
+		const merchantCode = c.env.SUMUP_MERCHANT_CODE
+		const qs = new URLSearchParams({
+			start_date: startDate,
+			end_date: endDate,
+			format: 'json',
+			order: 'asc',
+			limit: '9999'
+		})
+		const res = await fetch(
+			`https://api.sumup.com/v1.0/merchants/${encodeURIComponent(merchantCode)}/payouts?${qs}`,
+			{ headers: { Authorization: `Bearer ${access_token}` } }
+		)
+		const txt = await res.text()
+		if (!res.ok) {
+			console.error('[Payouts] SumUp API error:', res.status, txt)
+			return c.json({ error: `sumup_${res.status}`, detail: txt }, 502)
+		}
+
+		let data: any
+		try {
+			data = JSON.parse(txt)
+		} catch {
+			return c.json({ error: 'invalid_sumup_json', detail: txt }, 502)
+		}
+
+		const payouts = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : [])
+		return c.json({ payouts, start_date: startDate, end_date: endDate })
+	} catch (error: any) {
+		console.error('Payouts list error:', error)
+		return c.json({ error: error.message || 'Failed to fetch payouts' }, 500)
 	}
 })
 

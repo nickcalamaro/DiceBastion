@@ -360,6 +360,16 @@ async function syncPublishedBlogToCdn(options?: { deleteSlugs?: string[] }): Pro
   return { posts: posts.length };
 }
 
+// Canonical main-worker base: the workers.dev subdomain currently 404s
+// (error 1042), while dicebastion.com/api/* is the live route. A non-OK
+// response or network error falls through to the next candidate.
+const DEFAULT_WORKER_API_URL = "https://dicebastion.com/api";
+
+function workerApiCandidates(): string[] {
+  const configured = (process.env.WORKER_API_URL || "").replace(/\/+$/, "");
+  return [...new Set([configured, DEFAULT_WORKER_API_URL].filter(Boolean))];
+}
+
 async function requireAdmin(request: Request): Promise<Response | null> {
   const adminKey = request.headers.get("X-Admin-Key");
   if (adminKey && adminKey === process.env.ADMIN_KEY) return null;
@@ -367,37 +377,44 @@ async function requireAdmin(request: Request): Promise<Response | null> {
   const sessionToken = request.headers.get("X-Session-Token");
   if (!sessionToken) return jsonResponse({ error: "unauthorized" }, 401);
 
-  const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
-  try {
-    const res = await fetch(`${workerUrl}/admin/verify`, {
-      headers: { "X-Session-Token": sessionToken },
-    });
-    if (!res.ok) return jsonResponse({ error: "unauthorized" }, 401);
-    return null;
-  } catch (error) {
-    console.error("[Blog] admin verify error:", error);
-    return jsonResponse({ error: "unauthorized" }, 401);
+  for (const workerUrl of workerApiCandidates()) {
+    try {
+      const res = await fetch(`${workerUrl}/admin/verify`, {
+        headers: { "X-Session-Token": sessionToken },
+      });
+      if (res.ok) return null;
+      // A live worker rejecting the session is definitive; only a dead
+      // base (e.g. workers.dev 404) should fall through to the next one.
+      if (res.status !== 404) return jsonResponse({ error: "unauthorized" }, 401);
+      console.error(`[Blog] admin verify via ${workerUrl} returned 404, trying next base`);
+    } catch (error) {
+      console.error(`[Blog] admin verify via ${workerUrl} error:`, error);
+    }
   }
+  return jsonResponse({ error: "unauthorized" }, 401);
 }
 
 async function notifyGoogleIndexing(request: Request, slug: string): Promise<void> {
   const sessionToken = request.headers.get("X-Session-Token");
   if (!sessionToken) return;
-  const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
-  try {
-    await fetch(`${workerUrl}/admin/indexing/notify`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Session-Token": sessionToken,
-      },
-      body: JSON.stringify({
-        url: `https://dicebastion.com/posts/${encodeURIComponent(slug)}/`,
-        type: "URL_UPDATED",
-      }),
-    });
-  } catch (error) {
-    console.error("[Blog] indexing notify error:", error);
+  for (const workerUrl of workerApiCandidates()) {
+    try {
+      const res = await fetch(`${workerUrl}/admin/indexing/notify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Session-Token": sessionToken,
+        },
+        body: JSON.stringify({
+          url: `https://dicebastion.com/posts/${encodeURIComponent(slug)}/`,
+          type: "URL_UPDATED",
+        }),
+      });
+      if (res.ok) return;
+      console.error(`[Blog] indexing notify via ${workerUrl} failed: HTTP ${res.status}`);
+    } catch (error) {
+      console.error(`[Blog] indexing notify via ${workerUrl} error:`, error);
+    }
   }
 }
 

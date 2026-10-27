@@ -8,7 +8,7 @@
  *   - BUNNY_DATABASE_URL: Database connection URL
  *   - BUNNY_DATABASE_AUTH_TOKEN: Database access token
  *   - EMAIL_API_URL: URL of the DiceBastionEmails edge script (e.g., https://dicebastionemails-xxxxx.bunny.run/send)
- *   - WORKER_API_URL: Cloudflare worker base URL for membership verification
+ *   - WORKER_API_URL: Cloudflare worker base URL for membership verification (default https://dicebastion.com/api — do NOT use the workers.dev subdomain, it 404s)
  *   - PAYMENTS_API_URL: Payments worker base URL (SumUp checkouts)
  *   - INTERNAL_SECRET: Shared secret for payments worker internal routes
  * 
@@ -37,8 +37,8 @@ const CORS_HEADERS = {
 };
 
 const BOOKING_TZ = "Europe/Gibraltar";
-const SAME_DAY_CONTACT_MESSAGE =
-  "We normally require at least one day's notice to book a table. Please contact a member of our team to guarantee your spot.";
+const SAME_DAY_MEMBER_REQUIRED_MESSAGE =
+  "Same-day bookings are for club members. Please log in or register, then take out a membership to book a table for today.";
 
 function getGibraltarNow(): { dateStr: string; minutesSinceMidnight: number } {
   const now = new Date();
@@ -176,17 +176,36 @@ async function loadBookingConfig(): Promise<BookingScheduleConfig> {
   };
 }
 
+// Canonical main-worker base: the workers.dev subdomain currently 404s
+// (error 1042), while dicebastion.com/api/* is the live route — the same
+// base the frontend uses (see static/js/utils.js). Never fail closed on a
+// dead base URL: a non-OK response or network error falls through to the
+// next candidate instead of reporting every member as inactive.
+const DEFAULT_WORKER_API_URL = "https://dicebastion.com/api";
+
+function workerApiCandidates(): string[] {
+  const configured = (process.env.WORKER_API_URL || "").replace(/\/+$/, "");
+  return [...new Set([configured, DEFAULT_WORKER_API_URL].filter(Boolean))];
+}
+
 async function checkActiveMembership(email: string): Promise<boolean> {
-  const workerUrl = (process.env.WORKER_API_URL || "https://dicebastion-memberships.ncalamaro.workers.dev").replace(/\/+$/, "");
-  try {
-    const res = await fetch(`${workerUrl}/membership/status?email=${encodeURIComponent(email)}`);
-    if (!res.ok) return false;
-    const data = (await res.json()) as { active?: boolean };
-    return !!data.active;
-  } catch (error) {
-    console.error("Membership check failed:", error);
-    return false;
+  for (const workerUrl of workerApiCandidates()) {
+    try {
+      const res = await fetch(
+        `${workerUrl}/membership/status?email=${encodeURIComponent(email)}&_=${Date.now()}`,
+        { headers: { Accept: "application/json" } }
+      );
+      if (!res.ok) {
+        console.error(`Membership check via ${workerUrl} failed: HTTP ${res.status}`);
+        continue;
+      }
+      const data = (await res.json()) as { active?: boolean };
+      return !!data.active;
+    } catch (error) {
+      console.error(`Membership check via ${workerUrl} failed:`, error);
+    }
   }
+  return false;
 }
 
 function validateBookingAdvance(params: {
@@ -194,7 +213,7 @@ function validateBookingAdvance(params: {
   startTime: string;
   isMember: boolean;
 }): { ok: true } | { ok: false; error: string; message: string } {
-  const { dateStr: todayStr } = getGibraltarNow();
+  const { dateStr: todayStr, minutesSinceMidnight } = getGibraltarNow();
 
   if (params.bookingDate < todayStr) {
     return {
@@ -205,13 +224,21 @@ function validateBookingAdvance(params: {
   }
 
   if (params.bookingDate === todayStr) {
-    return {
-      ok: false,
-      error: params.isMember ? "member_same_day_not_allowed" : "same_day_not_allowed",
-      message: params.isMember
-        ? SAME_DAY_CONTACT_MESSAGE
-        : "Tables must be booked at least the day before. Please contact us if you need a last-minute table.",
-    };
+    if (!params.isMember) {
+      return {
+        ok: false,
+        error: "same_day_not_allowed",
+        message: SAME_DAY_MEMBER_REQUIRED_MESSAGE,
+      };
+    }
+
+    if (parseTimeToMinutes(params.startTime) <= minutesSinceMidnight) {
+      return {
+        ok: false,
+        error: "past_slot",
+        message: "That time slot has already started. Please choose a later slot.",
+      };
+    }
   }
 
   return { ok: true };
@@ -775,19 +802,17 @@ async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: 
       return jsonResponse({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
     }
 
-    const { dateStr: todayStr } = getGibraltarNow();
+    const { dateStr: todayStr, minutesSinceMidnight } = getGibraltarNow();
     if (date < todayStr) {
       return jsonResponse({ error: "past_date", message: "Cannot book dates in the past." }, 400);
     }
 
     const isMember = userEmail ? await checkActiveMembership(userEmail) : false;
     const tablePrices = isMember ? await getTableTypePrices(tableTypeId) : null;
-    if (date === todayStr) {
+    if (date === todayStr && !isMember) {
       return jsonResponse({
         slots: [],
-        message: isMember
-          ? SAME_DAY_CONTACT_MESSAGE
-          : "Tables must be booked at least the day before.",
+        message: SAME_DAY_MEMBER_REQUIRED_MESSAGE,
       });
     }
 
@@ -818,7 +843,24 @@ async function getAvailableSlots(date: string, tableTypeId: number, userEmail?: 
     for (let hour = startHour; hour + slotDuration <= endHour; hour += slotDuration) {
       const startTime = `${hour.toString().padStart(2, '0')}:00`;
       const endTime = `${(hour + slotDuration).toString().padStart(2, '0')}:00`;
+      // Same-day bookings only show slots that have not started yet (Gibraltar time)
+      if (date === todayStr && parseTimeToMinutes(startTime) <= minutesSinceMidnight) {
+        continue;
+      }
       timeSlots.push({ start: startTime, end: endTime });
+    }
+
+    if (timeSlots.length === 0) {
+      return jsonResponse({
+        date,
+        table_type_id: tableTypeId,
+        max_bookings: maxBookings,
+        slots: [],
+        message:
+          date === todayStr
+            ? "There are no remaining time slots left today."
+            : "No bookable hours on this day with the current schedule rules.",
+      });
     }
     
     console.log('Generated time slots:', timeSlots);

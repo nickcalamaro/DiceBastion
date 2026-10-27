@@ -1,0 +1,59 @@
+<div id="inquiry-page" class="page-container" style="max-width: 560px;">
+
+<div id="inquiry-form-state" class="card">
+<h1 class="card-header" style="margin-bottom: 0.5rem;">{{ .title }}</h1>
+<p style="color: rgb(var(--color-neutral-600)); margin-top: 0; margin-bottom: 1.5rem;">
+  {{ .intro }}
+</p>
+
+<form id="inquiry-form" novalidate data-unavailable-msg="{{ .unavailableMsg }}">
+  <div class="form-group">
+    <label class="form-label" for="inquiry-name">Your name</label>
+    <input type="text" id="inquiry-name" class="form-input" required autocomplete="name" placeholder="Your full name">
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="inquiry-email">Email address</label>
+    <input type="email" id="inquiry-email" class="form-input" required autocomplete="email" placeholder="you@example.com">
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="inquiry-category">{{ .categoryLabel }}</label>
+    <select id="inquiry-category" class="form-select">
+      <option value="general">General enquiry</option>
+      <option value="membership">Membership</option>
+      <option value="events">Events</option>
+      <option value="bookings">Table bookings</option>
+      <option value="website">Website / technical issue</option>
+      <option value="other">Other</option>
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="inquiry-message">{{ .messageLabel }}</label>
+    <textarea id="inquiry-message" class="form-textarea" rows="6" required placeholder="{{ .messagePlaceholder }}"></textarea>
+  </div>
+
+  <input type="text" id="inquiry-hp" name="website" autocomplete="off" tabindex="-1" style="position:absolute;left:-9999px;opacity:0;" aria-hidden="true">
+
+  <div class="form-group">
+    <div class="form-label">Security check</div>
+    <div id="inquiry-ts" data-sitekey="0x4AAAAAACAB4xlOnW3S8K0k" data-size="flexible"></div>
+  </div>
+
+  <div id="inquiry-error" class="alert alert-error" style="display:none; margin-bottom: 1rem;"></div>
+
+  <button type="submit" id="inquiry-submit" class="btn btn-primary btn-full">Send message</button>
+</form>
+</div>
+
+<div id="inquiry-success-state" class="card" style="display:none;">
+<div class="alert alert-success" style="margin-bottom: 1.25rem;">
+  {{ .successLead }}
+</div>
+<p style="color: rgb(var(--color-neutral-600)); margin: 0;">
+  {{ .successFollowUp | safeHTML }}
+</p>
+</div>
+
+</div>

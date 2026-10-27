@@ -4,11 +4,13 @@
  *
  * Mints a fresh SUMUP_REFRESH_TOKEN with the scopes this worker needs, including
  * `transactions.history` (so transaction-level decline reasons can be read via
- * GET /v0.1/me/transactions and the auth-gated /internal/transaction endpoint).
+ * GET /v0.1/me/transactions and the auth-gated /internal/transaction endpoint)
+ * and `user.profile_readonly` (so payout fees can be listed via
+ * GET /v1.0/merchants/{code}/payouts and /internal/payouts).
  *
  * IMPORTANT: the token MUST be minted from the OAuth client that has the restricted
  * `payments` and `payment_instruments` scopes approved (i.e. DiceBastionClient),
- * because the worker needs all three scopes in ONE token. A different client that
+ * because the worker needs those scopes in ONE token. A different client that
  * lacks those restricted scopes will break checkouts/charges.
  *
  * Two modes, chosen automatically from the redirect URI:
@@ -37,7 +39,7 @@ import readline from 'node:readline'
 
 const AUTHORIZE_URL = 'https://api.sumup.com/authorize'
 const TOKEN_URL = 'https://api.sumup.com/token'
-const SCOPES = ['payments', 'payment_instruments', 'transactions.history']
+const SCOPES = ['payments', 'payment_instruments', 'transactions.history', 'user.profile_readonly']
 const DEFAULT_LOCAL_PORT = 8976
 
 function arg(name) {

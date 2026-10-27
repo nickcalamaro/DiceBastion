@@ -23,6 +23,8 @@
 
   let selectedAmount = null;
   let currentCheckoutId = null;
+  let scaWatcher = null;
+  let paymentConfirmed = false;
 
   // ───────── DOM refs ─────────
   const $totalRaised = document.getElementById('total-raised');
@@ -42,6 +44,7 @@
   const $formCard = document.getElementById('donation-form-card');
   const $paymentSection = document.getElementById('sumup-payment-section');
   const $paymentProcessing = document.getElementById('payment-processing');
+  const $scaNote = document.getElementById('donation-sca-note');
   const $thankYou = document.getElementById('donation-thank-you');
   const $tyAmount = document.getElementById('ty-amount');
   const $wallEmpty = document.getElementById('donation-wall-empty');
@@ -52,6 +55,8 @@
   loadDonationWall();
   initAmountButtons();
   initFormEvents();
+  const resumeRef = new URLSearchParams(window.location.search).get('orderRef');
+  if (resumeRef && resumeRef.indexOf('DON-') === 0) resumeDonation(resumeRef);
 
   // ───────── Donation Wall & Progress ─────────
   async function loadDonationWall() {
@@ -236,48 +241,144 @@
     }
   }
 
+  function setScaNote(visible) {
+    if ($scaNote) $scaNote.style.display = visible ? 'block' : 'none';
+  }
+
+  function stopScaWatcher() {
+    const w = scaWatcher;
+    scaWatcher = null;
+    setScaNote(false);
+    return w ? w.stop() : Promise.resolve();
+  }
+
+  function returnToForm(msg) {
+    $paymentProcessing.style.display = 'none';
+    $paymentSection.style.display = 'none';
+    $formCard.style.display = '';
+    showError($donationError, msg);
+    updateDonateButton();
+  }
+
+  function showStillProcessing() {
+    $paymentProcessing.style.display = 'none';
+    setScaNote(false);
+    $paymentSection.style.display = 'none';
+    $formCard.style.display = '';
+    showInfo($donationStatus, 'Your bank is still confirming this donation. If the payment goes through, it will show on the donation wall, and we will email you when you left an address.');
+    updateDonateButton();
+  }
+
+  // The card widget often never reports the end of a bank check, so confirm on the server.
+  function startScaWatcher(orderRef) {
+    if (scaWatcher || paymentConfirmed) return;
+    hideError($donationError);
+    $paymentProcessing.style.display = 'none';
+    setScaNote(true);
+    scaWatcher = window.utils.watchScaPayment('/donations/confirm', orderRef, {
+      onPaid: (data) => {
+        scaWatcher = null;
+        paymentConfirmed = true;
+        showThankYou(data.amount || selectedAmount, data.currency || 'GBP');
+      },
+      onFailed: (msg) => {
+        scaWatcher = null;
+        setScaNote(false);
+        returnToForm(msg);
+      }
+    });
+  }
+
+  function settleWidgetOutcome(orderRef) {
+    if (paymentConfirmed) return;
+    fetch(`${API_BASE}/donations/confirm?orderRef=${encodeURIComponent(orderRef)}&_=${Date.now()}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (paymentConfirmed) return;
+        if (data && data.ok && (data.status === 'active' || data.status === 'already_active')) {
+          paymentConfirmed = true;
+          showThankYou(data.amount || selectedAmount, data.currency || 'GBP');
+          return;
+        }
+        const status = String((data && data.status) || '').toUpperCase();
+        if (status === 'FAILED' || status === 'DECLINED') {
+          returnToForm((data && data.message) || 'Payment failed. Please check your card details and try again.');
+          return;
+        }
+        startScaWatcher(orderRef);
+      })
+      .catch(() => startScaWatcher(orderRef));
+  }
+
+  function pollDonation(orderRef) {
+    $paymentProcessing.style.display = '';
+    return window.utils.pollPaymentConfirmation('/donations/confirm', orderRef, {
+      maxAttempts: 40,
+      pollInterval: 2000,
+      onSuccess: (data) => {
+        paymentConfirmed = true;
+        showThankYou(data.amount, data.currency);
+      },
+      onError: (msg) => returnToForm(msg),
+      onTimeout: () => showStillProcessing()
+    });
+  }
+
+  function resumeDonation(orderRef) {
+    $formCard.style.display = 'none';
+    $paymentSection.style.display = '';
+    pollDonation(orderRef);
+  }
+
   // ───────── SumUp Widget ─────────
   async function mountSumUpWidget(checkoutId, orderRef) {
     try {
-      await window.utils.loadSumUpSdk();
-      await SumUpCard.mount({
+      paymentConfirmed = false;
+      await stopScaWatcher();
+      const email = $donorEmail.value.trim();
+      await window.utils.mountSumUpWidget({
         id: 'donation-sumup-card',
         checkoutId: checkoutId,
-        locale: 'en-GB',
-        country: 'GB',
-        onResponse: async function (type, body) {
-          console.log('[donate] SumUp response:', type, body);
-
-          if (type === 'sent' || type === 'success') {
-            $paymentProcessing.style.display = '';
-
-            // Poll for confirmation
-            await window.utils.pollPaymentConfirmation('/donations/confirm', orderRef, {
-              maxAttempts: 80,
-              pollInterval: 2000,
-              onSuccess: (data) => {
-                showThankYou(data.amount, data.currency);
-              },
-              onError: (msg) => {
-                $paymentProcessing.style.display = 'none';
-                $paymentSection.style.display = 'none';
-                $formCard.style.display = '';
-                showError($donationError, msg);
-                updateDonateButton();
-              },
-              onTimeout: () => {
-                showThankYou(String(selectedAmount), 'GBP');
-              }
+        email: email || undefined,
+        onResponse: function (type, body) {
+          const t = String(type || '').toLowerCase();
+          try {
+            window.utils.logPaymentEvent({
+              flow: 'donation',
+              type: t,
+              orderRef: orderRef,
+              checkoutId: checkoutId,
+              message: (body && body.message) || null,
+              sumupBody: body
             });
-          } else if (type === 'error' || type === 'fail') {
+          } catch (err) {}
+          if (paymentConfirmed) return;
+          if (t === 'auth-screen' || t === 'sent') {
+            startScaWatcher(orderRef);
+            return;
+          }
+          if (t === 'success') {
+            const bodyStatus = String((body && body.status) || '').toUpperCase();
+            stopScaWatcher().then(function () {
+              if (paymentConfirmed) return;
+              if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
+                returnToForm((body && body.message) || 'Payment failed. Please try again.');
+                return;
+              }
+              pollDonation(orderRef);
+            });
+            return;
+          }
+          if (t === 'error' || t === 'fail') {
+            stopScaWatcher().then(function () { settleWidgetOutcome(orderRef); });
+            return;
+          }
+          if (t === 'cancel') {
+            stopScaWatcher();
+            $paymentProcessing.style.display = 'none';
             $paymentSection.style.display = 'none';
             $formCard.style.display = '';
-            showError($donationError, 'Payment failed. Please check your card details and try again.');
-            updateDonateButton();
-          } else if (type === 'cancel') {
-            $paymentSection.style.display = 'none';
-            $formCard.style.display = '';
-            showInfo($donationStatus, 'Payment cancelled. You can try again when you\'re ready.');
+            showInfo($donationStatus, 'Payment cancelled. You can try again when you are ready.');
             updateDonateButton();
           }
         }

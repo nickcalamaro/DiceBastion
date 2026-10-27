@@ -9,14 +9,14 @@ import {
   fetchPayment,
   savePaymentInstrument,
   chargePaymentInstrument,
-  verifyWebhook
+  verifyWebhook,
+  listPayouts
 } from './payments-client.js'
 import {
   getStoreCreditBalance,
   listStoreCreditLedger,
   computeCreditSplit,
-  debitStoreCreditForPurchase,
-  restoreStoreCredit
+  settleStoreCredit
 } from './store-credit.js'
 import {
   listBuybackMeta,
@@ -25,6 +25,28 @@ import {
   BUYBACK_LANGUAGES,
   isRiftboundSearchConfigured
 } from './buyback-cards.js'
+import {
+  ensureLedgerSchema,
+  recordOrderCosts,
+  receiveStock,
+  writeOffStock,
+  loadSumUpFeeContext,
+  buildPnl,
+  buildBalanceSheet,
+  createImportSession,
+  updateImportSession,
+  listImportSessions,
+  getImportSession,
+  addImportLine,
+  removeImportLine,
+  parseLedgerDate,
+  parsePence,
+  getBooksStartDate,
+  todayIso,
+  EXPENSE_CATEGORIES,
+  PAID_FROM,
+  OWNER_ACCOUNTS
+} from './shop-ledger.js'
 
 // Replace generic cors with strict configurable CORS + debug logging
 const app = new Hono()
@@ -502,6 +524,15 @@ function isDrinksCategoryName(categoryName) {
 
 function isDrinksProduct(product) {
   return productBelongsToCategory(product, 'Drinks')
+}
+
+/** Bar walk-ins from /drinks. Shop checkout sets sale_channel; these rows leave it empty. */
+function isDrinksWalkInOrder(order) {
+  if (!order) return false
+  const email = String(order.email || '').trim().toLowerCase()
+  const name = String(order.name || '').trim()
+  const channel = String(order.sale_channel || '').trim()
+  return channel === '' && (name === 'Walk-in' || email === 'walk-in')
 }
 
 function defaultCategoryDescription(categoryName) {
@@ -1163,14 +1194,20 @@ async function activateMembership(db, env, { membershipId, membership, paymentId
  * Activate a ticket and increment event ticket count.
  * Also updates the related transaction row.
  */
+/**
+ * Returns false when another request (webhook vs browser confirm) already activated
+ * the ticket, so callers can skip tickets_sold and confirmation emails.
+ */
 async function activateTicket(db, { ticketId, eventId, transactionId, paymentId }) {
+  const claim = await db.prepare('UPDATE tickets SET status = "active" WHERE id = ? AND status != "active"').bind(ticketId).run()
+  if (!claim?.meta?.changes) return false
   await db.batch([
-    db.prepare('UPDATE tickets SET status = "active" WHERE id = ?').bind(ticketId),
     db.prepare('UPDATE transactions SET payment_status = "PAID", payment_id = ?, updated_at = ? WHERE id = ?')
       .bind(paymentId, toIso(new Date()), transactionId),
     db.prepare('UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)')
       .bind(eventId)
   ])
+  return true
 }
 
 /**
@@ -1246,6 +1283,10 @@ async function confirmTicketPurchase(db, env, { orderRef, payment = null }) {
       const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
       const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
       console.log('[confirmTicket] Payment not paid, status:', currentStatus, 'txStatuses:', txStatuses)
+      if (creditAppliedPence > 0 && transaction.user_id && isCheckoutFailed(pmt)) {
+        await settleTicketCredit(db, { userId: transaction.user_id, ticketId: ticket.id, orderRef, targetPence: 0 })
+          .catch(err => console.error('[confirmTicket] credit release failed:', err))
+      }
       return { ok: false, notPaid: true, status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus }
     }
 
@@ -1262,28 +1303,41 @@ async function confirmTicketPurchase(db, env, { orderRef, payment = null }) {
 
   // Capacity check
   if (ev.capacity && ev.tickets_sold >= ev.capacity) {
+    if (creditAppliedPence > 0 && transaction.user_id) {
+      await settleTicketCredit(db, { userId: transaction.user_id, ticketId: ticket.id, orderRef, targetPence: 0 })
+        .catch(err => console.error('[confirmTicket] credit release failed:', err))
+    }
     return { ok: false, error: 'sold_out', httpStatus: 409 }
   }
 
   if (creditAppliedPence > 0 && transaction.user_id) {
-    const debit = await debitStoreCreditForPurchase(db, {
+    const debit = await settleTicketCredit(db, {
       userId: transaction.user_id,
-      creditAppliedPence,
-      entryType: 'event_spend',
-      referenceType: 'ticket',
-      referenceId: String(ticket.id),
-      idempotencyKey: `event_spend:${orderRef}`,
-      note: `Event ticket ${orderRef}`,
-      nowIso: toIso(new Date())
+      ticketId: ticket.id,
+      orderRef,
+      targetPence: creditAppliedPence
     })
     if (!debit.ok) {
-      console.error('[confirmTicket] credit debit failed:', debit.error)
-      return { ok: false, error: 'insufficient_credit', httpStatus: 409 }
+      console.error('[confirmTicket] credit debit failed:', debit.error, orderRef)
+      if (creditOnly) return { ok: false, error: 'insufficient_credit', httpStatus: 409 }
+      // Card already captured: issue the ticket and let staff recover the credit shortfall.
+      await alertStoreCreditShortfall(env, {
+        reference: orderRef,
+        userId: transaction.user_id,
+        creditPence: creditAppliedPence,
+        error: debit.error,
+        relatedId: ticket.id,
+        relatedType: 'ticket'
+      })
     }
   }
 
   // Activate ticket + mark transaction PAID + increment tickets_sold (atomic batch).
-  await activateTicket(db, { ticketId: ticket.id, eventId: ticket.event_id, transactionId: transaction.id, paymentId: paymentIdForActivation })
+  const claimed = await activateTicket(db, { ticketId: ticket.id, eventId: ticket.event_id, transactionId: transaction.id, paymentId: paymentIdForActivation })
+  if (!claimed) {
+    console.log('[confirmTicket] Ticket activated concurrently, skipping emails:', ticket.id)
+    return { ok: true, alreadyActive: true, transaction, ticket, event: ev }
+  }
   console.log('[confirmTicket] Activated ticket', ticket.id, 'for order', orderRef)
 
   // Confirmation email (non-blocking — payment already captured + ticket active).
@@ -1880,6 +1934,49 @@ async function getSessionUser(db, sessionToken) {
     name: row.name,
     is_admin: row.is_admin === 1,
     store_credit_pence: Math.max(0, Number(row.store_credit_pence) || 0)
+  }
+}
+
+function settleTicketCredit(db, { userId, ticketId, orderRef, targetPence }) {
+  return settleStoreCredit(db, {
+    userId,
+    targetPence,
+    spendType: 'event_spend',
+    referenceType: 'ticket',
+    referenceId: String(ticketId),
+    keyPrefix: 'event_spend',
+    note: `Event ticket ${orderRef}`,
+    nowIso: toIso(new Date())
+  })
+}
+
+function settleShopOrderCredit(db, { userId, orderNumber, targetPence }) {
+  return settleStoreCredit(db, {
+    userId,
+    targetPence,
+    spendType: 'shop_spend',
+    referenceType: 'order',
+    referenceId: String(orderNumber),
+    keyPrefix: 'shop_spend',
+    note: `Shop order ${orderNumber}`,
+    nowIso: toIso(new Date())
+  })
+}
+
+/** Card was captured but the matching credit could not be taken (released and spent elsewhere). */
+async function alertStoreCreditShortfall(env, { reference, userId, creditPence, error, relatedId, relatedType }) {
+  try {
+    await sendEmail(env, {
+      to: env.BUYBACK_NOTIFY_EMAIL || 'admin@dicebastion.com',
+      subject: `Store credit debit failed after card payment — ${reference}`,
+      text: `${reference} was paid by card but store credit debit failed (${error}). Credit intended: ${creditPence} pence for user ${userId}. Adjust manually.`,
+      html: `<p><strong>${escapeHtml(reference)}</strong> was paid by card but store credit debit failed (<code>${escapeHtml(String(error))}</code>).</p><p>Credit intended: ${creditPence} pence for user ${userId}. Adjust manually.</p>`,
+      emailType: 'admin_credit_debit_failed',
+      relatedId,
+      relatedType
+    })
+  } catch (mailErr) {
+    console.error('[store credit] shortfall alert email failed:', mailErr)
   }
 }
 
@@ -5576,7 +5673,7 @@ app.post('/membership/sponsor/claim', async (c) => {
 
 app.post('/webhooks/sumup', async (c) => {
   const payload = await c.req.json()
-  const { id: paymentId, checkout_reference: orderRef, currency } = payload
+  const paymentId = payload?.id
   
   // Verify webhook via payments worker
   try {
@@ -5590,7 +5687,19 @@ app.post('/webhooks/sumup', async (c) => {
     return c.json({ error: 'verification_failed' }, 500)
   }
   
-  if (!paymentId || !orderRef) return c.json({ ok: false }, 400)
+  if (!paymentId) return c.json({ ok: false }, 400)
+
+  // Fetch + verify the payment BEFORE marking the webhook processed. SumUp can emit
+  // webhooks on non-terminal states; recording those would dedupe (and drop) the later
+  // PAID event. Activation is idempotent in every branch, so deferring the mark is safe.
+  // SumUp's payload is only { event_type, id }, so the order ref and currency come from
+  // the API rather than the (unauthenticated) request body.
+  let payment
+  try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
+  const orderRef = payment?.checkout_reference
+  const currency = payment?.currency
+  if (!orderRef) return c.json({ ok: false, error: 'missing_checkout_reference' }, 400)
+  if (!isCheckoutPaid(payment)) return c.json({ ok: true })
 
   // Detect if this is a bundle purchase (BUNDLE-{eventId}-{uuid})
   const isBundle = orderRef.startsWith('BUNDLE-')
@@ -5605,13 +5714,6 @@ app.post('/webhooks/sumup', async (c) => {
       ).bind(orderRef).first()
     : null
   const isSponsorship = !!sponsorshipTx
-
-  // Fetch + verify the payment BEFORE marking the webhook processed. SumUp can emit
-  // webhooks on non-terminal states; recording those would dedupe (and drop) the later
-  // PAID event. Activation is idempotent in every branch, so deferring the mark is safe.
-  let payment
-  try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
-  if (!isCheckoutPaid(payment)) return c.json({ ok: true })
 
   // Check for duplicate webhook processing (only paid webhooks reach here)
   const webhookId = `${paymentId}-${orderRef}`
@@ -5655,6 +5757,17 @@ app.post('/webhooks/sumup', async (c) => {
     const shopOrderRow = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderRef).first()
     if (!shopOrderRow) {
       console.warn('[webhook-shop] Order not found for checkout reference:', orderRef)
+      return c.json({ ok: true })
+    }
+    if (isDrinksWalkInOrder(shopOrderRow)) {
+      console.log('[webhook-drinks] Processing drinks order:', orderRef)
+      try {
+        const outcome = await completePaidDrinksOrder(c.env.DB, shopOrderRow, paymentId)
+        console.log('[webhook-drinks] Completed drinks order', shopOrderRow.id, outcome)
+      } catch (err) {
+        console.error('[webhook-drinks] Failed to complete drinks order:', err)
+        return c.json({ ok: false, error: String(err?.message || err) }, 400)
+      }
       return c.json({ ok: true })
     }
     try {
@@ -5706,6 +5819,24 @@ app.post('/webhooks/sumup', async (c) => {
       console.log('[webhook-ticket] Ticket confirmed for order:', orderRef, result.alreadyActive ? '(already active)' : '')
     } catch (err) {
       console.error('[webhook-ticket] Failed to confirm ticket:', err)
+      return c.json({ ok: false, error: String(err?.message || err) }, 400)
+    }
+    return c.json({ ok: true })
+  }
+
+  // ==================== DONATION WEBHOOK ====================
+  if (isDonation) {
+    console.log('[webhook-donation] Processing donation:', orderRef)
+    const donation = await c.env.DB.prepare('SELECT * FROM donations WHERE order_ref = ?').bind(orderRef).first()
+    if (!donation) {
+      console.warn('[webhook-donation] Donation not found:', orderRef)
+      return c.json({ ok: true })
+    }
+    try {
+      const outcome = await completePaidDonation(c.env, donation, payment.id || paymentId, payment)
+      console.log('[webhook-donation] Completed donation', donation.id, outcome)
+    } catch (err) {
+      console.error('[webhook-donation] Failed to complete donation:', err)
       return c.json({ ok: false, error: String(err?.message || err) }, 400)
     }
     return c.json({ ok: true })
@@ -7056,7 +7187,10 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
             WHEN 'annual' THEN 'membership_annual'
             ELSE 'membership'
           END AS category,
-          t.amount * 1.0 AS amount_pounds
+          t.amount * 1.0 AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
+          'sumup' AS payment_method
         FROM memberships m
         JOIN transactions t ON t.order_ref = m.order_ref
         WHERE t.transaction_type = 'membership'
@@ -7066,7 +7200,10 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
       runLines(`
         SELECT t.id AS id, t.created_at AS created_at,
           'renewal' AS category,
-          t.amount * 1.0 AS amount_pounds
+          t.amount * 1.0 AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
+          'sumup' AS payment_method
         FROM transactions t
         WHERE t.transaction_type = 'renewal'
           AND ${paidSql('t')}
@@ -7075,7 +7212,10 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
       runLines(`
         SELECT t.id AS id, t.created_at AS created_at,
           'donation' AS category,
-          t.amount * 1.0 AS amount_pounds
+          t.amount * 1.0 AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
+          'sumup' AS payment_method
         FROM transactions t
         WHERE t.transaction_type = 'donation'
           AND ${paidSql('t')}
@@ -7095,42 +7235,75 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
             WHEN 'quarterly' THEN 25
             WHEN 'annual' THEN 90
             ELSE t.amount * 1.0
-          END AS amount_pounds
+          END AS amount_pounds,
+          t.amount * 1.0 AS charged_pounds,
+          t.sumup_transaction_code AS tx_code,
+          'sumup' AS payment_method
         FROM memberships m
         JOIN transactions t ON t.order_ref = m.order_ref
         WHERE t.transaction_type = 'event_membership_bundle'
           AND ${paidSql('t')}
           AND ${dateSql('t')}
       `),
-      // /drinks checkout stores name 'Walk-in' / email 'walk-in' (single or mixed baskets).
-      // Online shop.dicebastion.com orders are intentionally excluded from this report.
+      // /drinks walk-ins (SumUp at the bar). Admin POS may also use Walk-in defaults but sets sale_channel='pos'.
       runLines(`
         SELECT o.id AS id, o.created_at AS created_at,
           'drinks' AS category,
-          o.total / 100.0 AS amount_pounds
+          o.total / 100.0 AS amount_pounds,
+          o.total / 100.0 AS charged_pounds,
+          NULL AS tx_code,
+          COALESCE(NULLIF(o.payment_method, ''), 'sumup') AS payment_method
         FROM orders o
         WHERE ${paidSql('o')}
           AND (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
+          AND IFNULL(o.sale_channel, '') != 'pos'
           AND ${dateSql('o')}
       `)
     ])
+    const rows = chunks.flat()
 
-    const lineItems = chunks.flat().map(row => {
-      const amount = accountsPounds(row.amount_pounds)
+    // Exact fees: SumUp payout rows are per transaction (amount_pence is net of fee_pence).
+    // Lines with no matching payout row (drinks orders store no transaction code) are estimated.
+    const { feeByCode, estimateRate } = await loadSumUpFeeContext(db, rows.map(r => r.tx_code))
+
+    const round2 = (n) => Math.round(n * 100) / 100
+    const lineItems = rows.map(row => {
+      const amount = round2(accountsPounds(row.amount_pounds))
+      const charged = accountsPounds(row.charged_pounds) || amount
+      const method = String(row.payment_method || 'sumup').toLowerCase()
+      let fee = 0
+      let feeBasis = 'none'
+      if (method === 'sumup') {
+        const code = row.tx_code ? String(row.tx_code) : null
+        if (code && feeByCode.has(code)) {
+          // Bundles: SumUp charged the full bundle, so apportion the fee to the membership part.
+          fee = round2((feeByCode.get(code) / 100) * (charged > 0 ? amount / charged : 1))
+          feeBasis = 'actual'
+        } else if (estimateRate != null) {
+          fee = round2(amount * estimateRate)
+          feeBasis = 'estimated'
+        } else {
+          feeBasis = 'unknown'
+        }
+      }
       return {
         id: row.id,
         created_at: row.created_at,
         category: row.category || 'other',
-        amount_pounds: Math.round(amount * 100) / 100,
-        net_payout: Math.round(amount * 0.95 * 100) / 100
+        payment_method: method,
+        amount_pounds: amount,
+        fee_pounds: fee,
+        fee_basis: feeBasis,
+        net_payout: round2(amount - fee)
       }
     }).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
 
     const grouped = new Map()
     for (const item of lineItems) {
-      const prev = grouped.get(item.category) || { category: item.category, quantity: 0, total_pounds: 0, net_payout: 0 }
+      const prev = grouped.get(item.category) || { category: item.category, quantity: 0, total_pounds: 0, fee_pounds: 0, net_payout: 0 }
       prev.quantity += 1
       prev.total_pounds += item.amount_pounds
+      prev.fee_pounds += item.fee_pounds
       prev.net_payout += item.net_payout
       grouped.set(item.category, prev)
     }
@@ -7138,28 +7311,540 @@ app.get('/admin/accounts/sales', requireAdmin, requireAccountsOwner, async c => 
     const categories = [...grouped.values()]
       .map(row => ({
         ...row,
-        total_pounds: Math.round(row.total_pounds * 100) / 100,
-        net_payout: Math.round(row.net_payout * 100) / 100
+        total_pounds: round2(row.total_pounds),
+        fee_pounds: round2(row.fee_pounds),
+        net_payout: round2(row.net_payout)
       }))
       .sort((a, b) => a.category.localeCompare(b.category))
 
-    const gross = lineItems.reduce((sum, row) => sum + row.amount_pounds, 0)
-    const net = lineItems.reduce((sum, row) => sum + row.net_payout, 0)
+    const sumBy = (key, basis) => round2(lineItems
+      .filter(r => !basis || r.fee_basis === basis)
+      .reduce((sum, r) => sum + r[key], 0))
+    const countBasis = (basis) => lineItems.filter(r => r.fee_basis === basis).length
 
     return c.json({
       from,
       to,
       categories,
       line_items: lineItems,
+      sumup_fees: {
+        pounds: sumBy('fee_pounds'),
+        actual_pounds: sumBy('fee_pounds', 'actual'),
+        estimated_pounds: sumBy('fee_pounds', 'estimated'),
+        actual_lines: countBasis('actual'),
+        estimated_lines: countBasis('estimated'),
+        unknown_lines: countBasis('unknown'),
+        estimate_rate: estimateRate
+      },
       totals: {
         quantity: lineItems.length,
-        total_pounds: Math.round(gross * 100) / 100,
-        net_payout: Math.round(net * 100) / 100
+        total_pounds: sumBy('amount_pounds'),
+        sumup_fees_pounds: sumBy('fee_pounds'),
+        net_payout: sumBy('net_payout')
       }
     })
   } catch (error) {
     console.error('[admin/accounts/sales] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/** Pull SumUp payout fees into D1 for the selected date range (owner Accounts). */
+app.post('/admin/accounts/sync-sumup-fees', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const from = parseAccountsIsoDate(body.from || c.req.query('from'))
+    const to = parseAccountsIsoDate(body.to || c.req.query('to'))
+    if (!from || !to) {
+      return c.json({ error: 'invalid_date_range' }, 400)
+    }
+    if (from > to) {
+      return c.json({ error: 'from_after_to' }, 400)
+    }
+    const result = await syncSumUpPayouts(c.env, from, to)
+    return c.json({ success: true, ...result })
+  } catch (error) {
+    console.error('[admin/accounts/sync-sumup-fees] ERROR:', error)
+    return c.json({ error: 'sync_failed', message: String(error?.message || error) }, 502)
+  }
+})
+
+// ============================================================================
+// SHOP AND EVENTS ACCOUNTS (stock batches, bills, expenses, P&L, balance sheet)
+// ============================================================================
+
+const LEDGER_ERROR_STATUS = {
+  product_not_found: 404,
+  bill_not_found: 404,
+  session_not_found: 404,
+  line_not_found: 404,
+  insufficient_stock: 409,
+  line_already_used: 409,
+  unsupported_file: 415
+}
+
+function ledgerText(value, max) {
+  const s = String(value == null ? '' : value).trim()
+  return s ? s.slice(0, max) : null
+}
+
+function ledgerPaid(body) {
+  const paidDate = body.paid_date === null || body.paid_date === '' ? null : parseLedgerDate(body.paid_date)
+  if (body.paid_date && !paidDate) return { error: 'invalid_paid_date' }
+  const paidFrom = paidDate ? (PAID_FROM.includes(body.paid_from) ? body.paid_from : 'bank') : null
+  return { paidDate, paidFrom }
+}
+
+// Any admin can receive stock so new deliveries are costed; reports stay owner-only.
+app.post('/admin/stock/receive', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const result = await receiveStock(c.env.DB, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[stock/receive] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/stock/write-off', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const result = await writeOffStock(c.env.DB, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[stock/write-off] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/stock/lots', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const productId = parseInt(c.req.query('product_id') || '', 10)
+    const onlyRemaining = c.req.query('remaining') === '1'
+    const where = []
+    const binds = []
+    if (productId > 0) { where.push('l.product_id = ?'); binds.push(productId) }
+    if (onlyRemaining) where.push('l.quantity_remaining > 0')
+    const { results } = await c.env.DB.prepare(`
+      SELECT l.*, p.name AS product_name, b.reference AS bill_reference, b.paid_date AS bill_paid_date
+      FROM stock_lots l
+      LEFT JOIN products p ON p.id = l.product_id
+      LEFT JOIN supplier_bills b ON b.id = l.supplier_bill_id
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY l.received_date DESC, l.id DESC
+      LIMIT 500
+    `).bind(...binds).all()
+    return c.json({ lots: results || [] })
+  } catch (e) {
+    console.error('[stock/lots] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/bills', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const unpaidOnly = c.req.query('status') === 'unpaid'
+    const { results } = await c.env.DB.prepare(`
+      SELECT b.*,
+        COALESCE((SELECT SUM(l.quantity_received * l.unit_cost_pence) FROM stock_lots l WHERE l.supplier_bill_id = b.id), 0) AS stock_pence,
+        (SELECT COUNT(*) FROM stock_lots l WHERE l.supplier_bill_id = b.id) AS lot_count
+      FROM supplier_bills b
+      ${unpaidOnly ? 'WHERE b.paid_date IS NULL' : ''}
+      ORDER BY b.bill_date DESC, b.id DESC
+      LIMIT 500
+    `).all()
+    return c.json({ bills: results || [] })
+  } catch (e) {
+    console.error('[finance/bills] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/bills', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const body = await c.req.json().catch(() => ({}))
+    const supplier = ledgerText(body.supplier, 200)
+    const billDate = parseLedgerDate(body.bill_date)
+    const total = parsePence(body.total_pence)
+    if (!supplier) return c.json({ error: 'missing_supplier' }, 400)
+    if (!billDate) return c.json({ error: 'invalid_bill_date' }, 400)
+    if (total == null) return c.json({ error: 'invalid_total' }, 400)
+    const paid = ledgerPaid(body)
+    if (paid.error) return c.json(paid, 400)
+    const row = await c.env.DB.prepare(`
+      INSERT INTO supplier_bills (supplier, bill_date, reference, total_pence, paid_date, paid_from, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `).bind(supplier, billDate, ledgerText(body.reference, 200), total, paid.paidDate, paid.paidFrom, ledgerText(body.notes, 1000)).first()
+    return c.json({ success: true, id: row.id })
+  } catch (e) {
+    console.error('[finance/bills POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/bills/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const updates = []
+    const binds = []
+    if (body.supplier !== undefined) {
+      const supplier = ledgerText(body.supplier, 200)
+      if (!supplier) return c.json({ error: 'missing_supplier' }, 400)
+      updates.push('supplier = ?'); binds.push(supplier)
+    }
+    if (body.bill_date !== undefined) {
+      const d = parseLedgerDate(body.bill_date)
+      if (!d) return c.json({ error: 'invalid_bill_date' }, 400)
+      updates.push('bill_date = ?'); binds.push(d)
+    }
+    if (body.total_pence !== undefined) {
+      const t = parsePence(body.total_pence)
+      if (t == null) return c.json({ error: 'invalid_total' }, 400)
+      updates.push('total_pence = ?'); binds.push(t)
+    }
+    if (body.reference !== undefined) { updates.push('reference = ?'); binds.push(ledgerText(body.reference, 200)) }
+    if (body.notes !== undefined) { updates.push('notes = ?'); binds.push(ledgerText(body.notes, 1000)) }
+    if (body.paid_date !== undefined) {
+      const paid = ledgerPaid(body)
+      if (paid.error) return c.json(paid, 400)
+      updates.push('paid_date = ?', 'paid_from = ?'); binds.push(paid.paidDate, paid.paidFrom)
+    }
+    if (!updates.length) return c.json({ error: 'no_fields_to_update' }, 400)
+    const res = await c.env.DB.prepare(`UPDATE supplier_bills SET ${updates.join(', ')} WHERE id = ?`).bind(...binds, id).run()
+    if (!Number(res.meta?.changes ?? 0)) return c.json({ error: 'bill_not_found' }, 404)
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/bills PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+function parseExpenseBody(body, partial) {
+  const out = {}
+  if (!partial || body.expense_date !== undefined) {
+    out.expense_date = parseLedgerDate(body.expense_date)
+    if (!out.expense_date) return { error: 'invalid_expense_date' }
+  }
+  if (!partial || body.category !== undefined) {
+    if (!EXPENSE_CATEGORIES.includes(body.category)) return { error: 'invalid_category' }
+    out.category = body.category
+  }
+  if (!partial || body.amount_pence !== undefined) {
+    out.amount_pence = parsePence(body.amount_pence)
+    if (out.amount_pence == null) return { error: 'invalid_amount' }
+  }
+  if (!partial || body.description !== undefined) out.description = ledgerText(body.description, 500)
+  if (!partial || body.event_id !== undefined) {
+    const ev = parseInt(body.event_id, 10)
+    out.event_id = ev > 0 ? ev : null
+  }
+  if (!partial || body.paid_date !== undefined) {
+    const paid = ledgerPaid(body)
+    if (paid.error) return paid
+    out.paid_date = paid.paidDate
+    out.paid_from = paid.paidFrom
+  }
+  return out
+}
+
+app.get('/admin/finance/expenses', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const { results } = await c.env.DB.prepare(`
+      SELECT be.*, e.event_name
+      FROM business_expenses be
+      LEFT JOIN events e ON e.event_id = be.event_id
+      ORDER BY be.expense_date DESC, be.id DESC
+      LIMIT 500
+    `).all()
+    const { results: events } = await c.env.DB.prepare(`
+      SELECT event_id, event_name, event_datetime
+      FROM events
+      WHERE event_datetime >= date('now', '-400 days')
+      ORDER BY event_datetime DESC
+      LIMIT 300
+    `).all()
+    return c.json({ expenses: results || [], events: events || [], categories: EXPENSE_CATEGORIES })
+  } catch (e) {
+    console.error('[finance/expenses] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/expenses', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const parsed = parseExpenseBody(await c.req.json().catch(() => ({})), false)
+    if (parsed.error) return c.json(parsed, 400)
+    const row = await c.env.DB.prepare(`
+      INSERT INTO business_expenses (expense_date, category, event_id, description, amount_pence, paid_date, paid_from)
+      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `).bind(parsed.expense_date, parsed.category, parsed.event_id, parsed.description, parsed.amount_pence, parsed.paid_date, parsed.paid_from).first()
+    return c.json({ success: true, id: row.id })
+  } catch (e) {
+    console.error('[finance/expenses POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/expenses/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const id = parseInt(c.req.param('id'), 10)
+    const parsed = parseExpenseBody(await c.req.json().catch(() => ({})), true)
+    if (parsed.error) return c.json(parsed, 400)
+    const cols = Object.keys(parsed)
+    if (!cols.length) return c.json({ error: 'no_fields_to_update' }, 400)
+    const res = await c.env.DB.prepare(
+      `UPDATE business_expenses SET ${cols.map(k => `${k} = ?`).join(', ')} WHERE id = ?`
+    ).bind(...cols.map(k => parsed[k]), id).run()
+    if (!Number(res.meta?.changes ?? 0)) return c.json({ error: 'expense_not_found' }, 404)
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/expenses PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.delete('/admin/finance/expenses/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    await c.env.DB.prepare('DELETE FROM business_expenses WHERE id = ?').bind(parseInt(c.req.param('id'), 10)).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/expenses DELETE] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+function parseOwnerMovementBody(body) {
+  const movementDate = parseLedgerDate(body.movement_date)
+  if (!movementDate) return { error: 'invalid_date' }
+  if (body.type !== 'capital_in' && body.type !== 'drawing') return { error: 'invalid_type' }
+  const amount = parsePence(body.amount_pence)
+  if (!amount) return { error: 'invalid_amount' }
+  return {
+    movement_date: movementDate,
+    type: body.type,
+    account: OWNER_ACCOUNTS.includes(body.account) ? body.account : 'bank',
+    amount_pence: amount,
+    notes: ledgerText(body.notes, 500)
+  }
+}
+
+app.get('/admin/finance/owner-movements', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const { results } = await c.env.DB.prepare(
+      'SELECT * FROM owner_movements ORDER BY movement_date DESC, id DESC LIMIT 500'
+    ).all()
+    return c.json({ movements: results || [] })
+  } catch (e) {
+    console.error('[finance/owner-movements] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/owner-movements', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const m = parseOwnerMovementBody(await c.req.json().catch(() => ({})))
+    if (m.error) return c.json(m, 400)
+    const row = await c.env.DB.prepare(`
+      INSERT INTO owner_movements (movement_date, type, account, amount_pence, notes)
+      VALUES (?, ?, ?, ?, ?) RETURNING id
+    `).bind(m.movement_date, m.type, m.account, m.amount_pence, m.notes).first()
+    return c.json({ success: true, id: row.id })
+  } catch (e) {
+    console.error('[finance/owner-movements POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/owner-movements/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const m = parseOwnerMovementBody(await c.req.json().catch(() => ({})))
+    if (m.error) return c.json(m, 400)
+    const res = await c.env.DB.prepare(`
+      UPDATE owner_movements SET movement_date = ?, type = ?, account = ?, amount_pence = ?, notes = ? WHERE id = ?
+    `).bind(m.movement_date, m.type, m.account, m.amount_pence, m.notes, parseInt(c.req.param('id'), 10)).run()
+    if (!Number(res.meta?.changes ?? 0)) return c.json({ error: 'movement_not_found' }, 404)
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/owner-movements PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.delete('/admin/finance/owner-movements/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    await c.env.DB.prepare('DELETE FROM owner_movements WHERE id = ?').bind(parseInt(c.req.param('id'), 10)).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('[finance/owner-movements DELETE] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/pnl', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const from = parseLedgerDate(c.req.query('from'))
+    const to = parseLedgerDate(c.req.query('to'))
+    if (!from || !to) return c.json({ error: 'invalid_date_range' }, 400)
+    if (from > to) return c.json({ error: 'from_after_to' }, 400)
+    return c.json(await buildPnl(c.env.DB, from, to))
+  } catch (e) {
+    console.error('[finance/pnl] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/balance-sheet', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const asOf = parseLedgerDate(c.req.query('as_of')) || todayIso()
+    return c.json(await buildBalanceSheet(c.env.DB, asOf))
+  } catch (e) {
+    console.error('[finance/balance-sheet] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/settings', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    return c.json({ books_start_date: await getBooksStartDate(c.env.DB) })
+  } catch (e) {
+    console.error('[finance/settings] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/settings', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const body = await c.req.json().catch(() => ({}))
+    const start = parseLedgerDate(body.books_start_date)
+    if (!start) return c.json({ error: 'invalid_books_start_date' }, 400)
+    await c.env.DB.prepare(`
+      INSERT INTO finance_settings (key, value) VALUES ('books_start_date', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).bind(start).run()
+    return c.json({ success: true, books_start_date: start })
+  } catch (e) {
+    console.error('[finance/settings PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// One receipt (supplier, date, file) and the stock lines added to it.
+app.get('/admin/finance/import-sessions', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    return c.json({ sessions: await listImportSessions(c.env.DB) })
+  } catch (e) {
+    console.error('[finance/import-sessions] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/import-sessions', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const result = await createImportSession(c.env.DB, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[finance/import-sessions POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/import-sessions/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const result = await getImportSession(c.env.DB, id)
+    if (!result) return c.json({ error: 'session_not_found' }, 404)
+    return c.json(result)
+  } catch (e) {
+    console.error('[finance/import-sessions GET] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/import-sessions/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const result = await updateImportSession(c.env.DB, id, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    return c.json(result)
+  } catch (e) {
+    console.error('[finance/import-sessions PUT] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/import-sessions/:id/lines', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const result = await addImportLine(c.env.DB, id, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[finance/import-sessions lines POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.delete('/admin/finance/import-sessions/:id/lines/:lineId', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const lineId = parseInt(c.req.param('lineId'), 10)
+    const result = await removeImportLine(c.env.DB, id, lineId)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json(result)
+  } catch (e) {
+    console.error('[finance/import-sessions lines DELETE] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/receipts', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const { file, filename } = await c.req.json().catch(() => ({}))
+    const match = String(file || '').match(/^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/)
+    if (!match) return c.json({ error: 'invalid_file' }, 400)
+    const contentType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase()
+    const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' }
+    const ext = extensions[contentType]
+    if (!ext) return c.json({ error: 'unsupported_file' }, 415)
+    if (!c.env.IMAGES) return c.json({ error: 'storage_not_configured' }, 500)
+
+    const binary = atob(match[2].replace(/\s/g, ''))
+    if (binary.length > 8 * 1024 * 1024) return c.json({ error: 'file_too_large' }, 413)
+    const buffer = Uint8Array.from(binary, ch => ch.charCodeAt(0))
+    const safeName = String(filename || 'receipt').replace(/[^a-z0-9._-]+/gi, '-').slice(0, 40) || 'receipt'
+    const key = `receipts/${Date.now()}-${safeName}.${ext}`
+    await c.env.IMAGES.put(key, buffer, { httpMetadata: { contentType } })
+    const publicUrl = c.env.R2_PUBLIC_URL ? `${c.env.R2_PUBLIC_URL}/${key}` : `/r2-placeholder/${key}`
+    return c.json({ success: true, url: publicUrl, key })
+  } catch (e) {
+    console.error('[finance/receipts] ERROR:', e)
+    return c.json({ error: 'upload_failed' }, 500)
   }
 })
 
@@ -7547,6 +8232,8 @@ app.post('/events/:id/checkout', async c => {
     let creditAppliedPence = 0
     let cardDuePence = amountDuePence
     if (sessionUser && applyCreditRequested) {
+      await releaseAbandonedCreditReservations(c.env.DB, c.env, { userId: sessionUser.user_id, olderThanMinutes: 2, limit: 5 })
+        .catch(err => console.error('[events/checkout] credit release sweep failed:', err))
       const balance = await getStoreCreditBalance(c.env.DB, sessionUser.user_id)
       const split = computeCreditSplit(amountDuePence, balance, true)
       creditAppliedPence = split.creditAppliedPence
@@ -7607,13 +8294,18 @@ app.post('/events/:id/checkout', async c => {
     if (cardDuePence > 0) {
       let checkout
       try {
+        // redirectUrl recovers activation if the SumUp widget is unmounted mid-3DS
+        // (e.g. user switches email and starts a second checkout while the first charges).
         checkout = await createCheckout(c.env, {
           amount: cardDuePence / 100,
           currency,
           orderRef: order_ref,
           title: ev.event_name,
           description: `Ticket for ${ev.event_name}` + (creditAppliedPence > 0 ? ` (store credit £${(creditAppliedPence / 100).toFixed(2)})` : ''),
-          redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`
+          redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`,
+          // Webhooks are only enabled for flows whose activation is race-safe against the
+          // browser confirm. Membership/bundle activation charges a saved card and is not.
+          webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
         })
       } catch (e) {
         console.error('SumUp checkout failed for event', evId, e)
@@ -7637,17 +8329,16 @@ app.post('/events/:id/checkout', async c => {
     await handleEmailPreferencesOptIn(c.env.DB, ident.id, marketingConsent)
 
     if (creditAppliedPence > 0) {
-      const debit = await debitStoreCreditForPurchase(c.env.DB, {
+      const debit = await settleTicketCredit(c.env.DB, {
         userId: ident.id,
-        creditAppliedPence,
-        entryType: 'event_spend',
-        referenceType: 'ticket',
-        referenceId: String(ticketId),
-        idempotencyKey: `event_spend:${order_ref}`,
-        note: `Event ticket ${order_ref}`,
-        nowIso: toIso(new Date())
+        ticketId,
+        orderRef: order_ref,
+        targetPence: creditAppliedPence
       })
       if (!debit.ok) {
+        await c.env.DB.prepare(
+          `UPDATE transactions SET payment_status = 'FAILED', updated_at = ? WHERE order_ref = ?`
+        ).bind(toIso(new Date()), order_ref).run()
         return c.json({ error: 'insufficient_credit', message: 'Store credit could not be applied.' }, 409)
       }
     }
@@ -8150,7 +8841,6 @@ function generateProductSeoPage(product, allCategories) {
     'image': productImages.length ? (productImages.length === 1 ? productImages[0] : productImages) : img,
     'url': url,
     'sku': slug,
-    'brand': { '@type': 'Brand', 'name': 'Dice Bastion' },
     'category': primaryCategory,
     'offers': {
       '@type': 'Offer',
@@ -8286,6 +8976,16 @@ ${bodyHtml ? `<div class="desc">${bodyHtml}</div>` : `<div class="desc">${e(plai
 </body></html>`;
 }
 
+// Admin intro is plain text; a blank line starts a new paragraph.
+function introParagraphsHtml(intro) {
+  return String(intro || '')
+    .split(/\n\s*\n/)
+    .map((para) => para.trim())
+    .filter(Boolean)
+    .map((para) => `<p class="cat-intro">${escapeHtml(para)}</p>`)
+    .join('\n')
+}
+
 // ---------- Product Category SEO Page ----------
 function generateCategorySeoPage(categoryName, products, seoMeta) {
   const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
@@ -8367,6 +9067,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .cat-heading{max-width:900px;width:100%;margin:1rem auto;padding:0 1rem}
 .cat-heading h1{font-size:2rem;color:#fff}
 .cat-heading p{color:#808090;margin-top:.25rem}
+.cat-heading .cat-intro{color:#c0c0d0;line-height:1.6;margin-top:.75rem;max-width:70ch}
 .cat-hero{max-width:900px;width:100%;margin:0 auto 0.5rem;padding:0 1rem}
 .cat-hero img{width:100%;max-height:360px;object-fit:cover;border-radius:12px;border:1px solid #2a2a4a;display:block}
 .cta{display:inline-block;margin-top:1rem;padding:.65rem 1.5rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600}
@@ -8387,6 +9088,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 ${ogImage ? `<div class="cat-hero"><img src="${e(ogImage)}" alt="${previewAlt}"></div>` : ''}
 <div class="cat-heading">
 <h1>${catDisplay}</h1>
+${introParagraphsHtml(seoMeta?.intro)}
 <p>${products.length} product${products.length !== 1 ? 's' : ''}</p>
 <a class="cta" href="${url}">Open category in shop</a>
 </div>
@@ -8731,7 +9433,7 @@ async function ensureProductCategoriesSchema(db) {
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     )
   `).run()
-  for (const col of ['seo_title', 'seo_description', 'seo_image']) {
+  for (const col of ['seo_title', 'seo_description', 'seo_image', 'intro']) {
     try {
       await db.prepare(`ALTER TABLE product_categories ADD COLUMN ${col} TEXT`).run()
     } catch (_) {
@@ -8801,7 +9503,7 @@ async function canonicalizeStoredProductCategories(db) {
 
   await ensureProductCategoriesSchema(db)
   const metaRows = await db.prepare(`
-    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image
+    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image, intro
     FROM product_categories
   `).all()
   const groups = new Map()
@@ -8827,6 +9529,7 @@ async function canonicalizeStoredProductCategories(db) {
     const seoTitle = rows.map((r) => String(r.seo_title || '').trim()).find(Boolean) || null
     const seoDescription = rows.map((r) => String(r.seo_description || '').trim()).find(Boolean) || null
     const seoImage = rows.map((r) => String(r.seo_image || '').trim()).find(Boolean) || null
+    const intro = rows.map((r) => String(r.intro || '').trim()).find(Boolean) || null
 
     const needsUpdate =
       keep.name !== canon ||
@@ -8836,7 +9539,8 @@ async function canonicalizeStoredProductCategories(db) {
       String(keep.keywords || '') !== String(keywords || '') ||
       String(keep.seo_title || '') !== String(seoTitle || '') ||
       String(keep.seo_description || '') !== String(seoDescription || '') ||
-      String(keep.seo_image || '') !== String(seoImage || '')
+      String(keep.seo_image || '') !== String(seoImage || '') ||
+      String(keep.intro || '') !== String(intro || '')
 
     for (const other of others) {
       metaStmts.push(db.prepare('DELETE FROM product_categories WHERE id = ?').bind(other.id))
@@ -8845,7 +9549,7 @@ async function canonicalizeStoredProductCategories(db) {
       metaStmts.push(
         db.prepare(`
           UPDATE product_categories
-          SET name = ?, featured = ?, sort_order = ?, keywords = ?, seo_title = ?, seo_description = ?, seo_image = ?, updated_at = ?
+          SET name = ?, featured = ?, sort_order = ?, keywords = ?, seo_title = ?, seo_description = ?, seo_image = ?, intro = ?, updated_at = ?
           WHERE id = ?
         `).bind(
           canon,
@@ -8855,6 +9559,7 @@ async function canonicalizeStoredProductCategories(db) {
           seoTitle,
           seoDescription,
           seoImage,
+          intro,
           now,
           keep.id
         )
@@ -8903,7 +9608,7 @@ async function listProductCategoryMeta(db) {
   `).all()
   const counts = collectProductCategoryNames(products.results || [])
   const metaRows = await db.prepare(`
-    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image, created_at, updated_at
+    SELECT id, name, featured, sort_order, keywords, seo_title, seo_description, seo_image, intro, created_at, updated_at
     FROM product_categories
     ORDER BY featured DESC, sort_order ASC, name COLLATE NOCASE ASC
   `).all()
@@ -8932,6 +9637,7 @@ async function listProductCategoryMeta(db) {
       seo_title: meta?.seo_title || '',
       seo_description: meta?.seo_description || '',
       seo_image: meta?.seo_image || '',
+      intro: meta?.intro || '',
       id: meta?.id || null
     }
   }).sort((a, b) => {
@@ -8955,7 +9661,7 @@ app.get('/product-categories', async (c) => {
     return c.json({
       categories: categories
         .filter((row) => !isDrinksCategoryName(row.name))
-        .map(({ name, featured, sort_order, keywords, product_count, seo_title, seo_description, seo_image }) => ({
+        .map(({ name, featured, sort_order, keywords, product_count, seo_title, seo_description, seo_image, intro }) => ({
         name,
         featured,
         sort_order,
@@ -8963,7 +9669,8 @@ app.get('/product-categories', async (c) => {
         product_count,
         seo_title,
         seo_description,
-        seo_image
+        seo_image,
+        intro
       }))
     })
   } catch (e) {
@@ -8999,6 +9706,7 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
     const seoImage = seoImageRaw
       ? (ensureAbsoluteImageUrl(seoImageRaw, 'https://shop.dicebastion.com') || null)
       : null
+    const intro = clampSeoText(body.intro, 2000) || null
     const now = toIso(new Date())
     invalidateProductCategoryMetaCache()
 
@@ -9010,8 +9718,8 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
     }
 
     await c.env.DB.prepare(`
-      INSERT INTO product_categories (name, featured, sort_order, keywords, seo_title, seo_description, seo_image, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO product_categories (name, featured, sort_order, keywords, seo_title, seo_description, seo_image, intro, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(name) DO UPDATE SET
         featured = excluded.featured,
         sort_order = excluded.sort_order,
@@ -9019,8 +9727,9 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
         seo_title = excluded.seo_title,
         seo_description = excluded.seo_description,
         seo_image = excluded.seo_image,
+        intro = excluded.intro,
         updated_at = excluded.updated_at
-    `).bind(name, featured, sortOrder, keywords || null, seoTitle, seoDescription, seoImage, now, now).run()
+    `).bind(name, featured, sortOrder, keywords || null, seoTitle, seoDescription, seoImage, intro, now, now).run()
 
     const categoryUrl = getShopCategoryUrl(name)
     if (categoryUrl) {
@@ -9329,10 +10038,18 @@ function uniqueConstraintError(e) {
 app.get('/admin/products', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
+    await ensureLedgerSchema(c.env.DB)
     const products = await c.env.DB.prepare(`
-      SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, created_at, ean, catalog_status, import_batch_id
-      FROM products
-      ORDER BY name ASC
+      SELECT p.id, p.name, p.slug, p.description, p.summary, p.full_description, p.price, p.currency, p.stock_quantity, p.image_url, p.category, p.is_active, p.release_date, p.created_at, p.ean, p.catalog_status, p.import_batch_id,
+             IFNULL(p.cost_tracked, 0) AS cost_tracked,
+             COALESCE(lots.stock_value_pence, 0) AS stock_value_pence
+      FROM products p
+      LEFT JOIN (
+        SELECT product_id, SUM(quantity_remaining * unit_cost_pence) AS stock_value_pence
+        FROM stock_lots
+        GROUP BY product_id
+      ) lots ON lots.product_id = p.id
+      ORDER BY p.name ASC
     `).all()
     return c.json((products.results || []).map(withNormalizedProductCategory))
   } catch (e) {
@@ -9345,11 +10062,21 @@ app.get('/admin/products', requireAdmin, async (c) => {
 app.post('/admin/products', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
+    await ensureLedgerSchema(c.env.DB)
     const body = await c.req.json()
     const {
       name, slug, description, summary, full_description, price, currency,
       stock_quantity, image_url, category, release_date, import_batch_id, ean: rawEan
     } = body
+    const openingCost = body.opening_stock && body.opening_stock.unit_cost_pence != null && body.opening_stock.unit_cost_pence !== ''
+      ? body.opening_stock
+      : null
+    if (openingCost && parsePence(openingCost.unit_cost_pence) == null) {
+      return c.json({ error: 'invalid_unit_cost' }, 400)
+    }
+    if (openingCost && !String(openingCost.supplier || '').trim()) {
+      return c.json({ error: 'missing_supplier' }, 400)
+    }
 
     if (!name || !slug || price === undefined) {
       return c.json({ error: 'missing_required_fields' }, 400)
@@ -9412,7 +10139,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
         restoredFull || null,
         price,
         currency || existing.currency || 'GBP',
-        stock_quantity || 0,
+        Number(existing.cost_tracked) ? (Number(existing.stock_quantity) || 0) : (stock_quantity || 0),
         restoredImage,
         restoredCategory,
         release_date || null,
@@ -9456,7 +10183,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
       full_description || null,
       price,
       currency || 'GBP',
-      stock_quantity || 0,
+      openingCost ? 0 : (stock_quantity || 0),
       image_url || null,
       incomingCategory,
       release_date || null,
@@ -9465,6 +10192,19 @@ app.post('/admin/products', requireAdmin, async (c) => {
       now,
       now
     ).run()
+
+    const newProductId = result.meta.last_row_id
+    let openingStock = null
+    if (openingCost && Number(stock_quantity) > 0) {
+      openingStock = await receiveStock(c.env.DB, {
+        ...openingCost,
+        product_id: newProductId,
+        quantity: stock_quantity
+      })
+      if (openingStock.error) {
+        console.error('Opening stock batch failed:', openingStock.error, newProductId)
+      }
+    }
 
     if (Number.isFinite(batchId)) await refreshImportBatchProductCount(c.env.DB, batchId)
 
@@ -9476,7 +10216,12 @@ app.post('/admin/products', requireAdmin, async (c) => {
     invalidateProductCategoryMetaCache()
     scheduleCategoryCanonicalize(c)
 
-    return c.json({ success: true, action: 'created', product_id: result.meta.last_row_id })
+    return c.json({
+      success: true,
+      action: 'created',
+      product_id: newProductId,
+      ...(openingStock ? { opening_stock: openingStock } : {})
+    })
   } catch (e) {
     console.error('Create product error:', e)
     const uniqueErr = uniqueConstraintError(e)
@@ -9491,9 +10236,14 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
   try {
     await ensureProductImportSchema(c.env.DB)
     const id = c.req.param('id')
-    const { name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date, ean } = await c.req.json()
-    const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url FROM products WHERE id = ?')
+    await ensureLedgerSchema(c.env.DB)
+    const body = await c.req.json()
+    const { name, slug, description, summary, full_description, price, currency, image_url, category, is_active, release_date, ean } = body
+    let { stock_quantity } = body
+    const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url, cost_tracked FROM products WHERE id = ?')
       .bind(id).first()
+    // Tracked stock only changes through Receive stock / Write off so batches stay in step.
+    if (Number(previousProduct?.cost_tracked)) stock_quantity = undefined
     
     const updates = []
     const binds = []
@@ -9670,23 +10420,281 @@ app.post('/admin/images', requireAdmin, async (c) => {
   }
 })
 
-// Get all orders (admin only)
-app.get('/admin/orders', async (c) => {
+// Shop orders only (excludes /drinks walk-ins). Default: undelivered.
+app.get('/admin/orders', requireAdmin, async (c) => {
   try {
-    const adminKey = c.req.header('X-Admin-Key')
-    if (adminKey !== c.env.ADMIN_KEY) {
-      return c.json({ error: 'unauthorized' }, 401)
+    const limitRaw = parseInt(c.req.query('limit') || '50', 10)
+    const limit = Math.min(200, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50))
+    const includeDelivered = ['1', 'true', 'yes'].includes(String(c.req.query('include_delivered') || '').toLowerCase())
+    const deliveryFilter = includeDelivered
+      ? ''
+      : `AND LOWER(COALESCE(delivery_status, 'undelivered')) = 'undelivered'`
+
+    // Exclude /drinks walk-ins (Walk-in + not POS). Include online shop + admin POS.
+    const shopOnlySql = `
+      NOT (
+        (o.name = 'Walk-in' OR lower(o.email) = 'walk-in')
+        AND IFNULL(o.sale_channel, '') != 'pos'
+      )
+    `
+
+    const ordersResult = await c.env.DB.prepare(`
+      SELECT o.id, o.order_number, o.email, o.name, o.status, o.subtotal, o.tax, o.shipping, o.total, o.currency,
+             o.payment_status, o.payment_method, o.sale_channel, o.discount_pence, o.promo_code_applied,
+             o.notes, o.created_at, o.updated_at, o.completed_at,
+             COALESCE(o.delivery_status, 'undelivered') AS delivery_status
+      FROM orders o
+      WHERE ${shopOnlySql}
+        ${deliveryFilter}
+      ORDER BY datetime(COALESCE(o.completed_at, o.created_at)) DESC
+      LIMIT ?
+    `).bind(limit).all()
+    const orders = ordersResult.results || []
+    if (!orders.length) {
+      return c.json({ orders: [], include_delivered: includeDelivered })
     }
-    
-    const orders = await c.env.DB.prepare(`
-      SELECT * FROM orders 
-      ORDER BY created_at DESC
-    `).all()
-    
-    return c.json({ orders: orders.results || [] })
+
+    const ids = orders.map(o => o.id)
+    const placeholders = ids.map(() => '?').join(',')
+    const itemsResult = await c.env.DB.prepare(`
+      SELECT order_id, product_id, product_name, quantity, unit_price, subtotal
+      FROM order_items
+      WHERE order_id IN (${placeholders})
+      ORDER BY id ASC
+    `).bind(...ids).all()
+    const byOrder = new Map()
+    for (const item of itemsResult.results || []) {
+      const list = byOrder.get(item.order_id) || []
+      list.push(item)
+      byOrder.set(item.order_id, list)
+    }
+
+    return c.json({
+      include_delivered: includeDelivered,
+      orders: orders.map(o => ({
+        ...o,
+        items: byOrder.get(o.id) || []
+      }))
+    })
   } catch (e) {
     console.error('Get orders error:', e)
     return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/** Mark a shop order as delivered (or undelivered). */
+app.post('/admin/orders/:id/delivery-status', requireAdmin, async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    if (!id) return c.json({ error: 'invalid_id' }, 400)
+    const body = await c.req.json().catch(() => ({}))
+    const status = String(body.delivery_status || body.status || 'delivered').toLowerCase().trim()
+    if (status !== 'delivered' && status !== 'undelivered') {
+      return c.json({ error: 'invalid_delivery_status' }, 400)
+    }
+
+    const order = await c.env.DB.prepare('SELECT id, sale_channel, name, email FROM orders WHERE id = ?').bind(id).first()
+    if (!order) return c.json({ error: 'not_found' }, 404)
+    const isDrinks =
+      (order.name === 'Walk-in' || String(order.email || '').toLowerCase() === 'walk-in') &&
+      String(order.sale_channel || '') !== 'pos'
+    if (isDrinks) {
+      return c.json({ error: 'not_shop_order', message: 'Drinks orders are not managed here' }, 400)
+    }
+
+    const now = toIso(new Date())
+    await c.env.DB.prepare(`
+      UPDATE orders SET delivery_status = ?, updated_at = ? WHERE id = ?
+    `).bind(status, now, id).run()
+
+    const updated = await c.env.DB.prepare(`
+      SELECT id, order_number, delivery_status, updated_at FROM orders WHERE id = ?
+    `).bind(id).first()
+    return c.json({ success: true, order: updated })
+  } catch (e) {
+    console.error('[admin/orders/delivery-status] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * Record an in-person shop sale (cash or bank transfer).
+ * POST /admin/shop/pos-sale
+ */
+app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
+  try {
+    const body = await c.req.json()
+    const paymentMethod = String(body.payment_method || '').toLowerCase().trim()
+    if (paymentMethod !== 'cash' && paymentMethod !== 'bank_transfer') {
+      return c.json({ error: 'invalid_payment_method', message: 'payment_method must be cash or bank_transfer' }, 400)
+    }
+    const rawItems = Array.isArray(body.items) ? body.items : []
+    if (!rawItems.length) {
+      return c.json({ error: 'no_items', message: 'Add at least one product line' }, 400)
+    }
+
+    const now = toIso(new Date())
+    const name = clampStr(body.name || '', 200) || 'Walk-in'
+    const email = clampStr(String(body.email || '').trim().toLowerCase() || 'walk-in', 320)
+    const notes = body.notes ? clampStr(String(body.notes), 1000) : null
+
+    const lineSpecs = []
+    for (const raw of rawItems) {
+      const productId = parseInt(raw.product_id ?? raw.id, 10)
+      const quantity = parseInt(raw.quantity ?? raw.qty, 10)
+      if (!productId || productId <= 0) {
+        return c.json({ error: 'invalid_product_id' }, 400)
+      }
+      if (!quantity || quantity <= 0 || quantity > 999) {
+        return c.json({ error: 'invalid_quantity', product_id: productId }, 400)
+      }
+      let unitOverride = null
+      if (raw.unit_price_pence != null && raw.unit_price_pence !== '') {
+        unitOverride = parseInt(raw.unit_price_pence, 10)
+        if (!Number.isFinite(unitOverride) || unitOverride < 0) {
+          return c.json({ error: 'invalid_unit_price', product_id: productId }, 400)
+        }
+      }
+      lineSpecs.push({ productId, quantity, unitOverride })
+    }
+
+    const ids = [...new Set(lineSpecs.map(l => l.productId))]
+    const { results: products } = await c.env.DB.prepare(
+      `SELECT id, name, price, currency, stock_quantity, is_active, catalog_status
+       FROM products WHERE id IN (${ids.map(() => '?').join(',')})`
+    ).bind(...ids).all()
+    const productMap = new Map((products || []).map(p => [p.id, p]))
+
+    const orderItemsPayload = []
+    let catalogueSubtotal = 0
+    let chargedSubtotal = 0
+    let currency = 'GBP'
+
+    for (const spec of lineSpecs) {
+      const product = productMap.get(spec.productId)
+      if (!product) {
+        return c.json({ error: 'product_not_found', product_id: spec.productId }, 404)
+      }
+      if (!Number(product.is_active) || (product.catalog_status || 'listed') === 'archived') {
+        return c.json({ error: 'product_unavailable', product_id: spec.productId, message: product.name }, 400)
+      }
+      const stock = Number(product.stock_quantity) || 0
+      if (stock < spec.quantity) {
+        return c.json({
+          error: 'insufficient_stock',
+          product_id: spec.productId,
+          message: `${product.name}: only ${stock} in stock`,
+          stock
+        }, 400)
+      }
+      const cataloguePrice = Number(product.price) || 0
+      const unitPrice = spec.unitOverride != null ? spec.unitOverride : cataloguePrice
+      const lineSubtotal = unitPrice * spec.quantity
+      catalogueSubtotal += cataloguePrice * spec.quantity
+      chargedSubtotal += lineSubtotal
+      currency = product.currency || currency
+      orderItemsPayload.push({
+        product_id: product.id,
+        product_name: product.name,
+        quantity: spec.quantity,
+        unit_price: unitPrice,
+        subtotal: lineSubtotal
+      })
+    }
+
+    const discountPence = Math.max(0, catalogueSubtotal - chargedSubtotal)
+    const orderNumber = `ORD-${crypto.randomUUID()}`
+
+    const insertOrder = await c.env.DB.prepare(`
+      INSERT INTO orders (
+        order_number, email, name, status,
+        subtotal, tax, shipping, total, currency,
+        payment_status, payment_method, sale_channel,
+        notes, discount_pence, delivery_status,
+        created_at, updated_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      orderNumber,
+      email,
+      name,
+      'completed',
+      chargedSubtotal,
+      0,
+      0,
+      chargedSubtotal,
+      currency,
+      'PAID',
+      paymentMethod,
+      'pos',
+      notes,
+      discountPence,
+      'undelivered',
+      now,
+      now,
+      now
+    ).run()
+
+    const orderId = insertOrder.meta?.last_row_id
+    if (!orderId) {
+      return c.json({ error: 'order_creation_failed' }, 500)
+    }
+
+    const batchStatements = orderItemsPayload.map(r =>
+      c.env.DB.prepare(`
+        INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(orderId, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal)
+    )
+    if (batchStatements.length) await c.env.DB.batch(batchStatements)
+
+    const stock = await decrementOrderStock(c.env.DB, orderId, now)
+    if (!stock.ok) {
+      // Sale already committed; surface failure so admin can reconcile stock manually
+      console.error('[pos-sale] stock decrement failed', stock.failedProductId, orderNumber)
+      return c.json({
+        error: 'stock_update_failed',
+        message: 'Order was recorded but stock could not be fully updated. Check inventory.',
+        order_number: orderNumber,
+        order_id: orderId,
+        failed_product_id: stock.failedProductId
+      }, 409)
+    }
+
+    try {
+      const adminContent = getAdminNotificationEmail('shop_order', {
+        orderNumber,
+        customerName: name,
+        customerEmail: email,
+        total: chargedSubtotal / 100,
+        discountPence,
+        promoCodeApplied: '',
+        deliveryMethod: `POS (${paymentMethod === 'bank_transfer' ? 'bank transfer' : 'cash'})`,
+        orderNotes: notes || '',
+        shippingPlain: '',
+        items: orderItemsPayload
+      })
+      await sendEmail(c.env, {
+        to: 'admin@dicebastion.com',
+        ...adminContent,
+        emailType: 'admin_shop_pos_sale',
+        relatedId: orderId,
+        relatedType: 'order',
+        metadata: { order_number: orderNumber, payment_method: paymentMethod }
+      })
+    } catch (adminErr) {
+      console.error('[pos-sale] Admin notification failed:', adminErr)
+    }
+
+    const order = await c.env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
+    return c.json({
+      success: true,
+      order_number: orderNumber,
+      order,
+      items: orderItemsPayload
+    })
+  } catch (e) {
+    console.error('[admin/shop/pos-sale] Error:', e)
+    return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
   }
 })
 
@@ -11876,6 +12884,82 @@ app.get('/donations/wall', async c => {
   }
 })
 
+/** Mark a donation paid and send the donor and admin emails once. */
+async function completePaidDonation(env, donation, paymentId, payment) {
+  const nowIso = toIso(new Date())
+  const updateResult = await env.DB.prepare(`
+    UPDATE donations
+    SET payment_status = 'PAID', payment_id = COALESCE(?, payment_id), updated_at = ?
+    WHERE id = ? AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(paymentId || null, nowIso, donation.id).run()
+  const changed = Number(updateResult.meta?.changes ?? 0)
+
+  await env.DB.prepare(`
+    UPDATE transactions
+    SET payment_status = 'PAID', payment_id = COALESCE(?, payment_id), updated_at = ?
+    WHERE order_ref = ? AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(paymentId || null, nowIso, donation.order_ref).run()
+
+  if (payment) {
+    try {
+      await updateTransactionPaymentMeta(env.DB, { orderRef: donation.order_ref, payment })
+    } catch (metaErr) {
+      console.error('[donations] transaction code not stored:', metaErr)
+    }
+  }
+
+  if (!changed) return { alreadyCompleted: true }
+
+  const orderRef = donation.order_ref
+  try {
+    await sendEmail(env, {
+      to: 'admin@dicebastion.com',
+      subject: `New Donation: £${donation.amount} - Dice Bastion and the Gibraltar Warhammer Club`,
+      html: `<h2>New Donation Received!</h2>
+             <p><strong>Amount:</strong> £${donation.amount}</p>
+             <p><strong>Donor:</strong> ${donation.donor_name || 'Anonymous'}</p>
+             <p><strong>Email:</strong> ${donation.donor_email || 'Not provided'}</p>
+             <p><strong>Message:</strong> ${donation.message || 'No message'}</p>
+             <p><strong>Order Ref:</strong> ${orderRef}</p>`,
+      text: `New Donation: £${donation.amount} from ${donation.donor_name || 'Anonymous'}`,
+      emailType: 'admin_donation_notification',
+      relatedId: donation.id,
+      relatedType: 'donation'
+    })
+  } catch (emailError) {
+    console.error('[donations] Failed to send admin notification:', emailError)
+  }
+
+  if (donation.donor_email) {
+    try {
+      const donorDisplayName = donation.donor_name || 'there'
+      await sendEmail(env, {
+        to: donation.donor_email,
+        subject: 'Thank you for your donation to Dice Bastion and the Gibraltar Warhammer Club',
+        html: `<h2>Thank you for your generosity, ${donorDisplayName}!</h2>
+               <p>We've received your donation of <strong>&pound;${donation.amount}</strong> to Dice Bastion and the Gibraltar Warhammer Club.</p>
+               <p>Your support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.</p>
+               <p><strong>Donation details:</strong></p>
+               <ul>
+                 <li>Amount: &pound;${donation.amount}</li>
+                 <li>Purpose: club improvements (Aircon &amp; venue fund)</li>
+                 <li>Reference: ${orderRef}</li>
+               </ul>
+               <p>If you have any questions, feel free to get in touch at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
+               <p>Thanks again,<br>Dice Bastion and the Gibraltar Warhammer Club</p>`,
+        text: `Thank you for your generosity, ${donorDisplayName}!\n\nWe've received your donation of £${donation.amount} to Dice Bastion and the Gibraltar Warhammer Club.\n\nYour support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.\n\nDonation details:\n- Amount: £${donation.amount}\n- Purpose: club improvements (Aircon & venue fund)\n- Reference: ${orderRef}\n\nIf you have any questions, feel free to get in touch at admin@dicebastion.com.\n\nThanks again,\nDice Bastion and the Gibraltar Warhammer Club`,
+        emailType: 'donation_thank_you',
+        relatedId: donation.id,
+        relatedType: 'donation'
+      })
+    } catch (emailError) {
+      console.error('[donations] Failed to send donor thank-you email:', emailError)
+    }
+  }
+
+  return { alreadyCompleted: false }
+}
+
 /**
  * Create a donation checkout
  * POST /donations/checkout
@@ -11940,7 +13024,11 @@ app.post('/donations/checkout', async c => {
         currency,
         orderRef: order_ref,
         title: 'Dice Bastion and the Gibraltar Warhammer Club donation',
-        description: `Donation of £${donationAmount.toFixed(2)} to Dice Bastion and the Gibraltar Warhammer Club (club improvements fund)`
+        description: `Donation of £${donationAmount.toFixed(2)} to Dice Bastion and the Gibraltar Warhammer Club (club improvements fund)`,
+        // 3DS sends the donor back here. Without redirect_url the card widget
+        // reports a failure while the bank challenge is still unfinished.
+        redirectUrl: `${siteUrl(c.env)}/donations/?orderRef=${encodeURIComponent(order_ref)}`,
+        webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
       })
     } catch (e) {
       console.error('[donations/checkout] SumUp checkout failed:', e)
@@ -12033,76 +13121,27 @@ app.get('/donations/confirm', async c => {
     }
 
     if (!isCheckoutPaid(payment)) {
-      const currentStatus = payment?.status || 'PENDING'
-      const txStatuses = payment?.transactions?.map(t => t.status) || []
-      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
-      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+      // One failed card attempt must not abort the checkout while bank verification is still pending.
+      if (isCheckoutFailed(payment)) {
+        const status = String(payment?.status || '').toUpperCase()
+        const declined = status === 'DECLINED'
+        return c.json({
+          ok: false,
+          status: declined ? 'DECLINED' : 'FAILED',
+          message: declined
+            ? 'Your card was declined. Please try a different payment method.'
+            : 'Payment failed. Please try again.'
+        })
+      }
       return c.json({
         ok: false,
-        status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
-        message: hasFailed ? 'Payment failed. Please try again.' :
-                 hasDeclined ? 'Your card was declined. Please try a different payment method.' :
-                 'Payment is still processing.'
+        status: payment?.status || 'PENDING',
+        message: 'Payment is still processing.'
       })
     }
 
     console.log('[donations/confirm] Payment verified as paid (top-level or transactions[])')
-
-    // Update donation and transaction records
-    await c.env.DB.batch([
-      c.env.DB.prepare('UPDATE donations SET payment_status = ?, payment_id = ?, updated_at = ? WHERE id = ?')
-        .bind('PAID', payment.id, toIso(new Date()), donation.id),
-      c.env.DB.prepare('UPDATE transactions SET payment_status = ?, payment_id = ?, updated_at = ? WHERE order_ref = ?')
-        .bind('PAID', payment.id, toIso(new Date()), orderRef)
-    ])
-
-    // Send admin notification
-    try {
-      await sendEmail(c.env, {
-        to: 'admin@dicebastion.com',
-        subject: `💰 New Donation: £${donation.amount} - Dice Bastion and the Gibraltar Warhammer Club`,
-        html: `<h2>New Donation Received!</h2>
-               <p><strong>Amount:</strong> £${donation.amount}</p>
-               <p><strong>Donor:</strong> ${donation.donor_name || 'Anonymous'}</p>
-               <p><strong>Email:</strong> ${donation.donor_email || 'Not provided'}</p>
-               <p><strong>Message:</strong> ${donation.message || 'No message'}</p>
-               <p><strong>Order Ref:</strong> ${orderRef}</p>`,
-        text: `New Donation: £${donation.amount} from ${donation.donor_name || 'Anonymous'}`,
-        emailType: 'admin_donation_notification',
-        relatedId: donation.id,
-        relatedType: 'donation'
-      })
-    } catch (emailError) {
-      console.error('[donations/confirm] Failed to send admin notification:', emailError)
-    }
-
-    // Send thank-you email to the donor (only if they provided an email)
-    if (donation.donor_email) {
-      try {
-        const donorDisplayName = donation.donor_name || 'there'
-        await sendEmail(c.env, {
-          to: donation.donor_email,
-          subject: `Thank you for your donation to Dice Bastion and the Gibraltar Warhammer Club`,
-          html: `<h2>Thank you for your generosity, ${donorDisplayName}!</h2>
-                 <p>We've received your donation of <strong>&pound;${donation.amount}</strong> to Dice Bastion and the Gibraltar Warhammer Club.</p>
-                 <p>Your support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.</p>
-                 <p><strong>Donation details:</strong></p>
-                 <ul>
-                   <li>Amount: &pound;${donation.amount}</li>
-                   <li>Purpose: club improvements (Aircon &amp; venue fund)</li>
-                   <li>Reference: ${orderRef}</li>
-                 </ul>
-                 <p>If you have any questions, feel free to get in touch at <a href="mailto:admin@dicebastion.com">admin@dicebastion.com</a>.</p>
-                 <p>Thanks again,<br>Dice Bastion and the Gibraltar Warhammer Club</p>`,
-          text: `Thank you for your generosity, ${donorDisplayName}!\n\nWe've received your donation of £${donation.amount} to Dice Bastion and the Gibraltar Warhammer Club.\n\nYour support helps us improve the club and keep a welcoming space for tabletop gaming in Gibraltar.\n\nDonation details:\n- Amount: £${donation.amount}\n- Purpose: club improvements (Aircon & venue fund)\n- Reference: ${orderRef}\n\nIf you have any questions, feel free to get in touch at admin@dicebastion.com.\n\nThanks again,\nDice Bastion and the Gibraltar Warhammer Club`,
-          emailType: 'donation_thank_you',
-          relatedId: donation.id,
-          relatedType: 'donation'
-        })
-      } catch (emailError) {
-        console.error('[donations/confirm] Failed to send donor thank-you email:', emailError)
-      }
-    }
+    await completePaidDonation(c.env, donation, payment.id, payment)
 
     return c.json({
       ok: true,
@@ -12241,25 +13280,155 @@ function buildShopBuyerEmail(order, items) {
   }
 }
 
+/**
+ * Decrement product stock for all lines on an order.
+ * Returns { ok, failedProductId } — fails if any line cannot be fulfilled.
+ */
+async function decrementOrderStock(db, orderId, nowIso = toIso(new Date())) {
+  const itemsQuery = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(orderId).all()
+  const itemRows = itemsQuery.results || []
+  for (const item of itemRows) {
+    const q = Number(item.quantity) || 0
+    if (q <= 0) continue
+    const updateResult = await db.prepare(`
+      UPDATE products
+      SET stock_quantity = stock_quantity - ?,
+          updated_at = ?
+      WHERE id = ? AND stock_quantity >= ?
+    `).bind(q, nowIso, item.product_id, q).run()
+    if (!Number(updateResult.meta?.changes ?? 0)) {
+      return { ok: false, failedProductId: item.product_id }
+    }
+  }
+  try {
+    await recordOrderCosts(db, orderId, nowIso)
+  } catch (e) {
+    console.error('[ledger] cost of goods sold not recorded for order', orderId, e)
+  }
+  return { ok: true, failedProductId: null }
+}
+
+/** Mark a /drinks walk-in paid. No shop email: the address is the placeholder "walk-in". */
+async function completePaidDrinksOrder(db, orderRow, paymentId) {
+  const nowIso = toIso(new Date())
+  const updateResult = await db.prepare(`
+    UPDATE orders
+    SET status = 'completed',
+        payment_status = 'PAID',
+        payment_id = COALESCE(?, payment_id),
+        payment_method = COALESCE(payment_method, 'sumup'),
+        updated_at = ?
+    WHERE id = ?
+      AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(paymentId || null, nowIso, orderRow.id).run()
+  return { alreadyCompleted: !Number(updateResult.meta?.changes ?? 0) }
+}
+
+/**
+ * Release store credit held by checkouts that were never paid. A checkout found paid on
+ * SumUp is completed instead; one with a card attempt still in flight (3DS) is left alone.
+ * A late payment on a released checkout re-debits through the normal completion path.
+ *
+ * @param {{ userId?: number|null, olderThanMinutes: number, limit?: number }} opts
+ */
+async function releaseAbandonedCreditReservations(db, env, { userId = null, olderThanMinutes, limit = 25 }) {
+  const cutoff = `-${Math.max(0, Math.floor(olderThanMinutes))} minutes`
+  const userClause = userId ? 'AND user_id = ?' : ''
+  const userArgs = userId ? [userId] : []
+  const inFlight = pmt => (pmt?.transactions || []).some(t => String(t?.status || '').toUpperCase() === 'PENDING')
+  const summary = { orders_released: 0, orders_completed: 0, tickets_released: 0, tickets_completed: 0 }
+
+  const { results: orders } = await db.prepare(`
+    SELECT * FROM orders
+    WHERE credit_applied_pence > 0 AND user_id IS NOT NULL
+      AND IFNULL(status, '') NOT IN ('completed', 'cancelled')
+      AND julianday(created_at) < julianday('now', ?)
+      ${userClause}
+    ORDER BY id LIMIT ?
+  `).bind(cutoff, ...userArgs, limit).all()
+
+  for (const order of orders || []) {
+    try {
+      let pmt = null
+      if (order.checkout_id) {
+        pmt = await fetchPayment(env, order.checkout_id)
+        if (isCheckoutPaid(pmt)) {
+          await completePaidShopOrder(db, env, order, pmt.id || pmt.payment_id || order.payment_id)
+          summary.orders_completed++
+          continue
+        }
+        if (inFlight(pmt)) continue
+      } else {
+        const outcome = await completePaidShopOrder(db, env, order, `CREDIT-${order.order_number}`)
+        if (!outcome?.creditError) {
+          summary.orders_completed++
+          continue
+        }
+      }
+      const released = await settleShopOrderCredit(db, { userId: order.user_id, orderNumber: order.order_number, targetPence: 0 })
+      if (!released.ok) continue
+      await db.prepare(`
+        UPDATE orders SET status = 'cancelled', payment_status = 'failed', updated_at = ?
+        WHERE id = ? AND IFNULL(status, '') != 'completed'
+      `).bind(toIso(new Date()), order.id).run()
+      summary.orders_released++
+    } catch (err) {
+      console.error('[credit sweep] order', order.order_number, err)
+    }
+  }
+
+  const { results: txs } = await db.prepare(`
+    SELECT * FROM transactions
+    WHERE transaction_type = 'ticket' AND credit_applied_pence > 0 AND user_id IS NOT NULL
+      AND UPPER(IFNULL(payment_status, '')) NOT IN ('PAID', 'FAILED')
+      AND julianday(created_at) < julianday('now', ?)
+      ${userClause}
+    ORDER BY id LIMIT ?
+  `).bind(cutoff, ...userArgs, limit).all()
+
+  for (const tx of txs || []) {
+    try {
+      let pmt = null
+      if (tx.checkout_id) {
+        pmt = await fetchPayment(env, tx.checkout_id)
+        if (inFlight(pmt) && !isCheckoutPaid(pmt)) continue
+      }
+      if (!tx.checkout_id || isCheckoutPaid(pmt)) {
+        const confirm = await confirmTicketPurchase(db, env, { orderRef: tx.order_ref, payment: pmt })
+        if (confirm.ok) {
+          summary.tickets_completed++
+          continue
+        }
+      }
+      const released = await settleTicketCredit(db, { userId: tx.user_id, ticketId: tx.reference_id, orderRef: tx.order_ref, targetPence: 0 })
+      if (!released.ok) continue
+      await db.prepare(`
+        UPDATE transactions SET payment_status = 'FAILED', updated_at = ?
+        WHERE id = ? AND UPPER(IFNULL(payment_status, '')) != 'PAID'
+      `).bind(toIso(new Date()), tx.id).run()
+      summary.tickets_released++
+    } catch (err) {
+      console.error('[credit sweep] ticket', tx.order_ref, err)
+    }
+  }
+
+  return summary
+}
+
 async function completePaidShopOrder(db, env, orderRow, paymentId) {
   const orderId = orderRow.id
   const nowIso = toIso(new Date())
   const creditApplied = Math.max(0, Number(orderRow.credit_applied_pence) || 0)
   const userId = orderRow.user_id != null ? Number(orderRow.user_id) : null
 
-  // Debit store credit once (idempotent). Prefer debit-at-checkout; this call
-  // is a no-op reuse when already reserved. If card already paid and debit fails
-  // (race), still complete the order and alert staff — never leave charged-pending.
+  // Settle the reserved credit (re-debits if a decline or the abandonment sweep released it).
+  // If the card is already paid and the credit has since been spent, still complete the
+  // order and alert staff — never leave a charged order pending.
   if (creditApplied > 0 && userId) {
-    const debit = await debitStoreCreditForPurchase(db, {
+    const debit = await settleShopOrderCredit(db, {
       userId,
-      creditAppliedPence: creditApplied,
-      entryType: 'shop_spend',
-      referenceType: 'order',
-      referenceId: orderRow.order_number,
-      idempotencyKey: `shop_spend:${orderRow.order_number}`,
-      note: `Shop order ${orderRow.order_number}`,
-      nowIso
+      orderNumber: orderRow.order_number,
+      targetPence: creditApplied
     })
     if (!debit.ok) {
       console.error('[shop] store credit debit failed:', debit.error, orderRow.order_number)
@@ -12267,19 +13436,14 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
       if (!looksLikeCardPaid) {
         return { alreadyCompleted: false, creditError: debit.error || 'credit_debit_failed' }
       }
-      try {
-        await sendEmail(env, {
-          to: env.BUYBACK_NOTIFY_EMAIL || 'admin@dicebastion.com',
-          subject: `Store credit debit failed after card payment — ${orderRow.order_number}`,
-          text: `Order ${orderRow.order_number} was paid by card but store credit debit failed (${debit.error}). Credit intended: ${creditApplied} pence for user ${userId}. Complete/adjust manually.`,
-          html: `<p>Order <strong>${orderRow.order_number}</strong> was paid by card but store credit debit failed (<code>${debit.error}</code>).</p><p>Credit intended: ${creditApplied} pence for user ${userId}. Adjust manually.</p>`,
-          emailType: 'admin_credit_debit_failed',
-          relatedId: orderId,
-          relatedType: 'order'
-        })
-      } catch (mailErr) {
-        console.error('[shop] credit failure alert email failed:', mailErr)
-      }
+      await alertStoreCreditShortfall(env, {
+        reference: `Order ${orderRow.order_number}`,
+        userId,
+        creditPence: creditApplied,
+        error: debit.error,
+        relatedId: orderId,
+        relatedType: 'order'
+      })
     }
   }
 
@@ -12288,6 +13452,8 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
     SET status = 'completed',
         payment_status = 'PAID',
         payment_id = ?,
+        payment_method = COALESCE(payment_method, 'sumup'),
+        sale_channel = COALESCE(sale_channel, 'online'),
         updated_at = ?,
         completed_at = COALESCE(completed_at, ?)
     WHERE id = ?
@@ -12307,17 +13473,9 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
     }
   }
 
-  const itemsQuery = await db.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(orderId).all()
-  const itemRows = itemsQuery.results || []
-
-  for (const item of itemRows) {
-    const q = Number(item.quantity) || 0
-    await db.prepare(`
-      UPDATE products
-      SET stock_quantity = stock_quantity - ?,
-          updated_at = ?
-      WHERE id = ? AND stock_quantity >= ?
-    `).bind(q, nowIso, item.product_id, q).run()
+  const stock = await decrementOrderStock(db, orderId, nowIso)
+  if (!stock.ok) {
+    console.error('[shop] stock decrement failed for product', stock.failedProductId, 'order', orderId)
   }
 
   const refreshed = await db.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
@@ -12724,10 +13882,10 @@ app.post('/buyback/cases', async c => {
           'Issue credit via documented SQL in /admin/docs/store-credit/ after quoting.'
         ].filter(Boolean).join('\n'),
         html: `<p><strong>New buyback submission #${caseId}</strong></p>
-<p>User: ${clampStr(sessionUser.name || '', 80)} &lt;${sessionUser.email}&gt; (id ${sessionUser.user_id})</p>
+<p>User: ${escapeHtml(clampStr(sessionUser.name || '', 80))} &lt;${escapeHtml(sessionUser.email)}&gt; (id ${sessionUser.user_id})</p>
 <p>Games: ${[...games].join(', ')} · Items: ${normalized.length}</p>
-${customerNotes ? `<p>Customer notes: ${customerNotes.replace(/</g, '&lt;')}</p>` : ''}
-<pre style="white-space:pre-wrap;font-size:13px;">${(itemLines + more).replace(/</g, '&lt;')}</pre>
+${customerNotes ? `<p>Customer notes: ${escapeHtml(customerNotes)}</p>` : ''}
+<pre style="white-space:pre-wrap;font-size:13px;">${escapeHtml(itemLines + more)}</pre>
 <p>Issue credit via documented SQL in admin store-credit docs after quoting.</p>`,
         emailType: 'buyback_case_submitted',
         relatedId: caseId,
@@ -12970,6 +14128,8 @@ app.post('/shop/checkout', async c => {
     let cardDuePence = totalPence
 
     if (sessionUser && applyCreditRequested) {
+      await releaseAbandonedCreditReservations(c.env.DB, c.env, { userId: sessionUser.user_id, olderThanMinutes: 2, limit: 5 })
+        .catch(err => console.error('[shop/checkout] credit release sweep failed:', err))
       const balance = await getStoreCreditBalance(c.env.DB, sessionUser.user_id)
       const split = computeCreditSplit(totalPence, balance, true)
       creditAppliedPence = split.creditAppliedPence
@@ -13045,8 +14205,9 @@ app.post('/shop/checkout', async c => {
         shipping_address, billing_address, notes,
         promo_code_id, discount_pence, promo_code_applied,
         credit_applied_pence, card_charged_pence,
+        payment_method, sale_channel, delivery_status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       orderNumber,
       orderUserId,
@@ -13068,6 +14229,9 @@ app.post('/shop/checkout', async c => {
       promoCodeSnap,
       creditAppliedPence,
       cardDuePence,
+      cardDuePence === 0 ? 'store_credit' : 'sumup',
+      'online',
+      'undelivered',
       now,
       now
     ).run()
@@ -13086,17 +14250,12 @@ app.post('/shop/checkout', async c => {
     )
     if (batchStatements.length) await c.env.DB.batch(batchStatements)
 
-    // Reserve store credit at checkout create (idempotent on complete).
+    // Reserve store credit at checkout create; completion re-settles, decline or abandonment releases.
     if (creditAppliedPence > 0 && orderUserId) {
-      const debit = await debitStoreCreditForPurchase(c.env.DB, {
+      const debit = await settleShopOrderCredit(c.env.DB, {
         userId: orderUserId,
-        creditAppliedPence,
-        entryType: 'shop_spend',
-        referenceType: 'order',
-        referenceId: orderNumber,
-        idempotencyKey: `shop_spend:${orderNumber}`,
-        note: `Shop order ${orderNumber}`,
-        nowIso: now
+        orderNumber,
+        targetPence: creditAppliedPence
       })
       if (!debit.ok) {
         await c.env.DB.prepare(
@@ -13154,7 +14313,13 @@ app.post('/shop/confirm-payment/:orderNumber', async c => {
       ? Number(orderRow.card_charged_pence)
       : null
     if (!orderRow.checkout_id && Number(orderRow.credit_applied_pence || 0) > 0 && (cardDue === 0 || cardDue === null)) {
-      await completePaidShopOrder(c.env.DB, c.env, orderRow, orderRow.payment_id || `CREDIT-${orderNumber}`)
+      if (orderRow.status === 'cancelled') {
+        return c.json({ success: false, status: 'failed', message: 'Store credit could not be applied to this order.', order: orderRow })
+      }
+      const outcome = await completePaidShopOrder(c.env.DB, c.env, orderRow, orderRow.payment_id || `CREDIT-${orderNumber}`)
+      if (outcome?.creditError) {
+        return c.json({ success: false, status: 'failed', message: 'Store credit could not be applied to this order.', order: orderRow })
+      }
       const updatedCreditOrder = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
       return c.json({ success: true, status: 'completed', order: updatedCreditOrder })
     }
@@ -13173,20 +14338,13 @@ app.post('/shop/confirm-payment/:orderNumber', async c => {
         `UPDATE orders SET payment_status = ?, updated_at = ? WHERE order_number = ? AND LOWER(COALESCE(payment_status,'')) NOT IN ('paid','completed')`
       ).bind('failed', nowFailed, orderNumber).run()
       const failedOrder = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
-      // Restore reserved store credit if card payment failed.
-      if (failedOrder && Number(failedOrder.credit_applied_pence || 0) > 0 && failedOrder.user_id) {
+      // Release reserved credit; a later successful retry on this checkout takes it again.
+      if (failedOrder && Number(failedOrder.credit_applied_pence || 0) > 0 && failedOrder.user_id &&
+          String(failedOrder.status || '') !== 'completed') {
         try {
-          await restoreStoreCredit(c.env.DB, {
-            userId: failedOrder.user_id,
-            creditPence: Number(failedOrder.credit_applied_pence),
-            referenceType: 'order',
-            referenceId: orderNumber,
-            idempotencyKey: `shop_spend_void:${orderNumber}`,
-            note: `Restore credit after failed payment for ${orderNumber}`,
-            nowIso: nowFailed
-          })
+          await settleShopOrderCredit(c.env.DB, { userId: failedOrder.user_id, orderNumber, targetPence: 0 })
         } catch (restoreErr) {
-          console.error('[shop/confirm-payment] credit restore failed:', restoreErr)
+          console.error('[shop/confirm-payment] credit release failed:', restoreErr)
         }
       }
       return c.json({
@@ -13265,7 +14423,11 @@ app.post('/orders/checkout', async c => {
       currency,
       orderRef: orderNumber,
       title: `Dice Bastion Shop – ${orderItems.length} item(s)`,
-      description: formatShopCheckoutDescription(orderItems)
+      description: formatShopCheckoutDescription(orderItems),
+      // 3DS sends the customer back here. Without redirect_url the card widget
+      // reports a failure while the bank challenge is still unfinished.
+      redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(orderNumber)}&type=drinks`,
+      webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
     })
     if (!checkout?.id) return c.json({ error: 'checkout_failed' }, 502)
 
@@ -13275,8 +14437,11 @@ app.post('/orders/checkout', async c => {
     const orderName = clampStr(name || '', 200) || 'Walk-in'
 
     const batch = [
-      c.env.DB.prepare('INSERT INTO orders (order_number, email, name, subtotal, total, currency, checkout_id, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(orderNumber, orderEmail, orderName, total, total, currency, checkout.id, 'pending'),
+      c.env.DB.prepare(`INSERT INTO orders (
+        order_number, email, name, subtotal, total, currency, checkout_id, payment_status,
+        payment_method
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(orderNumber, orderEmail, orderName, total, total, currency, checkout.id, 'pending', 'sumup'),
       ...orderItems.map(r =>
         c.env.DB.prepare('INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal) VALUES ((SELECT id FROM orders WHERE order_number = ?), ?, ?, ?, ?, ?)')
           .bind(orderNumber, r.product_id, r.product_name, r.quantity, r.unit_price, r.subtotal))
@@ -13294,18 +14459,106 @@ app.get('/orders/confirm', async c => {
   const ref = c.req.query('orderRef')
   if (!ref) return c.json({ error: 'missing_ref' }, 400)
 
-  const order = await c.env.DB.prepare('SELECT checkout_id, payment_status FROM orders WHERE order_number = ?').bind(ref).first()
+  const order = await c.env.DB.prepare(
+    'SELECT id, email, name, sale_channel, checkout_id, payment_status FROM orders WHERE order_number = ?'
+  ).bind(ref).first()
   if (!order) return c.json({ error: 'not_found' }, 404)
   if (String(order.payment_status || '').toUpperCase() === 'PAID') return c.json({ ok: true, status: 'active' })
 
   const payment = await fetchPayment(c.env, order.checkout_id)
   if (!isCheckoutPaid(payment)) return c.json({ ok: false, status: payment?.status || 'PENDING' })
 
-  await c.env.DB.prepare('UPDATE orders SET payment_status = ?, payment_id = ?, status = ?, updated_at = ? WHERE order_number = ?')
-    .bind('PAID', payment.id, 'completed', toIso(new Date()), ref).run()
+  if (isDrinksWalkInOrder(order)) {
+    await completePaidDrinksOrder(c.env.DB, order, payment.id)
+  } else {
+    await c.env.DB.prepare(`UPDATE orders SET payment_status = ?, payment_id = ?, status = ?,
+      payment_method = COALESCE(payment_method, 'sumup'),
+      updated_at = ? WHERE order_number = ?`)
+      .bind('PAID', payment.id, 'completed', toIso(new Date()), ref).run()
+  }
 
   return c.json({ ok: true, status: 'active' })
 })
+
+/**
+ * Upsert SumUp payout rows from payments-worker into D1.
+ * @returns {{ upserted: number, fee_pence: number, start_date: string, end_date: string }}
+ */
+async function syncSumUpPayouts(env, startDate, endDate) {
+  const result = await listPayouts(env, startDate, endDate)
+  const payouts = Array.isArray(result?.payouts) ? result.payouts : []
+  const nowIso = toIso(new Date())
+  let upserted = 0
+  let feePence = 0
+
+  for (const row of payouts) {
+    const sumupId = Number(row.id)
+    if (!Number.isFinite(sumupId) || sumupId <= 0) continue
+    const payoutDate = String(row.date || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(payoutDate)) continue
+    const amountPence = Math.round(Number(row.amount || 0) * 100)
+    const fee = Math.round(Number(row.fee || 0) * 100)
+
+    await env.DB.prepare(`
+      INSERT INTO sumup_payouts (
+        sumup_id, type, amount_pence, fee_pence, currency, payout_date,
+        status, reference, transaction_code, synced_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(sumup_id) DO UPDATE SET
+        type = excluded.type,
+        amount_pence = excluded.amount_pence,
+        fee_pence = excluded.fee_pence,
+        currency = excluded.currency,
+        payout_date = excluded.payout_date,
+        status = excluded.status,
+        reference = excluded.reference,
+        transaction_code = excluded.transaction_code,
+        synced_at = excluded.synced_at
+    `).bind(
+      sumupId,
+      String(row.type || 'PAYOUT'),
+      amountPence,
+      fee,
+      String(row.currency || 'GBP'),
+      payoutDate,
+      row.status != null ? String(row.status) : null,
+      row.reference != null ? String(row.reference) : null,
+      row.transaction_code != null ? String(row.transaction_code) : null,
+      nowIso
+    ).run()
+    upserted += 1
+    feePence += fee
+  }
+
+  return { upserted, fee_pence: feePence, start_date: startDate, end_date: endDate }
+}
+
+async function processSumUpPayoutSync(env) {
+  const jobName = 'sync_sumup_payouts'
+  const end = new Date()
+  const start = new Date(end.getTime() - 35 * 24 * 60 * 60 * 1000)
+  const startDate = start.toISOString().slice(0, 10)
+  const endDate = end.toISOString().slice(0, 10)
+  try {
+    const result = await syncSumUpPayouts(env, startDate, endDate)
+    await logCronJob(env.DB, jobName, 'completed', {
+      records_processed: result.upserted,
+      records_succeeded: result.upserted,
+      records_failed: 0,
+      extra: result
+    })
+    return result
+  } catch (e) {
+    console.error('[CRON] sync_sumup_payouts failed:', e)
+    await logCronJob(env.DB, jobName, 'failed', {
+      records_processed: 0,
+      records_succeeded: 0,
+      records_failed: 1,
+      extra: { error: String(e?.message || e), start_date: startDate, end_date: endDate }
+    })
+    throw e
+  }
+}
 
 /**
  * Main scheduled handler - runs all cron jobs
@@ -13323,7 +14576,9 @@ async function handleScheduled(event, env, ctx) {
     auto_renewals: null,
     event_reminders: null,
     delayed_account_setup_emails: null,
-    seo_freshness: null
+    seo_freshness: null,
+    sync_sumup_payouts: null,
+    store_credit_release: null
   }
   
   // Run all cron jobs sequentially, catching errors individually
@@ -13369,6 +14624,23 @@ async function handleScheduled(event, env, ctx) {
     console.error('[CRON MASTER] SEO freshness failed:', e)
     jobResults.seo_freshness = 'failed'
   }
+
+  try {
+    await processSumUpPayoutSync(env)
+    jobResults.sync_sumup_payouts = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] SumUp payout sync failed:', e)
+    jobResults.sync_sumup_payouts = 'failed'
+  }
+
+  try {
+    const released = await releaseAbandonedCreditReservations(env.DB, env, { olderThanMinutes: 60, limit: 100 })
+    console.log('[CRON] Store credit reservations:', released)
+    jobResults.store_credit_release = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Store credit release failed:', e)
+    jobResults.store_credit_release = 'failed'
+  }
   
   console.log('============================================')
   console.log('All cron jobs completed at:', new Date().toISOString())
@@ -13377,11 +14649,11 @@ async function handleScheduled(event, env, ctx) {
   
   // Log the master cron run
   const allSucceeded = Object.values(jobResults).every(r => r === 'completed')
-  const someFailed = Object.values(jobResults).some(r => r === 'failed')
+  const jobCount = Object.keys(jobResults).length
     try {
     await logCronJob(env.DB, 'cron_master', allSucceeded ? 'completed' : 'partial', {
       started_at: runStarted,
-      records_processed: 5,
+      records_processed: jobCount,
       records_succeeded: Object.values(jobResults).filter(r => r === 'completed').length,
       records_failed: Object.values(jobResults).filter(r => r === 'failed').length,
       extra: jobResults

@@ -219,6 +219,53 @@ export async function restoreStoreCredit(db, {
 }
 
 /**
+ * Move a purchase's net credit spend to targetPence (credit_applied to reserve or
+ * settle, 0 to release). Spend and void rows share reference_type/reference_id.
+ * Keys carry the count of prior rows for the reference, so a release followed by a
+ * later card success debits again rather than reusing the first spend's key, while
+ * two concurrent settles at the same step still collapse onto one key.
+ *
+ * @returns {Promise<{ ok: boolean, changedPence: number, netSpentPence: number, error?: string }>}
+ */
+export async function settleStoreCredit(db, {
+  userId,
+  targetPence,
+  spendType,
+  referenceType,
+  referenceId,
+  keyPrefix,
+  note = null,
+  nowIso = null
+}) {
+  const uid = Number(userId)
+  const target = Math.max(0, Math.floor(Number(targetPence) || 0))
+  const ref = String(referenceId)
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS n, COALESCE(SUM(delta_pence), 0) AS s
+    FROM store_credit_ledger
+    WHERE user_id = ? AND reference_type = ? AND reference_id = ?
+  `).bind(uid, referenceType, ref).first()
+  const step = Number(row?.n) || 0
+  const netSpent = -(Number(row?.s) || 0)
+  const diff = target - netSpent
+  if (!uid || diff === 0) return { ok: true, changedPence: 0, netSpentPence: netSpent }
+
+  const res = await appendStoreCreditLedger(db, {
+    userId: uid,
+    deltaPence: -diff,
+    entryType: diff > 0 ? spendType : 'void',
+    referenceType,
+    referenceId: ref,
+    idempotencyKey: `${keyPrefix}${diff > 0 ? '' : '_void'}:${ref}:${step}`,
+    note,
+    createdBy: 'system',
+    nowIso
+  })
+  if (!res.ok) return { ok: false, changedPence: 0, netSpentPence: netSpent, error: res.error }
+  return { ok: true, changedPence: res.reused ? 0 : diff, netSpentPence: target }
+}
+
+/**
  * Recent ledger rows for account UI.
  */
 export async function listStoreCreditLedger(db, userId, limit = 20) {

@@ -48,6 +48,7 @@ showDate: false
 
 <h2>Sub-£1 card charge rule</h2>
 <p>If applying available credit would leave a card remainder of 1–99p, credit is <strong>not</strong> applied and the full amount is charged on card (SumUp minimum £1.00). Credit applies only when the remainder is £0 or ≥ £1.00.</p>
+<p>Credit is held as soon as a checkout starts, so a customer's balance drops before they pay by card. Held credit is given back when the card is declined, when the same customer starts another checkout more than 2 minutes later without paying the first, or by the nightly job for checkouts over an hour old. If a released checkout is paid later, the credit is taken again. If the customer has spent it by then, the order or ticket still goes through and staff get a "Store credit debit failed after card payment" email to settle the difference.</p>
 
 <h2>SQL recipes (D1)</h2>
 <p>Run against the production D1 database. Prefer a single batch / transaction mentally: update the case, then ledger + balance together. Use a unique <code>idempotency_key</code> every time.</p>
@@ -70,18 +71,20 @@ WHERE id = :case_id;
 
 <h3>3. Issue credit when buyback completes</h3>
 <p>Replace placeholders. <code>:user_id</code> must match the case owner. <code>:credit_pence</code> is usually <code>agreed_value_pence</code>.</p>
-<pre style="background:#f8fafc; padding:1rem; overflow:auto; font-size:0.8rem;"><code>-- Read current balance
-SELECT user_id, store_credit_pence FROM users WHERE user_id = :user_id;
+<p>Never type a new balance in by hand. A customer can spend credit between you reading the balance and writing it, and a typed balance would wipe out that spend. Every recipe below adds a change to the stored balance instead.</p>
+<p>Run step A on its own first. If it fails on the unique <code>idempotency_key</code>, credit was already issued for that case: stop and do not run step B. If it reports 0 rows written, the user ID is wrong.</p>
+<pre style="background:#f8fafc; padding:1rem; overflow:auto; font-size:0.8rem;"><code>-- Check the case owner and that it has not been completed already
 SELECT id, user_id, agreed_value_pence, status FROM buyback_cases WHERE id = :case_id;
 
--- Assume :old_balance and :new_balance = old + credit are known
+-- Step A: ledger row (balance_after is worked out from the live balance)
 INSERT INTO store_credit_ledger (
   user_id, delta_pence, balance_after_pence, entry_type,
   reference_type, reference_id, idempotency_key, note, created_by, created_at
-) VALUES (
-  :user_id,
+)
+SELECT
+  user_id,
   :credit_pence,
-  :new_balance,
+  store_credit_pence + :credit_pence,
   'buyback_credit',
   'buyback_case',
   CAST(:case_id AS TEXT),
@@ -89,10 +92,11 @@ INSERT INTO store_credit_ledger (
   'Buyback case #' || CAST(:case_id AS TEXT),
   'sql_admin',
   strftime('%Y-%m-%dT%H:%M:%fZ','now')
-);
+FROM users WHERE user_id = :user_id;
 
+-- Step B: balance and case
 UPDATE users
-SET store_credit_pence = :new_balance,
+SET store_credit_pence = store_credit_pence + :credit_pence,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE user_id = :user_id;
 
@@ -102,28 +106,32 @@ SET status = 'completed',
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id = :case_id;
 </code></pre>
-<p>If the INSERT fails on unique <code>idempotency_key</code>, credit was already issued for that case — do not bump the balance again.</p>
 
 <h3>4. Manual adjustment</h3>
-<pre style="background:#f8fafc; padding:1rem; overflow:auto; font-size:0.8rem;"><code>INSERT INTO store_credit_ledger (
+<p><code>:delta_pence</code> is positive to add credit and negative to remove it. A removal that would take the balance below zero writes 0 rows in step A; do not run step B in that case.</p>
+<pre style="background:#f8fafc; padding:1rem; overflow:auto; font-size:0.8rem;"><code>-- Step A
+INSERT INTO store_credit_ledger (
   user_id, delta_pence, balance_after_pence, entry_type,
   reference_type, reference_id, idempotency_key, note, created_by, created_at
-) VALUES (
-  :user_id, :delta_pence, :new_balance, 'adjustment',
+)
+SELECT
+  user_id, :delta_pence, store_credit_pence + :delta_pence, 'adjustment',
   NULL, NULL,
   'adjustment:' || lower(hex(randomblob(8))),
   :note,
   'sql_admin',
   strftime('%Y-%m-%dT%H:%M:%fZ','now')
-);
+FROM users
+WHERE user_id = :user_id AND store_credit_pence + :delta_pence >= 0;
 
-UPDATE users SET store_credit_pence = :new_balance,
+-- Step B
+UPDATE users SET store_credit_pence = store_credit_pence + :delta_pence,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-WHERE user_id = :user_id;
+WHERE user_id = :user_id AND store_credit_pence + :delta_pence >= 0;
 </code></pre>
 
-<h3>5. Void / reverse a mistaken credit</h3>
-<p>Insert a negative <code>void</code> (or <code>adjustment</code>) entry with a new idempotency key; never delete ledger rows.</p>
+<h3>5. Reverse a mistaken credit</h3>
+<p>Use a negative manual adjustment (recipe 4); never delete ledger rows. Do not write <code>void</code> rows by hand: the Worker uses them to release credit held by unpaid checkouts, and the accounts only count <code>buyback_credit</code> and <code>adjustment</code> rows as credit given out.</p>
 
 <h3>Inspect a case</h3>
 <pre style="background:#f8fafc; padding:1rem; overflow:auto; font-size:0.8rem;"><code>SELECT * FROM buyback_cases WHERE id = :case_id;

@@ -27,6 +27,10 @@
       .join(', ');
   }
 
+  function productById(id) {
+    return cachedProducts.find(function (p) { return Number(p.id) === Number(id); }) || null;
+  }
+
   function isArchived(p) {
     return (p.catalog_status || 'listed') === 'archived';
   }
@@ -111,6 +115,15 @@
         const indexBtn = p.slug
           ? '<button type="button" class="btn-index" data-slug="' + slugAttr + '">Index</button>'
           : '';
+        const tracked = Number(p.cost_tracked) === 1;
+        const owner = typeof global.isAccountsOwnerClient === 'function' && global.isAccountsOwnerClient();
+        const costLine = tracked && owner
+          ? ' | Stock value at cost: £' + (Number(p.stock_value_pence || 0) / 100).toFixed(2)
+          : (tracked ? ' | Cost tracked' : '');
+        const receiveBtn = '<button type="button" class="btn-receive-stock" data-id="' + p.id + '">Receive stock</button>';
+        const writeOffBtn = tracked && owner
+          ? '<button type="button" class="btn-write-off" data-id="' + p.id + '">Write off</button>'
+          : '';
         return (
           '<div class="item-card">' +
             '<div style="display: flex; gap: 1rem;">' +
@@ -120,13 +133,16 @@
                 eanLine +
                 '<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">' + escapeHtml(p.summary || '') + '</p>' +
                 '<p style="margin: 0.5rem 0;"><strong>£' + (Number(p.price || 0) / 100).toFixed(2) +
-                  '</strong> | Stock: ' + escapeHtml(p.stock_quantity) +
+                  '</strong> | Stock: ' + escapeHtml(p.stock_quantity) + escapeHtml(costLine) +
                   ' | Categories: ' + escapeHtml(categories) + '</p>' +
               '</div>' +
             '</div>' +
             '<div class="item-actions">' +
               '<button type="button" class="btn-edit" data-id="' + p.id + '">Edit</button>' +
+              '<button type="button" class="btn-duplicate" data-id="' + p.id + '">Duplicate</button>' +
               '<button type="button" class="btn-delete" data-id="' + p.id + '" data-name="' + nameAttr + '">Delete</button>' +
+              receiveBtn +
+              writeOffBtn +
               copyBtn +
               indexBtn +
             '</div>' +
@@ -368,10 +384,25 @@
           global.editProduct(Number(editBtn.getAttribute('data-id')));
           return;
         }
+        const duplicateBtn = e.target.closest('.btn-duplicate');
+        if (duplicateBtn && typeof global.duplicateProduct === 'function') {
+          global.duplicateProduct(Number(duplicateBtn.getAttribute('data-id')));
+          return;
+        }
         const deleteBtn = e.target.closest('.btn-delete');
         if (deleteBtn && typeof global.deleteProduct === 'function') {
           const name = decodeURIComponent(deleteBtn.getAttribute('data-name') || '');
           global.deleteProduct(Number(deleteBtn.getAttribute('data-id')), name);
+          return;
+        }
+        const receiveBtn = e.target.closest('.btn-receive-stock');
+        if (receiveBtn && global.ShopFinance) {
+          global.ShopFinance.openReceiveStock(productById(receiveBtn.getAttribute('data-id')));
+          return;
+        }
+        const writeOffBtn = e.target.closest('.btn-write-off');
+        if (writeOffBtn && global.ShopFinance) {
+          global.ShopFinance.openWriteOff(productById(writeOffBtn.getAttribute('data-id')));
           return;
         }
         const copyBtn = e.target.closest('.btn-copy');

@@ -11,7 +11,9 @@ showDate: false
 <script src="/js/shopCategories.js"></script>
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
-<script src="/js/shopProductAdmin.js?v=20260831a"></script>
+<script src="/js/shopProductAdmin.js?v=20261002a"></script>
+<script src="/js/shopPosAdmin.js?v=20260408b"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261013f"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -323,7 +325,8 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
-<button class="admin-tab-btn tab-btn" data-tab="accounts" id="accounts-tab-btn" style="display: none;">Accounts</button>
+<button class="admin-tab-btn tab-btn" data-tab="accounts" id="accounts-tab-btn" style="display: none;">Club accounts</button>
+<button class="admin-tab-btn tab-btn" data-tab="finance" id="finance-tab-btn" style="display: none;">Shop and events accounts</button>
 <button class="admin-tab-btn tab-btn" data-tab="bookings">Bookings & Calendar</button>
 <button class="admin-tab-btn tab-btn" data-tab="cron">Cron Jobs</button>
 <button class="admin-tab-btn tab-btn" data-tab="newsletter">Newsletter</button>
@@ -339,7 +342,8 @@ Logout
 <a href="#registrations">Registrations</a>
 <a href="#orders">Orders</a>
 <a href="#memberships">Memberships</a>
-<a href="#accounts" id="accounts-jump-link" style="display: none;">Accounts</a>
+<a href="#accounts" id="accounts-jump-link" style="display: none;">Club accounts</a>
+<a href="#finance" id="finance-jump-link" style="display: none;">Shop and events accounts</a>
 <a href="#bookings">Bookings</a>
 <a href="#bookings-upcoming">Upcoming</a>
 <a href="#cron">Cron</a>
@@ -519,7 +523,7 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <div class="admin-mb-1">
 <label class="form-label">EAN</label>
 <input type="text" id="product-ean" class="form-input" inputmode="numeric" autocomplete="off">
-<small class="admin-text-small">Barcode used to restore archived imports. Digits only; 8–14 characters.</small>
+<small class="admin-text-small">Optional. Used to match this product when the same EAN is imported again from a CSV.</small>
 </div>
 
 <div class="admin-mb-1">
@@ -551,7 +555,32 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <div>
 <label class="form-label">Stock Quantity *</label>
 <input type="number" id="product-stock" required class="form-input">
+<small id="product-stock-tracked-note" class="admin-text-small" style="display: none;">Stock for this product is tracked in cost batches. Change it with Receive stock, a stock import session, or Write off.</small>
 </div>
+</div>
+
+<div id="product-cost-fields" class="admin-mb-1" style="padding: 0.75rem 1rem; border-left: 3px solid rgb(var(--color-primary-500)); background: rgba(var(--color-primary-50), 0.5); border-radius: 4px;">
+<p class="form-label" style="margin-top: 0;">What you paid for this stock</p>
+<div class="admin-grid-3">
+<div>
+<label class="form-label" for="product-cost">Cost per unit (£)</label>
+<input type="number" id="product-cost" step="0.01" min="0" class="form-input" placeholder="e.g. 18.50">
+</div>
+<div>
+<label class="form-label" for="product-supplier">Supplier</label>
+<input type="text" id="product-supplier" class="form-input" autocomplete="off" placeholder="e.g. Asmodee UK">
+</div>
+<div>
+<label class="form-label" for="product-cost-paid">Paid</label>
+<select id="product-cost-paid" class="form-select">
+<option value="">Not paid yet</option>
+<option value="bank">Paid from bank</option>
+<option value="cash">Paid in cash</option>
+<option value="owner">Paid personally</option>
+</select>
+</div>
+</div>
+<small class="admin-text-small">Used for Shop and events accounts. The stock quantity above becomes the first stock batch at this cost. Leave the cost blank to skip cost tracking.</small>
 </div>
 
 <div class="admin-mb-1">
@@ -593,6 +622,11 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <div id="preorder-date-container" class="admin-mb-1" style="display: none;">
 <label class="form-label">Expected Release Date</label>
 <input type="date" id="product-release-date" class="form-input">
+</div>
+
+<div class="checkbox-group admin-mb-1">
+<input type="checkbox" id="product-create-more" class="checkbox-input">
+<label for="product-create-more" class="checkbox-label">Create more (after adding, keep these details filled for another product)</label>
 </div>
 
 <div class="admin-flex">
@@ -974,16 +1008,60 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 
 <!-- Orders Tab -->
 <div id="orders-tab" class="tab-content" style="display: none;">
-<h2 id="admin-section-orders" class="admin-section-heading">Recent Orders <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
+<h2 id="admin-section-orders" class="admin-section-heading">Record in-person sale <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
+<p class="admin-text-muted admin-mb-1">Cash or bank transfer sales for the shop. Adjust the unit price for discounts. Stock is reduced when the sale is saved.</p>
+<div class="admin-mb-2" style="padding: 1rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px;">
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="pos-payment-method">Payment method</label>
+<select id="pos-payment-method" class="form-select">
+<option value="cash">Cash</option>
+<option value="bank_transfer">Bank transfer</option>
+</select>
+</div>
+<div>
+<label class="form-label">Cart total</label>
+<div id="pos-cart-total" style="font-size: 1.25rem; font-weight: 600; padding: 0.5rem 0;">£0.00</div>
+</div>
+</div>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="pos-customer-name">Customer name (optional)</label>
+<input type="text" id="pos-customer-name" class="form-input" placeholder="Walk-in" autocomplete="name">
+</div>
+<div>
+<label class="form-label" for="pos-customer-email">Customer email (optional)</label>
+<input type="email" id="pos-customer-email" class="form-input" placeholder="walk-in" autocomplete="email">
+</div>
+</div>
+<div class="admin-mb-1">
+<label class="form-label" for="pos-notes">Notes (optional)</label>
+<input type="text" id="pos-notes" class="form-input" placeholder="e.g. bulk discount, invoice ref">
+</div>
+<div id="pos-lines" class="admin-mb-1"></div>
+<div class="admin-flex" style="flex-wrap: wrap; align-items: center;">
+<button type="button" id="pos-add-line-btn" class="btn btn-secondary">Add line</button>
+<button type="button" id="pos-submit-btn" class="btn btn-primary">Record sale</button>
+</div>
+<p id="pos-status" class="admin-text-small admin-mb-0" style="margin-top: 0.75rem;"></p>
+</div>
+<div class="admin-flex-between admin-mb-1" style="flex-wrap: wrap; align-items: center; gap: 0.75rem;">
+<h3 class="admin-section-heading admin-m-0">Shop orders</h3>
+<label class="admin-text-small" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+<input type="checkbox" id="orders-show-delivered">
+Show delivered
+</label>
+</div>
+<p class="admin-text-muted admin-mb-1">Undelivered shop orders only by default (online + POS). Drinks sales are not listed here.</p>
 <div id="orders-list"></div>
 </div>
 
-<!-- Accounts Tab (owner-only) -->
+<!-- Club Accounts Tab (owner-only) -->
 <div id="accounts-tab" class="tab-content" style="display: none;">
 <div class="admin-flex-between admin-mb-2">
-<h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
+<h2 id="admin-section-accounts" class="admin-section-heading admin-m-0">Club accounts <a href="#accounts" class="admin-permalink" aria-label="Link to accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Paid sales from D1 for the selected dates. Net payout is 95% of gross. Includes memberships, renewals, donations, event+membership bundles (membership portion only — event ticket fees are excluded), and /drinks walk-in sales. Online shop.dicebastion.com orders are not included.</p>
+<p class="admin-text-muted admin-mb-1">Paid sales for the selected dates: drinks, memberships, membership renewals, the membership part of event bundles, and donations. Shop orders and event tickets are reported in Shop and events accounts. Net is gross minus the SumUp fee on each sale. Fees come from synced SumUp payouts where the sale can be matched; otherwise they are estimated at the effective SumUp rate and marked as estimated.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="accounts-from">From</label>
@@ -994,6 +1072,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <input type="date" id="accounts-to" class="form-input">
 </div>
 <button type="button" id="accounts-run-btn" class="btn btn-primary">Run report</button>
+<button type="button" id="accounts-sync-fees-btn" class="btn btn-secondary">Sync SumUp fees</button>
 <button type="button" id="accounts-csv-btn" class="btn btn-secondary" disabled>Download CSV</button>
 </div>
 <p id="accounts-status" class="admin-text-small admin-mb-1"></p>
@@ -1006,8 +1085,12 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <div class="stat-card-label">Gross</div>
 <div class="stat-card-value" id="accounts-stat-gross">-</div>
 </div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-600));">
+<div class="stat-card-label">SumUp fees</div>
+<div class="stat-card-value" id="accounts-stat-fees">-</div>
+</div>
 <div class="stat-card" style="background: rgb(var(--color-neutral-700));">
-<div class="stat-card-label">Net payout</div>
+<div class="stat-card-label">Net (gross − SumUp fees)</div>
 <div class="stat-card-value" id="accounts-stat-net">-</div>
 </div>
 </div>
@@ -1020,12 +1103,13 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <th>Category</th>
 <th style="text-align: right;">Qty</th>
 <th style="text-align: right;">Gross</th>
+<th style="text-align: right;">SumUp fees</th>
 <th style="text-align: right;">Net</th>
 </tr>
 </thead>
 <tbody id="accounts-category-list">
 <tr>
-<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+<td colspan="5" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
 </tr>
 </tbody>
 </table>
@@ -1039,18 +1123,112 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <tr>
 <th>Date</th>
 <th>Category</th>
-<th style="text-align: right;">Amount</th>
+<th>Method</th>
+<th style="text-align: right;">Gross</th>
+<th style="text-align: right;">SumUp fee</th>
 <th style="text-align: right;">Net</th>
 </tr>
 </thead>
 <tbody id="accounts-line-list">
 <tr>
-<td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
+<td colspan="6" class="admin-text-center admin-text-muted" style="padding: 2rem;">Choose dates and run the report.</td>
 </tr>
 </tbody>
 </table>
 </div>
 </div>
+</div>
+
+<!-- Shop and Events Accounts Tab (owner-only) -->
+<div id="finance-tab" class="tab-content" style="display: none;">
+<div class="admin-flex-between admin-mb-2">
+<h2 id="admin-section-finance" class="admin-section-heading admin-m-0">Shop and events accounts <a href="#finance" class="admin-permalink" aria-label="Link to shop and events accounts">#</a></h2>
+</div>
+<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first.</p>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="finance-books-start">Books start date</label>
+<input type="date" id="finance-books-start" class="form-input">
+</div>
+<button type="button" id="finance-books-start-save" class="btn btn-secondary">Save start date</button>
+<small class="admin-text-small" style="flex-basis: 100%;">Shop sales and ticket sales before this date are not counted.</small>
+</div>
+<p id="finance-status" class="admin-text-small admin-mb-1" role="status" aria-live="polite"></p>
+
+<h3 id="admin-section-finance-imports" class="admin-section-heading">Stock import sessions</h3>
+<p class="admin-text-muted admin-mb-1">One session is one receipt. Add each item yourself. Every item is linked to that receipt and added to stock at the cost you paid.</p>
+<button type="button" id="finance-session-new" class="btn btn-primary admin-mb-1">New import session</button>
+<div id="finance-sessions-list" class="admin-mb-2"></div>
+<div id="finance-session-panel" class="admin-mb-2" style="display: none;"></div>
+
+<h3 id="admin-section-finance-pnl" class="admin-section-heading">Profit and loss</h3>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="finance-pnl-from">From</label>
+<input type="date" id="finance-pnl-from" class="form-input">
+</div>
+<div>
+<label class="form-label" for="finance-pnl-to">To</label>
+<input type="date" id="finance-pnl-to" class="form-input">
+</div>
+<button type="button" id="finance-pnl-run" class="btn btn-primary">Run P&amp;L</button>
+<button type="button" id="finance-pnl-csv" class="btn btn-secondary" disabled>Download CSV</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+<div class="stat-card" style="background: rgb(var(--color-primary-700));">
+<div class="stat-card-label">Revenue</div>
+<div class="stat-card-value" id="finance-stat-revenue">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-primary-600));">
+<div class="stat-card-label">Gross profit</div>
+<div class="stat-card-value" id="finance-stat-gross">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-600));">
+<div class="stat-card-label">Expenses</div>
+<div class="stat-card-value" id="finance-stat-expenses">-</div>
+</div>
+<div class="stat-card" style="background: rgb(var(--color-neutral-700));">
+<div class="stat-card-label">Net profit</div>
+<div class="stat-card-value" id="finance-stat-net">-</div>
+</div>
+</div>
+<div id="finance-pnl-body" class="admin-mb-2"><p class="admin-text-muted">Choose dates and run the P&amp;L.</p></div>
+
+<h3 id="admin-section-finance-balance" class="admin-section-heading">Balance sheet</h3>
+<div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
+<div>
+<label class="form-label" for="finance-bs-asof">As of</label>
+<input type="date" id="finance-bs-asof" class="form-input">
+</div>
+<button type="button" id="finance-bs-run" class="btn btn-primary">Run balance sheet</button>
+<button type="button" id="finance-bs-csv" class="btn btn-secondary" disabled>Download CSV</button>
+</div>
+<div id="finance-bs-body" class="admin-mb-2"><p class="admin-text-muted">Choose a date and run the balance sheet.</p></div>
+
+<h3 id="admin-section-finance-bills" class="admin-section-heading">Supplier bills</h3>
+<div class="admin-flex admin-mb-1" style="flex-wrap: wrap; align-items: center;">
+<button type="button" id="finance-bill-add" class="btn btn-primary">Add supplier bill</button>
+<label class="checkbox-label" style="display: inline-flex; gap: 0.5rem; align-items: center;"><input type="checkbox" id="finance-bills-unpaid" class="checkbox-input"> Unpaid only</label>
+</div>
+<div id="finance-bills-list" class="admin-mb-2"></div>
+
+<h3 id="admin-section-finance-expenses" class="admin-section-heading">Expenses</h3>
+<div class="admin-flex admin-mb-1">
+<button type="button" id="finance-expense-add" class="btn btn-primary">Add expense</button>
+</div>
+<div id="finance-expenses-list" class="admin-mb-2"></div>
+
+<h3 id="admin-section-finance-owner" class="admin-section-heading">Owner money in and out</h3>
+<div class="admin-flex admin-mb-1">
+<button type="button" id="finance-owner-add" class="btn btn-primary">Record money in or out</button>
+</div>
+<div id="finance-owner-list" class="admin-mb-2"></div>
+
+<h3 id="admin-section-finance-batches" class="admin-section-heading">Stock batches</h3>
+<div class="admin-flex admin-mb-1">
+<label class="checkbox-label" style="display: inline-flex; gap: 0.5rem; align-items: center;"><input type="checkbox" id="finance-lots-remaining" class="checkbox-input" checked> Only batches with stock left</label>
+</div>
+<div id="finance-lots-list"></div>
 </div>
 
 <!-- Memberships Tab -->
@@ -1618,10 +1796,19 @@ Loading cron job logs...
 .dark .btn-edit { background: rgb(var(--color-primary-500)); }
 .btn-edit:hover { background: rgb(var(--color-primary-700)); }
 .dark .btn-edit:hover { background: rgb(var(--color-primary-600)); }
+.btn-duplicate { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-600)); color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.dark .btn-duplicate { background: rgb(var(--color-neutral-500)); }
+.btn-duplicate:hover { background: rgb(var(--color-neutral-700)); }
+.dark .btn-duplicate:hover { background: rgb(var(--color-neutral-600)); }
 .btn-delete { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
 .dark .btn-delete { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
 .btn-delete:hover { background: #fee; color: #c00; }
 .dark .btn-delete:hover { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
+.btn-receive-stock { padding: 0.5rem 1rem; background: rgb(var(--color-primary-600)); color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.btn-receive-stock:hover { background: rgb(var(--color-primary-700)); }
+.btn-write-off { padding: 0.5rem 1rem; background: rgb(var(--color-neutral-200)); border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.dark .btn-write-off { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-200)); }
+.btn-write-off:hover { background: rgb(var(--color-neutral-300)); }
 .btn-index { padding: 0.5rem 1rem; background: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
 .dark .btn-index { background: #10b981; }
 .btn-index:hover { background: #047857; }
@@ -3268,7 +3455,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 });
 
 // Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
-const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'accounts', 'bookings', 'cron', 'newsletter', 'blog'];
+const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'accounts', 'finance', 'bookings', 'cron', 'newsletter', 'blog'];
 const ACCOUNTS_OWNER_EMAIL = 'ncalamaro@gmail.com';
 let accountsReportRows = [];
 
@@ -3283,6 +3470,10 @@ function revealAccountsTabIfOwner() {
   const jump = document.getElementById('accounts-jump-link');
   if (btn) btn.style.display = show ? '' : 'none';
   if (jump) jump.style.display = show ? '' : 'none';
+  const financeBtn = document.getElementById('finance-tab-btn');
+  const financeJump = document.getElementById('finance-jump-link');
+  if (financeBtn) financeBtn.style.display = show ? '' : 'none';
+  if (financeJump) financeJump.style.display = show ? '' : 'none';
   if (show) setDefaultAccountsDates();
 }
 
@@ -3322,6 +3513,15 @@ function accountsCategoryLabel(raw) {
     drinks: 'Drinks'
   };
   return map[raw] || raw;
+}
+
+function accountsMethodLabel(raw) {
+  const m = String(raw || '').toLowerCase();
+  if (m === 'cash') return 'Cash';
+  if (m === 'bank_transfer') return 'Bank transfer';
+  if (m === 'store_credit') return 'Store credit';
+  if (m === 'sumup') return 'SumUp';
+  return m || '—';
 }
 
 function formatAccountsGbp(n) {
@@ -3374,44 +3574,66 @@ async function loadAccountsReport() {
 
     document.getElementById('accounts-stat-qty').textContent = String(totals.quantity || 0);
     document.getElementById('accounts-stat-gross').textContent = formatAccountsGbp(totals.total_pounds);
+    const feesEl = document.getElementById('accounts-stat-fees');
+    if (feesEl) feesEl.textContent = formatAccountsGbp(totals.sumup_fees_pounds ?? data.sumup_fees?.pounds ?? 0);
     document.getElementById('accounts-stat-net').textContent = formatAccountsGbp(totals.net_payout);
 
+    const num = 'text-align: right; white-space: nowrap;';
     const catBody = document.getElementById('accounts-category-list');
     if (!categories.length) {
-      catBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+      catBody.innerHTML = '<tr><td colspan="5" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
     } else {
       catBody.innerHTML = categories.map(row => `
         <tr>
           <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(row.quantity)}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.total_pounds))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
+          <td style="${num}">${escapeAccountsHtml(row.quantity)}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.total_pounds))}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.fee_pounds))}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
         </tr>
       `).join('') + `
         <tr>
           <td><strong>Total</strong></td>
-          <td style="text-align: right;"><strong>${escapeAccountsHtml(totals.quantity || 0)}</strong></td>
-          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.total_pounds))}</strong></td>
-          <td style="text-align: right;"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.net_payout))}</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(totals.quantity || 0)}</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.total_pounds))}</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.sumup_fees_pounds))}</strong></td>
+          <td style="${num}"><strong>${escapeAccountsHtml(formatAccountsGbp(totals.net_payout))}</strong></td>
         </tr>`;
     }
 
     const lineBody = document.getElementById('accounts-line-list');
     if (!lines.length) {
-      lineBody.innerHTML = '<tr><td colspan="4" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
+      lineBody.innerHTML = '<tr><td colspan="6" class="admin-text-center admin-text-muted" style="padding: 2rem;">No paid sales in this range.</td></tr>';
     } else {
-      lineBody.innerHTML = lines.map(row => `
+      lineBody.innerHTML = lines.map(row => {
+        const feeNote = row.fee_basis === 'estimated' ? ' <span class="admin-text-muted admin-text-small">est.</span>'
+          : row.fee_basis === 'unknown' ? ' <span class="admin-text-muted admin-text-small">not synced</span>' : '';
+        return `
         <tr>
-          <td>${escapeAccountsHtml(formatAccountsWhen(row.created_at))}</td>
+          <td style="white-space: nowrap;">${escapeAccountsHtml(formatAccountsWhen(row.created_at))}</td>
           <td>${escapeAccountsHtml(accountsCategoryLabel(row.category))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.amount_pounds))}</td>
-          <td style="text-align: right;">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
-        </tr>
-      `).join('');
+          <td>${escapeAccountsHtml(accountsMethodLabel(row.payment_method))}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.amount_pounds))}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.fee_pounds))}${feeNote}</td>
+          <td style="${num}">${escapeAccountsHtml(formatAccountsGbp(row.net_payout))}</td>
+        </tr>`;
+      }).join('');
     }
 
     if (csvBtn) csvBtn.disabled = !lines.length;
-    if (status) status.textContent = `${lines.length} line item${lines.length === 1 ? '' : 's'} from ${from} to ${to}.`;
+    const feeInfo = data.sumup_fees || {};
+    let statusMsg = `${lines.length} line item${lines.length === 1 ? '' : 's'} from ${from} to ${to}.`;
+    if (feeInfo.actual_lines) {
+      statusMsg += ` Actual SumUp fees on ${feeInfo.actual_lines} sale${feeInfo.actual_lines === 1 ? '' : 's'} (${formatAccountsGbp(feeInfo.actual_pounds)}).`;
+    }
+    if (feeInfo.estimated_lines) {
+      const pct = (Number(feeInfo.estimate_rate || 0) * 100).toFixed(2);
+      statusMsg += ` Estimated at ${pct}% on ${feeInfo.estimated_lines} sale${feeInfo.estimated_lines === 1 ? '' : 's'} (${formatAccountsGbp(feeInfo.estimated_pounds)}).`;
+    }
+    if (feeInfo.unknown_lines) {
+      statusMsg += ` No SumUp payout data synced yet, so ${feeInfo.unknown_lines} sale${feeInfo.unknown_lines === 1 ? ' has' : 's have'} no fee. Use Sync SumUp fees.`;
+    }
+    if (status) status.textContent = statusMsg;
   } catch (err) {
     console.error('Accounts report error:', err);
     if (status) status.textContent = 'Could not load the report. ' + String(err.message || err);
@@ -3420,15 +3642,50 @@ async function loadAccountsReport() {
   }
 }
 
+async function syncAccountsSumUpFees() {
+  if (!isAccountsOwnerClient() || !sessionToken) return;
+  const from = document.getElementById('accounts-from')?.value;
+  const to = document.getElementById('accounts-to')?.value;
+  const status = document.getElementById('accounts-status');
+  const syncBtn = document.getElementById('accounts-sync-fees-btn');
+  if (!from || !to) {
+    if (status) status.textContent = 'Choose a from and to date before syncing fees.';
+    return;
+  }
+  if (syncBtn) syncBtn.disabled = true;
+  if (status) status.textContent = 'Syncing SumUp payout fees…';
+  try {
+    const res = await fetch(`${API_BASE}/admin/accounts/sync-sumup-fees`, {
+      method: 'POST',
+      headers: adminJsonHeaders(),
+      body: JSON.stringify({ from, to })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || data.error || res.statusText);
+    if (status) {
+      status.textContent = `Synced ${data.upserted || 0} payout row(s); fees in range ≈ ${formatAccountsGbp((data.fee_pence || 0) / 100)}. Reloading report…`;
+    }
+    await loadAccountsReport();
+  } catch (err) {
+    console.error('SumUp fee sync error:', err);
+    if (status) status.textContent = 'Fee sync failed. ' + String(err.message || err);
+  } finally {
+    if (syncBtn) syncBtn.disabled = false;
+  }
+}
+
 function downloadAccountsCsv() {
   if (!accountsReportRows.length) return;
-  const header = ['date', 'category', 'amount_pounds', 'net_payout'];
+  const header = ['date', 'category', 'payment_method', 'gross_pounds', 'sumup_fee_pounds', 'fee_basis', 'net_pounds'];
   const lines = [header.join(',')].concat(accountsReportRows.map(row => {
     const cells = [
       row.created_at,
       accountsCategoryLabel(row.category),
+      accountsMethodLabel(row.payment_method),
       Number(row.amount_pounds).toFixed(2),
-      Number(row.net_payout).toFixed(2)
+      Number(row.fee_pounds || 0).toFixed(2),
+      row.fee_basis || '',
+      Number(row.net_payout ?? row.amount_pounds).toFixed(2)
     ];
     return cells.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
   }));
@@ -3437,7 +3694,7 @@ function downloadAccountsCsv() {
   const from = document.getElementById('accounts-from')?.value || 'from';
   const to = document.getElementById('accounts-to')?.value || 'to';
   a.href = URL.createObjectURL(blob);
-  a.download = `dicebastion-accounts-${from}-to-${to}.csv`;
+  a.download = `dicebastion-club-accounts-${from}-to-${to}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -3448,7 +3705,7 @@ function scrollToAdminSection(sectionId) {
 }
 
 function switchAdminTab(tab, options = {}) {
-  if (tab === 'accounts' && !isAccountsOwnerClient()) return false;
+  if ((tab === 'accounts' || tab === 'finance') && !isAccountsOwnerClient()) return false;
   const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
   if (!btn) return false;
   document.querySelectorAll('.tab-btn').forEach(b => {
@@ -3465,7 +3722,9 @@ function switchAdminTab(tab, options = {}) {
   if (tab === 'activity') loadRecentActivity();
   if (tab === 'bookings') loadBookingsAndCalendar();
   if (tab === 'memberships') loadMemberships();
+  if (tab === 'orders') loadOrders();
   if (tab === 'accounts') loadAccountsReport();
+  if (tab === 'finance' && window.ShopFinance) ShopFinance.load();
   if (tab === 'newsletter') {
     loadNewsletterRecipients();
     loadNewsletterEvents();
@@ -3516,7 +3775,17 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 document.getElementById('accounts-run-btn')?.addEventListener('click', () => loadAccountsReport());
+document.getElementById('accounts-sync-fees-btn')?.addEventListener('click', () => syncAccountsSumUpFees());
 document.getElementById('accounts-csv-btn')?.addEventListener('click', () => downloadAccountsCsv());
+
+if (window.ShopFinance) {
+  ShopFinance.init({
+    apiBase: () => API_BASE,
+    token: () => sessionToken || (utils.session && utils.session.get()) || '',
+    isOwner: () => isAccountsOwnerClient(),
+    onStockChanged: () => loadProducts()
+  });
+}
 
 // Image Upload Handlers
 document.getElementById('product-image-upload').addEventListener('change', (e) => {
@@ -4629,6 +4898,28 @@ is_active: document.getElementById('product-active').checked ? 1 : 0,
 release_date: releaseDate
 };
 
+const costRaw = document.getElementById('product-cost').value.trim();
+if (!id && costRaw !== '') {
+  const unitCost = Math.round(parseFloat(costRaw) * 100);
+  const supplier = document.getElementById('product-supplier').value.trim();
+  const paidFrom = document.getElementById('product-cost-paid').value;
+  if (!Number.isFinite(unitCost) || unitCost < 0) {
+    alert('Enter a valid cost per unit, or leave it blank.');
+    return;
+  }
+  if (!supplier) {
+    alert('Enter the supplier for this stock, or leave the cost blank.');
+    return;
+  }
+  data.opening_stock = {
+    unit_cost_pence: unitCost,
+    supplier,
+    paid: !!paidFrom,
+    paid_from: paidFrom || null,
+    received_date: formatAccountsIsoDate(new Date())
+  };
+}
+
 try {
 const url = id ? `${API_BASE}/admin/products/${id}` : `${API_BASE}/admin/products`;
 const method = id ? 'PUT' : 'POST';
@@ -4643,20 +4934,14 @@ body: JSON.stringify(data)
 });
 
 if (res.ok) {
-document.getElementById('product-form').reset();
-document.getElementById('product-id').value = '';
-document.getElementById('description-content').innerHTML = '';
-document.getElementById('product-form-title').textContent = 'Add New Product';
-document.getElementById('product-submit-text').textContent = 'Add Product';
-document.getElementById('cancel-product-edit').style.display = 'none';
-document.getElementById('product-image-preview').innerHTML = '';
-document.getElementById('product-preorder').checked = false;
-document.getElementById('product-release-date').value = '';
-document.getElementById('preorder-date-container').style.display = 'none';
-selectedCategories = [];
-window.selectedCategories = selectedCategories;
-renderCategoryTags();
-uploadedProductImage = null;
+const createMore = !id && document.getElementById('product-create-more') && document.getElementById('product-create-more').checked;
+if (createMore) {
+  document.getElementById('product-id').value = '';
+  setProductFormAddMode();
+  scrollToProductForm();
+} else {
+  resetProductForm();
+}
 loadProducts();
 if (typeof loadShopCategories === 'function') loadShopCategories();
 } else {
@@ -4675,12 +4960,42 @@ alert('Error saving product');
 });
 
 document.getElementById('cancel-product-edit').addEventListener('click', () => {
-document.getElementById('product-form').reset();
-document.getElementById('product-id').value = '';
-document.getElementById('description-content').innerHTML = '';
+resetProductForm();
+});
+
+function scrollToProductForm() {
+const heading = document.getElementById('product-form-title');
+if (heading && heading.scrollIntoView) {
+  heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+}
+
+function setProductStockTracked(tracked) {
+const stockInput = document.getElementById('product-stock');
+stockInput.readOnly = !!tracked;
+document.getElementById('product-stock-tracked-note').style.display = tracked ? 'block' : 'none';
+}
+
+function setProductFormAddMode() {
 document.getElementById('product-form-title').textContent = 'Add New Product';
 document.getElementById('product-submit-text').textContent = 'Add Product';
 document.getElementById('cancel-product-edit').style.display = 'none';
+document.getElementById('product-cost-fields').style.display = 'block';
+setProductStockTracked(false);
+}
+
+function setProductFormEditMode() {
+document.getElementById('product-form-title').textContent = 'Edit Product';
+document.getElementById('product-submit-text').textContent = 'Update Product';
+document.getElementById('cancel-product-edit').style.display = 'block';
+document.getElementById('product-cost-fields').style.display = 'none';
+}
+
+function resetProductForm() {
+document.getElementById('product-form').reset();
+document.getElementById('product-id').value = '';
+document.getElementById('description-content').innerHTML = '';
+setProductFormAddMode();
 document.getElementById('product-image-preview').innerHTML = '';
 document.getElementById('product-preorder').checked = false;
 document.getElementById('product-release-date').value = '';
@@ -4690,14 +5005,11 @@ window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 uploadedProductImage = null;
-});
+const uploadInput = document.getElementById('product-image-upload');
+if (uploadInput) uploadInput.value = '';
+}
 
-async function editProduct(id) {
-try {
-const product = (adminProductsList || []).find(p => Number(p.id) === Number(id));
-if (!product) return;
-
-document.getElementById('product-id').value = product.id;
+function fillProductFormFromProduct(product) {
 document.getElementById('product-name').value = product.name;
 document.getElementById('product-slug').value = product.slug;
 document.getElementById('product-ean').value = product.ean || '';
@@ -4715,7 +5027,6 @@ window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 
-// Pre-order fields
 if (product.release_date) {
 document.getElementById('product-preorder').checked = true;
 document.getElementById('product-release-date').value = product.release_date;
@@ -4727,19 +5038,50 @@ document.getElementById('preorder-date-container').style.display = 'none';
 }
 
 if (product.image_url) {
-document.getElementById('product-image-preview').innerHTML = 
+document.getElementById('product-image-preview').innerHTML =
 `<img src="${product.image_url}" class="image-preview" alt="Current">`;
+} else {
+document.getElementById('product-image-preview').innerHTML = '';
+}
+uploadedProductImage = null;
+const uploadInput = document.getElementById('product-image-upload');
+if (uploadInput) uploadInput.value = '';
 }
 
-document.getElementById('product-form-title').textContent = 'Edit Product';
-document.getElementById('product-submit-text').textContent = 'Update Product';
-document.getElementById('cancel-product-edit').style.display = 'block';
-uploadedProductImage = null;
-document.getElementById('product-form').scrollIntoView({ behavior: 'smooth' });
+function getAdminProductById(id) {
+return (adminProductsList || []).find(p => Number(p.id) === Number(id));
+}
+
+async function editProduct(id) {
+try {
+const product = getAdminProductById(id);
+if (!product) return;
+
+document.getElementById('product-id').value = product.id;
+fillProductFormFromProduct(product);
+setProductFormEditMode();
+setProductStockTracked(Number(product.cost_tracked) === 1);
+scrollToProductForm();
 } catch (err) {
 alert('Error loading product');
 }
 }
+
+function duplicateProduct(id) {
+try {
+const product = getAdminProductById(id);
+if (!product) return;
+
+document.getElementById('product-id').value = '';
+fillProductFormFromProduct(product);
+setProductFormAddMode();
+scrollToProductForm();
+} catch (err) {
+alert('Error duplicating product');
+}
+}
+
+window.duplicateProduct = duplicateProduct;
 
 async function deleteProduct(id, name) {
 if (!confirm(`Delete product "${name}"?`)) return;
@@ -5328,10 +5670,14 @@ async function loadRecentActivity() {
   }
 }
 
-// Orders
+// Orders / POS
 async function loadOrders() {
-  const list = document.getElementById('orders-list');
-  list.innerHTML = '<p class="admin-text-muted">Order management coming soon. Use SQL queries for now.</p>';
+  if (!sessionToken || typeof ShopPosAdmin === 'undefined') {
+    const list = document.getElementById('orders-list');
+    if (list) list.innerHTML = '<p class="admin-text-muted">POS UI failed to load.</p>';
+    return;
+  }
+  await ShopPosAdmin.init(API_BASE, sessionToken);
 }
 
 // Registrations

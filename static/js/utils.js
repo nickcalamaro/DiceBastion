@@ -190,7 +190,12 @@ window.utils = {
       const isLoggedIn = !!window.utils.session.get();
       const isAdmin = user?.is_admin === true;
       const membershipCache = JSON.parse(localStorage.getItem('user_membership_status') || 'null');
-      const isMember = membershipCache && membershipCache.status === 'active';
+      // Cache is written in two shapes: the /account/info membership row
+      // ({status: 'active', ...} via loginStatus.js) and the
+      // /membership/status payload ({active: true, ...} via bookings and
+      // memberships pages). Accept both, or members get treated as
+      // non-members by every data-visibility control.
+      const isMember = !!membershipCache && (membershipCache.status === 'active' || membershipCache.active === true);
       
       return { user, isMember, isAdmin, isLoggedIn };
     },
@@ -368,6 +373,67 @@ window.utils = {
       onError(timeoutMsg);
     }
     return null;
+  },
+
+  /**
+   * Background confirmation once the card widget reports 3DS/SCA ('sent' / 'auth-screen').
+   * Some issuer challenges finish without the widget ever emitting success or error
+   * (seen on iOS Safari), which left checkout modals hanging indefinitely.
+   *
+   * At most one request is in flight, and stop() resolves only after it settles.
+   * Membership and bundle confirms charge a saved card, so callers must await stop()
+   * before running their own confirm to avoid concurrent activation.
+   *
+   * @param {string} endpoint - '/events/confirm' or '/membership/confirm'
+   * @param {string} orderRef
+   * @param {Object} options
+   * @param {Function} options.onPaid - receives the confirm response
+   * @param {Function} options.onFailed - receives (message, status)
+   * @returns {{ stop: () => Promise<void>, isRunning: () => boolean }}
+   */
+  watchScaPayment: (endpoint, orderRef, options = {}) => {
+    const { intervalMs = 4000, maxMs = 10 * 60 * 1000, onPaid = null, onFailed = null } = options;
+    const apiBase = window.utils.getApiBase();
+    const startedAt = Date.now();
+    let stopped = false;
+    let timer = null;
+    let inFlight = Promise.resolve();
+
+    const tick = () => {
+      if (stopped) return;
+      if (Date.now() - startedAt > maxMs) { stopped = true; return; }
+      inFlight = (async () => {
+        try {
+          const url = `${apiBase}${endpoint}?orderRef=${encodeURIComponent(orderRef)}&_=${Date.now()}`;
+          const data = await (await fetch(url, { cache: 'no-store' })).json();
+          if (stopped) return;
+          if (data.ok && (data.status === 'active' || data.status === 'already_active')) {
+            stopped = true;
+            if (onPaid) onPaid(data);
+            return;
+          }
+          if (data.status === 'FAILED' || data.status === 'DECLINED') {
+            stopped = true;
+            const msg = data.message || (data.status === 'DECLINED'
+              ? 'Your card was declined. Please use a different payment method.'
+              : 'Payment failed. Please check your card details and try again.');
+            if (onFailed) onFailed(msg, data.status);
+            return;
+          }
+        } catch (_) { /* transient; keep watching */ }
+        if (!stopped) timer = setTimeout(tick, intervalMs);
+      })();
+    };
+
+    timer = setTimeout(tick, intervalMs);
+    return {
+      stop: async () => {
+        stopped = true;
+        clearTimeout(timer);
+        try { await inFlight; } catch (_) {}
+      },
+      isRunning: () => !stopped
+    };
   },
 
   /**
