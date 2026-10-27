@@ -1587,6 +1587,16 @@ function isGenuineDecline(err) {
 }
 
 /**
+ * SumUp refused the saved card token itself (deactivated card, expired or removed
+ * instrument). The payments worker surfaces this as a 500, but it is not transient:
+ * retrying never succeeds, so it must take the failure path that disables
+ * auto-renewal and asks the member to update their card.
+ */
+function isPaymentMethodRejected(err) {
+  return /"param"\s*:\s*"token"/i.test(String(err?.message || ''))
+}
+
+/**
  * A renewal charge could not be attempted at the gateway (system/transport error).
  * No money was touched, so we DON'T email the member and DON'T burn a renewal
  * attempt — we just log it so the next cron run retries cleanly.
@@ -1653,7 +1663,7 @@ async function processMembershipRenewal(db, membership, env) {
     // Only a genuine gateway decline (HTTP 402) is a real, failed payment attempt
     // that should notify the member. System/transport errors never reached the
     // card, so they must not produce a "payment failed" email or burn an attempt.
-    if (isGenuineDecline(e)) {
+    if (isGenuineDecline(e) || isPaymentMethodRejected(e)) {
       return await handleRenewalFailure(db, env, membership, instrument, amount, currency, e, orderRef)
     }
     return await handleRenewalSystemError(db, membership, amount, currency, e)
@@ -4071,84 +4081,6 @@ app.post('/account/enable-auto-renewal', async c => {
   } catch (error) {
     console.error('[Enable Auto-Renewal] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
-  }
-})
-
-// Setup payment method for auto-renewal
-app.post('/account/setup-payment-method', async c => {
-  try {
-    const sessionToken = c.req.header('X-Session-Token')
-    
-    if (!sessionToken) {
-      return c.json({ error: 'no_session_token' }, 401)
-    }
-    
-    // Get session
-    const session = await c.env.DB.prepare(`
-      SELECT us.user_id, u.email, u.name 
-      FROM user_sessions us
-      JOIN users u ON us.user_id = u.user_id
-      WHERE us.session_token = ? AND us.expires_at > datetime('now')
-    `).bind(sessionToken).first()
-    
-    if (!session) {
-      return c.json({ error: 'invalid_session' }, 401)
-    }
-      // Get active membership (check status column only, not date)
-    const membership = await c.env.DB.prepare(`
-      SELECT * FROM memberships 
-      WHERE user_id = ? AND status = 'active'
-      ORDER BY end_date DESC LIMIT 1
-    `).bind(session.user_id).first()
-    
-    if (!membership) {
-      return c.json({ error: 'no_active_membership' }, 404)
-    }
-    
-    // Create a verification checkout for £0.01 to save the card
-    const orderRef = `CARD-SETUP-${session.user_id}-${Date.now()}`
-    const customerId = `USER-${session.user_id}`
-    
-    try {
-      const checkoutResponse = await fetch(`${c.env.PAYMENTS_WORKER_URL}/internal/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: 0.01, // £0.01 verification charge
-          currency: 'GBP',
-          orderRef,
-          description: 'Payment method setup for auto-renewal',
-          savePaymentInstrument: true,
-          customerId
-        })
-      })
-      
-      if (!checkoutResponse.ok) {
-        const error = await checkoutResponse.text()
-        console.error('Checkout creation failed:', error)
-        throw new Error('Failed to create checkout')
-      }
-      
-      const checkout = await checkoutResponse.json()
-      
-      // Store the setup intent
-      await c.env.DB.prepare(`
-        INSERT INTO payment_setups (user_id, checkout_id, order_ref, status, created_at)
-        VALUES (?, ?, ?, 'pending', ?)
-      `).bind(session.user_id, checkout.id, orderRef, now).run()
-      
-      return c.json({
-        success: true,
-        checkout_id: checkout.id,
-        order_ref: orderRef
-      })
-    } catch (error) {
-      console.error('[Setup Payment Method] Checkout error:', error)
-      throw error
-    }
-  } catch (error) {
-    console.error('[Setup Payment Method] ERROR:', error)
-    return c.json({ error: 'internal_error', message: error.message }, 500)
   }
 })
 
@@ -12158,7 +12090,7 @@ async function processAutoRenewals(env) {
           } catch (e) {
             // Genuine decline → notify + count the attempt. System error → no
             // charge reached the card, so don't email or burn an attempt; retry next run.
-            if (isGenuineDecline(e)) {
+            if (isGenuineDecline(e) || isPaymentMethodRejected(e)) {
               await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, e, orderRef)
               trialChargesFailed++
             } else {
@@ -12437,8 +12369,38 @@ async function processAutoRenewals(env) {
     
     const expiredGracePeriod = expiredGracePeriodResult.meta?.changes || 0
     console.log(`[CRON] Marked ${expiredGracePeriod} auto-renewal memberships as expired (grace period ended)`)
-    
-    expired = expiredNoAutoRenew + expiredGracePeriod
+
+    // Anything still active with auto-renew past the grace window only ever hit system
+    // errors, so the member was never told. The renewal query no longer reaches it;
+    // expire it, stop auto-renew, and ask staff to contact the member.
+    const { results: stuckRenewals } = await env.DB.prepare(`
+      SELECT m.id, m.user_id, m.plan, m.end_date, u.email, u.name,
+             (SELECT error_message FROM renewal_log rl WHERE rl.membership_id = m.id ORDER BY rl.id DESC LIMIT 1) AS last_error
+      FROM memberships m
+      JOIN users u ON u.user_id = m.user_id
+      WHERE m.end_date < ? AND m.status = 'active' AND m.auto_renew = 1
+    `).bind(gracePeriodStartStr).all()
+    for (const m of stuckRenewals || []) {
+      await env.DB.prepare(`UPDATE memberships SET status = 'expired', auto_renew = 0 WHERE id = ? AND status = 'active'`)
+        .bind(m.id).run()
+    }
+    if (stuckRenewals?.length) {
+      const lines = stuckRenewals.map(m =>
+        `Membership ${m.id} (${m.plan}) for ${m.name || ''} <${m.email}>, user ${m.user_id}, ended ${m.end_date}. Last error: ${m.last_error || 'none logged'}`
+      )
+      await sendEmail(env, {
+        to: 'admin@dicebastion.com',
+        subject: `${stuckRenewals.length} membership renewal(s) could not be attempted and have expired`,
+        text: `These auto-renewing memberships passed their grace period without a successful renewal. The member was not emailed, so please contact them.\n\n${lines.join('\n')}`,
+        html: `<p>These auto-renewing memberships passed their grace period without a successful renewal. The member was not emailed, so please contact them.</p><ul>${lines.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`,
+        emailType: 'admin_renewal_stuck_expired',
+        relatedType: 'membership',
+        metadata: { membership_ids: stuckRenewals.map(m => m.id) }
+      }).catch(err => console.error('[CRON] Stuck renewal alert email failed:', err))
+    }
+    console.log(`[CRON] Expired ${stuckRenewals?.length || 0} auto-renewal memberships that never reached the gateway`)
+
+    expired = expiredNoAutoRenew + expiredGracePeriod + (stuckRenewals?.length || 0)
     console.log(`[CRON] Total memberships marked as expired: ${expired}`)
 
     // ========================================================================
