@@ -38,6 +38,7 @@
     const m = String(method || '').toLowerCase();
     if (m === 'cash') return 'Cash';
     if (m === 'bank_transfer') return 'Bank transfer';
+    if (m === 'store_credit') return 'Store credit';
     if (m === 'sumup') return channel === 'pos' ? 'SumUp (POS)' : 'SumUp';
     return m || '—';
   }

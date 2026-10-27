@@ -738,7 +738,7 @@ async function collectIncome(db, from, to, booksStart) {
 
   const { results: itemRows } = await db.prepare(`
     SELECT o.id AS order_id, o.order_number, o.total, IFNULL(o.shipping, 0) AS shipping,
-           o.payment_method, o.sale_channel,
+           o.payment_method, o.sale_channel, IFNULL(o.credit_applied_pence, 0) AS credit_applied_pence,
            COALESCE(o.completed_at, o.created_at) AS sold_at,
            oi.id AS item_id, oi.product_id, oi.product_name, oi.quantity, oi.subtotal,
            EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.order_item_id = oi.id AND sm.movement_type = 'sale') AS tracked
@@ -776,6 +776,10 @@ async function collectIncome(db, from, to, booksStart) {
     if (!tracked.length) continue
     const goodsPence = tracked.reduce((s, l) => s + l.net_pence, 0)
     const shippingPence = Number(order.shipping) || 0
+    const orderTotal = Number(order.total) || 0
+    const creditPence = orderTotal > 0
+      ? Math.min(goodsPence + shippingPence, Math.round((Number(order.credit_applied_pence) || 0) * (goodsPence + shippingPence) / orderTotal))
+      : 0
     shopOrders.push({
       order_id: order.order_id,
       order_number: order.order_number,
@@ -784,12 +788,14 @@ async function collectIncome(db, from, to, booksStart) {
       sale_channel: order.sale_channel,
       goods_pence: goodsPence,
       shipping_pence: shippingPence,
+      credit_pence: creditPence,
       lines: tracked
     })
   }
 
   const { results: txRows } = await db.prepare(`
-    SELECT tr.id, tr.transaction_type, tr.order_ref, tr.amount, tr.created_at, tr.sumup_transaction_code, m.plan
+    SELECT tr.id, tr.transaction_type, tr.order_ref, tr.amount, tr.created_at, tr.sumup_transaction_code, m.plan,
+           IFNULL(tr.credit_applied_pence, 0) AS credit_applied_pence
     FROM transactions tr
     LEFT JOIN memberships m ON tr.transaction_type = 'event_membership_bundle' AND m.order_ref = tr.order_ref
     WHERE tr.transaction_type IN ('ticket', 'event_membership_bundle')
@@ -813,6 +819,7 @@ async function collectIncome(db, from, to, booksStart) {
       sold_at: t.created_at,
       charged_pence: charged,
       ticket_pence: ticketPence,
+      credit_pence: Math.min(ticketPence, Math.max(0, Number(t.credit_applied_pence) || 0)),
       tx_code: t.sumup_transaction_code ? String(t.sumup_transaction_code) : null
     })
   }
@@ -833,7 +840,7 @@ async function applyFees(db, income) {
       continue
     }
     if (estimateRate != null) {
-      o.fee_pence = Math.round((o.goods_pence + o.shipping_pence) * estimateRate)
+      o.fee_pence = Math.round((o.goods_pence + o.shipping_pence - (o.credit_pence || 0)) * estimateRate)
       o.fee_basis = 'estimated'
     } else {
       o.fee_pence = 0
@@ -847,8 +854,12 @@ async function applyFees(db, income) {
       const share = t.charged_pence > 0 ? t.ticket_pence / t.charged_pence : 1
       t.fee_pence = Math.round(feeByCode.get(t.tx_code) * share)
       t.fee_basis = 'actual'
+    } else if (t.ticket_pence - (t.credit_pence || 0) <= 0) {
+      t.fee_pence = 0
+      t.fee_basis = 'none'
+      continue
     } else if (estimateRate != null) {
-      t.fee_pence = Math.round(t.ticket_pence * estimateRate)
+      t.fee_pence = Math.round((t.ticket_pence - (t.credit_pence || 0)) * estimateRate)
       t.fee_basis = 'estimated'
     } else {
       t.fee_pence = 0
@@ -901,6 +912,25 @@ async function collectBillExtras(db, from, to) {
     .filter(b => b.extra_pence !== 0)
 }
 
+/**
+ * Store credit given out (buyback payouts and staff adjustments) between from and to.
+ * Spends and releases are left out: redemptions are counted through paid orders and tickets.
+ */
+async function collectCreditIssued(db, from, to) {
+  try {
+    const row = await db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN entry_type = 'buyback_credit' THEN delta_pence ELSE 0 END), 0) AS buyback_pence,
+             COALESCE(SUM(CASE WHEN entry_type = 'adjustment' THEN delta_pence ELSE 0 END), 0) AS adjustment_pence
+      FROM store_credit_ledger
+      WHERE entry_type IN ('buyback_credit', 'adjustment')
+        AND substr(created_at, 1, 10) >= ? AND substr(created_at, 1, 10) <= ?
+    `).bind(from, to).first()
+    return { buyback_pence: Number(row?.buyback_pence) || 0, adjustment_pence: Number(row?.adjustment_pence) || 0 }
+  } catch (_) {
+    return { buyback_pence: 0, adjustment_pence: 0 }
+  }
+}
+
 async function eventNames(db, ids) {
   const unique = [...new Set(ids.filter(Boolean))]
   const map = new Map()
@@ -930,6 +960,7 @@ export async function buildPnl(db, from, to) {
   const movements = await collectMovements(db, from, to)
   const expenses = await collectExpenses(db, from, to)
   const billExtras = await collectBillExtras(db, from, to)
+  const creditIssued = await collectCreditIssued(db, from, to)
 
   // Per product: revenue from sale lines, cost from sale movements
   const products = new Map()
@@ -1014,7 +1045,8 @@ export async function buildPnl(db, from, to) {
   const revenuePence = productSalesPence + shippingPence + ticketPence
   const grossProfitPence = revenuePence - cogsPence
   const feesPence = shopFees + ticketFees
-  const netProfitPence = grossProfitPence - feesPence - writeOffPence - expensesPence - billExtrasPence
+  const creditIssuedPence = creditIssued.buyback_pence + creditIssued.adjustment_pence
+  const netProfitPence = grossProfitPence - feesPence - writeOffPence - expensesPence - billExtrasPence - creditIssuedPence
 
   return {
     from,
@@ -1036,8 +1068,12 @@ export async function buildPnl(db, from, to) {
       stock_write_offs_pence: writeOffPence,
       by_category: [...expenseByCategory.entries()].map(([category, amount_pence]) => ({ category, amount_pence })),
       supplier_bill_extras_pence: billExtrasPence,
-      total_pence: feesPence + writeOffPence + expensesPence + billExtrasPence
+      card_buyback_credit_pence: creditIssued.buyback_pence,
+      store_credit_adjustments_pence: creditIssued.adjustment_pence,
+      total_pence: feesPence + writeOffPence + expensesPence + billExtrasPence + creditIssuedPence
     },
+    store_credit_redeemed_pence: income.shopOrders.reduce((s, o) => s + (o.credit_pence || 0), 0)
+      + income.tickets.reduce((s, t) => s + (t.credit_pence || 0), 0),
     net_profit_pence: netProfitPence,
     products: [...products.values()]
       .map(p => ({ ...p, gross_profit_pence: p.revenue_pence - p.cogs_pence }))
@@ -1074,12 +1110,27 @@ export async function buildBalanceSheet(db, asOf) {
   const income = await collectIncome(db, epoch, asOf, booksStart)
   await applyFees(db, income)
   const cash = { bank: 0, cash: 0 }
+  let creditRedeemed = 0
   for (const o of income.shopOrders) {
-    cash[moneyAccount(o.payment_method)] += o.goods_pence + o.shipping_pence - (o.fee_pence || 0)
+    cash[moneyAccount(o.payment_method)] += o.goods_pence + o.shipping_pence - (o.credit_pence || 0) - (o.fee_pence || 0)
+    creditRedeemed += o.credit_pence || 0
   }
   for (const t of income.tickets) {
-    cash.bank += t.ticket_pence - (t.fee_pence || 0)
+    cash.bank += t.ticket_pence - (t.credit_pence || 0) - (t.fee_pence || 0)
+    creditRedeemed += t.credit_pence || 0
   }
+
+  // Owed to customers: credit issued less credit spent on the paid sales counted above.
+  // Spends on untracked items are left owed, matching how untracked sales are left out of cash.
+  const issued = await collectCreditIssued(db, epoch, asOf)
+  const storeCreditOwedPence = issued.buyback_pence + issued.adjustment_pence - creditRedeemed
+  let storeCreditActualPence = null
+  try {
+    const row = await db.prepare(
+      'SELECT COALESCE(SUM(delta_pence), 0) AS pence FROM store_credit_ledger WHERE substr(created_at, 1, 10) <= ?'
+    ).bind(asOf).first()
+    storeCreditActualPence = Number(row?.pence) || 0
+  } catch (_) {}
 
   const paidOut = async (table, dateCol) => {
     const { results } = await db.prepare(`
@@ -1145,7 +1196,7 @@ export async function buildBalanceSheet(db, asOf) {
   const expensesUnpaid = await unpaid('business_expenses', 'expense_date')
 
   const assetsPence = stockPence + cash.bank + cash.cash
-  const liabilitiesPence = billsUnpaid + expensesUnpaid
+  const liabilitiesPence = billsUnpaid + expensesUnpaid + storeCreditOwedPence
   const equityPence = capitalIn + paidPersonally - drawings + pnl.net_profit_pence
 
   return {
@@ -1160,6 +1211,8 @@ export async function buildBalanceSheet(db, asOf) {
     liabilities: {
       unpaid_supplier_bills_pence: billsUnpaid,
       unpaid_expenses_pence: expensesUnpaid,
+      store_credit_owed_pence: storeCreditOwedPence,
+      store_credit_customer_balances_pence: storeCreditActualPence,
       total_pence: liabilitiesPence
     },
     net_assets_pence: assetsPence - liabilitiesPence,

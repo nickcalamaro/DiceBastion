@@ -25,9 +25,12 @@
   
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="/img/logo.png" />
+  <link rel="stylesheet" href="{{ "css/forms.css" | relURL }}" />
 
   <!-- Cart: shared TTL (cookie + localStorage); must load before page scripts -->
   <script src="{{ "js/shopCartStorage.js" | relURL }}" charset="utf-8"></script>
+  <script src="https://dicebastion.com/js/utils.js"></script>
+  <script src="{{ "js/loginStatus.js" | relURL }}"></script>
 
   <style>
     /* Blowfish color scheme */
@@ -292,6 +295,10 @@
       </a>
       <nav aria-label="Shop">
         <a href="https://dicebastion.com">Main Site</a>
+        <a href="/sell-cards/">
+          <span class="nav-label-full">Sell Cards</span>
+          <span class="nav-label-short">Sell</span>
+        </a>
         <a href="/custom-playmats/">
           <span class="nav-label-full">Custom Playmats</span>
           <span class="nav-label-short">Playmats</span>
@@ -313,6 +320,8 @@
   <footer>
     <div class="container">
       <p>&copy; {{ now.Year }} Dice Bastion Gibraltar | 
+        <a href="/sell-cards/">Sell Cards</a> |
+        <a href="/buyback-terms/">Buyback Terms</a> |
         <a href="https://dicebastion.com/privacy-policy/">Privacy Policy</a> | 
         <a href="https://dicebastion.com/cookie-policy/">Cookie Policy</a> |
         <a href="https://dicebastion.com/code-of-conduct/">Code of Conduct</a>
@@ -360,7 +369,19 @@
 
     window.addEventListener('cartUpdated', updateGlobalCartBadge);
 
-    document.addEventListener('DOMContentLoaded', updateGlobalCartBadge);
+    document.addEventListener('DOMContentLoaded', async function () {
+      updateGlobalCartBadge();
+      try {
+        if (window.utils && utils.session && utils.session.syncFromSharedCookie) {
+          const apiBase = utils.getApiBase(true);
+          await utils.session.syncFromSharedCookie(apiBase);
+        }
+      } catch (_) {}
+      if (typeof updateLoginUI === 'function') updateLoginUI();
+      else if (window.LoginStatus && typeof window.LoginStatus.refresh === 'function') {
+        window.LoginStatus.refresh();
+      }
+    });
   </script>
 </body>
 </html>

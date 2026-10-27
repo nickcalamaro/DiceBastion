@@ -83,11 +83,7 @@ class AuthModal {
     this.mainApiUrl = options.mainApiUrl || window.__DB_API_BASE || (
       (location.hostname === 'dicebastion.com' || location.hostname === 'www.dicebastion.com')
         ? '/api'
-        : (location.hostname === 'shop.dicebastion.com')
-          ? 'https://dicebastion.com/api'
-        : (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-          ? 'http://localhost:8787'
-          : 'https://dicebastion.com/api'
+        : 'https://dicebastion.com/api'
     );
     this.onSuccess = options.onSuccess || (() => {});
     this.modal = null;
@@ -336,6 +332,7 @@ class AuthModal {
       const response = await fetch(`${this.mainApiUrl}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password })
       });
 
@@ -345,15 +342,19 @@ class AuthModal {
         throw new Error(data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed');
       }
 
-      // Store session
-      localStorage.setItem('session_token', data.session_token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      
-      // Also store in admin_session format for compatibility
-      localStorage.setItem('admin_session', data.session_token);
-      localStorage.setItem('admin_user', JSON.stringify(data.user));
+      if (window.utils && utils.session && utils.session.set) {
+        utils.session.set(data.session_token, data.user);
+      } else {
+        localStorage.setItem('admin_session', data.session_token);
+        localStorage.setItem('admin_user', JSON.stringify(data.user));
+      }
 
-      // Reload page to show logged-in state
+      if (typeof this.onSuccess === 'function') {
+        this.onSuccess(data);
+        this.hide();
+        return;
+      }
+
       window.location.reload();
 
     } catch (error) {
@@ -394,6 +395,7 @@ class AuthModal {
       const response = await fetch(`${this.mainApiUrl}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, name, password })
       });
 
@@ -410,15 +412,19 @@ class AuthModal {
         throw new Error('Registration failed. Please try again.');
       }
 
-      // Store session (auto-login after registration)
-      localStorage.setItem('session_token', data.session_token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      
-      // Also store in admin_session format for compatibility
-      localStorage.setItem('admin_session', data.session_token);
-      localStorage.setItem('admin_user', JSON.stringify(data.user));
+      if (window.utils && utils.session && utils.session.set) {
+        utils.session.set(data.session_token, data.user);
+      } else {
+        localStorage.setItem('admin_session', data.session_token);
+        localStorage.setItem('admin_user', JSON.stringify(data.user));
+      }
 
-      // Reload page to show logged-in state
+      if (typeof this.onSuccess === 'function') {
+        this.onSuccess(data);
+        this.hide();
+        return;
+      }
+
       window.location.reload();
 
     } catch (error) {
