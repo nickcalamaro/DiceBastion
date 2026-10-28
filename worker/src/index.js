@@ -10495,6 +10495,8 @@ app.get('/admin/orders', requireAdmin, async (c) => {
         AND IFNULL(o.sale_channel, '') != 'pos'
       )
     `
+    // Fulfillment list: paid orders only (failed/abandoned checkouts stay in D1 but are not real sales).
+    const paidOnlySql = `UPPER(COALESCE(o.payment_status, '')) = 'PAID'`
 
     const ordersResult = await c.env.DB.prepare(`
       SELECT o.id, o.order_number, o.email, o.name, o.status, o.subtotal, o.tax, o.shipping, o.total, o.currency,
@@ -10503,6 +10505,7 @@ app.get('/admin/orders', requireAdmin, async (c) => {
              COALESCE(o.delivery_status, 'undelivered') AS delivery_status
       FROM orders o
       WHERE ${shopOnlySql}
+        AND ${paidOnlySql}
         ${deliveryFilter}
       ORDER BY datetime(COALESCE(o.completed_at, o.created_at)) DESC
       LIMIT ?

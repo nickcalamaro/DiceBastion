@@ -1063,7 +1063,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 Show delivered
 </label>
 </div>
-<p class="admin-text-muted admin-mb-1">Undelivered shop orders only by default (online + POS). Drinks sales are not listed here.</p>
+<p class="admin-text-muted admin-mb-1">Undelivered, paid shop orders only by default (online + POS). Failed or abandoned checkouts are hidden. Drinks sales are not listed here.</p>
 <div id="orders-list"></div>
 </div>
 
@@ -5827,13 +5827,19 @@ async function loadRecentActivity() {
 }
 
 // Orders / POS
+let shopPosInitialized = false;
 async function loadOrders() {
   if (!sessionToken || typeof ShopPosAdmin === 'undefined') {
     const list = document.getElementById('orders-list');
     if (list) list.innerHTML = '<p class="admin-text-muted">POS UI failed to load.</p>';
     return;
   }
-  await ShopPosAdmin.init(API_BASE, sessionToken);
+  if (!shopPosInitialized) {
+    await ShopPosAdmin.init(API_BASE, sessionToken);
+    shopPosInitialized = true;
+  } else {
+    await ShopPosAdmin.loadOrders(API_BASE, sessionToken);
+  }
 }
 
 // Registrations
