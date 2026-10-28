@@ -30,7 +30,7 @@ Riftbound packs, boxes and accessories are available through the [Dice Bastion s
 
 - [Riftbound products](https://shop.dicebastion.com/products/category/riftbound)
 - [Full shop](https://shop.dicebastion.com)
-- [Sell us your singles for store credit](https://shop.dicebastion.com/sell-cards/)
+- [Trade in your singles for store credit](https://shop.dicebastion.com/sell-cards/)
 
 ## More TCGs
 
