@@ -10,7 +10,7 @@ const IS_LOCALHOST = window.location.hostname === 'localhost' ||
 
 // Make functions globally accessible
 window.renderEventPurchase = function renderEventPurchase(event) {
-  const eventId = event.id || event.event_id;
+  const eventId = event.session_event_id || event.id || event.event_id;
   
   // Determine if event is free
   // Free if: requires_purchase is 0/false OR both prices are 0
@@ -199,7 +199,7 @@ function generateModal(eventId, isFree) {
 }
 
 window.initEventPurchase = function initEventPurchase(event) {
-  const eventId = String(event.id);
+  const eventId = String(event.session_event_id || event.id);
   const root = document.querySelector('.event-purchase[data-event-id="'+eventId+'"]');
   const modal = document.getElementById('evt-modal-'+eventId);
   const cardEl = document.getElementById('evt-card-'+eventId);

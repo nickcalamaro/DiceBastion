@@ -370,9 +370,10 @@
 
 <script>
 function openEventModal(eventId, allEvents) {
-  const event = allEvents.find(e => e.id === eventId);
+  const event = allEvents.find(e => e.id === eventId || e.session_event_id === eventId);
   if (!event) return;
   
+  const checkoutId = event.session_event_id || event.id;
   const datetime = new Date(event.event_datetime);
   const isFree = event.requires_purchase !== 1;
   
@@ -446,7 +447,7 @@ function openEventModal(eventId, allEvents) {
   // Use setTimeout to ensure DOM has fully updated before attaching event listeners
   setTimeout(() => {
     if (typeof initEventPurchase === 'function') {
-      initEventPurchase(event);
+      initEventPurchase({ ...event, id: checkoutId, session_event_id: checkoutId });
     }
   }, 0);
 }

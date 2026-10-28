@@ -929,6 +929,17 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
     <input type="date" id="recurrence-end-date" class="form-input">
     <small class="admin-text-small">Leave empty for indefinite recurrence</small>
 </div>
+
+<div id="recurrence-preview" class="form-group" style="display: none;">
+  <label class="form-label">Upcoming dates (preview)</label>
+  <ul id="recurrence-preview-list" class="admin-text-small" style="margin: 0; padding-left: 1.25rem; color: rgb(var(--color-neutral-600));"></ul>
+</div>
+
+<div id="series-sessions-panel" class="form-group" style="display: none;">
+  <label class="form-label">Materialized sessions</label>
+  <p class="admin-text-small admin-mb-1">Each session has its own ticket list and capacity. Cancelling hides it from the public calendar.</p>
+  <div id="series-sessions-table" class="admin-card" style="padding: 0; overflow: hidden;"></div>
+</div>
 </div>
 </div>
 
@@ -2607,6 +2618,134 @@ function toggleRecurringFields() {
   
   if (isRecurring) {
     updateRecurrenceFields();
+    updateRecurrencePreview();
+  } else {
+    const preview = document.getElementById('recurrence-preview');
+    if (preview) preview.style.display = 'none';
+    const panel = document.getElementById('series-sessions-panel');
+    if (panel) panel.style.display = 'none';
+  }
+}
+
+function updateRecurrencePreview() {
+  const isRecurring = document.getElementById('event-is-recurring').checked;
+  const wrap = document.getElementById('recurrence-preview');
+  const list = document.getElementById('recurrence-preview-list');
+  if (!wrap || !list || !isRecurring) return;
+  wrap.style.display = 'block';
+  try {
+    const pattern = JSON.parse(getRecurrencePattern());
+    const time = pattern.time || '00:00';
+    const dates = [];
+    let cursor = new Date();
+    for (let i = 0; i < 8; i++) {
+      const next = computeNextOccurrenceClient(pattern, cursor);
+      if (!next) break;
+      dates.push(next);
+      cursor = new Date(next);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    list.innerHTML = dates.length
+      ? dates.map(d => `<li>${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} at ${time}</li>`).join('')
+      : '<li>No upcoming dates in the next 12 weeks</li>';
+  } catch (_) {
+    list.innerHTML = '<li>Set recurrence options to preview dates</li>';
+  }
+}
+
+function computeNextOccurrenceClient(pattern, fromDate) {
+  const from = new Date(fromDate);
+  const time = String(pattern.time || '00:00');
+  const [h, m] = time.split(':').map(Number);
+  if (pattern.type === 'weekly') {
+    const target = Number(pattern.day);
+    const d = new Date(from);
+    let add = (target - d.getDay() + 7) % 7;
+    if (add === 0 && (d.getHours() > h || (d.getHours() === h && d.getMinutes() >= m))) add = 7;
+    d.setDate(d.getDate() + add);
+    d.setHours(h, m, 0, 0);
+    return d;
+  }
+  if (pattern.type === 'monthly_date') {
+    const day = Number(pattern.date);
+    const d = new Date(from.getFullYear(), from.getMonth(), day, h, m, 0, 0);
+    if (d <= from) d.setMonth(d.getMonth() + 1);
+    return d;
+  }
+  if (pattern.type === 'monthly_day') {
+    return getNthWeekdayOfMonth(from.getFullYear(), from.getMonth(), Number(pattern.week), Number(pattern.day));
+  }
+  return null;
+}
+
+async function loadSeriesSessionsPanel(templateId) {
+  const panel = document.getElementById('series-sessions-panel');
+  const table = document.getElementById('series-sessions-table');
+  if (!panel || !table || !templateId) {
+    if (panel) panel.style.display = 'none';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/admin/events/${templateId}/sessions`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    if (!res.ok) {
+      panel.style.display = 'none';
+      return;
+    }
+    const data = await res.json();
+    const sessions = data.sessions || [];
+    panel.style.display = 'block';
+    if (!sessions.length) {
+      table.innerHTML = '<p class="admin-text-small" style="padding: 1rem;">No sessions yet — save the series to generate upcoming sessions.</p>';
+      return;
+    }
+    table.innerHTML = `
+      <table style="width:100%; border-collapse: collapse; font-size: 0.875rem;">
+        <thead>
+          <tr style="background: rgb(var(--color-neutral-100)); text-align: left;">
+            <th style="padding: 0.65rem 1rem;">Date</th>
+            <th style="padding: 0.65rem 1rem;">Tickets</th>
+            <th style="padding: 0.65rem 1rem;">Status</th>
+            <th style="padding: 0.65rem 1rem;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sessions.map(s => {
+            const dt = new Date(s.event_datetime);
+            const cap = s.capacity != null ? s.capacity : '∞';
+            const sold = s.tickets_sold || 0;
+            const active = s.is_active === 1;
+            return `<tr style="border-top: 1px solid rgb(var(--color-neutral-200));">
+              <td style="padding: 0.65rem 1rem;">${dt.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+              <td style="padding: 0.65rem 1rem;">${sold} / ${cap}</td>
+              <td style="padding: 0.65rem 1rem;">${active ? 'Active' : 'Cancelled'}</td>
+              <td style="padding: 0.65rem 1rem; text-align: right;">
+                ${active ? `<button type="button" class="admin-btn-secondary admin-btn-sm" onclick="cancelSeriesSession(${s.id})">Cancel session</button>` : ''}
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  } catch (err) {
+    console.error('loadSeriesSessionsPanel', err);
+    panel.style.display = 'none';
+  }
+}
+
+async function cancelSeriesSession(sessionId) {
+  if (!confirm('Cancel this session? It will be hidden from the public events list.')) return;
+  try {
+    const res = await fetch(`${API_BASE}/admin/events/sessions/${sessionId}/cancel`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    if (!res.ok) throw new Error('cancel_failed');
+    const templateId = document.getElementById('event-id').value;
+    await loadSeriesSessionsPanel(templateId);
+    loadEvents();
+  } catch (err) {
+    alert('Could not cancel session: ' + err.message);
   }
 }
 
@@ -2616,6 +2755,7 @@ function updateRecurrenceFields() {
   document.getElementById('weekly-fields').style.display = type === 'weekly' ? 'block' : 'none';
   document.getElementById('monthly-day-fields').style.display = type === 'monthly_day' ? 'block' : 'none';
   document.getElementById('monthly-date-fields').style.display = type === 'monthly_date' ? 'block' : 'none';
+  updateRecurrencePreview();
 }
 
 function getRecurrencePattern() {
@@ -5113,8 +5253,11 @@ document.getElementById('event-slug').value = slug;
 
 async function loadEvents() {
 try {
-const res = await fetch(`${API_BASE}/events`);
-const events = await res.json();
+const res = await fetch(`${API_BASE}/admin/events`, {
+  headers: { 'X-Session-Token': sessionToken }
+});
+const payload = await res.json();
+const events = payload.events || [];
 const list = document.getElementById('events-list');
 
 if (events.length === 0) {
@@ -5124,24 +5267,29 @@ return;
 
 list.innerHTML = events.map(e => {
 const requiresPurchase = e.requires_purchase === 1;
-const eventDate = e.event_datetime ? new Date(e.event_datetime).toLocaleDateString() : 'No date';
-const eventTime = e.event_datetime ? new Date(e.event_datetime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+const isSeries = e.type === 'series';
+const nextDt = e.next_session?.event_datetime || e.event_datetime;
+const eventDate = nextDt ? new Date(nextDt).toLocaleDateString() : 'No date';
+const eventTime = nextDt ? new Date(nextDt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
 const eventId = e.id || e.event_id;
+const seriesBadge = isSeries ? '<span style="color: rgb(var(--color-primary-600)); font-size: 0.875rem; font-weight: 600;">Recurring series</span>' : '';
+const sessionCount = isSeries && e.sessions ? e.sessions.filter(s => s.is_active === 1).length : 0;
 return `
 <div class="item-card">
 <div style="display: flex; gap: 1rem;">
 ${e.image_url ? `<img src="${e.image_url_card || e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
 <div style="flex: 1;">
 <h3>${e.title} ${e.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'} ${requiresPurchase ? '' : '<span style="color: #2563eb; font-size: 0.875rem;">(Free Event)</span>'}</h3>
+<p style="margin: 0.25rem 0;">${seriesBadge}${isSeries ? ` · ${sessionCount} upcoming session${sessionCount === 1 ? '' : 's'}` : ''}</p>
 <p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${e.description || ''}</p>
-<p style="margin: 0.5rem 0;"><strong>${eventDate}</strong> ${eventTime} ${e.location ? `| ${e.location}` : ''}</p>
+<p style="margin: 0.5rem 0;"><strong>${isSeries ? 'Next: ' : ''}${eventDate}</strong> ${eventTime} ${e.location ? `| ${e.location}` : ''}</p>
 ${requiresPurchase ? `<p style="margin: 0.5rem 0;">Member: £${(e.membership_price / 100).toFixed(2)} | Non-member: £${(e.non_membership_price / 100).toFixed(2)}${e.capacity ? ` | Max: ${e.capacity}` : ''}</p>` : ''}
 </div>
 </div>
 <div class="item-actions">
 <button class="btn-edit" onclick="editEvent(${eventId})">Edit</button>
-<button class="btn-delete" onclick="deleteEvent(${eventId}, '${e.title.replace(/'/g, "\\'")}')">Delete</button>
-${e.slug ? `<button class="btn-index" onclick="requestIndexing('event', '${e.slug}', this)">📡 Index</button>` : ''}
+<button class="btn-delete" onclick="deleteEvent(${eventId}, '${String(e.title).replace(/'/g, "\\'")}')">Delete</button>
+${e.slug ? `<button class="btn-index" onclick="requestIndexing('event', '${e.slug}', this)">Index</button>` : ''}
 </div>
 </div>
 `;
@@ -5228,6 +5376,7 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
       document.getElementById('event-seo-image').value = '';
       document.getElementById('event-image-card').value = '';
       document.getElementById('event-image-hero').value = '';
+      await loadSeriesSessionsPanel(null);
 uploadedEventBundle = null;
 loadEvents();
 alert('Event saved successfully!' + blockNote);
@@ -5349,6 +5498,13 @@ async function editEvent(id) {
     
     if (event.recurrence_end_date) {
       document.getElementById('recurrence-end-date').value = event.recurrence_end_date;
+    }
+
+    if (isRecurring) {
+      updateRecurrencePreview();
+      await loadSeriesSessionsPanel(id);
+    } else {
+      await loadSeriesSessionsPanel(null);
     }
 
     if (event.image_url) {

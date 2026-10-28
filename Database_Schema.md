@@ -313,7 +313,7 @@ CREATE TABLE IF NOT EXISTS "events" (
     full_description TEXT,
     requires_purchase INTEGER DEFAULT 1,
     is_active INTEGER DEFAULT 1
-, is_recurring INTEGER DEFAULT 0, recurrence_pattern TEXT, recurrence_end_date TEXT, organiser TEXT, seo_description TEXT, seo_organizer TEXT, seo_image TEXT, end_time TEXT);
+, is_recurring INTEGER DEFAULT 0, recurrence_pattern TEXT, recurrence_end_date TEXT, organiser TEXT, seo_description TEXT, seo_organizer TEXT, seo_image TEXT, end_time TEXT, series_id INTEGER REFERENCES events(event_id), occurrence_key TEXT);
 CREATE TABLE email_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email_type TEXT NOT NULL,
@@ -419,6 +419,9 @@ CREATE INDEX IF NOT EXISTS idx_sponsored_status_purchased ON sponsored_membershi
 CREATE INDEX IF NOT EXISTS idx_sponsored_claimed_at ON sponsored_memberships(claimed_at);
 CREATE INDEX IF NOT EXISTS idx_promo_codes_active_code ON promo_codes(active, code);
 CREATE INDEX IF NOT EXISTS idx_events_datetime ON events(event_datetime);
+CREATE INDEX IF NOT EXISTS idx_events_series_id ON events(series_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_series_occurrence ON events(series_id, occurrence_key)
+  WHERE series_id IS NOT NULL AND occurrence_key IS NOT NULL AND TRIM(occurrence_key) != '';
 
 ## blog_posts
 

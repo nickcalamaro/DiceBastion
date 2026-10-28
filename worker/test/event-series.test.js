@@ -1,0 +1,57 @@
+import { describe, it, expect } from 'vitest'
+import {
+  listOccurrencesInRange,
+  isSeriesTemplate,
+  isSeriesSession,
+  mergeTemplateWithSession
+} from '../src/utils/event-series.js'
+
+describe('event-series helpers', () => {
+  it('identifies series templates and sessions', () => {
+    expect(isSeriesTemplate({ is_recurring: 1, series_id: null })).toBe(true)
+    expect(isSeriesTemplate({ is_recurring: 0, series_id: null })).toBe(false)
+    expect(isSeriesSession({ series_id: 5 })).toBe(true)
+  })
+
+  it('merges template content with session datetime and counts', () => {
+    const merged = mergeTemplateWithSession(
+      { event_id: 1, event_name: 'Weekly League', slug: 'weekly-league', organiser: 'GWC' },
+      { event_id: 99, event_datetime: '2026-04-02T17:00:00.000Z', tickets_sold: 3, capacity: 20, occurrence_key: '2026-04-02T17:00:00.000Z' }
+    )
+    expect(merged.id).toBe(99)
+    expect(merged.slug).toBe('weekly-league')
+    expect(merged.title).toBe('Weekly League')
+    expect(merged.tickets_sold).toBe(3)
+    expect(merged.session_event_id).toBe(99)
+  })
+
+  it('lists weekly occurrences in range', () => {
+    const series = {
+      is_recurring: 1,
+      recurrence_pattern: JSON.stringify({ type: 'weekly', day: 3, time: '18:00' }),
+      recurrence_end_date: null
+    }
+    const from = new Date('2026-04-01T00:00:00.000Z')
+    const to = new Date('2026-04-30T23:59:59.999Z')
+    const dates = listOccurrencesInRange(series, from, to, 10)
+    expect(dates.length).toBeGreaterThanOrEqual(3)
+    expect(dates.length).toBeLessThanOrEqual(5)
+    for (let i = 1; i < dates.length; i++) {
+      expect(dates[i].getTime()).toBeGreaterThan(dates[i - 1].getTime())
+    }
+  })
+
+  it('respects recurrence_end_date in range listing', () => {
+    const series = {
+      is_recurring: 1,
+      recurrence_pattern: JSON.stringify({ type: 'weekly', day: 1, time: '10:00' }),
+      recurrence_end_date: '2026-04-15'
+    }
+    const from = new Date('2026-04-01T00:00:00.000Z')
+    const to = new Date('2026-05-31T23:59:59.999Z')
+    const dates = listOccurrencesInRange(series, from, to, 20)
+    expect(dates.length).toBeGreaterThan(0)
+    const end = new Date('2026-04-15T23:59:59.999Z')
+    expect(dates.every(d => d <= end || d.getUTCDate() <= 15)).toBe(true)
+  })
+})

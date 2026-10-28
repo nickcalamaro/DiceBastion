@@ -2,6 +2,18 @@ import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { createHmac } from 'crypto'
 import { calculateNextOccurrence, processUpcomingEvents } from './utils/recurring.js'
+import {
+  assertBookableEventRow,
+  ensureEventSeriesSchema,
+  fetchPublicUpcomingEvents,
+  listSeriesSessions,
+  materializeAllActiveSeries,
+  materializeSeriesSessions,
+  mergeTemplateWithSession,
+  previewOccurrenceDates,
+  resolvePublicEventBySlug,
+  syncFutureSessionsFromTemplate
+} from './utils/event-series.js'
 import { getEventReminderEmail } from './email-templates/event-reminder.js'
 import {
   createCheckout,
@@ -1350,11 +1362,7 @@ async function confirmTicketPurchase(db, env, { orderRef, payment = null }) {
   let emailSent = false
   if (user) {
     try {
-      const eventForEmail = { ...ev }
-      if (ev.is_recurring === 1) {
-        const nextOccurrence = calculateNextOccurrence(ev, new Date())
-        if (nextOccurrence) eventForEmail.event_datetime = nextOccurrence.toISOString()
-      }
+      const eventForEmail = eventRowForTicketEmail(ev)
       const emailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
       await sendEmail(env, {
         to: user.email,
@@ -1418,11 +1426,7 @@ async function sendBundleEmails(env, db, { membership, membershipId, endDate, ti
     })
     
     // Event ticket confirmation email
-    const eventForEmail = { ...event }
-    if (event.is_recurring === 1) {
-      const nextOccurrence = calculateNextOccurrence(event, new Date())
-      if (nextOccurrence) eventForEmail.event_datetime = nextOccurrence.toISOString()
-    }
+    const eventForEmail = eventRowForTicketEmail(event)
     const ticketEmailContent = getTicketConfirmationEmail(eventForEmail, user, transaction)
     await sendEmail(env, {
       to: user.email,
@@ -5928,6 +5932,16 @@ app.post('/webhooks/sumup', async (c) => {
 // PUBLIC EVENT ENDPOINTS
 // ============================================================================
 
+/** Legacy virtual recurring rows only; materialized sessions use stored event_datetime. */
+function eventRowForTicketEmail(ev) {
+  const eventForEmail = { ...ev }
+  if (Number(ev.is_recurring) === 1 && (ev.series_id == null || ev.series_id === '')) {
+    const nextOccurrence = calculateNextOccurrence(ev, new Date())
+    if (nextOccurrence) eventForEmail.event_datetime = nextOccurrence.toISOString()
+  }
+  return eventForEmail
+}
+
 /**
  * Generate an indexable SEO landing page for a shared event link.
  * Contains OG / Twitter / Schema.org metadata for rich previews,
@@ -6138,38 +6152,13 @@ ${loc ? `<div class="meta-item"><span class="meta-label">Location</span><span cl
 // Get all active events (public endpoint)
 app.get('/events', async c => {
   try {
-    const { results } = await c.env.DB.prepare(`
-      SELECT 
-        event_id as id,
-        event_name as title,
-        slug,
-        organiser,
-        description,
-        full_description,
-        seo_description,
-        seo_organizer,
-        seo_image,
-        event_datetime,
-        location,
-        membership_price,
-        non_membership_price,
-        capacity,
-        tickets_sold,
-        image_url,
-        image_url_card,
-        image_url_hero,
-        requires_purchase,
-        is_recurring,
-        recurrence_pattern,
-        recurrence_end_date,
-        end_time
-      FROM events 
-      WHERE is_active = 1 
-        AND (event_datetime >= datetime('now') OR is_recurring = 1)
-      ORDER BY event_datetime ASC
-    `).all()
-    
-    return c.json(processUpcomingEvents(results))
+    await ensureEventSeriesSchema(c.env.DB)
+    const { materialized, legacyTemplates } = await fetchPublicUpcomingEvents(c.env.DB)
+    const legacy = processUpcomingEvents(legacyTemplates)
+    const combined = [...materialized, ...legacy].sort(
+      (a, b) => new Date(a.event_datetime) - new Date(b.event_datetime)
+    )
+    return c.json(combined)
   } catch (err) {
     console.error('Error fetching events:', err)
     return c.json({ error: 'failed_to_fetch_events' }, 500)  }
@@ -6278,17 +6267,10 @@ app.get('/events/confirm', async c => {
       console.log('[events/confirm] Registration ticket found:', { id: ticket.id, status: ticket.status, event_id: ticket.event_id })
       
       // Get event details
-      const ev = await c.env.DB.prepare('SELECT event_name, event_datetime, is_recurring, recurrence_pattern FROM events WHERE event_id = ?').bind(ticket.event_id).first()
+      const ev = await c.env.DB.prepare('SELECT event_name, event_datetime, is_recurring, recurrence_pattern, series_id FROM events WHERE event_id = ?').bind(ticket.event_id).first()
       if (!ev) return c.json({ ok:false, error:'event_not_found' },404)
       
-      // For recurring events, calculate and return the next occurrence date
-      let displayDate = ev.event_datetime
-      if (ev.is_recurring === 1) {
-        const nextOccurrence = calculateNextOccurrence(ev, new Date())
-        if (nextOccurrence) {
-          displayDate = nextOccurrence.toISOString()
-        }
-      }
+      const displayDate = eventRowForTicketEmail(ev).event_datetime
       
       return c.json({ 
         ok: true, 
@@ -6322,12 +6304,7 @@ app.get('/events/confirm', async c => {
     }
 
     const ev = result.event
-    // For recurring events, surface the next occurrence date to the thank-you page.
-    let displayDate = ev.event_datetime
-    if (ev.is_recurring === 1) {
-      const nextOccurrence = calculateNextOccurrence(ev, new Date())
-      if (nextOccurrence) displayDate = nextOccurrence.toISOString()
-    }
+    const displayDate = eventRowForTicketEmail(ev).event_datetime
 
     // Idempotent re-confirm (already active): return the lightweight shape.
     if (result.alreadyActive) {
@@ -6407,13 +6384,18 @@ function buildEventsSitemapXml(events) {
 
 app.get('/events/sitemap.xml', async c => {
   try {
+    await ensureEventSeriesSchema(c.env.DB)
     const { results } = await c.env.DB.prepare(`
-      SELECT slug, event_datetime, updated_at, created_at, is_recurring
+      SELECT slug, event_datetime, updated_at, created_at, is_recurring, series_id
       FROM events
       WHERE is_active = 1
         AND slug IS NOT NULL
         AND TRIM(slug) != ''
-        AND (event_datetime >= datetime('now') OR is_recurring = 1)
+        AND (series_id IS NULL OR series_id = '')
+        AND (
+          is_recurring = 1
+          OR event_datetime >= datetime('now')
+        )
       ORDER BY event_datetime ASC
     `).all()
 
@@ -6542,64 +6524,25 @@ app.get('/events/:slug', async c => {
   try {
     const slug = c.req.param('slug')
     
-    // Static files (index.html, index.json, etc.) aren't event slugs
     if (!slug || slug.includes('.')) {
       return c.json({ error: 'not_found' }, 404)
     }
-    
-    const event = await c.env.DB.prepare(`
-      SELECT 
-        event_id as id,
-        event_name as title,
-        slug,
-        organiser,
-        description,
-        full_description,
-        seo_description,
-        seo_organizer,
-        seo_image,
-        event_datetime,
-        location,
-        membership_price,
-        non_membership_price,
-        capacity,
-        tickets_sold,
-        image_url,
-        image_url_card,
-        image_url_hero,
-        requires_purchase,
-        is_recurring,
-        recurrence_pattern,
-        recurrence_end_date,
-        end_time,
-        created_at
-      FROM events 
-      WHERE slug = ? AND is_active = 1
-    `).bind(slug).first()
 
-    if (!event) {
-      // Unknown slug → redirect to events listing
+    await ensureEventSeriesSchema(c.env.DB)
+    const resolved = await resolvePublicEventBySlug(c.env.DB, slug)
+    if (resolved.error === 'not_found') {
       return Response.redirect('https://dicebastion.com/events/', 302)
     }
-    
-    // Calculate next occurrence for recurring events
-    if (event.is_recurring === 1) {
-      const nextOccurrence = calculateNextOccurrence(event, new Date())
-      if (!nextOccurrence) {
-        return c.json({ error: 'event_ended' }, 404)
-      }
-      event.event_datetime = nextOccurrence.toISOString()
-      event.next_occurrence = nextOccurrence.toISOString()
+    if (resolved.error === 'event_ended') {
+      return c.json({ error: 'event_ended' }, 404)
     }
 
-    // Serve the full event landing page at this URL for everyone (humans + crawlers).
-    // Professional event sites always have real HTML at the shareable URL — redirecting
-    // humans to a JS modal on /events/ hid content from crawlers and broke discovery.
+    const publicEvent = resolved.event
     const accept = c.req.header('Accept') || ''
     const wantsHtml = accept.includes('text/html') && !accept.includes('application/json')
     const host = c.req.header('Host') || ''
     if (wantsHtml || host.includes('dicebastion.com')) {
-      const html = generateEventSeoPage(event)
+      const html = generateEventSeoPage(publicEvent)
       return new Response(html, {
         status: 200,
         headers: {
@@ -6609,7 +6552,7 @@ app.get('/events/:slug', async c => {
       })
     }
 
-    return c.json(event)
+    return c.json(publicEvent)
   } catch (err) {
     console.error('Error fetching event:', err)
     return c.json({ error: 'failed_to_fetch_event' }, 500)
@@ -6644,6 +6587,11 @@ app.post('/events/:id/register', async c => {
 
     const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
     if (!ev) return c.json({ error:'event_not_found' },404)
+
+    const bookable = await assertBookableEventRow(c.env.DB, ev)
+    if (!bookable.ok) {
+      return c.json({ error: bookable.error, message: bookable.message }, 400)
+    }
     
     // Get or create identity to check membership status
     const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
@@ -6687,17 +6635,9 @@ app.post('/events/:id/register', async c => {
       'UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)'
     ).bind(evId).run()
     
-    // Send confirmation email
-    // For recurring events, calculate next occurrence for calendar invite
-    const eventForEmail = { ...ev }
-    if (ev.is_recurring === 1) {
-      const nextOccurrence = calculateNextOccurrence(ev, new Date())
-      if (nextOccurrence) {
-        eventForEmail.event_datetime = nextOccurrence.toISOString()
-      }
-    }
+    const eventForEmail = eventRowForTicketEmail(ev)
     
-    const emailContent = getTicketConfirmationEmail(eventForEmail, ident, { 
+    const emailContent = getTicketConfirmationEmail(eventForEmail, ident, {
       email, 
       name: ident.name || name,
       amount: '0.00',
@@ -7789,6 +7729,100 @@ app.post('/admin/finance/receipts', requireAdmin, requireAccountsOwner, async c 
 // ADMIN EVENT MANAGEMENT ENDPOINTS
 // ============================================================================
 
+app.get('/admin/events', requireAdmin, async c => {
+  try {
+    await ensureEventSeriesSchema(c.env.DB)
+    const { results: rows } = await c.env.DB.prepare(`
+      SELECT
+        event_id AS id,
+        event_name AS title,
+        slug,
+        event_datetime,
+        is_active,
+        is_recurring,
+        series_id,
+        recurrence_pattern,
+        recurrence_end_date,
+        capacity,
+        tickets_sold,
+        requires_purchase,
+        location,
+        image_url,
+        image_url_card,
+        membership_price,
+        non_membership_price
+      FROM events
+      WHERE (series_id IS NULL OR series_id = '')
+      ORDER BY is_recurring DESC, event_datetime ASC
+    `).all()
+
+    const events = []
+    for (const row of rows || []) {
+      if (Number(row.is_recurring) === 1) {
+        const sessions = await listSeriesSessions(c.env.DB, row.id, { limit: 24 })
+        const nextSession = (sessions || [])
+          .filter(s => s.is_active === 1 && new Date(s.event_datetime) >= new Date())
+          .sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime))[0] || null
+        events.push({
+          type: 'series',
+          ...row,
+          next_session: nextSession,
+          sessions
+        })
+      } else {
+        events.push({ type: 'one_off', ...row, sessions: [] })
+      }
+    }
+
+    return c.json({ success: true, events })
+  } catch (e) {
+    console.error('Admin list events error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/events/:id/sessions', requireAdmin, async c => {
+  try {
+    const id = c.req.param('id')
+    await ensureEventSeriesSchema(c.env.DB)
+    const template = await c.env.DB.prepare(
+      'SELECT event_id, event_name, is_recurring FROM events WHERE event_id = ?'
+    ).bind(id).first()
+    if (!template || Number(template.is_recurring) !== 1) {
+      return c.json({ error: 'not_a_series' }, 400)
+    }
+    const sessions = await listSeriesSessions(c.env.DB, id, { limit: 100 })
+    const preview = previewOccurrenceDates(
+      await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(id).first(),
+      8
+    ).map(d => d.toISOString())
+    return c.json({ success: true, sessions, preview_dates: preview })
+  } catch (e) {
+    console.error('Admin list sessions error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/events/sessions/:sessionId/cancel', requireAdmin, async c => {
+  try {
+    const sessionId = c.req.param('sessionId')
+    await ensureEventSeriesSchema(c.env.DB)
+    const row = await c.env.DB.prepare(
+      'SELECT event_id, series_id FROM events WHERE event_id = ?'
+    ).bind(sessionId).first()
+    if (!row || !row.series_id) {
+      return c.json({ error: 'not_a_session' }, 400)
+    }
+    await c.env.DB.prepare(
+      'UPDATE events SET is_active = 0, updated_at = ? WHERE event_id = ?'
+    ).bind(toIso(new Date()), sessionId).run()
+    return c.json({ success: true })
+  } catch (e) {
+    console.error('Cancel session error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // Get single event by ID (admin only)
 app.get('/admin/events/:id', requireAdmin, async c => {
   try {
@@ -7819,7 +7853,8 @@ app.get('/admin/events/:id', requireAdmin, async c => {
         is_recurring,
         recurrence_pattern,
         recurrence_end_date,
-        end_time
+        end_time,
+        series_id
       FROM events 
       WHERE event_id = ?
     `).bind(id).first()
@@ -7887,7 +7922,12 @@ app.post('/admin/events', requireAdmin, async c => {
       notifyContentSeoAsync(c.executionCtx, c.env, { urls: [eventUrl], indexingUrl: eventUrl })
     }
 
-    return c.json({ success: true, id: result.meta.last_row_id })
+    const newId = result.meta.last_row_id
+    if (Number(is_recurring) === 1) {
+      await materializeSeriesSessions(c.env.DB, newId)
+    }
+
+    return c.json({ success: true, id: newId })
   } catch (e) {
     console.error('Create event error:', e)
     if (e.message && e.message.includes('UNIQUE constraint')) {
@@ -7955,6 +7995,11 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     if (slug) {
       const eventUrl = `https://dicebastion.com/events/${encodeURIComponent(slug)}`
       notifyContentSeoAsync(c.executionCtx, c.env, { urls: [eventUrl], indexingUrl: eventUrl })
+    }
+
+    if (Number(is_recurring) === 1) {
+      await materializeSeriesSessions(c.env.DB, id)
+      await syncFutureSessionsFromTemplate(c.env.DB, id)
     }
 
     return c.json({ success: true })
@@ -8146,6 +8191,10 @@ app.post('/events/:id/checkout', async c => {
 
     const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
     if (!ev) return c.json({ error:'event_not_found' },404)
+    const bookable = await assertBookableEventRow(c.env.DB, ev)
+    if (!bookable.ok) {
+      return c.json({ error: bookable.error, message: bookable.message }, 400)
+    }
     if (ev.capacity && ev.tickets_sold >= ev.capacity) return c.json({ error:'sold_out' },409)
 
     const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
@@ -8333,6 +8382,10 @@ app.post('/events/:id/checkout-with-membership', async c => {
 
     const ev = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
     if (!ev) return c.json({ error:'event_not_found' },404)
+    const bookable = await assertBookableEventRow(c.env.DB, ev)
+    if (!bookable.ok) {
+      return c.json({ error: bookable.error, message: bookable.message }, 400)
+    }
     if (ev.capacity && ev.tickets_sold >= ev.capacity) return c.json({ error:'sold_out' },409)
 
     // Get the membership service/plan
@@ -11017,15 +11070,13 @@ app.get('/admin/newsletter/recipients', requireAdmin, async c => {
  */
 app.get('/admin/newsletter/events', requireAdmin, async c => {
   try {
-    const { results } = await c.env.DB.prepare(`
-      SELECT event_id, event_name, description, event_datetime, location,
-             image_url, image_url_card, slug, is_recurring, recurrence_pattern, recurrence_end_date
-      FROM events
-      WHERE is_active = 1
-        AND (event_datetime >= datetime('now') OR is_recurring = 1)
-      ORDER BY event_datetime ASC
-    `).all()
-    return c.json(processUpcomingEvents(results ?? [], { limit: 10 }))
+    await ensureEventSeriesSchema(c.env.DB)
+    const { materialized, legacyTemplates } = await fetchPublicUpcomingEvents(c.env.DB)
+    const legacy = processUpcomingEvents(legacyTemplates, { limit: 10 })
+    const combined = [...materialized, ...legacy]
+      .sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime))
+      .slice(0, 10)
+    return c.json(combined)
   } catch (e) {
     console.error('[Newsletter] events error:', e)
     return c.json({ error: e.message }, 500)
@@ -12571,6 +12622,36 @@ async function processAutoRenewals(env) {
     } catch (logErr) {
       console.error(`[CRON] ${jobName} - Failed to log error:`, logErr)
     }
+  }
+}
+
+/**
+ * Materialize upcoming sessions for all active recurring series (legacy + ongoing).
+ */
+async function processEventSeriesMaterialization(env) {
+  const jobName = 'event_series_materialize'
+  const startedAt = new Date().toISOString()
+  console.log(`[CRON] Starting ${jobName} at ${startedAt}`)
+  try {
+    await ensureEventSeriesSchema(env.DB)
+    const result = await materializeAllActiveSeries(env.DB)
+    await logCronJob(env.DB, jobName, 'completed', {
+      started_at: startedAt,
+      records_processed: result.series,
+      records_succeeded: result.created,
+      records_failed: 0,
+      extra: result
+    })
+  } catch (e) {
+    console.error(`[CRON] ${jobName} failed:`, e)
+    await logCronJob(env.DB, jobName, 'failed', {
+      started_at: startedAt,
+      records_processed: 0,
+      records_succeeded: 0,
+      records_failed: 1,
+      extra: { error: String(e?.message || e) }
+    })
+    throw e
   }
 }
 
@@ -14606,6 +14687,7 @@ async function handleScheduled(event, env, ctx) {
   const jobResults = {
     scheduled_newsletters: null,
     auto_renewals: null,
+    event_series_materialize: null,
     event_reminders: null,
     delayed_account_setup_emails: null,
     seo_freshness: null,
@@ -14631,6 +14713,14 @@ async function handleScheduled(event, env, ctx) {
     // Individual job already logged its own error
   }
   
+  try {
+    await processEventSeriesMaterialization(env)
+    jobResults.event_series_materialize = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Event series materialization failed:', e)
+    jobResults.event_series_materialize = 'failed'
+  }
+
   try {
     await processEventReminders(env)
     jobResults.event_reminders = 'completed'
@@ -14952,7 +15042,12 @@ export default {
             SELECT slug, event_name FROM events
             WHERE is_active = 1
               AND slug IS NOT NULL
-              AND (event_datetime >= datetime('now') OR is_recurring = 1)
+              AND TRIM(slug) != ''
+              AND (series_id IS NULL OR series_id = '')
+              AND (
+                is_recurring = 1
+                OR event_datetime >= datetime('now')
+              )
             ORDER BY event_datetime ASC
           `).all()
         ])
