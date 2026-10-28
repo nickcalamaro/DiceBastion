@@ -138,58 +138,44 @@
   right: 0;
   z-index: 10;
   pointer-events: none;
-  overflow: hidden;
-  width: 150px;
-  height: 150px;
+  max-width: min(52%, 18rem);
 }
 
 .event-organiser-ribbon {
-  position: absolute;
-  top: 30px;
-  right: -40px;
-  width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
   background: linear-gradient(135deg,
     rgba(var(--color-primary-400), 1) 0%,
     rgba(var(--color-primary-600), 1) 50%,
     rgba(var(--color-primary-700), 1) 100%);
   color: white;
-  font-size: 0.8rem;
-  font-weight: 800;
-  text-align: center;
-  padding: 0.65rem 0;
-  transform: rotate(45deg);
+  text-align: right;
+  padding: 0.5rem 0.85rem 0.55rem 1rem;
+  border-radius: 0 15px 0 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.event-organiser-ribbon-kicker {
+  display: block;
+  font-size: 0.5625rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  opacity: 0.92;
 }
 
-.event-organiser-ribbon::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 4px;
-  background: linear-gradient(90deg,
-    transparent 0%,
-    rgba(0, 0, 0, 0.3) 50%,
-    transparent 100%);
-}
-
-.event-organiser-ribbon::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: linear-gradient(90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.5) 50%,
-    transparent 100%);
+.event-organiser-ribbon-name {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  word-break: break-word;
 }
 
 .dark .event-organiser-ribbon {
@@ -375,6 +361,10 @@
     max-height: none;
     margin: 0;
     z-index: 1;
+  }
+
+  .event-organiser-banner {
+    max-width: calc(100% - 1rem);
   }
 }
 </style>

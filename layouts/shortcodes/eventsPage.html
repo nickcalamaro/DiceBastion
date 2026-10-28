@@ -72,7 +72,10 @@ async function loadEvents() {
         <div class="event-card" data-event-id="${event.id}">
           ${event.organiser ? `
             <div class="event-organiser-banner">
-              <div class="event-organiser-ribbon">${event.organiser}</div>
+              <div class="event-organiser-ribbon">
+                <span class="event-organiser-ribbon-kicker">Hosted by</span>
+                <span class="event-organiser-ribbon-name">${event.organiser}</span>
+              </div>
             </div>
           ` : ''}
           ${event.image_url ? `<div class="event-card-image" style="--card-bg-image: url('${event.image_url}');"><img src="${event.image_url}" alt="${event.title}" width="800" height="379" loading="lazy" decoding="async"></div>` : ''}
