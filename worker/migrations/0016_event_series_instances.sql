@@ -7,4 +7,4 @@ ALTER TABLE events ADD COLUMN occurrence_key TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_events_series_id ON events(series_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_series_occurrence ON events(series_id, occurrence_key)
-  WHERE series_id IS NOT NULL AND occurrence_key IS NOT NULL AND TRIM(occurrence_key) != '';
+  WHERE series_id IS NOT NULL AND occurrence_key IS NOT NULL;

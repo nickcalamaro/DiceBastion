@@ -7873,6 +7873,7 @@ app.get('/admin/events/:id', requireAdmin, async c => {
 // Create new event (admin only)
 app.post('/admin/events', requireAdmin, async c => {
   try {
+    await ensureEventSeriesSchema(c.env.DB)
     const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
     if (!title || !slug || !event_date) {
@@ -7923,7 +7924,8 @@ app.post('/admin/events', requireAdmin, async c => {
     }
 
     const newId = result.meta.last_row_id
-    if (Number(is_recurring) === 1) {
+      || (await c.env.DB.prepare('SELECT event_id FROM events WHERE slug = ?').bind(slug).first())?.event_id
+    if (Number(is_recurring) === 1 && newId) {
       await materializeSeriesSessions(c.env.DB, newId)
     }
 
@@ -7933,13 +7935,14 @@ app.post('/admin/events', requireAdmin, async c => {
     if (e.message && e.message.includes('UNIQUE constraint')) {
       return c.json({ error: 'slug_already_exists' }, 400)
     }
-    return c.json({ error: 'internal_error' }, 500)
+    return c.json({ error: 'internal_error', detail: String(e?.message || e) }, 500)
   }
 })
 
 // Update event (admin only)
 app.put('/admin/events/:id', requireAdmin, async c => {
   try {
+    await ensureEventSeriesSchema(c.env.DB)
     const id = c.req.param('id')
     const { title, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image, event_date, time, end_time, membership_price, non_membership_price, max_attendees, location, image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring, recurrence_pattern, recurrence_end_date } = await c.req.json()
     
@@ -8008,7 +8011,7 @@ app.put('/admin/events/:id', requireAdmin, async c => {
     if (e.message && e.message.includes('UNIQUE constraint')) {
       return c.json({ error: 'slug_already_exists' }, 400)
     }
-    return c.json({ error: 'internal_error' }, 500)
+    return c.json({ error: 'internal_error', detail: String(e?.message || e) }, 500)
   }
 })
 

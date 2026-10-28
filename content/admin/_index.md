@@ -5382,7 +5382,7 @@ loadEvents();
 alert('Event saved successfully!' + blockNote);
 } else {
 const error = await res.json();
-alert('Failed to save event: ' + (error.error || error.message || 'Unknown error'));
+alert('Failed to save event: ' + (error.detail || error.error || error.message || 'Unknown error'));
 }
 } catch (err) {
 alert('Error saving event: ' + err.message);

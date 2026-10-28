@@ -4,21 +4,22 @@ const DEFAULT_HORIZON_WEEKS = 12
 
 export async function ensureEventSeriesSchema(db) {
   if (!db) return
-  try {
-    await db.prepare('ALTER TABLE events ADD COLUMN series_id INTEGER REFERENCES events(event_id)').run()
-  } catch (_) { /* exists */ }
-  try {
-    await db.prepare('ALTER TABLE events ADD COLUMN occurrence_key TEXT').run()
-  } catch (_) { /* exists */ }
-  try {
-    await db.prepare('CREATE INDEX IF NOT EXISTS idx_events_series_id ON events(series_id)').run()
-  } catch (_) { /* exists */ }
-  try {
-    await db.prepare(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_events_series_occurrence ON events(series_id, occurrence_key)
-      WHERE series_id IS NOT NULL AND occurrence_key IS NOT NULL AND TRIM(occurrence_key) != ''
-    `).run()
-  } catch (_) { /* exists */ }
+  const steps = [
+    'ALTER TABLE events ADD COLUMN series_id INTEGER',
+    'ALTER TABLE events ADD COLUMN occurrence_key TEXT',
+    'CREATE INDEX IF NOT EXISTS idx_events_series_id ON events(series_id)',
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_events_series_occurrence ON events(series_id, occurrence_key)
+      WHERE series_id IS NOT NULL AND occurrence_key IS NOT NULL`
+  ]
+  for (const sql of steps) {
+    try {
+      await db.prepare(sql).run()
+    } catch (err) {
+      const msg = String(err?.message || err)
+      if (/duplicate column name/i.test(msg)) continue
+      console.error('[event-series] schema step failed:', sql, msg)
+    }
+  }
 }
 
 export function isSeriesTemplate(event) {
@@ -100,8 +101,12 @@ export async function materializeSeriesSessions(db, templateId, options = {}) {
   await ensureEventSeriesSchema(db)
   const horizonWeeks = options.horizonWeeks ?? DEFAULT_HORIZON_WEEKS
   const now = options.now ? new Date(options.now) : new Date()
+  const seriesId = Number(templateId)
+  if (!Number.isFinite(seriesId) || seriesId <= 0) {
+    throw new Error(`materializeSeriesSessions: invalid templateId ${templateId}`)
+  }
 
-  const template = await db.prepare('SELECT * FROM events WHERE event_id = ?').bind(templateId).first()
+  const template = await db.prepare('SELECT * FROM events WHERE event_id = ?').bind(seriesId).first()
   if (!template || !isSeriesTemplate(template)) {
     return { created: 0, skipped: 0, error: 'not_a_series_template' }
   }
@@ -121,42 +126,46 @@ export async function materializeSeriesSessions(db, templateId, options = {}) {
     const occurrenceKey = occ.toISOString()
     const existing = await db.prepare(
       'SELECT event_id FROM events WHERE series_id = ? AND occurrence_key = ?'
-    ).bind(templateId, occurrenceKey).first()
+    ).bind(seriesId, occurrenceKey).first()
     if (existing) {
       skipped++
       continue
     }
 
     const isoDatetime = occ.toISOString().replace(/\.\d{3}Z$/, 'Z')
-    await db.prepare(`
-      INSERT INTO events (
-        event_name, slug, organiser, description, full_description, seo_description, seo_organizer, seo_image,
-        event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold,
-        image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring,
-        recurrence_pattern, recurrence_end_date, end_time, series_id, occurrence_key
-      ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1, 0, NULL, NULL, ?, ?, ?, ?)
-    `).bind(
-      template.event_name,
-      template.organiser || null,
-      template.description || null,
-      template.full_description || null,
-      template.seo_description || null,
-      template.seo_organizer || null,
-      template.seo_image || null,
-      isoDatetime,
-      template.location || null,
-      template.membership_price ?? 0,
-      template.non_membership_price ?? 0,
-      template.capacity ?? null,
-      template.image_url || null,
-      template.image_url_card || null,
-      template.image_url_hero || null,
-      template.requires_purchase ?? 1,
-      template.end_time || null,
-      templateId,
-      occurrenceKey
-    ).run()
-    created++
+    try {
+      await db.prepare(`
+        INSERT INTO events (
+          event_name, organiser, description, full_description, seo_description, seo_organizer, seo_image,
+          event_datetime, location, membership_price, non_membership_price, capacity, tickets_sold,
+          image_url, image_url_card, image_url_hero, requires_purchase, is_active, is_recurring,
+          recurrence_pattern, recurrence_end_date, end_time, series_id, occurrence_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1, 0, NULL, NULL, ?, ?, ?)
+      `).bind(
+        template.event_name,
+        template.organiser || null,
+        template.description || null,
+        template.full_description || null,
+        template.seo_description || null,
+        template.seo_organizer || null,
+        template.seo_image || null,
+        isoDatetime,
+        template.location || null,
+        template.membership_price ?? 0,
+        template.non_membership_price ?? 0,
+        template.capacity ?? null,
+        template.image_url || null,
+        template.image_url_card || null,
+        template.image_url_hero || null,
+        template.requires_purchase ?? 1,
+        template.end_time || null,
+        seriesId,
+        occurrenceKey
+      ).run()
+      created++
+    } catch (err) {
+      throw new Error(`Failed to create session ${occurrenceKey}: ${err?.message || err}`)
+    }
   }
 
   return { created, skipped }
