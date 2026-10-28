@@ -539,9 +539,14 @@ function defaultCategoryDescription(categoryName) {
   return `Browse ${categoryName} in Gibraltar at Dice Bastion — board games, Magic: The Gathering (MTG), trading cards, miniatures, and gaming accessories. Local collection available.`
 }
 
-/** Share/Google preview: first listed product in that category (shop order is name A–Z). */
+function isProductInStock(product) {
+  return (Number(product?.stock_quantity) || 0) > 0
+}
+
+/** Share/Google preview: prefer first in-stock product in catalogue order. */
 function resolveCategoryPreviewImage(products, shopUrl) {
-  const first = (products || [])[0]
+  const list = products || []
+  const first = list.find(isProductInStock) || list[0]
   if (!first) return `${shopUrl}/img/og-image.png`
   return resolveProductPrimaryImage(first, shopUrl)
 }
@@ -8738,20 +8743,45 @@ app.get('/test/delayed-emails', requireAdmin, async (c) => {
 // Produces a rich HTML landing page with Product JSON-LD for Google Shopping,
 // Open Graph tags for social sharing, and BreadcrumbList for SERP breadcrumbs.
 // https://developers.google.com/search/docs/appearance/structured-data/product
+function stripProductSeoHtml(html) {
+  return String(html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function productPlainDescription(product) {
+  const summaryPlain = stripProductSeoHtml(product?.summary)
+  const descriptionPlain = stripProductSeoHtml(product?.description)
+  const fullPlain = stripProductSeoHtml(product?.full_description)
+  return summaryPlain || descriptionPlain || fullPlain ||
+    'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local collection available.'
+}
+
+function buildProductShellSeo(product) {
+  const shop = 'https://shop.dicebastion.com'
+  const title = `${product.name || 'Product'} | Dice Bastion Shop, Gibraltar`
+  return {
+    title,
+    canonical: getShopProductUrl(product.slug || ''),
+    description: clampSeoText(productPlainDescription(product), 160),
+    ogType: 'product',
+    ogImage: resolveProductPrimaryImage(product, shop)
+  }
+}
+
+function appendProductGtinSchema(schema, product) {
+  const gtinDigits = String(product?.ean || '').replace(/\D/g, '')
+  if (gtinDigits.length === 13) schema.gtin13 = gtinDigits
+  else if (gtinDigits.length === 12) schema.gtin12 = gtinDigits
+  else if (gtinDigits.length === 8) schema.gtin8 = gtinDigits
+}
+
 function generateProductSeoPage(product, allCategories) {
   const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
-  const stripHtml = s => (s || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
   const shop = 'https://shop.dicebastion.com';
   const name = e(product.name || 'Product');
   const slug = product.slug || '';
   const productImages = collectProductImageUrls(product, shop);
   const img = resolveProductPrimaryImage(product, shop);
-  // Meta/snippets prefer summary (short); body can still show full HTML description.
-  const summaryPlain = stripHtml(product.summary || '');
-  const descriptionPlain = stripHtml(product.description || '');
-  const fullPlain = stripHtml(product.full_description || '');
-  const plainForMeta = summaryPlain || descriptionPlain || fullPlain ||
-    'Available from Dice Bastion in Gibraltar — board games, Magic: The Gathering (MTG), trading cards, miniatures, and accessories. Local collection available.';
+  const plainForMeta = productPlainDescription(product);
   const descTrunc = plainForMeta.length > 160 ? plainForMeta.substring(0, 157) + '...' : plainForMeta;
   const desc = e(descTrunc);
   const bodyHtml = product.full_description || product.description || product.summary || '';
@@ -8761,6 +8791,7 @@ function generateProductSeoPage(product, allCategories) {
   const priceDisplay = priceNum.toFixed(2);
   const inStock = (product.stock_quantity || 0) > 0;
   const isPreorder = product.release_date && new Date(product.release_date) > new Date();
+  const ogAvailability = isPreorder ? 'preorder' : inStock ? 'in stock' : 'out of stock';
   const categories = parseProductCategoryNames(product.category);
   const primaryCategory = categories[0] || 'Tabletop Gaming';
 
@@ -8774,6 +8805,10 @@ function generateProductSeoPage(product, allCategories) {
     'url': url,
     'sku': slug,
     'category': primaryCategory,
+    'brand': {
+      '@type': 'Brand',
+      'name': 'Dice Bastion'
+    },
     'offers': {
       '@type': 'Offer',
       'url': url,
@@ -8816,6 +8851,7 @@ function generateProductSeoPage(product, allCategories) {
   if (isPreorder && product.release_date) {
     schema.offers.availabilityStarts = product.release_date;
   }
+  appendProductGtinSchema(schema, product);
 
   // BreadcrumbList for SERP breadcrumbs
   const breadcrumbs = {
@@ -8845,7 +8881,7 @@ function generateProductSeoPage(product, allCategories) {
 <meta property="og:image" content="${img}"><meta property="og:image:alt" content="${name}">
 <meta property="og:site_name" content="Dice Bastion Shop">
 <meta property="product:price:amount" content="${priceDisplay}"><meta property="product:price:currency" content="${product.currency || 'GBP'}">
-<meta property="product:availability" content="${inStock ? 'in stock' : 'out of stock'}">
+<meta property="product:availability" content="${ogAvailability}">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${name}">
 <meta name="twitter:description" content="${desc}"><meta name="twitter:image" content="${img}">
 <meta name="twitter:image:alt" content="${name}">
@@ -9047,7 +9083,7 @@ function formatProductSitemapLastMod(updatedAt) {
 app.get('/products/sitemap.xml', async c => {
   try {
     const { results } = await c.env.DB.prepare(`
-      SELECT slug, updated_at, category FROM products
+      SELECT slug, updated_at, category, stock_quantity FROM products
       WHERE is_active = 1
         AND slug IS NOT NULL AND TRIM(slug) != ''
       ORDER BY updated_at DESC
@@ -9083,7 +9119,8 @@ app.get('/products/sitemap.xml', async c => {
     // Product pages
     for (const p of shopProducts) {
       const lastmod = formatProductSitemapLastMod(p.updated_at)
-      xml += `\n<url><loc>${getShopProductUrl(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>0.8</priority></url>`
+      const priority = isProductInStock(p) ? '0.8' : '0.5'
+      xml += `\n<url><loc>${getShopProductUrl(p.slug)}</loc>${lastmod}<changefreq>weekly</changefreq><priority>${priority}</priority></url>`
     }
 
     // Category pages
@@ -9181,10 +9218,31 @@ async function loadShopShellHtml(env) {
 }
 
 // Crawlers and share bots get the full SEO page; this shell is only what a person's browser shows.
-function applyShopShellSeo(html, { title, canonical }) {
-  return String(html || '')
+function applyShopShellSeo(html, { title, canonical, description, ogType, ogImage }) {
+  let out = String(html || '')
     .replace(/<title>[^<]*<\/title>/i, `<title>${escapeHtml(title)}</title>`)
     .replace(/(<link rel="canonical" href=")[^"]*(")/i, `$1${escapeHtml(canonical)}$2`)
+
+  if (description) {
+    const descEsc = escapeHtml(description)
+    out = out
+      .replace(/(<meta name="description" content=")[^"]*(")/i, `$1${descEsc}$2`)
+      .replace(/(<meta property="og:description" content=")[^"]*(")/i, `$1${descEsc}$2`)
+      .replace(/(<meta name="twitter:description" content=")[^"]*(")/i, `$1${descEsc}$2`)
+      .replace(/(<meta property="og:title" content=")[^"]*(")/i, `$1${escapeHtml(title)}$2`)
+      .replace(/(<meta name="twitter:title" content=")[^"]*(")/i, `$1${escapeHtml(title)}$2`)
+      .replace(/(<meta property="og:url" content=")[^"]*(")/i, `$1${escapeHtml(canonical)}$2`)
+      .replace(/(<meta name="twitter:url" content=")[^"]*(")/i, `$1${escapeHtml(canonical)}$2`)
+  }
+  if (ogType) {
+    out = out.replace(/(<meta property="og:type" content=")[^"]*(")/i, `$1${escapeHtml(ogType)}$2`)
+  }
+  if (ogImage) {
+    const imgEsc = escapeHtml(ogImage)
+    out = out.replace(/(<meta property="og:image" content=")[^"]*(")/i, `$1${imgEsc}$2`)
+    out = out.replace(/(<meta name="twitter:image" content=")[^"]*(")/i, `$1${imgEsc}$2`)
+  }
+  return out
 }
 
 function shopSeoHtmlResponse(html, cacheSeconds) {
@@ -9211,7 +9269,8 @@ app.get('/products/category/:name', async c => {
       c.env.DB.prepare(`
         SELECT id, name, slug, summary, description, full_description, price, currency, stock_quantity, image_url, category, release_date
         FROM products WHERE is_active = 1
-        ORDER BY name ASC
+        ORDER BY CASE WHEN COALESCE(stock_quantity, 0) > 0 THEN 0 ELSE 1 END,
+                 name COLLATE NOCASE ASC
       `).all(),
       listProductCategoryMeta(c.env.DB)
     ])
@@ -9244,9 +9303,13 @@ app.get('/products/category/:name', async c => {
 
     const shell = await loadShopShellHtml(c.env)
     if (!shell) return shopSeoHtmlResponse(seoHtml, 60)
+    const categorySeo = resolveCategorySeo(canonicalName, catProducts, seoMeta, 'https://shop.dicebastion.com')
     return shopSeoHtmlResponse(applyShopShellSeo(shell, {
-      title: resolveCategorySeo(canonicalName, catProducts, seoMeta, 'https://shop.dicebastion.com').title,
-      canonical: getShopCategoryUrl(canonicalName)
+      title: categorySeo.title,
+      canonical: getShopCategoryUrl(canonicalName),
+      description: clampSeoText(categorySeo.description, 160),
+      ogType: 'website',
+      ogImage: categorySeo.image
     }), 60)
   } catch (err) {
     console.error('Category page error:', err)
@@ -9285,10 +9348,8 @@ app.get('/products/:slug', async (c, next) => {
 
     const shell = await loadShopShellHtml(c.env)
     if (!shell) return shopSeoHtmlResponse(generateProductSeoPage(product), 60)
-    return shopSeoHtmlResponse(applyShopShellSeo(shell, {
-      title: `${product.name || 'Product'} | Dice Bastion Shop, Gibraltar`,
-      canonical: getShopProductUrl(product.slug)
-    }), 60)
+    const productShellSeo = buildProductShellSeo(product)
+    return shopSeoHtmlResponse(applyShopShellSeo(shell, productShellSeo), 60)
   } catch (err) {
     console.error('Product slug error:', err)
     return c.json({ error: 'internal_error' }, 500)
@@ -9328,13 +9389,22 @@ function toPublicCatalogueProduct(product) {
   return { ...rest, preview }
 }
 
+function sortCatalogueProducts(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const sa = isProductInStock(a) ? 0 : 1
+    const sb = isProductInStock(b) ? 0 : 1
+    if (sa !== sb) return sa - sb
+    return String(a.name || '').localeCompare(String(b.name || ''), 'en', { sensitivity: 'base' })
+  })
+}
+
 // Get all active products (public), optionally filtered by category
 app.get('/products', async (c) => {
   try {
     const category = c.req.query('category')
     let sql = `SELECT id, name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, is_active, release_date
       FROM products WHERE is_active = 1`
-    sql += ' ORDER BY name ASC'
+    sql += ` ORDER BY CASE WHEN COALESCE(stock_quantity, 0) > 0 THEN 0 ELSE 1 END, name COLLATE NOCASE ASC`
     const products = await c.env.DB.prepare(sql).all()
     let rows = products.results || []
     if (category) {
@@ -9343,7 +9413,7 @@ app.get('/products', async (c) => {
       // Default catalogue is the online shop — exclude drinks (sold via /drinks only)
       rows = rows.filter((p) => !isDrinksProduct(p))
     }
-    return c.json(rows.map(toPublicCatalogueProduct))
+    return c.json(sortCatalogueProducts(rows).map(toPublicCatalogueProduct))
   } catch (e) {
     console.error('Get products error:', e)
     return c.json({ error: 'internal_error' }, 500)

@@ -330,6 +330,16 @@ color: rgb(var(--color-neutral-800));
   border-color: rgb(var(--color-primary-300));
 }
 
+.product-card--out-of-stock {
+  opacity: 0.82;
+}
+
+.product-card--out-of-stock:hover {
+  transform: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  border-color: rgb(var(--color-neutral-200));
+}
+
 .product-image {
   width: 100%;
   height: 220px;
@@ -1360,6 +1370,8 @@ function productMatchesSearch(product, term) {
 
   const summary = String(product.summary || '').toLowerCase();
   if (summary.includes(term)) return true;
+  const preview = String(product.preview || '').toLowerCase();
+  if (preview.includes(term)) return true;
   const description = String(product.description || '').toLowerCase();
   if (description.includes(term)) return true;
 
@@ -1411,6 +1423,15 @@ function scheduleSearch() {
   searchDebounceTimer = setTimeout(handleSearchInput, SEARCH_DEBOUNCE_MS);
 }
 
+function sortProductsForCatalogue(products) {
+  return products.slice().sort((a, b) => {
+    const sa = (Number(a.stock_quantity) || 0) > 0 ? 0 : 1;
+    const sb = (Number(b.stock_quantity) || 0) > 0 ? 0 : 1;
+    if (sa !== sb) return sa - sb;
+    return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+  });
+}
+
 function getFilteredProducts() {
   let filteredProducts = allProducts.slice();
 
@@ -1426,7 +1447,7 @@ function getFilteredProducts() {
     );
   }
 
-  return filteredProducts;
+  return sortProductsForCatalogue(filteredProducts);
 }
 
 function renderCategoryIntro() {
@@ -1572,9 +1593,10 @@ function productCardHtml(product) {
   const slugRaw = product.slug || '';
   const slugAttr = escapeHtml(slugRaw);
   const slugHref = '/products/' + encodeURIComponent(slugRaw);
+  const outOfStock = (Number(product.stock_quantity) || 0) === 0 && !isPreorder;
 
   return `
-<div class="product-card">
+<div class="product-card${outOfStock ? ' product-card--out-of-stock' : ''}">
     <a href="${slugHref}"
        class="product-card-link"
        data-product-id="${product.id}"

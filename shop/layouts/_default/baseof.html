@@ -11,10 +11,11 @@
   <meta property="og:type" content="website" />
   <meta property="og:url" content="{{ .Permalink }}" />
   <meta property="og:title" content="{{ if .IsHome }}{{ .Site.Title }}{{ else }}{{ .Title }} - {{ .Site.Title }}{{ end }}" />
-  <meta property="og:description" content="{{ .Site.Params.description }}" />
+  <meta property="og:description" content="{{ with .Description }}{{ . }}{{ else }}{{ .Site.Params.description }}{{ end }}" />
   <meta property="og:image" content="{{ .Site.BaseURL }}img/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
+  <meta property="og:site_name" content="Dice Bastion Shop" />
   
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image" />
@@ -22,6 +23,31 @@
   <meta name="twitter:title" content="{{ if .IsHome }}{{ .Title | default .Site.Title }}{{ else }}{{ .Title }} - {{ .Site.Title }}{{ end }}" />
   <meta name="twitter:description" content="{{ with .Description }}{{ . }}{{ else }}{{ .Site.Params.description }}{{ end }}" />
   <meta name="twitter:image" content="{{ .Site.BaseURL }}img/og-image.png" />
+
+  {{ if .IsHome }}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "{{ .Site.BaseURL }}#organization",
+        "name": "Dice Bastion",
+        "url": "https://dicebastion.com",
+        "logo": "{{ .Site.BaseURL }}img/logo.png"
+      },
+      {
+        "@type": "WebSite",
+        "@id": "{{ .Site.BaseURL }}#website",
+        "url": "{{ .Site.BaseURL }}",
+        "name": "Dice Bastion Shop",
+        "description": {{ .Site.Params.description | jsonify }},
+        "publisher": { "@id": "{{ .Site.BaseURL }}#organization" }
+      }
+    ]
+  }
+  </script>
+  {{ end }}
   
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="/img/logo.png" />
