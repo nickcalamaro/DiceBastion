@@ -242,6 +242,12 @@
     if (d.expenses.supplier_bill_extras_pence) {
       rows += statementRow('Supplier bill costs not in stock', -d.expenses.supplier_bill_extras_pence, { indent: true, note: 'delivery charges or bills without stock received' });
     }
+    if (d.expenses.card_buyback_credit_pence) {
+      rows += statementRow('Cards bought for store credit', -d.expenses.card_buyback_credit_pence, { indent: true });
+    }
+    if (d.expenses.store_credit_adjustments_pence) {
+      rows += statementRow('Store credit adjustments', -d.expenses.store_credit_adjustments_pence, { indent: true });
+    }
     rows += statementRow('Total expenses', -d.expenses.total_pence, { total: true });
     rows += statementRow('Net profit', d.net_profit_pence, { total: true });
 
@@ -311,6 +317,8 @@
       rows.push([EXPENSE_LABELS[c.category] || c.category, poundsCsv(-c.amount_pence)]);
     });
     rows.push(['Supplier bill costs not in stock', poundsCsv(-d.expenses.supplier_bill_extras_pence)]);
+    rows.push(['Cards bought for store credit', poundsCsv(-(d.expenses.card_buyback_credit_pence || 0))]);
+    rows.push(['Store credit adjustments', poundsCsv(-(d.expenses.store_credit_adjustments_pence || 0))]);
     rows.push(['Total expenses', poundsCsv(-d.expenses.total_pence)]);
     rows.push(['Net profit', poundsCsv(d.net_profit_pence)]);
     rows.push([]);
@@ -356,6 +364,12 @@
     rows += statementHeading('Liabilities');
     rows += statementRow('Unpaid supplier bills', d.liabilities.unpaid_supplier_bills_pence, { indent: true });
     rows += statementRow('Unpaid expenses', d.liabilities.unpaid_expenses_pence, { indent: true });
+    if (d.liabilities.store_credit_owed_pence || d.liabilities.store_credit_customer_balances_pence) {
+      rows += statementRow('Store credit owed to customers', d.liabilities.store_credit_owed_pence, {
+        indent: true,
+        note: 'customer balances: £' + ((d.liabilities.store_credit_customer_balances_pence || 0) / 100).toFixed(2)
+      });
+    }
     rows += statementRow('Total liabilities', d.liabilities.total_pence, { total: true });
     rows += statementRow('Net assets', d.net_assets_pence, { total: true });
     rows += statementHeading('Owner equity');
@@ -389,6 +403,7 @@
       ['Total assets', poundsCsv(d.assets.total_pence)],
       ['Unpaid supplier bills', poundsCsv(d.liabilities.unpaid_supplier_bills_pence)],
       ['Unpaid expenses', poundsCsv(d.liabilities.unpaid_expenses_pence)],
+      ['Store credit owed to customers', poundsCsv(d.liabilities.store_credit_owed_pence || 0)],
       ['Total liabilities', poundsCsv(d.liabilities.total_pence)],
       ['Net assets', poundsCsv(d.net_assets_pence)],
       ['Money put in', poundsCsv(d.equity.owner_capital_in_pence)],

@@ -13,6 +13,19 @@ import {
   listPayouts
 } from './payments-client.js'
 import {
+  getStoreCreditBalance,
+  listStoreCreditLedger,
+  computeCreditSplit,
+  settleStoreCredit
+} from './store-credit.js'
+import {
+  listBuybackMeta,
+  searchBuybackCards,
+  BUYBACK_CONDITIONS,
+  BUYBACK_LANGUAGES,
+  isRiftboundSearchConfigured
+} from './buyback-cards.js'
+import {
   ensureLedgerSchema,
   recordOrderCosts,
   receiveStock,
@@ -51,7 +64,12 @@ app.use('*', async (c, next) => {
     allowOrigin = origin
   }
   
-  if (allowOrigin) c.res.headers.set('Access-Control-Allow-Origin', allowOrigin)
+  if (allowOrigin) {
+    c.res.headers.set('Access-Control-Allow-Origin', allowOrigin)
+    if (allowOrigin !== '*') {
+      c.res.headers.set('Access-Control-Allow-Credentials', 'true')
+    }
+  }
   c.res.headers.set('Vary','Origin')
   c.res.headers.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key, X-Session-Token, X-Admin-Key')
   c.res.headers.set('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS')
@@ -63,6 +81,24 @@ app.use('*', async (c, next) => {
   if (c.req.method === 'OPTIONS') return c.body(null, 204)
   await next()
 })
+
+/** Shared session cookie so shop.dicebastion.com can see logins from dicebastion.com */
+function setSessionCookie(c, sessionToken, maxAgeSec = 7 * 24 * 60 * 60) {
+  const secure = 'Secure; '
+  c.header(
+    'Set-Cookie',
+    `db_session=${encodeURIComponent(sessionToken)}; Domain=.dicebastion.com; Path=/; ${secure}SameSite=Lax; Max-Age=${maxAgeSec}`,
+    { append: true }
+  )
+}
+
+function clearSessionCookie(c) {
+  c.header(
+    'Set-Cookie',
+    'db_session=; Domain=.dicebastion.com; Path=/; Secure; SameSite=Lax; Max-Age=0',
+    { append: true }
+  )
+}
 
 // Payment/auth-sensitive endpoints must never be cached by the browser, the user's
 // ISP, captive-portal/corporate proxies, or any intermediary. These return dynamic
@@ -1217,41 +1253,87 @@ async function confirmTicketPurchase(db, env, { orderRef, payment = null }) {
     return { ok: true, alreadyActive: true, transaction, ticket, event: ev }
   }
 
-  // Resolve the payment. Redirect path fetches here; webhook passes the verified payload.
-  let pmt = payment
-  if (!pmt) {
-    try {
-      pmt = await fetchPayment(env, transaction.checkout_id)
-      console.log('[confirmTicket] SumUp payment status:', pmt?.status, 'checkout_id:', transaction.checkout_id)
-    } catch (err) {
-      console.error('[confirmTicket] Failed to fetch payment from SumUp:', err)
-      return { ok: false, error: 'verify_failed', httpStatus: 400 }
+  const creditAppliedPence = Math.max(0, Number(transaction.credit_applied_pence) || 0)
+  const cardChargedPence = transaction.card_charged_pence != null
+    ? Math.max(0, Number(transaction.card_charged_pence))
+    : null
+  const creditOnly = creditAppliedPence > 0 && cardChargedPence === 0
+
+  let paymentIdForActivation = null
+
+  if (creditOnly) {
+    paymentIdForActivation = `CREDIT-${orderRef}`
+  } else {
+    // Resolve the payment. Redirect path fetches here; webhook passes the verified payload.
+    let pmt = payment
+    if (!pmt) {
+      try {
+        pmt = await fetchPayment(env, transaction.checkout_id)
+        console.log('[confirmTicket] SumUp payment status:', pmt?.status, 'checkout_id:', transaction.checkout_id)
+      } catch (err) {
+        console.error('[confirmTicket] Failed to fetch payment from SumUp:', err)
+        return { ok: false, error: 'verify_failed', httpStatus: 400 }
+      }
     }
-  }
 
-  // SumUp may leave checkout.status as PENDING while transactions[] holds SUCCESSFUL/PAID.
-  if (!isCheckoutPaid(pmt)) {
-    const currentStatus = pmt?.status || 'PENDING'
-    const txStatuses = pmt?.transactions?.map(t => t.status) || []
-    const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
-    const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
-    console.log('[confirmTicket] Payment not paid, status:', currentStatus, 'txStatuses:', txStatuses)
-    return { ok: false, notPaid: true, status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus }
-  }
+    // SumUp may leave checkout.status as PENDING while transactions[] holds SUCCESSFUL/PAID.
+    if (!isCheckoutPaid(pmt)) {
+      const currentStatus = pmt?.status || 'PENDING'
+      const txStatuses = pmt?.transactions?.map(t => t.status) || []
+      const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
+      const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
+      console.log('[confirmTicket] Payment not paid, status:', currentStatus, 'txStatuses:', txStatuses)
+      if (creditAppliedPence > 0 && transaction.user_id && isCheckoutFailed(pmt)) {
+        await settleTicketCredit(db, { userId: transaction.user_id, ticketId: ticket.id, orderRef, targetPence: 0 })
+          .catch(err => console.error('[confirmTicket] credit release failed:', err))
+      }
+      return { ok: false, notPaid: true, status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus }
+    }
 
-  // Verify amount/currency against the SumUp checkout.
-  if (pmt.amount != Number(transaction.amount) || (transaction.currency && pmt.currency !== transaction.currency)) {
-    console.log('[confirmTicket] Payment mismatch - payment:', pmt.amount, pmt.currency, 'transaction:', transaction.amount, transaction.currency)
-    return { ok: false, error: 'payment_mismatch', httpStatus: 400 }
+    // Verify card charge against expected remainder (or full amount for legacy rows).
+    const expectedCardPounds = cardChargedPence != null
+      ? cardChargedPence / 100
+      : Number(transaction.amount)
+    if (pmt.amount != expectedCardPounds || (transaction.currency && pmt.currency !== transaction.currency)) {
+      console.log('[confirmTicket] Payment mismatch - payment:', pmt.amount, pmt.currency, 'expected card:', expectedCardPounds, transaction.currency)
+      return { ok: false, error: 'payment_mismatch', httpStatus: 400 }
+    }
+    paymentIdForActivation = pmt.id
   }
 
   // Capacity check
   if (ev.capacity && ev.tickets_sold >= ev.capacity) {
+    if (creditAppliedPence > 0 && transaction.user_id) {
+      await settleTicketCredit(db, { userId: transaction.user_id, ticketId: ticket.id, orderRef, targetPence: 0 })
+        .catch(err => console.error('[confirmTicket] credit release failed:', err))
+    }
     return { ok: false, error: 'sold_out', httpStatus: 409 }
   }
 
+  if (creditAppliedPence > 0 && transaction.user_id) {
+    const debit = await settleTicketCredit(db, {
+      userId: transaction.user_id,
+      ticketId: ticket.id,
+      orderRef,
+      targetPence: creditAppliedPence
+    })
+    if (!debit.ok) {
+      console.error('[confirmTicket] credit debit failed:', debit.error, orderRef)
+      if (creditOnly) return { ok: false, error: 'insufficient_credit', httpStatus: 409 }
+      // Card already captured: issue the ticket and let staff recover the credit shortfall.
+      await alertStoreCreditShortfall(env, {
+        reference: orderRef,
+        userId: transaction.user_id,
+        creditPence: creditAppliedPence,
+        error: debit.error,
+        relatedId: ticket.id,
+        relatedType: 'ticket'
+      })
+    }
+  }
+
   // Activate ticket + mark transaction PAID + increment tickets_sold (atomic batch).
-  const claimed = await activateTicket(db, { ticketId: ticket.id, eventId: ticket.event_id, transactionId: transaction.id, paymentId: pmt.id })
+  const claimed = await activateTicket(db, { ticketId: ticket.id, eventId: ticket.event_id, transactionId: transaction.id, paymentId: paymentIdForActivation })
   if (!claimed) {
     console.log('[confirmTicket] Ticket activated concurrently, skipping emails:', ticket.id)
     return { ok: true, alreadyActive: true, transaction, ticket, event: ev }
@@ -1505,6 +1587,16 @@ function isGenuineDecline(err) {
 }
 
 /**
+ * SumUp refused the saved card token itself (deactivated card, expired or removed
+ * instrument). The payments worker surfaces this as a 500, but it is not transient:
+ * retrying never succeeds, so it must take the failure path that disables
+ * auto-renewal and asks the member to update their card.
+ */
+function isPaymentMethodRejected(err) {
+  return /"param"\s*:\s*"token"/i.test(String(err?.message || ''))
+}
+
+/**
  * A renewal charge could not be attempted at the gateway (system/transport error).
  * No money was touched, so we DON'T email the member and DON'T burn a renewal
  * attempt — we just log it so the next cron run retries cleanly.
@@ -1571,7 +1663,7 @@ async function processMembershipRenewal(db, membership, env) {
     // Only a genuine gateway decline (HTTP 402) is a real, failed payment attempt
     // that should notify the member. System/transport errors never reached the
     // card, so they must not produce a "payment failed" email or burn an attempt.
-    if (isGenuineDecline(e)) {
+    if (isGenuineDecline(e) || isPaymentMethodRejected(e)) {
       return await handleRenewalFailure(db, env, membership, instrument, amount, currency, e, orderRef)
     }
     return await handleRenewalSystemError(db, membership, amount, currency, e)
@@ -1830,6 +1922,74 @@ function isTelemetryOrderRef(ref) {
  * @returns {string} Clamped string
  */
 function clampStr(v, max){ return (v||'').substring(0, max) }
+
+/**
+ * Resolve logged-in user from X-Session-Token. Returns null if missing/invalid.
+ * @param {D1Database} db
+ * @param {string|null|undefined} sessionToken
+ */
+async function getSessionUser(db, sessionToken) {
+  const token = String(sessionToken || '').trim()
+  if (!token) return null
+  const row = await db.prepare(`
+    SELECT u.user_id, u.email, u.name, u.is_admin, u.is_active, u.store_credit_pence
+    FROM user_sessions us
+    JOIN users u ON us.user_id = u.user_id
+    WHERE us.session_token = ? AND us.expires_at > datetime('now') AND u.is_active = 1
+  `).bind(token).first()
+  if (!row) return null
+  return {
+    user_id: row.user_id,
+    email: row.email,
+    name: row.name,
+    is_admin: row.is_admin === 1,
+    store_credit_pence: Math.max(0, Number(row.store_credit_pence) || 0)
+  }
+}
+
+function settleTicketCredit(db, { userId, ticketId, orderRef, targetPence }) {
+  return settleStoreCredit(db, {
+    userId,
+    targetPence,
+    spendType: 'event_spend',
+    referenceType: 'ticket',
+    referenceId: String(ticketId),
+    keyPrefix: 'event_spend',
+    note: `Event ticket ${orderRef}`,
+    nowIso: toIso(new Date())
+  })
+}
+
+function settleShopOrderCredit(db, { userId, orderNumber, targetPence }) {
+  return settleStoreCredit(db, {
+    userId,
+    targetPence,
+    spendType: 'shop_spend',
+    referenceType: 'order',
+    referenceId: String(orderNumber),
+    keyPrefix: 'shop_spend',
+    note: `Shop order ${orderNumber}`,
+    nowIso: toIso(new Date())
+  })
+}
+
+/** Card was captured but the matching credit could not be taken (released and spent elsewhere). */
+async function alertStoreCreditShortfall(env, { reference, userId, creditPence, error, relatedId, relatedType }) {
+  try {
+    await sendEmail(env, {
+      to: env.BUYBACK_NOTIFY_EMAIL || 'admin@dicebastion.com',
+      subject: `Store credit debit failed after card payment — ${reference}`,
+      text: `${reference} was paid by card but store credit debit failed (${error}). Credit intended: ${creditPence} pence for user ${userId}. Adjust manually.`,
+      html: `<p><strong>${escapeHtml(reference)}</strong> was paid by card but store credit debit failed (<code>${escapeHtml(String(error))}</code>).</p><p>Credit intended: ${creditPence} pence for user ${userId}. Adjust manually.</p>`,
+      emailType: 'admin_credit_debit_failed',
+      relatedId,
+      relatedType
+    })
+  } catch (mailErr) {
+    console.error('[store credit] shortfall alert email failed:', mailErr)
+  }
+}
+
 
 const PLAYMAT_ATTACHMENT_MAX_FILES = 5
 const PLAYMAT_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024
@@ -3229,6 +3389,7 @@ app.post('/register', async c => {
     ).run()
     
     console.log('[User Register] New user created, session created')
+    setSessionCookie(c, sessionToken)
     return c.json({
       success: true,
       session_token: sessionToken,
@@ -3302,6 +3463,7 @@ app.post('/login', async c => {
     ).run()
     
     console.log('[User Login] Success! Session created for', user.email)
+    setSessionCookie(c, sessionToken)
     return c.json({
       success: true,
       session_token: sessionToken,
@@ -3575,6 +3737,7 @@ app.post('/logout', async c => {
     `).bind(sessionToken).run()
     
     console.log('[Logout] Session invalidated')
+    clearSessionCookie(c)
     return c.json({ success: true })
   } catch (error) {
     console.error('[Logout] ERROR:', error)
@@ -3592,7 +3755,8 @@ app.get('/account/info', async c => {
     
     // Get session and user
     const session = await c.env.DB.prepare(`
-      SELECT us.*, u.user_id, u.email, u.name, u.is_admin, u.created_at as user_created_at
+      SELECT us.*, u.user_id, u.email, u.name, u.is_admin, u.created_at as user_created_at,
+             u.store_credit_pence
       FROM user_sessions us
       JOIN users u ON us.user_id = u.user_id
       WHERE us.session_token = ? AND us.expires_at > datetime('now')
@@ -3635,6 +3799,9 @@ app.get('/account/info', async c => {
       ORDER BY created_at DESC
       LIMIT 10
     `).bind(userId).all()
+
+    const storeCreditPence = Math.max(0, Number(session.store_credit_pence) || 0)
+    const creditLedger = await listStoreCreditLedger(c.env.DB, userId, 20)
     
     // Get email preferences
     let emailPrefs = await c.env.DB.prepare(`
@@ -3670,6 +3837,8 @@ app.get('/account/info', async c => {
       memberships_history: membershipsHistory.results || [],
       tickets: tickets.results || [],
       orders: orders.results || [],
+      store_credit_pence: storeCreditPence,
+      store_credit_ledger: creditLedger,
       email_preferences: emailPrefs
     })
   } catch (error) {
@@ -3912,84 +4081,6 @@ app.post('/account/enable-auto-renewal', async c => {
   } catch (error) {
     console.error('[Enable Auto-Renewal] ERROR:', error)
     return c.json({ error: 'internal_error' }, 500)
-  }
-})
-
-// Setup payment method for auto-renewal
-app.post('/account/setup-payment-method', async c => {
-  try {
-    const sessionToken = c.req.header('X-Session-Token')
-    
-    if (!sessionToken) {
-      return c.json({ error: 'no_session_token' }, 401)
-    }
-    
-    // Get session
-    const session = await c.env.DB.prepare(`
-      SELECT us.user_id, u.email, u.name 
-      FROM user_sessions us
-      JOIN users u ON us.user_id = u.user_id
-      WHERE us.session_token = ? AND us.expires_at > datetime('now')
-    `).bind(sessionToken).first()
-    
-    if (!session) {
-      return c.json({ error: 'invalid_session' }, 401)
-    }
-      // Get active membership (check status column only, not date)
-    const membership = await c.env.DB.prepare(`
-      SELECT * FROM memberships 
-      WHERE user_id = ? AND status = 'active'
-      ORDER BY end_date DESC LIMIT 1
-    `).bind(session.user_id).first()
-    
-    if (!membership) {
-      return c.json({ error: 'no_active_membership' }, 404)
-    }
-    
-    // Create a verification checkout for £0.01 to save the card
-    const orderRef = `CARD-SETUP-${session.user_id}-${Date.now()}`
-    const customerId = `USER-${session.user_id}`
-    
-    try {
-      const checkoutResponse = await fetch(`${c.env.PAYMENTS_WORKER_URL}/internal/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: 0.01, // £0.01 verification charge
-          currency: 'GBP',
-          orderRef,
-          description: 'Payment method setup for auto-renewal',
-          savePaymentInstrument: true,
-          customerId
-        })
-      })
-      
-      if (!checkoutResponse.ok) {
-        const error = await checkoutResponse.text()
-        console.error('Checkout creation failed:', error)
-        throw new Error('Failed to create checkout')
-      }
-      
-      const checkout = await checkoutResponse.json()
-      
-      // Store the setup intent
-      await c.env.DB.prepare(`
-        INSERT INTO payment_setups (user_id, checkout_id, order_ref, status, created_at)
-        VALUES (?, ?, ?, 'pending', ?)
-      `).bind(session.user_id, checkout.id, orderRef, now).run()
-      
-      return c.json({
-        success: true,
-        checkout_id: checkout.id,
-        order_ref: orderRef
-      })
-    } catch (error) {
-      console.error('[Setup Payment Method] Checkout error:', error)
-      throw error
-    }
-  } catch (error) {
-    console.error('[Setup Payment Method] ERROR:', error)
-    return c.json({ error: 'internal_error', message: error.message }, 500)
   }
 })
 
@@ -8039,7 +8130,8 @@ app.post('/events/:id/checkout', async c => {
     }
     
     const idem = c.req.header('Idempotency-Key')?.trim()
-    const { email, name, privacyConsent, marketingConsent, turnstileToken } = await c.req.json()
+    const body = await c.req.json()
+    const { email, name, privacyConsent, marketingConsent, turnstileToken } = body
     if (!email) return c.json({ error:'email_required' },400)
     if (!EMAIL_RE.test(email)) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error:'privacy_consent_required' },400)
@@ -8051,18 +8143,42 @@ app.post('/events/:id/checkout', async c => {
     if (!ev) return c.json({ error:'event_not_found' },404)
     if (ev.capacity && ev.tickets_sold >= ev.capacity) return c.json({ error:'sold_out' },409)
 
-    const ident = await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
+    const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+    const ident = sessionUser
+      ? { id: sessionUser.user_id, email: sessionUser.email, name: sessionUser.name || clampStr(name, 200) }
+      : await getOrCreateIdentity(c.env.DB, email, clampStr(name,200))
     if (!ident || typeof ident.id === 'undefined' || ident.id === null) {
       console.error('identity missing id', ident)
       return c.json({ error:'identity_error' },500)
     }
+    // Guests never apply credit; logged-in users opt in by default.
+    const applyCreditRequested = body.apply_store_credit !== false && !!sessionUser
+
     const isActive = !!(await getActiveMembership(c.env.DB, ident.id))
     const amount = Number(isActive ? ev.membership_price : ev.non_membership_price)
     if (!Number.isFinite(amount)) return c.json({ error:'invalid_amount' },400)
     if (amount <= 0) return c.json({ error:'invalid_amount' },400)
     const currency = c.env.CURRENCY || 'GBP'
+    const amountDuePence = Math.round(amount * 100)
 
-    const s = await getSchema(c.env.DB)
+    let creditAppliedPence = 0
+    let cardDuePence = amountDuePence
+    if (sessionUser && applyCreditRequested) {
+      await releaseAbandonedCreditReservations(c.env.DB, c.env, { userId: sessionUser.user_id, olderThanMinutes: 2, limit: 5 })
+        .catch(err => console.error('[events/checkout] credit release sweep failed:', err))
+      const balance = await getStoreCreditBalance(c.env.DB, sessionUser.user_id)
+      const split = computeCreditSplit(amountDuePence, balance, true)
+      creditAppliedPence = split.creditAppliedPence
+      cardDuePence = split.cardDuePence
+    }
+
+    if (cardDuePence > 0 && cardDuePence < SHOP_MIN_PAYMENT_PENCE) {
+      return c.json({
+        error: 'card_charge_below_minimum',
+        message: 'Card charge would be under £1.00. Use enough store credit to cover the ticket in full, or pay the full amount by card.'
+      }, 400)
+    }
+
     await migrateToTransactions(c.env.DB)
 
     const order_ref = `EVT-${evId}-${crypto.randomUUID()}`
@@ -8070,15 +8186,35 @@ app.post('/events/:id/checkout', async c => {
     // Idempotency check in transactions table
     if (idem){
       const existing = await c.env.DB.prepare(`
-        SELECT t.*, ti.id as ticket_id FROM transactions t
+        SELECT t.*, ti.id as ticket_id, ti.status as ticket_status FROM transactions t
         JOIN tickets ti ON ti.id = t.reference_id
         WHERE t.transaction_type = 'ticket' AND t.user_id = ? AND t.idempotency_key = ?
         ORDER BY t.id DESC LIMIT 1
       `).bind(ident.id, idem).first()
-      if (existing && existing.checkout_id){
-        return c.json({ orderRef: existing.order_ref, checkoutId: existing.checkout_id, reused: true })
+      const existingCardDue = existing?.card_charged_pence
+      const isCreditOnlyReuse =
+        existing &&
+        Number(existing.credit_applied_pence || 0) > 0 &&
+        existingCardDue != null &&
+        Number(existingCardDue) === 0
+      if (existing && (existing.checkout_id || isCreditOnlyReuse)){
+        if (isCreditOnlyReuse && existing.ticket_status !== 'active') {
+          const confirm = await confirmTicketPurchase(c.env.DB, c.env, { orderRef: existing.order_ref, payment: null })
+          if (!confirm.ok) {
+            return c.json({ error: confirm.error || 'credit_activation_failed' }, confirm.httpStatus || 500)
+          }
+        }
+        return c.json({
+          orderRef: existing.order_ref,
+          checkoutId: existing.checkout_id || null,
+          reused: true,
+          paid_with_credit_only: isCreditOnlyReuse,
+          credit_applied_pence: Number(existing.credit_applied_pence || 0),
+          card_charged_pence: Number(existingCardDue != null ? existingCardDue : Math.round(Number(existing.amount) * 100))
+        })
       }
-    }    // Insert minimal ticket record (business logic only)
+    }
+
     const colParts = ['event_id', 'user_id', 'status', 'created_at']
     const bindVals = [evId, ident.id, 'pending', toIso(new Date())]
     
@@ -8086,42 +8222,79 @@ app.post('/events/:id/checkout', async c => {
     const ticketResult = await c.env.DB.prepare(`INSERT INTO tickets (${colParts.join(',')}) VALUES (${placeholders}) RETURNING id`).bind(...bindVals).first()
     const ticketId = ticketResult?.id || (await c.env.DB.prepare('SELECT last_insert_rowid() as id').first()).id
 
-    let checkout
-    try {
-      // redirectUrl recovers activation if the SumUp widget is unmounted mid-3DS
-      // (e.g. user switches email and starts a second checkout while the first charges).
-      checkout = await createCheckout(c.env, {
-        amount,
-        currency,
-        orderRef: order_ref,
-        title: ev.event_name,
-        description: `Ticket for ${ev.event_name}`,
-        redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`,
-        // Webhooks are only enabled for flows whose activation is race-safe against the
-        // browser confirm. Membership/bundle activation charges a saved card and is not.
-        webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
-      })
-    } catch (e) {
-      console.error('SumUp checkout failed for event', evId, e)
-      return c.json({ error:'sumup_checkout_failed', message:String(e?.message||e) },502)
-    }
-    if (!checkout.id) {
-      console.error('event checkout missing id', checkout)
-      return c.json({ error: 'sumup_missing_id' }, 502)
+    let checkoutId = null
+    if (cardDuePence > 0) {
+      let checkout
+      try {
+        // redirectUrl recovers activation if the SumUp widget is unmounted mid-3DS
+        // (e.g. user switches email and starts a second checkout while the first charges).
+        checkout = await createCheckout(c.env, {
+          amount: cardDuePence / 100,
+          currency,
+          orderRef: order_ref,
+          title: ev.event_name,
+          description: `Ticket for ${ev.event_name}` + (creditAppliedPence > 0 ? ` (store credit £${(creditAppliedPence / 100).toFixed(2)})` : ''),
+          redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(order_ref)}`,
+          // Webhooks are only enabled for flows whose activation is race-safe against the
+          // browser confirm. Membership/bundle activation charges a saved card and is not.
+          webhookUrl: `${siteUrl(c.env)}/api/webhooks/sumup`
+        })
+      } catch (e) {
+        console.error('SumUp checkout failed for event', evId, e)
+        return c.json({ error:'sumup_checkout_failed', message:String(e?.message||e) },502)
+      }
+      if (!checkout.id) {
+        console.error('event checkout missing id', checkout)
+        return c.json({ error: 'sumup_missing_id' }, 502)
+      }
+      checkoutId = checkout.id
     }
     
-    // Store payment details in transactions table
     await c.env.DB.prepare(`
       INSERT INTO transactions (transaction_type, reference_id, user_id, email, name, order_ref,
-                                checkout_id, amount, currency, payment_status, idempotency_key)
-      VALUES ('ticket', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-    `).bind(ticketId, ident.id, email, clampStr(name,200), order_ref, checkout.id,
-            String(amount), currency, idem || null).run()
+                                checkout_id, amount, currency, payment_status, idempotency_key,
+                                credit_applied_pence, card_charged_pence)
+      VALUES ('ticket', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+    `).bind(ticketId, ident.id, email, clampStr(name,200), order_ref, checkoutId,
+            String(amount), currency, idem || null, creditAppliedPence, cardDuePence).run()
     
-    // Handle email preferences opt-in
     await handleEmailPreferencesOptIn(c.env.DB, ident.id, marketingConsent)
+
+    if (creditAppliedPence > 0) {
+      const debit = await settleTicketCredit(c.env.DB, {
+        userId: ident.id,
+        ticketId,
+        orderRef: order_ref,
+        targetPence: creditAppliedPence
+      })
+      if (!debit.ok) {
+        await c.env.DB.prepare(
+          `UPDATE transactions SET payment_status = 'FAILED', updated_at = ? WHERE order_ref = ?`
+        ).bind(toIso(new Date()), order_ref).run()
+        return c.json({ error: 'insufficient_credit', message: 'Store credit could not be applied.' }, 409)
+      }
+    }
+
+    if (cardDuePence === 0) {
+      const confirm = await confirmTicketPurchase(c.env.DB, c.env, { orderRef: order_ref, payment: null })
+      if (!confirm.ok) {
+        return c.json({ error: confirm.error || 'credit_activation_failed' }, confirm.httpStatus || 500)
+      }
+      return c.json({
+        orderRef: order_ref,
+        checkoutId: null,
+        paid_with_credit_only: true,
+        credit_applied_pence: creditAppliedPence,
+        card_charged_pence: 0
+      })
+    }
     
-    return c.json({ orderRef: order_ref, checkoutId: checkout.id })
+    return c.json({
+      orderRef: order_ref,
+      checkoutId,
+      credit_applied_pence: creditAppliedPence,
+      card_charged_pence: cardDuePence
+    })
   } catch (e) {
     const debugMode = ['1','true','yes'].includes(String(c.req.query('debug') || c.env.DEBUG || '').toLowerCase())
     console.error('events checkout error', e)
@@ -11917,7 +12090,7 @@ async function processAutoRenewals(env) {
           } catch (e) {
             // Genuine decline → notify + count the attempt. System error → no
             // charge reached the card, so don't email or burn an attempt; retry next run.
-            if (isGenuineDecline(e)) {
+            if (isGenuineDecline(e) || isPaymentMethodRejected(e)) {
               await handleRenewalFailure(env.DB, env, trial, instrument, amount, currency, e, orderRef)
               trialChargesFailed++
             } else {
@@ -12196,8 +12369,38 @@ async function processAutoRenewals(env) {
     
     const expiredGracePeriod = expiredGracePeriodResult.meta?.changes || 0
     console.log(`[CRON] Marked ${expiredGracePeriod} auto-renewal memberships as expired (grace period ended)`)
-    
-    expired = expiredNoAutoRenew + expiredGracePeriod
+
+    // Anything still active with auto-renew past the grace window only ever hit system
+    // errors, so the member was never told. The renewal query no longer reaches it;
+    // expire it, stop auto-renew, and ask staff to contact the member.
+    const { results: stuckRenewals } = await env.DB.prepare(`
+      SELECT m.id, m.user_id, m.plan, m.end_date, u.email, u.name,
+             (SELECT error_message FROM renewal_log rl WHERE rl.membership_id = m.id ORDER BY rl.id DESC LIMIT 1) AS last_error
+      FROM memberships m
+      JOIN users u ON u.user_id = m.user_id
+      WHERE m.end_date < ? AND m.status = 'active' AND m.auto_renew = 1
+    `).bind(gracePeriodStartStr).all()
+    for (const m of stuckRenewals || []) {
+      await env.DB.prepare(`UPDATE memberships SET status = 'expired', auto_renew = 0 WHERE id = ? AND status = 'active'`)
+        .bind(m.id).run()
+    }
+    if (stuckRenewals?.length) {
+      const lines = stuckRenewals.map(m =>
+        `Membership ${m.id} (${m.plan}) for ${m.name || ''} <${m.email}>, user ${m.user_id}, ended ${m.end_date}. Last error: ${m.last_error || 'none logged'}`
+      )
+      await sendEmail(env, {
+        to: 'admin@dicebastion.com',
+        subject: `${stuckRenewals.length} membership renewal(s) could not be attempted and have expired`,
+        text: `These auto-renewing memberships passed their grace period without a successful renewal. The member was not emailed, so please contact them.\n\n${lines.join('\n')}`,
+        html: `<p>These auto-renewing memberships passed their grace period without a successful renewal. The member was not emailed, so please contact them.</p><ul>${lines.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`,
+        emailType: 'admin_renewal_stuck_expired',
+        relatedType: 'membership',
+        metadata: { membership_ids: stuckRenewals.map(m => m.id) }
+      }).catch(err => console.error('[CRON] Stuck renewal alert email failed:', err))
+    }
+    console.log(`[CRON] Expired ${stuckRenewals?.length || 0} auto-renewal memberships that never reached the gateway`)
+
+    expired = expiredNoAutoRenew + expiredGracePeriod + (stuckRenewals?.length || 0)
     console.log(`[CRON] Total memberships marked as expired: ${expired}`)
 
     // ========================================================================
@@ -13083,9 +13286,128 @@ async function completePaidDrinksOrder(db, orderRow, paymentId) {
   return { alreadyCompleted: !Number(updateResult.meta?.changes ?? 0) }
 }
 
+/**
+ * Release store credit held by checkouts that were never paid. A checkout found paid on
+ * SumUp is completed instead; one with a card attempt still in flight (3DS) is left alone.
+ * A late payment on a released checkout re-debits through the normal completion path.
+ *
+ * @param {{ userId?: number|null, olderThanMinutes: number, limit?: number }} opts
+ */
+async function releaseAbandonedCreditReservations(db, env, { userId = null, olderThanMinutes, limit = 25 }) {
+  const cutoff = `-${Math.max(0, Math.floor(olderThanMinutes))} minutes`
+  const userClause = userId ? 'AND user_id = ?' : ''
+  const userArgs = userId ? [userId] : []
+  const inFlight = pmt => (pmt?.transactions || []).some(t => String(t?.status || '').toUpperCase() === 'PENDING')
+  const summary = { orders_released: 0, orders_completed: 0, tickets_released: 0, tickets_completed: 0 }
+
+  const { results: orders } = await db.prepare(`
+    SELECT * FROM orders
+    WHERE credit_applied_pence > 0 AND user_id IS NOT NULL
+      AND IFNULL(status, '') NOT IN ('completed', 'cancelled')
+      AND julianday(created_at) < julianday('now', ?)
+      ${userClause}
+    ORDER BY id LIMIT ?
+  `).bind(cutoff, ...userArgs, limit).all()
+
+  for (const order of orders || []) {
+    try {
+      let pmt = null
+      if (order.checkout_id) {
+        pmt = await fetchPayment(env, order.checkout_id)
+        if (isCheckoutPaid(pmt)) {
+          await completePaidShopOrder(db, env, order, pmt.id || pmt.payment_id || order.payment_id)
+          summary.orders_completed++
+          continue
+        }
+        if (inFlight(pmt)) continue
+      } else {
+        const outcome = await completePaidShopOrder(db, env, order, `CREDIT-${order.order_number}`)
+        if (!outcome?.creditError) {
+          summary.orders_completed++
+          continue
+        }
+      }
+      const released = await settleShopOrderCredit(db, { userId: order.user_id, orderNumber: order.order_number, targetPence: 0 })
+      if (!released.ok) continue
+      await db.prepare(`
+        UPDATE orders SET status = 'cancelled', payment_status = 'failed', updated_at = ?
+        WHERE id = ? AND IFNULL(status, '') != 'completed'
+      `).bind(toIso(new Date()), order.id).run()
+      summary.orders_released++
+    } catch (err) {
+      console.error('[credit sweep] order', order.order_number, err)
+    }
+  }
+
+  const { results: txs } = await db.prepare(`
+    SELECT * FROM transactions
+    WHERE transaction_type = 'ticket' AND credit_applied_pence > 0 AND user_id IS NOT NULL
+      AND UPPER(IFNULL(payment_status, '')) NOT IN ('PAID', 'FAILED')
+      AND julianday(created_at) < julianday('now', ?)
+      ${userClause}
+    ORDER BY id LIMIT ?
+  `).bind(cutoff, ...userArgs, limit).all()
+
+  for (const tx of txs || []) {
+    try {
+      let pmt = null
+      if (tx.checkout_id) {
+        pmt = await fetchPayment(env, tx.checkout_id)
+        if (inFlight(pmt) && !isCheckoutPaid(pmt)) continue
+      }
+      if (!tx.checkout_id || isCheckoutPaid(pmt)) {
+        const confirm = await confirmTicketPurchase(db, env, { orderRef: tx.order_ref, payment: pmt })
+        if (confirm.ok) {
+          summary.tickets_completed++
+          continue
+        }
+      }
+      const released = await settleTicketCredit(db, { userId: tx.user_id, ticketId: tx.reference_id, orderRef: tx.order_ref, targetPence: 0 })
+      if (!released.ok) continue
+      await db.prepare(`
+        UPDATE transactions SET payment_status = 'FAILED', updated_at = ?
+        WHERE id = ? AND UPPER(IFNULL(payment_status, '')) != 'PAID'
+      `).bind(toIso(new Date()), tx.id).run()
+      summary.tickets_released++
+    } catch (err) {
+      console.error('[credit sweep] ticket', tx.order_ref, err)
+    }
+  }
+
+  return summary
+}
+
 async function completePaidShopOrder(db, env, orderRow, paymentId) {
   const orderId = orderRow.id
   const nowIso = toIso(new Date())
+  const creditApplied = Math.max(0, Number(orderRow.credit_applied_pence) || 0)
+  const userId = orderRow.user_id != null ? Number(orderRow.user_id) : null
+
+  // Settle the reserved credit (re-debits if a decline or the abandonment sweep released it).
+  // If the card is already paid and the credit has since been spent, still complete the
+  // order and alert staff — never leave a charged order pending.
+  if (creditApplied > 0 && userId) {
+    const debit = await settleShopOrderCredit(db, {
+      userId,
+      orderNumber: orderRow.order_number,
+      targetPence: creditApplied
+    })
+    if (!debit.ok) {
+      console.error('[shop] store credit debit failed:', debit.error, orderRow.order_number)
+      const looksLikeCardPaid = paymentId && !String(paymentId).startsWith('CREDIT-')
+      if (!looksLikeCardPaid) {
+        return { alreadyCompleted: false, creditError: debit.error || 'credit_debit_failed' }
+      }
+      await alertStoreCreditShortfall(env, {
+        reference: `Order ${orderRow.order_number}`,
+        userId,
+        creditPence: creditApplied,
+        error: debit.error,
+        relatedId: orderId,
+        relatedType: 'order'
+      })
+    }
+  }
 
   const updateResult = await db.prepare(`
     UPDATE orders
@@ -13098,7 +13420,7 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
         completed_at = COALESCE(completed_at, ?)
     WHERE id = ?
       AND IFNULL(status, '') != 'completed'
-  `).bind(paymentId, nowIso, nowIso, orderId).run()
+  `).bind(paymentId || orderRow.payment_id || `CREDIT-${orderRow.order_number}`, nowIso, nowIso, orderId).run()
 
   const changed = Number(updateResult.meta?.changes ?? 0)
   if (!changed) {
@@ -13332,6 +13654,223 @@ async function validateAndComputeShopPromo(db, { promoCodeInput, checkoutEmail, 
   }
 }
 
+// ==================== BUYBACK (TCG → store credit) ====================
+
+const buybackSearchRateLimits = new Map()
+const buybackSubmitRateLimits = new Map()
+
+const BUYBACK_CONDITION_CODES = new Set(BUYBACK_CONDITIONS.map(c => c.code))
+const BUYBACK_LANGUAGE_CODES = new Set(BUYBACK_LANGUAGES.map(l => l.code))
+
+app.get('/buyback/meta', async c => {
+  const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+  if (!sessionUser) return c.json({ error: 'login_required' }, 401)
+  return c.json({
+    ok: true,
+    ...listBuybackMeta(c.env),
+    store_credit_pence: sessionUser.store_credit_pence
+  })
+})
+
+app.get('/buyback/cards/search', async c => {
+  try {
+    const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+    if (!sessionUser) return c.json({ error: 'login_required' }, 401)
+
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, buybackSearchRateLimits, 40, 1)) {
+      return c.json({ error: 'rate_limit_exceeded' }, 429)
+    }
+
+    const game = String(c.req.query('game') || '').toLowerCase()
+    const q = String(c.req.query('q') || '')
+    if (game === 'riftbound' && !isRiftboundSearchConfigured(c.env)) {
+      return c.json({
+        error: 'riftbound_not_configured',
+        message: 'Riftbound card search is not available yet. Magic: The Gathering is available now.'
+      }, 503)
+    }
+
+    const results = await searchBuybackCards(c.env, game, q)
+    return c.json({ ok: true, results })
+  } catch (e) {
+    const status = e.status || 500
+    console.error('[buyback/search]', e)
+    return c.json({ error: e.message || 'search_failed' }, status >= 400 && status < 600 ? status : 500)
+  }
+})
+
+app.get('/buyback/cases', async c => {
+  try {
+    const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+    if (!sessionUser) return c.json({ error: 'login_required' }, 401)
+
+    const { results } = await c.env.DB.prepare(`
+      SELECT id, status, agreed_value_pence, game_systems_json, customer_notes,
+             created_at, updated_at, quoted_at, resolved_at
+      FROM buyback_cases
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 25
+    `).bind(sessionUser.user_id).all()
+
+    return c.json({ ok: true, cases: results || [] })
+  } catch (e) {
+    console.error('[buyback/cases]', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/buyback/cases', async c => {
+  try {
+    const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+    if (!sessionUser) return c.json({ error: 'login_required' }, 401)
+
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, buybackSubmitRateLimits, 5, 1)) {
+      return c.json({ error: 'rate_limit_exceeded' }, 429)
+    }
+
+    const body = await c.req.json().catch(() => ({}))
+    if (!body.tos_accepted) {
+      return c.json({ error: 'tos_required', message: 'You must accept the buyback terms before submitting.' }, 400)
+    }
+
+    const items = Array.isArray(body.items) ? body.items : []
+    if (!items.length || items.length > 100) {
+      return c.json({ error: 'invalid_items', message: 'Submit between 1 and 100 cards.' }, 400)
+    }
+
+    const customerNotes = clampStr(body.customer_notes || '', 2000)
+    const now = toIso(new Date())
+    const normalized = []
+    const games = new Set()
+
+    for (const raw of items) {
+      const game = String(raw.game_system || '').toLowerCase()
+      if (!['mtg', 'riftbound'].includes(game)) {
+        return c.json({ error: 'invalid_game', message: 'Each item must be mtg or riftbound.' }, 400)
+      }
+      if (game === 'riftbound' && !isRiftboundSearchConfigured(c.env)) {
+        return c.json({
+          error: 'riftbound_not_configured',
+          message: 'Riftbound buyback submissions are not available until card search is configured.'
+        }, 503)
+      }
+      const cardName = clampStr(raw.card_name || '', 200).trim()
+      if (!cardName) return c.json({ error: 'card_name_required' }, 400)
+      const condition = String(raw.condition || 'EX').toUpperCase()
+      const language = String(raw.language || 'EN').toUpperCase()
+      if (!BUYBACK_CONDITION_CODES.has(condition)) {
+        return c.json({ error: 'invalid_condition' }, 400)
+      }
+      if (!BUYBACK_LANGUAGE_CODES.has(language)) {
+        return c.json({ error: 'invalid_language' }, 400)
+      }
+      games.add(game)
+      normalized.push({
+        game_system: game,
+        external_id: clampStr(raw.external_id || '', 120) || null,
+        card_name: cardName,
+        set_code: clampStr(raw.set_code || '', 40) || null,
+        set_name: clampStr(raw.set_name || '', 120) || null,
+        collector_number: clampStr(raw.collector_number || '', 40) || null,
+        image_url: clampStr(raw.image_url || '', 500) || null,
+        condition,
+        language,
+        notes: clampStr(raw.notes || '', 500) || null
+      })
+    }
+
+    const insertCase = await c.env.DB.prepare(`
+      INSERT INTO buyback_cases (
+        user_id, status, tos_accepted_at, game_systems_json, customer_notes, created_at, updated_at
+      ) VALUES (?, 'submitted', ?, ?, ?, ?, ?)
+    `).bind(
+      sessionUser.user_id,
+      now,
+      JSON.stringify([...games]),
+      customerNotes || null,
+      now,
+      now
+    ).run()
+
+    const caseId = insertCase.meta?.last_row_id
+    if (!caseId) return c.json({ error: 'case_creation_failed' }, 500)
+
+    const stmts = normalized.map(item =>
+      c.env.DB.prepare(`
+        INSERT INTO buyback_case_items (
+          case_id, game_system, external_id, card_name, set_code, set_name,
+          collector_number, image_url, condition, language, notes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        caseId,
+        item.game_system,
+        item.external_id,
+        item.card_name,
+        item.set_code,
+        item.set_name,
+        item.collector_number,
+        item.image_url,
+        item.condition,
+        item.language,
+        item.notes,
+        now
+      )
+    )
+    await c.env.DB.batch(stmts)
+
+    const notifyTo = c.env.BUYBACK_NOTIFY_EMAIL || c.env.SUPPORT_CONTACT_EMAIL || 'admin@dicebastion.com'
+    const itemLines = normalized
+      .slice(0, 40)
+      .map((it, i) => `${i + 1}. [${it.game_system}] ${it.card_name} (${it.condition}/${it.language})${it.set_code ? ` — ${it.set_code}` : ''}`)
+      .join('\n')
+    const more = normalized.length > 40 ? `\n…and ${normalized.length - 40} more` : ''
+
+    try {
+      await sendEmail(c.env, {
+        to: notifyTo,
+        subject: `Buyback case #${caseId} — ${sessionUser.email}`,
+        text: [
+          `New buyback submission #${caseId}`,
+          `User: ${sessionUser.name || ''} <${sessionUser.email}> (id ${sessionUser.user_id})`,
+          `Games: ${[...games].join(', ')}`,
+          `Items: ${normalized.length}`,
+          customerNotes ? `Customer notes: ${customerNotes}` : '',
+          '',
+          itemLines + more,
+          '',
+          'Issue credit via documented SQL in /admin/docs/store-credit/ after quoting.'
+        ].filter(Boolean).join('\n'),
+        html: `<p><strong>New buyback submission #${caseId}</strong></p>
+<p>User: ${escapeHtml(clampStr(sessionUser.name || '', 80))} &lt;${escapeHtml(sessionUser.email)}&gt; (id ${sessionUser.user_id})</p>
+<p>Games: ${[...games].join(', ')} · Items: ${normalized.length}</p>
+${customerNotes ? `<p>Customer notes: ${escapeHtml(customerNotes)}</p>` : ''}
+<pre style="white-space:pre-wrap;font-size:13px;">${escapeHtml(itemLines + more)}</pre>
+<p>Issue credit via documented SQL in admin store-credit docs after quoting.</p>`,
+        emailType: 'buyback_case_submitted',
+        relatedId: caseId,
+        relatedType: 'buyback_case',
+        metadata: { case_id: caseId, user_id: sessionUser.user_id }
+      })
+    } catch (mailErr) {
+      console.error('[buyback] staff notify failed:', mailErr)
+    }
+
+    return c.json({
+      ok: true,
+      case_id: caseId,
+      status: 'submitted',
+      item_count: normalized.length,
+      message: 'Thanks — we will get back to you as soon as possible with a quote. No prices are shown at submission.'
+    })
+  } catch (e) {
+    console.error('[buyback/cases POST]', e)
+    return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
+  }
+})
+
 // ==================== SHOP CHECKOUT ====================
 
 const shopCheckoutRateLimits = new Map()
@@ -13543,7 +14082,43 @@ app.post('/shop/checkout', async c => {
     }
 
     let totalPence = subtotal + shippingPence + taxPence - discountPence
-    if (totalPence < SHOP_MIN_PAYMENT_PENCE) {
+    if (totalPence < 0) totalPence = 0
+
+    const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+    const applyCreditRequested = body.apply_store_credit !== false && !!sessionUser
+    let creditAppliedPence = 0
+    let cardDuePence = totalPence
+
+    if (sessionUser && applyCreditRequested) {
+      await releaseAbandonedCreditReservations(c.env.DB, c.env, { userId: sessionUser.user_id, olderThanMinutes: 2, limit: 5 })
+        .catch(err => console.error('[shop/checkout] credit release sweep failed:', err))
+      const balance = await getStoreCreditBalance(c.env.DB, sessionUser.user_id)
+      const split = computeCreditSplit(totalPence, balance, true)
+      creditAppliedPence = split.creditAppliedPence
+      cardDuePence = split.cardDuePence
+    }
+
+    // Card path still requires SumUp minimum when charging a card.
+    if (cardDuePence > 0 && cardDuePence < SHOP_MIN_PAYMENT_PENCE) {
+      return c.json({
+        error: 'checkout_total_below_minimum',
+        message: `Card charge must be at least £${(SHOP_MIN_PAYMENT_PENCE / 100).toFixed(2)}. Adjust items or use enough store credit to cover the order in full.`,
+        minimum_pence: SHOP_MIN_PAYMENT_PENCE,
+        computed_total_pence: totalPence,
+        card_due_pence: cardDuePence,
+        credit_applied_pence: creditAppliedPence
+      }, 400)
+    }
+    // Credit-only is allowed for any positive total; zero-total after promo is not a valid paid order.
+    if (cardDuePence === 0 && totalPence <= 0) {
+      return c.json({
+        error: 'checkout_total_below_minimum',
+        message: `Order total must be at least £${(SHOP_MIN_PAYMENT_PENCE / 100).toFixed(2)} after promotions.`,
+        minimum_pence: SHOP_MIN_PAYMENT_PENCE,
+        computed_total_pence: totalPence
+      }, 400)
+    }
+    if (cardDuePence > 0 && totalPence < SHOP_MIN_PAYMENT_PENCE && creditAppliedPence === 0) {
       return c.json({
         error: 'checkout_total_below_minimum',
         message: `Order total must be at least £${(SHOP_MIN_PAYMENT_PENCE / 100).toFixed(2)} after promotions. Reduce the discount or add items.`,
@@ -13565,32 +14140,39 @@ app.post('/shop/checkout', async c => {
     }) : null
 
     const checkoutEmail = clampStr(email, 320).trim()
-    const checkout = await createCheckout(c.env, {
-      amount: totalPence / 100,
-      currency: currencyResolved,
-      orderRef: orderNumber,
-      title: `Dice Bastion Shop – ${orderItemsPayload.length} item(s)`,
-      description: formatShopCheckoutDescription(orderItemsPayload, {
-        deliveryMethod,
-        promoCode: promoCodeSnap
-      }),
-      // Required for 3DS: bank challenge returns here instead of abandoning the widget.
-      redirectUrl: `${shopUrl(c.env)}/order-confirmation?order=${encodeURIComponent(orderNumber)}&email=${encodeURIComponent(checkoutEmail)}`
-    })
-    if (!checkout?.id) return c.json({ error: 'sumup_checkout_failed' }, 502)
+    const orderUserId = sessionUser?.user_id ?? null
+
+    let checkoutId = null
+    if (cardDuePence > 0) {
+      const checkout = await createCheckout(c.env, {
+        amount: cardDuePence / 100,
+        currency: currencyResolved,
+        orderRef: orderNumber,
+        title: `Dice Bastion Shop – ${orderItemsPayload.length} item(s)`,
+        description: formatShopCheckoutDescription(orderItemsPayload, {
+          deliveryMethod,
+          promoCode: promoCodeSnap
+        }),
+        redirectUrl: `${shopUrl(c.env)}/order-confirmation?order=${encodeURIComponent(orderNumber)}&email=${encodeURIComponent(checkoutEmail)}`
+      })
+      if (!checkout?.id) return c.json({ error: 'sumup_checkout_failed' }, 502)
+      checkoutId = checkout.id
+    }
 
     const insertOrder = await c.env.DB.prepare(`
       INSERT INTO orders (
-        order_number, email, name, status,
+        order_number, user_id, email, name, status,
         subtotal, tax, shipping, total, currency,
         payment_status, checkout_id,
         shipping_address, billing_address, notes,
         promo_code_id, discount_pence, promo_code_applied,
+        credit_applied_pence, card_charged_pence,
         payment_method, sale_channel, delivery_status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       orderNumber,
+      orderUserId,
       clampStr(email, 320).trim(),
       clampStr(name, 200),
       'pending',
@@ -13600,14 +14182,16 @@ app.post('/shop/checkout', async c => {
       totalPence,
       resolvedCurrency,
       'pending',
-      checkout.id,
+      checkoutId,
       shipJson,
       shipJson,
       clampStr(notesExtra, 1000),
       promoRowId,
       discountPence,
       promoCodeSnap,
-      'sumup',
+      creditAppliedPence,
+      cardDuePence,
+      cardDuePence === 0 ? 'store_credit' : 'sumup',
       'online',
       'undelivered',
       now,
@@ -13628,12 +14212,45 @@ app.post('/shop/checkout', async c => {
     )
     if (batchStatements.length) await c.env.DB.batch(batchStatements)
 
+    // Reserve store credit at checkout create; completion re-settles, decline or abandonment releases.
+    if (creditAppliedPence > 0 && orderUserId) {
+      const debit = await settleShopOrderCredit(c.env.DB, {
+        userId: orderUserId,
+        orderNumber,
+        targetPence: creditAppliedPence
+      })
+      if (!debit.ok) {
+        await c.env.DB.prepare(
+          `UPDATE orders SET status = 'cancelled', payment_status = 'failed', updated_at = ? WHERE id = ?`
+        ).bind(now, orderId).run()
+        return c.json({ error: 'insufficient_credit', message: 'Store credit could not be applied. Refresh and try again.' }, 409)
+      }
+    }
+
+    // Credit-only: complete immediately (no SumUp widget).
+    if (cardDuePence === 0) {
+      const orderRow = await c.env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first()
+      await completePaidShopOrder(c.env.DB, c.env, orderRow, `CREDIT-${orderNumber}`)
+      return c.json({
+        success: true,
+        order_number: orderNumber,
+        checkoutId: null,
+        paid_with_credit_only: true,
+        discount_pence: discountPence,
+        promo_applied: !!promoCodeSnap,
+        credit_applied_pence: creditAppliedPence,
+        card_charged_pence: 0
+      })
+    }
+
     return c.json({
       success: true,
       order_number: orderNumber,
-      checkoutId: checkout.id,
+      checkoutId,
       discount_pence: discountPence,
-      promo_applied: !!promoCodeSnap
+      promo_applied: !!promoCodeSnap,
+      credit_applied_pence: creditAppliedPence,
+      card_charged_pence: cardDuePence
     })
   } catch (e) {
     console.error('[shop/checkout] Error:', e)
@@ -13653,6 +14270,22 @@ app.post('/shop/confirm-payment/:orderNumber', async c => {
       return c.json({ success: true, status: 'completed', order: orderRow })
     }
 
+    // Credit-only orders have no SumUp checkout.
+    const cardDue = orderRow.card_charged_pence != null
+      ? Number(orderRow.card_charged_pence)
+      : null
+    if (!orderRow.checkout_id && Number(orderRow.credit_applied_pence || 0) > 0 && (cardDue === 0 || cardDue === null)) {
+      if (orderRow.status === 'cancelled') {
+        return c.json({ success: false, status: 'failed', message: 'Store credit could not be applied to this order.', order: orderRow })
+      }
+      const outcome = await completePaidShopOrder(c.env.DB, c.env, orderRow, orderRow.payment_id || `CREDIT-${orderNumber}`)
+      if (outcome?.creditError) {
+        return c.json({ success: false, status: 'failed', message: 'Store credit could not be applied to this order.', order: orderRow })
+      }
+      const updatedCreditOrder = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
+      return c.json({ success: true, status: 'completed', order: updatedCreditOrder })
+    }
+
     let payment
     try {
       payment = await fetchPayment(c.env, orderRow.checkout_id)
@@ -13667,6 +14300,15 @@ app.post('/shop/confirm-payment/:orderNumber', async c => {
         `UPDATE orders SET payment_status = ?, updated_at = ? WHERE order_number = ? AND LOWER(COALESCE(payment_status,'')) NOT IN ('paid','completed')`
       ).bind('failed', nowFailed, orderNumber).run()
       const failedOrder = await c.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
+      // Release reserved credit; a later successful retry on this checkout takes it again.
+      if (failedOrder && Number(failedOrder.credit_applied_pence || 0) > 0 && failedOrder.user_id &&
+          String(failedOrder.status || '') !== 'completed') {
+        try {
+          await settleShopOrderCredit(c.env.DB, { userId: failedOrder.user_id, orderNumber, targetPence: 0 })
+        } catch (restoreErr) {
+          console.error('[shop/confirm-payment] credit release failed:', restoreErr)
+        }
+      }
       return c.json({
         success: false,
         status: 'failed',
@@ -13897,7 +14539,8 @@ async function handleScheduled(event, env, ctx) {
     event_reminders: null,
     delayed_account_setup_emails: null,
     seo_freshness: null,
-    sync_sumup_payouts: null
+    sync_sumup_payouts: null,
+    store_credit_release: null
   }
   
   // Run all cron jobs sequentially, catching errors individually
@@ -13950,6 +14593,15 @@ async function handleScheduled(event, env, ctx) {
   } catch (e) {
     console.error('[CRON MASTER] SumUp payout sync failed:', e)
     jobResults.sync_sumup_payouts = 'failed'
+  }
+
+  try {
+    const released = await releaseAbandonedCreditReservations(env.DB, env, { olderThanMinutes: 60, limit: 100 })
+    console.log('[CRON] Store credit reservations:', released)
+    jobResults.store_credit_release = 'completed'
+  } catch (e) {
+    console.error('[CRON MASTER] Store credit release failed:', e)
+    jobResults.store_credit_release = 'failed'
   }
   
   console.log('============================================')

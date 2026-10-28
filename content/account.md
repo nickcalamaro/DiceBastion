@@ -227,6 +227,19 @@ Go to Login
 </form>
 </div>
 
+<!-- Store Credit -->
+<div class="card" id="store-credit-section">
+<h2 class="card-header">Store Credit</h2>
+<div style="margin-bottom: 1rem;">
+<div class="card-label">Available balance</div>
+<div class="card-value" id="store-credit-balance" style="font-size: 1.5rem; font-weight: 700; color: rgb(var(--color-primary-600));">£0.00</div>
+<p class="text-muted" style="margin: 0.5rem 0 0; font-size: 0.875rem;">
+Store credit can be used for shop purchases and event tickets. It cannot be used for memberships or donations.
+</p>
+</div>
+<div id="store-credit-ledger"></div>
+</div>
+
 <!-- Event Tickets -->
 <div class="card">
 <h2 class="card-header">My Event Tickets</h2>
@@ -511,8 +524,48 @@ setupRenewalFailureListeners();
 // Tickets
 renderTickets(data.tickets);
 
+// Store credit
+renderStoreCredit(data.store_credit_pence, data.store_credit_ledger);
+
 // Orders
 renderOrders(data.orders);
+}
+function formatPence(pence) {
+const n = Number(pence) || 0;
+return '£' + (n / 100).toFixed(2);
+}
+function renderStoreCredit(balancePence, ledger) {
+const balEl = document.getElementById('store-credit-balance');
+const listEl = document.getElementById('store-credit-ledger');
+if (balEl) balEl.textContent = formatPence(balancePence);
+if (!listEl) return;
+if (!ledger || !ledger.length) {
+listEl.innerHTML = '<p class="card-empty" style="margin:0;">No credit activity yet.</p>';
+return;
+}
+const typeLabels = {
+buyback_credit: 'Buyback credit',
+shop_spend: 'Shop purchase',
+event_spend: 'Event ticket',
+adjustment: 'Adjustment',
+void: 'Void / reversal'
+};
+listEl.innerHTML = `
+<div class="card-label" style="margin-bottom:0.5rem;">Recent activity</div>
+<ul style="list-style:none; padding:0; margin:0;">
+${ledger.map(row => {
+const delta = Number(row.delta_pence) || 0;
+const colour = delta >= 0 ? 'rgb(22, 163, 74)' : 'rgb(var(--color-neutral-700))';
+const sign = delta >= 0 ? '+' : '';
+const when = row.created_at ? new Date(row.created_at).toLocaleDateString('en-GB', { year:'numeric', month:'short', day:'numeric' }) : '';
+const label = typeLabels[row.entry_type] || row.entry_type;
+const note = row.note ? `<div class="text-muted" style="font-size:0.75rem;">${String(row.note).replace(/</g,'&lt;')}</div>` : '';
+return `<li style="padding:0.65rem 0; border-bottom:1px solid rgb(var(--color-neutral-200)); display:flex; justify-content:space-between; gap:1rem;">
+<div><div style="font-weight:600; font-size:0.875rem;">${label}</div>${note}<div class="text-muted" style="font-size:0.75rem;">${when}</div></div>
+<div style="font-weight:700; color:${colour}; white-space:nowrap;">${sign}${formatPence(delta)}</div>
+</li>`;
+}).join('')}
+</ul>`;
 }
 function renderTickets(tickets) {
 const ticketsList = document.getElementById('tickets-list');

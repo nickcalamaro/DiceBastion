@@ -30,6 +30,7 @@ We stock Magic through the [Dice Bastion shop](https://shop.dicebastion.com):
 
 - [Magic: The Gathering products](https://shop.dicebastion.com/products/category/magic-the-gathering)
 - [Full shop](https://shop.dicebastion.com)
+- [Sell us your singles for store credit](https://shop.dicebastion.com/sell-cards/)
 
 ## More TCGs
 

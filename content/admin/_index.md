@@ -3519,6 +3519,7 @@ function accountsMethodLabel(raw) {
   const m = String(raw || '').toLowerCase();
   if (m === 'cash') return 'Cash';
   if (m === 'bank_transfer') return 'Bank transfer';
+  if (m === 'store_credit') return 'Store credit';
   if (m === 'sumup') return 'SumUp';
   return m || '—';
 }
