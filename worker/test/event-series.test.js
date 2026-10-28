@@ -3,7 +3,8 @@ import {
   listOccurrencesInRange,
   isSeriesTemplate,
   isSeriesSession,
-  mergeTemplateWithSession
+  mergeTemplateWithSession,
+  limitSessionsPerSeries
 } from '../src/utils/event-series.js'
 
 describe('event-series helpers', () => {
@@ -39,6 +40,18 @@ describe('event-series helpers', () => {
     for (let i = 1; i < dates.length; i++) {
       expect(dates[i].getTime()).toBeGreaterThan(dates[i - 1].getTime())
     }
+  })
+
+  it('limits public sessions to two per series', () => {
+    const rows = [
+      { id: 1, series_id: 10, slug: 'weekly', event_datetime: '2026-04-02T18:00:00.000Z' },
+      { id: 2, series_id: 10, slug: 'weekly', event_datetime: '2026-04-09T18:00:00.000Z' },
+      { id: 3, series_id: 10, slug: 'weekly', event_datetime: '2026-04-16T18:00:00.000Z' },
+      { id: 4, series_id: 20, slug: 'other', event_datetime: '2026-04-03T18:00:00.000Z' }
+    ]
+    const limited = limitSessionsPerSeries(rows, 2)
+    expect(limited).toHaveLength(3)
+    expect(limited.map(r => r.id)).toEqual([1, 2, 4])
   })
 
   it('respects recurrence_end_date in range listing', () => {

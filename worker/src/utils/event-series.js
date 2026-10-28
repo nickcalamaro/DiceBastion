@@ -1,6 +1,21 @@
 import { calculateNextOccurrence } from './recurring.js'
 
 const DEFAULT_HORIZON_WEEKS = 12
+/** How many upcoming session rows to show per recurring series on the public site. */
+export const PUBLIC_SESSIONS_PER_SERIES = 2
+
+export function limitSessionsPerSeries(sessions, maxPerSeries = PUBLIC_SESSIONS_PER_SERIES) {
+  const counts = new Map()
+  const out = []
+  for (const event of sessions || []) {
+    const key = String(event.series_id ?? event.series_template_id ?? event.slug ?? event.id)
+    const seen = counts.get(key) || 0
+    if (seen >= maxPerSeries) continue
+    counts.set(key, seen + 1)
+    out.push(event)
+  }
+  return out
+}
 
 export async function ensureEventSeriesSchema(db) {
   if (!db) return
@@ -407,7 +422,7 @@ export async function fetchPublicUpcomingEvents(db, now = new Date()) {
     ORDER BY event_datetime ASC
   `).bind(nowIso).all()
 
-  const sessionEvents = (sessions || []).map(mapSessionRowToPublic)
+  const sessionEvents = limitSessionsPerSeries((sessions || []).map(mapSessionRowToPublic))
   const oneOffEvents = (oneOffs || []).map(row => ({
     ...row,
     id: row.session_id,
