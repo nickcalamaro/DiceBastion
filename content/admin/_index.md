@@ -6,7 +6,7 @@ showDate: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js"></script>
+<script src="/js/utils.js?v=20261028a"></script>
 <script src="/js/modal.js"></script>
 <script src="/js/shopCategories.js"></script>
 <script src="/js/productCsvImport.js?v=20260831a"></script>
@@ -14,6 +14,7 @@ showDate: false
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261013f"></script>
+<script src="/js/shopInvoiceImportAdmin.js?v=20261028h"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -1165,6 +1166,76 @@ Show delivered
 <small class="admin-text-small" style="flex-basis: 100%;">Shop sales and ticket sales before this date are not counted.</small>
 </div>
 <p id="finance-status" class="admin-text-small admin-mb-1" role="status" aria-live="polite"></p>
+
+<div id="invoice-import-card" class="card card-compact admin-mb-2">
+<h3 id="admin-section-finance-invoice-import" class="admin-section-heading">Supplier invoice import</h3>
+<p class="admin-text-muted admin-mb-1" style="max-width: 52rem;">
+Upload a supplier invoice PDF. Parsing uses Mistral OCR only — save your API key below, then parse and review every line before stock is added through one import session.
+Invoice amounts may be in EUR on the PDF but are stored and sold using the same numeric values in GBP fields until currency conversion is added.
+</p>
+<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
+<div>
+<label class="form-label" for="invoice-import-mistral-key">Mistral API key *</label>
+<input type="password" id="invoice-import-mistral-key" class="form-input" autocomplete="off" placeholder="Required for invoice OCR">
+<small class="admin-text-small">Stored in this browser session only. Also used for product image lookup when RainPOS URLs are not available.</small>
+</div>
+<div>
+<button type="button" id="invoice-import-save-key" class="btn btn-secondary">Save key for session</button>
+</div>
+</div>
+<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
+<div>
+<label class="form-label" for="invoice-import-multiplier">Shop price multiplier</label>
+<input type="number" id="invoice-import-multiplier" class="form-input" min="0.1" step="0.05" value="1.3">
+<small class="admin-text-small">Sell price = unit net × multiplier, rounded up to whole £</small>
+</div>
+<div>
+<label class="form-label" for="invoice-import-pdf">Invoice PDF</label>
+<input type="file" id="invoice-import-pdf" accept="application/pdf,.pdf" class="form-input">
+</div>
+</div>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap;">
+<button type="button" id="invoice-import-parse" class="btn btn-primary">Parse invoice</button>
+<button type="button" id="invoice-import-lookup-images" class="btn btn-secondary">Look up images</button>
+<button type="button" id="invoice-import-process-images" class="btn btn-secondary">Process images</button>
+<button type="button" id="invoice-import-commit" class="btn btn-primary" disabled>Import items</button>
+</div>
+<div id="invoice-import-status" class="admin-mb-1" style="display: none; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9375rem;"></div>
+<h4 class="admin-section-heading" style="font-size: 1rem;">Supplier receipt</h4>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="invoice-import-supplier">Supplier *</label>
+<input type="text" id="invoice-import-supplier" class="form-input" required>
+</div>
+<div>
+<label class="form-label" for="invoice-import-received-date">Receipt date *</label>
+<input type="date" id="invoice-import-received-date" class="form-input" required>
+</div>
+<div>
+<label class="form-label" for="invoice-import-reference">Reference</label>
+<input type="text" id="invoice-import-reference" class="form-input" placeholder="Invoice / proforma number">
+</div>
+<div>
+<label class="form-label" for="invoice-import-paid-from">Paid from</label>
+<select id="invoice-import-paid-from" class="form-select">
+<option value="">Unpaid</option>
+<option value="bank">Bank</option>
+<option value="cash">Cash</option>
+<option value="owner">Owner</option>
+</select>
+</div>
+<div>
+<label class="form-label" for="invoice-import-paid-date">Paid date</label>
+<input type="date" id="invoice-import-paid-date" class="form-input">
+</div>
+<div>
+<label class="form-label" for="invoice-import-notes">Notes</label>
+<input type="text" id="invoice-import-notes" class="form-input">
+</div>
+</div>
+<div id="invoice-import-preview" class="admin-mb-1"></div>
+<div id="invoice-import-log" class="admin-mb-1" style="max-height: 12rem; overflow-y: auto;"></div>
+</div>
 
 <h3 id="admin-section-finance-imports" class="admin-section-heading">Stock import sessions</h3>
 <p class="admin-text-muted admin-mb-1">One session is one receipt. Add each item yourself. Every item is linked to that receipt and added to stock at the cost you paid.</p>
@@ -2430,6 +2501,7 @@ loadRegistrations();
 loadCronLogs();
 loadShopPromoCodes();
 revealAccountsTabIfOwner();
+if (window.ShopInvoiceImportAdmin) ShopInvoiceImportAdmin.init();
 handleAdminHash();
 // Verify session is still valid in background
 verifySession();
@@ -2472,6 +2544,7 @@ currentUser = data.user;
 localStorage.setItem('admin_user', JSON.stringify(currentUser));
 }
 revealAccountsTabIfOwner();
+if (window.ShopInvoiceImportAdmin) ShopInvoiceImportAdmin.init();
 }
 // If OK, dashboard is already showing - do nothing
 } catch (err) {
@@ -2517,6 +2590,7 @@ loadRegistrations();
 loadCronLogs();
       loadShopPromoCodes();
       revealAccountsTabIfOwner();
+      if (window.ShopInvoiceImportAdmin) ShopInvoiceImportAdmin.init();
       handleAdminHash();
 } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
@@ -3119,101 +3193,31 @@ function fillHeightMinCenterOnCanvasRegion(sourceCanvas, sx, sy, sw, sh, targetW
 
 /** Mean RGB of opaque pixels — used when flattening transparent pixels before blur/JPEG. */
 function averageOpaqueRgb(canvas) {
-  const w = canvas.width;
-  const h = canvas.height;
-  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let n = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    if (d[i + 3] > 128) {
-      r += d[i];
-      g += d[i + 1];
-      b += d[i + 2];
-      n++;
-    }
-  }
-  if (!n) return { r: 100, g: 116, b: 139 };
-  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+  return ProductImageExport.averageOpaqueRgb(canvas);
 }
 
 function hexToRgb(hex) {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
-  if (!m) return { r: 255, g: 255, b: 255 };
-  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+  return ProductImageExport.hexToRgb(hex);
 }
 
-/** Paint under transparent pixels so blur/JPEG never composites against white letterbox. */
 function flattenTransparentWithFill(src, rgb) {
-  const c = document.createElement('canvas');
-  c.width = src.width;
-  c.height = src.height;
-  const x = c.getContext('2d');
-  x.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
-  x.fillRect(0, 0, c.width, c.height);
-  x.drawImage(src, 0, 0);
-  return c;
+  return ProductImageExport.flattenTransparentWithFill(src, rgb);
 }
 
 function resolveCropFillRgb(croppedCanvas, cropBgMode, cropBgPickedCol) {
-  if (cropBgMode === 'white') return { r: 255, g: 255, b: 255 };
-  if (cropBgMode === 'pick' && cropBgPickedCol) return hexToRgb(cropBgPickedCol);
-  return averageOpaqueRgb(croppedCanvas);
+  return ProductImageExport.resolveCropFillRgb(croppedCanvas, cropBgMode, cropBgPickedCol);
 }
 
-/**
- * Export the artwork tightly at its own aspect ratio (scaled to fit within maxW×maxH), with no
- * letterbox padding band. This is for images rendered with object-fit: contain + a CSS ::before
- * blurred backdrop: the CSS is then the ONLY background. Baking any padding/fill here (solid or
- * blurred) is what produced the "two backgrounds" stacked on one image. The flat fill only ever
- * shows through genuine internal transparency in the source art (so JPEG doesn't composite on black).
- */
 function exportTightSubjectJpeg(sourceCanvas, sx, sy, sw, sh, maxW, maxH, cropBgMode, cropBgPickedCol) {
-  const scale = Math.min(maxW / sw, maxH / sh);
-  const dw = Math.max(1, Math.round(sw * scale));
-  const dh = Math.max(1, Math.round(sh * scale));
-  const fillRgb = resolveCropFillRgb(sourceCanvas, cropBgMode, cropBgPickedCol);
-  const c = document.createElement('canvas');
-  c.width = dw;
-  c.height = dh;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = `rgb(${fillRgb.r},${fillRgb.g},${fillRgb.b})`;
-  ctx.fillRect(0, 0, dw, dh);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
-  return c.toDataURL('image/jpeg', 0.92);
+  return ProductImageExport.exportTightSubjectJpeg(
+    sourceCanvas, sx, sy, sw, sh, maxW, maxH, cropBgMode, cropBgPickedCol
+  );
 }
 
-/**
- * Compose the export over a single flat fill (no baked blurred backdrop). The blurred backdrop
- * is added exactly once, by the rendering CSS (.event-card-image::before / inline figure media).
- * Baking a second blurred layer here is what produced the "two backgrounds" (a darker solid plus a
- * lighter gradient) stacked on the same image. Used only for 'fillHeight'/cover exports, which fill
- * the frame edge-to-edge so the flat fill is not visible.
- */
 function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
-  let fillRgb;
-  if (cropBgMode === 'white') {
-    fillRgb = { r: 255, g: 255, b: 255 };
-  } else if (cropBgMode === 'pick' && cropBgPickedCol) {
-    fillRgb = hexToRgb(cropBgPickedCol);
-  } else {
-    fillRgb = averageOpaqueRgb(croppedCanvas);
-  }
-
-  const fillCol = `rgb(${fillRgb.r},${fillRgb.g},${fillRgb.b})`;
-  const opaqueSrc = flattenTransparentWithFill(croppedCanvas, fillRgb);
-
-  const finalCanvas = document.createElement('canvas');
-  finalCanvas.width = targetWidth;
-  finalCanvas.height = targetHeight;
-  const ctx = finalCanvas.getContext('2d');
-  ctx.fillStyle = fillCol;
-  ctx.fillRect(0, 0, targetWidth, targetHeight);
-  ctx.drawImage(opaqueSrc, 0, 0, targetWidth, targetHeight);
-  return finalCanvas.toDataURL('image/jpeg', 0.92);
+  return ProductImageExport.composeBlurredBackgroundJpeg(
+    croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol
+  );
 }
 
 // Background fill mode buttons
@@ -3567,27 +3571,9 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
       croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol
     );
 
-    const uploadRes = await fetch(`${API_BASE}/admin/images`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-Token': sessionToken
-      },
-      body: JSON.stringify({
-        image: croppedImage,
-        filename: 'product-image.jpg'
-      })
-    });
-
-    const uploadData = await uploadRes.json();
-
-    if (uploadData.success) {
-      currentCropCallback(uploadData.url);
-      closeCropModal();
-    } else {
-      Modal.alert({ title: 'Upload Failed', message: 'Failed to upload image. Please try again.' });
-      console.error('Upload error:', uploadData);
-    }
+    const url = await utils.uploadAdminImage(croppedImage, 'product-image.jpg');
+    currentCropCallback(url);
+    closeCropModal();
   } catch (err) {
     Modal.alert({ title: 'Error', message: 'Error uploading image. Please try again.' });
     console.error('Upload error:', err);
@@ -3925,6 +3911,9 @@ if (window.ShopFinance) {
     isOwner: () => isAccountsOwnerClient(),
     onStockChanged: () => loadProducts()
   });
+}
+if (window.ShopInvoiceImportAdmin) {
+  ShopInvoiceImportAdmin.init();
 }
 
 // Image Upload Handlers
@@ -8235,19 +8224,7 @@ async function blogUploadImageToBunny(dataUrl, filename, subpathOverride) {
 }
 
 async function adminUploadImageToR2(dataUrl, filename) {
-  const uploadRes = await fetch(`${API_BASE}/admin/images`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Session-Token': sessionToken
-    },
-    body: JSON.stringify({ image: dataUrl, filename })
-  });
-  const uploadData = await uploadRes.json();
-  if (!uploadData.success) {
-    throw new Error(uploadData.error || 'Failed to upload image.');
-  }
-  return uploadData.url;
+  return utils.uploadAdminImage(dataUrl, filename);
 }
 
 function blogRenderCardPreview(url) {

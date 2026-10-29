@@ -59,6 +59,8 @@ import {
   PAID_FROM,
   OWNER_ACCOUNTS
 } from './shop-ledger.js'
+import { registerInvoiceImportRoutes } from './invoice-import.js'
+import { registerAdminImageProxyRoute } from './admin-image-proxy.js'
 
 // Replace generic cors with strict configurable CORS + debug logging
 const app = new Hono()
@@ -83,7 +85,7 @@ app.use('*', async (c, next) => {
     }
   }
   c.res.headers.set('Vary','Origin')
-  c.res.headers.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key, X-Session-Token, X-Admin-Key')
+  c.res.headers.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key, X-Session-Token, X-Admin-Key, X-Mistral-Api-Key')
   c.res.headers.set('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS')
   if (debugMode) {
     try { console.log('CORS', { origin, allowOrigin, allowed }) } catch {}
@@ -7699,6 +7701,10 @@ app.delete('/admin/finance/import-sessions/:id/lines/:lineId', requireAdmin, req
     return c.json({ error: 'internal_error' }, 500)
   }
 })
+
+registerAdminImageProxyRoute(app, { requireAdmin })
+
+registerInvoiceImportRoutes(app, { requireAdmin, requireAccountsOwner })
 
 app.post('/admin/finance/receipts', requireAdmin, requireAccountsOwner, async c => {
   try {

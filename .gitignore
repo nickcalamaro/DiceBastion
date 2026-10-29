@@ -22,6 +22,7 @@ exampleSite/resources/
 #others
 node_modules
 .hugo_build.lock
+worker/dist-check/
 
 # Environment variables (contains secrets)
 .env

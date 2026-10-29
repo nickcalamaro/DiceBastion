@@ -1213,6 +1213,10 @@
     init: init,
     load: load,
     openReceiveStock: openReceiveStock,
-    openWriteOff: openWriteOff
+    openWriteOff: openWriteOff,
+    refreshImportSessions: function (sessionId) {
+      refreshAfterChange();
+      if (sessionId) openSession(sessionId);
+    }
   };
 })(window);

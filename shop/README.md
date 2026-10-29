@@ -232,6 +232,7 @@ curl https://dicebastion-memberships.ncalamaro.workers.dev/products
 ### Admin Dashboard
 - [x] Product and category management lives on the main site admin (`https://dicebastion.com/admin/`, Products tab)
 - [x] `shop.dicebastion.com/admin` redirects there
+- [x] Finance tab: supplier invoice PDF import into stock import sessions (accounts owner)
 - [ ] Order management
 - [ ] Inventory tracking
 - [ ] Sales reports
@@ -251,6 +252,7 @@ curl https://dicebastion-memberships.ncalamaro.workers.dev/products
 
 - **No VAT**: Gibraltar has no VAT, simplifying tax calculations
 - **Currency**: Pounds Sterling (GBP)
+- **Supplier invoices (EUR)**: When stock is added from a European supplier PDF via admin Invoice OCR, euro amounts on the invoice are recorded in shop/accounts fields using the **same numeric face value in pence/pounds** (no EUR→GBP conversion yet). Selling prices use your chosen multiplier, rounded up to whole pounds.
 - **GDPR**: Follows UK GDPR requirements
 - **Invoices**: Must include:
   - Business name and address

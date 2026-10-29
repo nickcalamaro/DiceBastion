@@ -221,6 +221,183 @@ window.utils = {
     return fetch(url, { ...options, headers });
   },
 
+  /** Admin JSON API (uses page sessionToken or admin_session). */
+  adminFetchJson: async (path, options = {}) => {
+    const base = window.utils.getApiBase();
+    const token = window.sessionToken || localStorage.getItem('admin_session') || '';
+    const res = await fetch(base + path, {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': token,
+        ...(options.headers || {})
+      },
+      body: options.body
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.message || data.error || res.statusText || 'Request failed');
+    }
+    return data;
+  },
+
+  /** Upload JPEG/PNG data URL to shop R2 via worker (same as product crop upload). */
+  uploadAdminImage: async (dataUrl, filename = 'product-image.jpg') => {
+    const base = window.utils.getApiBase();
+    const token = window.sessionToken || localStorage.getItem('admin_session') || '';
+    const uploadRes = await fetch(`${base}/admin/images`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': token
+      },
+      body: JSON.stringify({ image: dataUrl, filename })
+    });
+    const uploadData = await uploadRes.json().catch(() => ({}));
+    if (!uploadData.success) {
+      throw new Error(uploadData.error || 'Failed to upload image.');
+    }
+    return uploadData.url;
+  },
+
+  /**
+   * Product image canvas export (672×440 shop frame) — shared by admin crop modal and invoice import.
+   */
+  productImage: (function () {
+    const PRODUCT_W = 672;
+    const PRODUCT_H = 440;
+
+    function averageOpaqueRgb(canvas) {
+      const w = canvas.width;
+      const h = canvas.height;
+      const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] > 128) {
+          r += d[i];
+          g += d[i + 1];
+          b += d[i + 2];
+          n++;
+        }
+      }
+      if (!n) return { r: 100, g: 116, b: 139 };
+      return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+    }
+
+    function hexToRgb(hex) {
+      const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
+      if (!m) return { r: 255, g: 255, b: 255 };
+      return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+    }
+
+    function flattenTransparentWithFill(src, rgb) {
+      const c = document.createElement('canvas');
+      c.width = src.width;
+      c.height = src.height;
+      const x = c.getContext('2d');
+      x.fillStyle = 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')';
+      x.fillRect(0, 0, c.width, c.height);
+      x.drawImage(src, 0, 0);
+      return c;
+    }
+
+    function resolveCropFillRgb(croppedCanvas, cropBgMode, cropBgPickedCol) {
+      if (cropBgMode === 'white') return { r: 255, g: 255, b: 255 };
+      if (cropBgMode === 'pick' && cropBgPickedCol) return hexToRgb(cropBgPickedCol);
+      return averageOpaqueRgb(croppedCanvas);
+    }
+
+    function exportTightSubjectJpeg(sourceCanvas, sx, sy, sw, sh, maxW, maxH, cropBgMode, cropBgPickedCol) {
+      const scale = Math.min(maxW / sw, maxH / sh);
+      const dw = Math.max(1, Math.round(sw * scale));
+      const dh = Math.max(1, Math.round(sh * scale));
+      const fillRgb = resolveCropFillRgb(sourceCanvas, cropBgMode, cropBgPickedCol);
+      const c = document.createElement('canvas');
+      c.width = dw;
+      c.height = dh;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = 'rgb(' + fillRgb.r + ',' + fillRgb.g + ',' + fillRgb.b + ')';
+      ctx.fillRect(0, 0, dw, dh);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
+      return c.toDataURL('image/jpeg', 0.92);
+    }
+
+    function composeBlurredBackgroundJpeg(croppedCanvas, targetWidth, targetHeight, cropBgMode, cropBgPickedCol) {
+      let fillRgb;
+      if (cropBgMode === 'white') {
+        fillRgb = { r: 255, g: 255, b: 255 };
+      } else if (cropBgMode === 'pick' && cropBgPickedCol) {
+        fillRgb = hexToRgb(cropBgPickedCol);
+      } else {
+        fillRgb = averageOpaqueRgb(croppedCanvas);
+      }
+
+      const fillCol = 'rgb(' + fillRgb.r + ',' + fillRgb.g + ',' + fillRgb.b + ')';
+      const opaqueSrc = flattenTransparentWithFill(croppedCanvas, fillRgb);
+
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = targetWidth;
+      finalCanvas.height = targetHeight;
+      const ctx = finalCanvas.getContext('2d');
+      ctx.fillStyle = fillCol;
+      ctx.fillRect(0, 0, targetWidth, targetHeight);
+      ctx.drawImage(opaqueSrc, 0, 0, targetWidth, targetHeight);
+      return finalCanvas.toDataURL('image/jpeg', 0.92);
+    }
+
+    function loadImageElement(src) {
+      return new Promise(function (resolve, reject) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function () { resolve(img); };
+        img.onerror = function () { reject(new Error('Could not load image.')); };
+        img.src = src;
+      });
+    }
+
+    function fitImageToCanvas(img, targetW, targetH) {
+      const scale = Math.min(targetW / img.naturalWidth, targetH / img.naturalHeight);
+      const dw = Math.max(1, Math.round(img.naturalWidth * scale));
+      const dh = Math.max(1, Math.round(img.naturalHeight * scale));
+      const c = document.createElement('canvas');
+      c.width = targetW;
+      c.height = targetH;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, targetW, targetH);
+      const ox = Math.floor((targetW - dw) / 2);
+      const oy = Math.floor((targetH - dh) / 2);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, ox, oy, dw, dh);
+      return c;
+    }
+
+    async function exportProductImageFromUrl(imageUrl, apiBase) {
+      const base = apiBase || window.utils.getApiBase();
+      const proxy = base + '/admin/proxy-image?url=' + encodeURIComponent(imageUrl);
+      const img = await loadImageElement(proxy);
+      const fitted = fitImageToCanvas(img, PRODUCT_W, PRODUCT_H);
+      return composeBlurredBackgroundJpeg(fitted, PRODUCT_W, PRODUCT_H, 'white', null);
+    }
+
+    return {
+      PRODUCT_W,
+      PRODUCT_H,
+      averageOpaqueRgb,
+      hexToRgb,
+      flattenTransparentWithFill,
+      resolveCropFillRgb,
+      exportTightSubjectJpeg,
+      composeBlurredBackgroundJpeg,
+      exportProductImageFromUrl
+    };
+  })(),
+
   /**
    * Show error message in a container
    */
@@ -774,3 +951,4 @@ window.utils = {
 window.escapeHtml = window.utils.escapeHtml;
 window.formatPrice = window.utils.formatPrice;
 window.formatDate = window.utils.formatDate;
+window.ProductImageExport = window.utils.productImage;
