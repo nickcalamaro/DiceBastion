@@ -252,7 +252,7 @@ curl https://dicebastion-memberships.ncalamaro.workers.dev/products
 
 - **No VAT**: Gibraltar has no VAT, simplifying tax calculations
 - **Currency**: Pounds Sterling (GBP)
-- **Supplier invoices (EUR)**: When stock is added from a European supplier PDF via admin Invoice OCR, euro amounts on the invoice are recorded in shop/accounts fields using the **same numeric face value in pence/pounds** (no EUR→GBP conversion yet). Selling prices use your chosen multiplier, rounded up to whole pounds.
+- **Supplier invoices (EUR)**: When stock is added from a European supplier PDF via admin invoice import, euro amounts on the invoice are recorded in shop/accounts fields using the **same numeric face value in pence/pounds** (no EUR→GBP conversion yet). Each line can be shop stock (crop upload + listing fields), event use (receive then write-off on accounts), or a split bundle expanded with Mistral. Selling prices use your chosen multiplier, rounded up to whole pounds.
 - **GDPR**: Follows UK GDPR requirements
 - **Invoices**: Must include:
   - Business name and address

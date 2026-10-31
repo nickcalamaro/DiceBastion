@@ -241,6 +241,28 @@ window.utils = {
     return data;
   },
 
+  /** Authenticated GET returning a Blob (e.g. admin image proxy). */
+  adminFetchBlob: async (path) => {
+    const base = window.utils.getApiBase();
+    const token = window.sessionToken || localStorage.getItem('admin_session') || '';
+    const res = await fetch(base + path, {
+      method: 'GET',
+      headers: { 'X-Session-Token': token },
+      credentials: 'include'
+    });
+    if (!res.ok) {
+      throw new Error('Request failed (' + res.status + ')');
+    }
+    return res.blob();
+  },
+
+  /** Load external HTTPS product image via admin proxy; returns a blob: object URL (revoke when done). */
+  adminProxyImageObjectUrl: async (externalUrl) => {
+    const path = '/admin/proxy-image?url=' + encodeURIComponent(String(externalUrl || '').trim());
+    const blob = await window.utils.adminFetchBlob(path);
+    return URL.createObjectURL(blob);
+  },
+
   /** Upload JPEG/PNG data URL to shop R2 via worker (same as product crop upload). */
   uploadAdminImage: async (dataUrl, filename = 'product-image.jpg') => {
     const base = window.utils.getApiBase();
@@ -255,7 +277,8 @@ window.utils = {
     });
     const uploadData = await uploadRes.json().catch(() => ({}));
     if (!uploadData.success) {
-      throw new Error(uploadData.error || 'Failed to upload image.');
+      const msg = uploadData.message || uploadData.details || uploadData.error || uploadRes.statusText || 'Failed to upload image.';
+      throw new Error(msg);
     }
     return uploadData.url;
   },
@@ -378,11 +401,14 @@ window.utils = {
     }
 
     async function exportProductImageFromUrl(imageUrl, apiBase) {
-      const base = apiBase || window.utils.getApiBase();
-      const proxy = base + '/admin/proxy-image?url=' + encodeURIComponent(imageUrl);
-      const img = await loadImageElement(proxy);
-      const fitted = fitImageToCanvas(img, PRODUCT_W, PRODUCT_H);
-      return composeBlurredBackgroundJpeg(fitted, PRODUCT_W, PRODUCT_H, 'white', null);
+      const objectUrl = await window.utils.adminProxyImageObjectUrl(imageUrl);
+      try {
+        const img = await loadImageElement(objectUrl);
+        const fitted = fitImageToCanvas(img, PRODUCT_W, PRODUCT_H);
+        return composeBlurredBackgroundJpeg(fitted, PRODUCT_W, PRODUCT_H, 'white', null);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
     }
 
     return {

@@ -133,8 +133,11 @@ CREATE TABLE supplier_bills (
   paid_from TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  , invoice_currency TEXT NOT NULL DEFAULT 'GBP'
+  , settlement_amount_pence INTEGER
 );
 -- paid_from: 'bank' | 'cash' | 'owner' (paid personally, counts as owner capital). NULL paid_date = unpaid.
+-- invoice_currency: ISO 4217 (default GBP). settlement_amount_pence: actual GBP paid for foreign-currency bills.
 -- Bill total minus the cost of its stock batches is expensed as "Supplier bill costs not in stock".
 CREATE TABLE stock_lots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,6 +150,7 @@ CREATE TABLE stock_lots (
   supplier_bill_id INTEGER,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  , unit_foreign_minor INTEGER
 );
 CREATE TABLE stock_movements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,6 +204,9 @@ CREATE TABLE stock_import_sessions (
   paid_from TEXT,
   supplier_bill_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  , invoice_currency TEXT NOT NULL DEFAULT 'GBP'
+  , settlement_amount_pence INTEGER
+  , foreign_goods_total_minor INTEGER
 );
 -- One supplier receipt. supplier_bill_id is the bill whose total is the sum of the session's stock lines.
 -- This is separate from products.import_batch_id, which belongs to CSV catalog imports.
@@ -214,6 +221,7 @@ CREATE TABLE stock_import_lines (
   entry_method TEXT NOT NULL,
   lot_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  , unit_foreign_minor INTEGER
 );
 -- entry_method: 'barcode' | 'manual'. lot_id is the stock batch created for the line.
 CREATE TABLE orders (

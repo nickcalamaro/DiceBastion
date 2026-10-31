@@ -50,6 +50,7 @@ import {
   listImportSessions,
   getImportSession,
   addImportLine,
+  addImportLinesBatch,
   removeImportLine,
   parseLedgerDate,
   parsePence,
@@ -7259,7 +7260,12 @@ const LEDGER_ERROR_STATUS = {
   line_not_found: 404,
   insufficient_stock: 409,
   line_already_used: 409,
-  unsupported_file: 415
+  unsupported_file: 415,
+  missing_settlement: 400,
+  missing_foreign_cost: 400,
+  invalid_settlement: 400,
+  zero_foreign_total: 400,
+  allocation_failed: 400
 }
 
 function ledgerText(value, max) {
@@ -7684,6 +7690,20 @@ app.post('/admin/finance/import-sessions/:id/lines', requireAdmin, requireAccoun
     return c.json({ success: true, ...result })
   } catch (e) {
     console.error('[finance/import-sessions lines POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/import-sessions/:id/lines/batch', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const result = await addImportLinesBatch(c.env.DB, id, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[finance/import-sessions lines batch POST] ERROR:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
@@ -10426,61 +10446,59 @@ app.delete('/admin/products/:id', requireAdmin, async (c) => {
 // Upload image to R2 (admin only)
 app.post('/admin/images', requireAdmin, async (c) => {
   try {
-    const { image, filename } = await c.req.json()
-    
-    if (!image || !filename) {
-      return c.json({ error: 'missing_image_or_filename' }, 400)
+    const { image, filename } = await c.req.json().catch(() => ({}))
+
+    const match = String(image || '').match(/^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/i)
+    if (!match) {
+      return c.json({ error: 'invalid_image', message: 'Expected a base64 data URL (image/jpeg or image/png).' }, 400)
     }
 
-    // Check if R2 bucket is configured
+    let contentType = match[1].toLowerCase()
+    if (contentType === 'image/jpg') contentType = 'image/jpeg'
+    const allowed = ['image/jpeg', 'image/png', 'image/webp']
+    if (!allowed.includes(contentType)) {
+      return c.json({ error: 'unsupported_image', message: 'Use JPEG, PNG, or WebP.' }, 415)
+    }
+
     if (!c.env.IMAGES) {
       console.error('R2 bucket not configured')
       return c.json({ error: 'storage_not_configured' }, 500)
     }
 
-    // Convert base64 to buffer
-    const base64Data = image.replace(/^data:image\/\w+;base64,/, '')
-    const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0))
+    const binary = atob(match[2].replace(/\s/g, ''))
+    if (binary.length > 6 * 1024 * 1024) {
+      return c.json({ error: 'image_too_large', message: 'Image exceeds 6 MB limit.' }, 413)
+    }
+    const buffer = Uint8Array.from(binary, (ch) => ch.charCodeAt(0))
 
-    // Generate unique filename with timestamp
-    const timestamp = Date.now()
-    const key = `images/${timestamp}-${filename}`
+    const ext = contentType === 'image/png' ? 'png' : contentType === 'image/webp' ? 'webp' : 'jpg'
+    const safeStem = String(filename || 'product-image')
+      .replace(/\.(jpe?g|png|webp)$/i, '')
+      .replace(/[^a-z0-9._-]+/gi, '-')
+      .slice(0, 60) || 'product-image'
+    const key = `images/${Date.now()}-${safeStem}.${ext}`
 
-    // Upload to R2
     await c.env.IMAGES.put(key, buffer, {
-      httpMetadata: {
-        contentType: 'image/jpeg',
-      },
+      httpMetadata: { contentType }
     })
 
-    // Return public URL
-    // For R2 public buckets, the URL format is typically:
-    // - Custom domain: https://images.dicebastion.com/{key}
-    // - R2.dev subdomain: https://{bucket}.{accountId}.r2.cloudflarestorage.com/{key}
-    // You need to configure public access in Cloudflare dashboard and set R2_PUBLIC_URL
-    
     let publicUrl
     if (c.env.R2_PUBLIC_URL) {
-      // Use configured public URL
       publicUrl = `${c.env.R2_PUBLIC_URL}/${key}`
     } else {
-      // Fallback: return a placeholder URL that indicates configuration needed
       publicUrl = `/r2-placeholder/${key}`
       console.warn('R2_PUBLIC_URL not configured. Set this environment variable to enable public image access.')
-      console.log('Configure R2 public access at: https://dash.cloudflare.com/?to=/:account/r2/buckets/dicebastion-images/settings')
     }
-    
+
     console.log('Image uploaded successfully:', key)
-    console.log('Public URL:', publicUrl)
-    
-    return c.json({ 
-      success: true, 
+    return c.json({
+      success: true,
       url: publicUrl,
-      key: key  // Return the key for debugging
+      key
     })
   } catch (e) {
     console.error('Image upload error:', e)
-    return c.json({ error: 'upload_failed', details: e.message }, 500)
+    return c.json({ error: 'upload_failed', details: String(e?.message || e).slice(0, 400) }, 500)
   }
 })
 

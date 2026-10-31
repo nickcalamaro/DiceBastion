@@ -6,16 +6,20 @@ var wrapper = document.getElementById("search-wrapper");
 var modal = document.getElementById("search-modal");
 var input = document.getElementById("search-query");
 var output = document.getElementById("search-results");
-var first = output.firstChild;
-var last = output.lastChild;
+var first = output ? output.firstChild : null;
+var last = output ? output.lastChild : null;
 var searchVisible = false;
 var indexed = false;
 var hasResults = false;
 
+if (!input || !output || !wrapper || !modal) {
+  // Search UI not on this page layout
+} else {
+
 // Listen for events
 showButton? showButton.addEventListener("click", displaySearch) : null;
 showButtonMobile? showButtonMobile.addEventListener("click", displaySearch) : null;
-hideButton.addEventListener("click", hideSearch);
+if (hideButton) hideButton.addEventListener("click", hideSearch);
 wrapper.addEventListener("click", hideSearch);
 modal.addEventListener("click", function (event) {
   event.stopPropagation();
@@ -23,9 +27,16 @@ modal.addEventListener("click", function (event) {
   return false;
 });
 document.addEventListener("keydown", function (event) {
-  // Forward slash to open search wrapper
+  var target = event.target;
+  var typingInField = target && (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  );
+  // Forward slash to open search wrapper (not while typing in a form field)
   if (event.key == "/") {
-    if (!searchVisible) {
+    if (!searchVisible && !typingInField) {
       event.preventDefault();
       displaySearch();
     }
@@ -144,10 +155,16 @@ function buildIndex() {
     }*/
     fuse = new Fuse(data, options);
     indexed = true;
+    if (input.value) {
+      executeQuery(input.value);
+    }
   });
 }
 
 function executeQuery(term) {
+  if (!fuse) {
+    return;
+  }
   let results = fuse.search(term);
   let resultsHTML = "";
 
@@ -188,4 +205,6 @@ function executeQuery(term) {
     first = output.firstChild.firstElementChild;
     last = output.lastChild.firstElementChild;
   }
+}
+
 }

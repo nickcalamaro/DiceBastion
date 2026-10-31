@@ -6,15 +6,17 @@ showDate: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js?v=20261028a"></script>
+<script src="/js/utils.js?v=20261031b"></script>
 <script src="/js/modal.js"></script>
 <script src="/js/shopCategories.js"></script>
+<script src="/js/shopCategoryPicker.js?v=20261031a"></script>
+<script src="/js/shopImportLinePayload.js?v=20261031l"></script>
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261013f"></script>
-<script src="/js/shopInvoiceImportAdmin.js?v=20261028h"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261031l"></script>
+<script src="/js/shopInvoiceImportAdmin.js?v=20261031m"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -1170,14 +1172,13 @@ Show delivered
 <div id="invoice-import-card" class="card card-compact admin-mb-2">
 <h3 id="admin-section-finance-invoice-import" class="admin-section-heading">Supplier invoice import</h3>
 <p class="admin-text-muted admin-mb-1" style="max-width: 52rem;">
-Upload a supplier invoice PDF. Parsing uses Mistral OCR only — save your API key below, then parse and review every line before stock is added through one import session.
-Invoice amounts may be in EUR on the PDF but are stored and sold using the same numeric values in GBP fields until currency conversion is added.
+Upload a supplier invoice PDF. Mistral OCR parses line items into an editable preview. Workflow: set disposition (split bundles or event use first), tick <strong>Enrich</strong> on shop lines you want, then run <strong>Enrich selected</strong> once. Similar product lines are enriched as one harmonised set; unique SKUs use a single line each. For invoices in euros (or other non-GBP currency), costs are shown in invoice currency; enter <strong>Amount paid (GBP)</strong> before import so stock and COGS use your actual bank settlement, allocated across lines by foreign value. Sell prices still use the multiplier on invoice unit net (unchanged). Suggested images are preview-only until you use Review and crop or Upload image.
 </p>
 <div class="admin-grid-2 admin-mb-1" style="align-items: end;">
 <div>
 <label class="form-label" for="invoice-import-mistral-key">Mistral API key *</label>
 <input type="password" id="invoice-import-mistral-key" class="form-input" autocomplete="off" placeholder="Required for invoice OCR">
-<small class="admin-text-small">Stored in this browser session only. Also used for product image lookup when RainPOS URLs are not available.</small>
+<small class="admin-text-small">Required for OCR, split expansion, and listing enrichment when you run Enrich selected. Stored in this browser session only.</small>
 </div>
 <div>
 <button type="button" id="invoice-import-save-key" class="btn btn-secondary">Save key for session</button>
@@ -1196,9 +1197,9 @@ Invoice amounts may be in EUR on the PDF but are stored and sold using the same 
 </div>
 <div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap;">
 <button type="button" id="invoice-import-parse" class="btn btn-primary">Parse invoice</button>
-<button type="button" id="invoice-import-lookup-images" class="btn btn-secondary">Look up images</button>
-<button type="button" id="invoice-import-process-images" class="btn btn-secondary">Process images</button>
+<button type="button" id="invoice-import-enrich-selected" class="btn btn-secondary">Enrich selected</button>
 <button type="button" id="invoice-import-commit" class="btn btn-primary" disabled>Import items</button>
+<input type="file" id="invoice-import-row-file" accept="image/*" style="display:none" aria-hidden="true">
 </div>
 <div id="invoice-import-status" class="admin-mb-1" style="display: none; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9375rem;"></div>
 <h4 class="admin-section-heading" style="font-size: 1rem;">Supplier receipt</h4>
@@ -1231,6 +1232,11 @@ Invoice amounts may be in EUR on the PDF but are stored and sold using the same 
 <div>
 <label class="form-label" for="invoice-import-notes">Notes</label>
 <input type="text" id="invoice-import-notes" class="form-input">
+</div>
+<div id="invoice-import-settlement-wrap" style="display: none;">
+<label class="form-label" for="invoice-import-settlement-gbp">Amount paid (GBP) *</label>
+<input type="number" id="invoice-import-settlement-gbp" class="form-input" min="0" step="0.01" placeholder="Bank settlement for this invoice">
+<small class="admin-text-small">Required for non-GBP invoices. Stock costs in accounts are allocated from this total in proportion to each line’s invoice currency amount.</small>
 </div>
 </div>
 <div id="invoice-import-preview" class="admin-mb-1"></div>
@@ -3269,13 +3275,13 @@ document.querySelector('.crop-image-container').addEventListener('click', (e) =>
   document.getElementById('crop-bg-pick-hint').textContent = `Sampled: ${cropBgPickedCol}`;
 });
 
-function showCropModal(file, callback, aspectRatio = 336 / 220, cropKind = 'product') {
+function showCropModal(source, callback, aspectRatio = 336 / 220, cropKind = 'product') {
   currentAspectRatio = aspectRatio;
   currentCropKind = cropKind;
-  const reader = new FileReader();
-  reader.onload = (e) => {
+
+  function openCropUi(dataUrl) {
     const img = document.getElementById('crop-image');
-    img.src = e.target.result;
+    img.src = dataUrl;
     document.getElementById('crop-modal').classList.add('is-open');
     currentCropCallback = callback;
 
@@ -3332,9 +3338,19 @@ const percentage = Math.round((clampedRatio / baseRatio) * 100);
 document.getElementById('crop-zoom').value = percentage;
 document.getElementById('crop-zoom-value').textContent = percentage + '%';
     }
-  });
+  }, { once: true });
+  }
+
+  if (typeof source === 'string' && (source.startsWith('data:') || source.startsWith('blob:'))) {
+    openCropUi(source);
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    openCropUi(e.target.result);
   };
-  reader.readAsDataURL(file);
+  reader.readAsDataURL(source);
 }
 
 document.getElementById('crop-zoom').addEventListener('input', (e) => {

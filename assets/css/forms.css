@@ -3166,3 +3166,43 @@ details[open] > .team-qa-summary .team-details-chevron {
     right: 0.5rem;
   }
 }
+
+/* Supplier invoice import preview (Finance tab) */
+.invoice-import-row-parent {
+  background: rgba(var(--color-neutral-100), 0.85);
+  border-top: 2px solid rgb(var(--color-neutral-300));
+}
+
+.invoice-import-row-child {
+  background: rgba(var(--color-neutral-50), 0.9);
+}
+
+.invoice-import-row-child td:first-child {
+  border-left: 3px solid rgb(var(--color-primary-400, 120 113 108));
+}
+
+.invoice-import-child-product {
+  padding-left: 0.75rem !important;
+}
+
+.invoice-import-child-label {
+  font-weight: 600;
+  color: rgb(var(--color-neutral-700));
+}
+
+.invoice-import-parent-badge {
+  display: block;
+  margin-top: 0.35rem;
+  color: rgb(var(--color-neutral-600));
+  font-style: italic;
+}
+
+.invoice-import-split-panel-cell {
+  padding: 0.5rem 0.75rem;
+  background: rgba(var(--color-neutral-100), 0.6);
+  border-bottom: 1px solid rgb(var(--color-neutral-200));
+}
+
+.invoice-import-row-group-end td {
+  border-bottom: 1px solid rgb(var(--color-neutral-300));
+}

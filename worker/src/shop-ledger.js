@@ -13,6 +13,75 @@ export const EXPENSE_CATEGORIES = ['event_costs', 'postage', 'packaging', 'suppl
 export const PAID_FROM = ['bank', 'cash', 'owner']
 export const OWNER_ACCOUNTS = ['bank', 'cash']
 
+const ISO_CURRENCY_RE = /^[A-Z]{3}$/
+
+/** Normalise ISO 4217 currency code; default GBP. */
+export function normalizeInvoiceCurrency(raw) {
+  const c = String(raw || 'GBP').trim().toUpperCase()
+  if (!ISO_CURRENCY_RE.test(c)) return 'GBP'
+  return c
+}
+
+export function isForeignInvoiceCurrency(currency) {
+  return normalizeInvoiceCurrency(currency) !== 'GBP'
+}
+
+/**
+ * Split settlement GBP across import lines by foreign extended cost (qty × unit foreign minor).
+ * Returns per-line unit_cost_pence (GBP) so sum(qty × unit_cost_pence) === settlementGbpPence.
+ */
+export function allocateSettlementToLines({ settlementGbpPence, lines }) {
+  const settlement = Number(settlementGbpPence)
+  if (!Number.isFinite(settlement) || settlement < 0 || !Number.isInteger(settlement)) {
+    return { error: 'invalid_settlement' }
+  }
+  const normalized = (lines || []).map((l) => {
+    const quantity = parseInt(l.quantity, 10)
+    const foreignMinorPerUnit = parseInt(l.foreignMinorPerUnit, 10)
+    if (!quantity || quantity <= 0 || foreignMinorPerUnit == null || foreignMinorPerUnit < 0) {
+      return null
+    }
+    return { quantity, foreignMinorPerUnit, foreignExtended: quantity * foreignMinorPerUnit }
+  })
+  if (normalized.some((x) => x == null)) return { error: 'invalid_line' }
+  if (!normalized.length) return { error: 'no_lines' }
+
+  const sumForeign = normalized.reduce((s, l) => s + l.foreignExtended, 0)
+  if (sumForeign <= 0) return { error: 'zero_foreign_total' }
+
+  const lineGbp = normalized.map((l, i) => {
+    if (i === normalized.length - 1) return 0
+    return Math.round((settlement * l.foreignExtended) / sumForeign)
+  })
+  lineGbp[lineGbp.length - 1] = settlement - lineGbp.slice(0, -1).reduce((a, b) => a + b, 0)
+
+  const unitCosts = lineGbp.map((gbp, i) => {
+    const q = normalized[i].quantity
+    return Math.max(0, Math.round(gbp / q))
+  })
+
+  let drift = settlement - normalized.reduce((s, l, i) => s + l.quantity * unitCosts[i], 0)
+  let guard = 0
+  while (drift !== 0 && guard < 100000) {
+    guard += 1
+    let idx = 0
+    for (let i = 1; i < normalized.length; i++) {
+      if (normalized[i].quantity > normalized[idx].quantity) idx = i
+    }
+    const step = drift > 0 ? 1 : -1
+    if (unitCosts[idx] + step < 0) return { error: 'allocation_underflow' }
+    unitCosts[idx] += step
+    drift -= normalized[idx].quantity * step
+  }
+  if (drift !== 0) return { error: 'allocation_failed' }
+
+  return {
+    unit_cost_pence: unitCosts,
+    foreign_goods_total_minor: sumForeign,
+    line_gbp_pence: lineGbp
+  }
+}
+
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS supplier_bills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,6 +185,22 @@ export async function ensureLedgerSchema(db) {
   }
   for (const sql of SCHEMA_STATEMENTS) {
     await db.prepare(sql).run()
+  }
+  const ledgerAlters = [
+    ["supplier_bills", 'invoice_currency', "TEXT NOT NULL DEFAULT 'GBP'"],
+    ['supplier_bills', 'settlement_amount_pence', 'INTEGER'],
+    ["stock_import_sessions", 'invoice_currency', "TEXT NOT NULL DEFAULT 'GBP'"],
+    ['stock_import_sessions', 'settlement_amount_pence', 'INTEGER'],
+    ['stock_import_sessions', 'foreign_goods_total_minor', 'INTEGER'],
+    ['stock_import_lines', 'unit_foreign_minor', 'INTEGER'],
+    ['stock_lots', 'unit_foreign_minor', 'INTEGER']
+  ]
+  for (const [table, col, type] of ledgerAlters) {
+    try {
+      await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`).run()
+    } catch (_) {
+      /* column exists */
+    }
   }
   await db.prepare(
     "INSERT OR IGNORE INTO finance_settings (key, value) VALUES ('books_start_date', ?)"
@@ -265,9 +350,19 @@ export async function receiveStock(db, input) {
   }
 
   const lot = await db.prepare(`
-    INSERT INTO stock_lots (product_id, received_date, supplier, quantity_received, quantity_remaining, unit_cost_pence, supplier_bill_id, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-  `).bind(productId, receivedDate, supplier || null, quantity, quantity, unitCost, billId, notes).first()
+    INSERT INTO stock_lots (product_id, received_date, supplier, quantity_received, quantity_remaining, unit_cost_pence, supplier_bill_id, notes, unit_foreign_minor)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+  `).bind(
+    productId,
+    receivedDate,
+    supplier || null,
+    quantity,
+    quantity,
+    unitCost,
+    billId,
+    notes,
+    input.unit_foreign_minor != null ? parsePence(input.unit_foreign_minor) : null
+  ).first()
 
   await db.prepare(`
     UPDATE products
@@ -441,15 +536,43 @@ export async function createImportSession(db, input) {
   const paid = paidFields(input, receivedDate)
   if (paid.error) return paid
 
+  const invoiceCurrency = normalizeInvoiceCurrency(input.invoice_currency)
+  const settlementPence = input.settlement_amount_pence != null && input.settlement_amount_pence !== ''
+    ? parsePence(input.settlement_amount_pence)
+    : null
+  if (isForeignInvoiceCurrency(invoiceCurrency)) {
+    if (settlementPence == null || settlementPence <= 0) return { error: 'missing_settlement' }
+  }
+
   const bill = await db.prepare(`
-    INSERT INTO supplier_bills (supplier, bill_date, reference, total_pence, paid_date, paid_from, notes)
-    VALUES (?, ?, ?, 0, ?, ?, ?) RETURNING id
-  `).bind(supplier, receivedDate, reference, paid.paidDate, paid.paidFrom, notes || 'Stock import session').first()
+    INSERT INTO supplier_bills (supplier, bill_date, reference, total_pence, paid_date, paid_from, notes, invoice_currency, settlement_amount_pence)
+    VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?) RETURNING id
+  `).bind(
+    supplier,
+    receivedDate,
+    reference,
+    paid.paidDate,
+    paid.paidFrom,
+    notes || 'Stock import session',
+    invoiceCurrency,
+    settlementPence
+  ).first()
 
   const session = await db.prepare(`
-    INSERT INTO stock_import_sessions (supplier, received_date, reference, receipt_url, notes, paid_date, paid_from, supplier_bill_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-  `).bind(supplier, receivedDate, reference, receiptUrl, notes, paid.paidDate, paid.paidFrom, bill.id).first()
+    INSERT INTO stock_import_sessions (supplier, received_date, reference, receipt_url, notes, paid_date, paid_from, supplier_bill_id, invoice_currency, settlement_amount_pence)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+  `).bind(
+    supplier,
+    receivedDate,
+    reference,
+    receiptUrl,
+    notes,
+    paid.paidDate,
+    paid.paidFrom,
+    bill.id,
+    invoiceCurrency,
+    settlementPence
+  ).first()
 
   return { id: session.id, supplier_bill_id: bill.id }
 }
@@ -543,11 +666,22 @@ export async function addImportLine(db, sessionId, input) {
   if (!session) return { error: 'session_not_found' }
 
   const quantity = parseInt(input.quantity, 10)
-  const unitCost = parsePence(input.unit_cost_pence)
+  let unitCost = parsePence(input.unit_cost_pence)
+  const unitForeignMinor = input.unit_foreign_minor != null && input.unit_foreign_minor !== ''
+    ? parsePence(input.unit_foreign_minor)
+    : null
   if (!quantity || quantity <= 0 || quantity > 100000) return { error: 'invalid_quantity' }
-  if (unitCost == null) return { error: 'invalid_unit_cost' }
+
+  const invoiceCurrency = normalizeInvoiceCurrency(session.invoice_currency)
+  if (isForeignInvoiceCurrency(invoiceCurrency)) {
+    if (unitForeignMinor == null) return { error: 'missing_foreign_cost' }
+    if (unitCost == null) return { error: 'missing_unit_cost' }
+  } else if (unitCost == null) {
+    return { error: 'invalid_unit_cost' }
+  }
   const entryMethod = ENTRY_METHODS.includes(input.entry_method) ? input.entry_method : 'manual'
   const ean = cleanEan(input.ean)
+  const eventWriteOff = input.disposition === 'event_write_off'
 
   let created = false
   let product = null
@@ -562,8 +696,27 @@ export async function addImportLine(db, sessionId, input) {
   let filledCopy = []
   if (!product) {
     const name = String(input.name || '').trim().slice(0, 200)
-    const price = parsePence(input.price_pence)
     if (!name) return { error: 'missing_name' }
+
+    if (eventWriteOff) {
+      const slug = await uniqueProductSlug(db, name)
+      const now = new Date().toISOString()
+      const summary = name.slice(0, 500)
+      try {
+        const row = await db.prepare(`
+          INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, ean, catalog_status, is_active, created_at, updated_at)
+          VALUES (?, ?, ?, ?, NULL, 0, 'GBP', 0, '', NULL, ?, 'archived', 0, ?, ?) RETURNING id
+        `).bind(name, slug, summary, summary, ean, now, now).first()
+        product = { id: row.id, name, catalog_status: 'archived' }
+        created = true
+      } catch (e) {
+        const msg = String(e?.message || '')
+        if (msg.includes('UNIQUE') && /ean/i.test(msg)) return { error: 'ean_already_exists' }
+        if (msg.includes('UNIQUE')) return { error: 'slug_already_exists' }
+        throw e
+      }
+    } else {
+    const price = parsePence(input.price_pence)
     if (price == null || price <= 0) return { error: 'missing_price' }
     const slug = await uniqueProductSlug(db, name)
     const now = new Date().toISOString()
@@ -596,19 +749,25 @@ export async function addImportLine(db, sessionId, input) {
       if (msg.includes('UNIQUE')) return { error: 'slug_already_exists' }
       throw e
     }
+    }
   } else {
-    if (product.catalog_status === 'archived') {
+    if (eventWriteOff) {
+      // Event use: stock and accounts only; do not refresh shop listing fields.
+    } else if (product.catalog_status === 'archived') {
       await db.prepare(`
         UPDATE products SET is_active = 1, catalog_status = 'listed', updated_at = ? WHERE id = ?
       `).bind(new Date().toISOString(), product.id).run()
     }
-    filledCopy = await applySubmittedCopy(db, product.id, input)
+    if (!eventWriteOff) {
+      filledCopy = await applySubmittedCopy(db, product.id, input)
+    }
   }
 
   const received = await receiveStock(db, {
     product_id: product.id,
     quantity,
     unit_cost_pence: unitCost,
+    unit_foreign_minor: unitForeignMinor,
     supplier: session.supplier,
     received_date: session.received_date,
     supplier_bill_id: session.supplier_bill_id,
@@ -620,9 +779,30 @@ export async function addImportLine(db, sessionId, input) {
     .bind(quantity * unitCost, session.supplier_bill_id).run()
 
   const line = await db.prepare(`
-    INSERT INTO stock_import_lines (session_id, product_id, ean, name, quantity, unit_cost_pence, entry_method, lot_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-  `).bind(session.id, product.id, ean, product.name, quantity, unitCost, entryMethod, received.lot_id).first()
+    INSERT INTO stock_import_lines (session_id, product_id, ean, name, quantity, unit_cost_pence, entry_method, lot_id, unit_foreign_minor)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+  `).bind(
+    session.id,
+    product.id,
+    ean,
+    product.name,
+    quantity,
+    unitCost,
+    entryMethod,
+    received.lot_id,
+    unitForeignMinor
+  ).first()
+
+  let writeOff = null
+  if (eventWriteOff) {
+    writeOff = await writeOffStock(db, {
+      product_id: product.id,
+      quantity,
+      reason: 'Event use (invoice import)',
+      date: session.received_date
+    })
+    if (writeOff.error) return writeOff
+  }
 
   return {
     line_id: line.id,
@@ -630,8 +810,62 @@ export async function addImportLine(db, sessionId, input) {
     product_id: product.id,
     created_product: created,
     matched_existing: !created && !(productId > 0),
-    filled_copy: filledCopy
+    filled_copy: filledCopy,
+    event_write_off: eventWriteOff || undefined,
+    write_off_cost_pence: writeOff ? writeOff.cost_pence : undefined,
+    unit_cost_pence: unitCost,
+    unit_foreign_minor: unitForeignMinor
   }
+}
+
+/**
+ * Adds many import lines at once; for foreign-currency sessions allocates GBP unit costs
+ * from settlement_amount_pence before inserting lines.
+ */
+export async function addImportLinesBatch(db, sessionId, input) {
+  await ensureLedgerSchema(db)
+  const session = await db.prepare('SELECT * FROM stock_import_sessions WHERE id = ?').bind(sessionId).first()
+  if (!session) return { error: 'session_not_found' }
+
+  const rawLines = input?.lines
+  if (!Array.isArray(rawLines) || !rawLines.length) return { error: 'no_lines' }
+
+  const invoiceCurrency = normalizeInvoiceCurrency(session.invoice_currency)
+  let unitCosts = null
+  let foreignTotal = null
+
+  if (isForeignInvoiceCurrency(invoiceCurrency)) {
+    const settlement = parsePence(session.settlement_amount_pence)
+    if (settlement == null || settlement <= 0) return { error: 'missing_settlement' }
+    const alloc = allocateSettlementToLines({
+      settlementGbpPence: settlement,
+      lines: rawLines.map((l) => ({
+        quantity: l.quantity,
+        foreignMinorPerUnit: l.unit_foreign_minor
+      }))
+    })
+    if (alloc.error) return alloc
+    unitCosts = alloc.unit_cost_pence
+    foreignTotal = alloc.foreign_goods_total_minor
+  }
+
+  const results = []
+  for (let i = 0; i < rawLines.length; i++) {
+    const lineInput = { ...rawLines[i] }
+    if (unitCosts) {
+      lineInput.unit_cost_pence = unitCosts[i]
+    }
+    const added = await addImportLine(db, sessionId, lineInput)
+    if (added.error) return added
+    results.push(added)
+  }
+
+  if (foreignTotal != null) {
+    await db.prepare('UPDATE stock_import_sessions SET foreign_goods_total_minor = ? WHERE id = ?')
+      .bind(foreignTotal, sessionId).run()
+  }
+
+  return { success: true, lines: results, foreign_goods_total_minor: foreignTotal }
 }
 
 /** Removes a line and its stock batch when none of that batch has been sold or written off. */

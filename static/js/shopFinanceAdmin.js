@@ -906,6 +906,20 @@
     const panel = el('finance-session-panel');
     if (!panel) return;
     const total = lines.reduce(function (sum, line) { return sum + (Number(line.quantity) || 0) * (Number(line.unit_cost_pence) || 0); }, 0);
+    const currency = String(session.invoice_currency || 'GBP').toUpperCase();
+    const foreignSession = currency !== 'GBP';
+    const settlementNote = foreignSession && session.settlement_amount_pence != null
+      ? '<p class="admin-text-small admin-text-muted">Invoice currency ' + esc(currency) +
+        '. GBP settlement ' + esc(gbp(session.settlement_amount_pence)) +
+        (session.foreign_goods_total_minor != null
+          ? ' · goods total ' + (Number(session.foreign_goods_total_minor) / 100).toFixed(2) + ' ' + esc(currency)
+          : '') +
+        '.</p>'
+      : '';
+    const costEachLabel = foreignSession ? ('Cost (' + currency + ')') : 'Cost each';
+    const tableHeaders = foreignSession
+      ? [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: costEachLabel, num: true }, { label: 'Cost each (GBP)', num: true }, { label: 'Line cost (GBP)', num: true }, { label: '' }]
+      : [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: 'Cost each', num: true }, { label: 'Line cost', num: true }, { label: '' }];
     const receipt = session.receipt_url
       ? '<p class="admin-text-small"><a href="' + esc(session.receipt_url) + '" target="_blank" rel="noopener">View current receipt</a></p>'
       : '';
@@ -937,16 +951,25 @@
       '<div class="admin-flex admin-mb-1">' +
         '<button type="button" id="finance-session-add-manual" class="btn btn-primary">Add item</button>' +
       '</div>' +
-      '<p class="admin-text-small admin-mb-1">' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', ' + esc(gbp(total)) + ' at cost.</p>' +
+      settlementNote +
+      '<p class="admin-text-small admin-mb-1">' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', ' + esc(gbp(total)) + ' at cost (GBP).</p>' +
       table(
-        [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: 'Cost each', num: true }, { label: 'Line cost', num: true }, { label: '' }],
+        tableHeaders,
         lines.map(function (line) {
           const how = line.entry_method === 'barcode' ? 'Barcode' : 'Manual';
+          const foreignCell = foreignSession && line.unit_foreign_minor != null
+            ? '<td style="' + NUM + '">' + (Number(line.unit_foreign_minor) / 100).toFixed(2) + '</td>'
+            : '';
+          const gbpCells = foreignSession
+            ? '<td style="' + NUM + '">' + esc(gbp(line.unit_cost_pence)) + '</td>' +
+              '<td style="' + NUM + '">' + esc(gbp((Number(line.quantity) || 0) * (Number(line.unit_cost_pence) || 0))) + '</td>'
+            : '<td style="' + NUM + '">' + esc(gbp(line.unit_cost_pence)) + '</td>' +
+              '<td style="' + NUM + '">' + esc(gbp((Number(line.quantity) || 0) * (Number(line.unit_cost_pence) || 0))) + '</td>';
           return '<tr><td>' + esc(line.product_name || line.name) + (line.ean ? ' <span class="admin-text-small admin-text-muted">' + esc(line.ean) + '</span>' : '') + '</td>' +
             '<td>' + how + '</td>' +
             '<td style="' + NUM + '">' + (Number(line.quantity) || 0) + '</td>' +
-            '<td style="' + NUM + '">' + esc(gbp(line.unit_cost_pence)) + '</td>' +
-            '<td style="' + NUM + '">' + esc(gbp((Number(line.quantity) || 0) * (Number(line.unit_cost_pence) || 0))) + '</td>' +
+            foreignCell +
+            gbpCells +
             '<td>' + (Number(line.removable) ? smallBtn('finance-session-line-remove', line.id, 'Remove') : '') + '</td></tr>';
         }).join(''),
         'No items yet. Add each product from this receipt.'
@@ -1048,19 +1071,33 @@
     const unitCost = toPence(body.unit_cost);
     if (!quantity || quantity < 1) throw new Error(ERROR_MESSAGES.invalid_quantity);
     if (unitCost == null) throw new Error(ERROR_MESSAGES.invalid_unit_cost);
-    const payload = {
-      entry_method: body.entry_method,
-      quantity: quantity,
-      unit_cost_pence: unitCost,
-      product_id: body.product_id || null,
-      ean: body.ean || null,
-      name: body.name || null,
-      price_pence: body.price != null && body.price !== '' ? toPence(body.price) : null,
-      category: body.category || null,
-      summary: body.summary || null,
-      description: body.description || null,
-      image_url: body.image_url || null
-    };
+    const payload = global.ShopImportLinePayload
+      ? ShopImportLinePayload.fromFinanceModal({
+        entry_method: body.entry_method,
+        quantity: quantity,
+        unit_cost_pence: unitCost,
+        product_id: body.product_id || null,
+        ean: body.ean || null,
+        name: body.name || null,
+        price_pence: body.price != null && body.price !== '' ? toPence(body.price) : null,
+        category: body.category || null,
+        summary: body.summary || null,
+        description: body.description || null,
+        image_url: body.image_url || null
+      })
+      : {
+        entry_method: body.entry_method,
+        quantity: quantity,
+        unit_cost_pence: unitCost,
+        product_id: body.product_id || null,
+        ean: body.ean || null,
+        name: body.name || null,
+        price_pence: body.price != null && body.price !== '' ? toPence(body.price) : null,
+        category: body.category || null,
+        summary: body.summary || null,
+        description: body.description || null,
+        image_url: body.image_url || null
+      };
     if (!payload.product_id && payload.price_pence == null && body.needs_price) throw new Error(ERROR_MESSAGES.missing_price);
     const result = await api('/admin/finance/import-sessions/' + openSessionId + '/lines', { method: 'POST', body: payload });
     modal.close();
