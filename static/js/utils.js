@@ -225,15 +225,29 @@ window.utils = {
   adminFetchJson: async (path, options = {}) => {
     const base = window.utils.getApiBase();
     const token = window.sessionToken || localStorage.getItem('admin_session') || '';
-    const res = await fetch(base + path, {
-      method: options.method || 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-Token': token,
-        ...(options.headers || {})
-      },
-      body: options.body
-    });
+    const timeoutMs = Number(options.timeoutMs) || 0;
+    const controller = timeoutMs > 0 ? new AbortController() : null;
+    const timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+    let res;
+    try {
+      res = await fetch(base + path, {
+        method: options.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': token,
+          ...(options.headers || {})
+        },
+        body: options.body,
+        signal: controller ? controller.signal : undefined
+      });
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        throw new Error('The server did not respond in time. Enrichment was stopped so the page would not stay waiting.');
+      }
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(data.message || data.error || res.statusText || 'Request failed');

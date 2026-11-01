@@ -118,6 +118,71 @@
     return window.utils.adminFetchJson(path, options || {});
   }
 
+  async function apiNdjson(path, options, onProgress) {
+    const base = window.utils.getApiBase();
+    const token = window.sessionToken || localStorage.getItem('admin_session') || '';
+    const timeoutMs = Number(options.timeoutMs) || 0;
+    const controller = timeoutMs > 0 ? new AbortController() : null;
+    const timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+    let res;
+    try {
+      res = await fetch(base + path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/x-ndjson',
+          'X-Session-Token': token
+        },
+        body: options.body,
+        signal: controller ? controller.signal : undefined
+      });
+    } catch (e) {
+      if (timer) clearTimeout(timer);
+      if (e && e.name === 'AbortError') {
+        throw new Error('The server did not respond in time. Enrichment was stopped so the page would not stay waiting.');
+      }
+      throw e;
+    }
+    const contentType = String(res.headers.get('content-type') || '');
+    if (contentType.indexOf('ndjson') === -1) {
+      if (timer) clearTimeout(timer);
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.message || data.error || res.statusText || 'Request failed');
+      return data;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let result = null;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value, { stream: true });
+        let nl = buf.indexOf('\n');
+        while (nl >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          nl = buf.indexOf('\n');
+          if (!line) continue;
+          let event;
+          try { event = JSON.parse(line); } catch (parseErr) { continue; }
+          if (event.type === 'progress') {
+            if (onProgress) onProgress(event.message || '');
+          } else if (event.type === 'result') {
+            result = event.data;
+          } else if (event.type === 'error') {
+            throw new Error(event.message || event.error || 'Enrichment failed');
+          }
+        }
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (!result) throw new Error('Enrichment ended without a result.');
+    return result;
+  }
+
   function readFileAsDataUrl(file) {
     return new Promise(function (resolve, reject) {
       const reader = new FileReader();
@@ -142,49 +207,94 @@
     return effectiveDisposition(r) === 'event_write_off';
   }
 
-  /** Keep in sync with worker normalizeVariantFamilyKey (invoice-import.js). */
-  var VARIANT_FAMILY_STRIP_WORDS = [
-    'black', 'white', 'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'grey', 'gray',
-    'silver', 'gold', 'brown', 'teal', 'cyan', 'magenta', 'ivory', 'crimson', 'navy', 'lime', 'amber',
-    'copper', 'bronze', 'charcoal', 'cream', 'ruby', 'sapphire', 'emerald', 'pearl', 'slate', 'wine',
-    'olive', 'sand', 'beige', 'tan', 'turquoise', 'coral', 'peach', 'plum', 'mustard', 'ebony', 'jet',
-    'snow', 'arctic', 'smoke', 'steel', 'brass', 'clear', 'transparent', 'petrol', 'petroleum',
-    'english', 'french', 'german', 'italian', 'spanish', 'japanese', 'polish', 'dutch',
-    'apple', 'blood', 'amazonite', 'mint', 'jade', 'graphite', 'violet', 'indigo', 'azure', 'umber',
-    'burgundy', 'melon', 'pumpkin', 'grass', 'sky', 'ocean', 'forest', 'midnight', 'rose',
-    'boros', 'dimir', 'golgari', 'azorius', 'simic', 'rakdos', 'gruul', 'izzet', 'selesnya', 'orzhov'
-  ];
-
-  var FAMILY_ENRICHMENT_MAX_LINES = 15;
-
+  /** Optional normalisation for display only; harmonised batches use Family # only. */
   function productVariantFamilyKey(row) {
-    var s = String(row && row.name || '').toLowerCase();
-    s = s.replace(/^\s*ds\b\s*[-:]\s*/i, 'dragon shield ');
-    s = s.replace(/\[[^\]]*\]/g, ' ');
-    s = s.replace(/\(\s*\d+\s*sleeves?\s*\)/gi, ' ');
-    s = s.replace(/\b\d+\s*sleeves?\b/gi, ' ');
-    s = s.replace(/\s[-–—]\s/g, ' ').replace(/[^\w\s]/g, ' ');
-    VARIANT_FAMILY_STRIP_WORDS.forEach(function (word) {
-      s = s.replace(new RegExp('\\b' + word + '\\b', 'gi'), ' ');
-    });
-    s = s.replace(/\s+/g, ' ').trim();
-    return s.slice(0, 160);
+    return String(row && row.name || '').trim().slice(0, 160);
   }
 
-  function pushFamilySetChunks(sets, group, setIdPrefix) {
+  function familyHintForSet(setRows) {
+    const fam = setRows.length ? parseProductFamily(setRows[0].product_family) : null;
+    if (fam != null) {
+      return 'Product family identifier ' + fam + ' (' + setRows.length + ' lines, one harmonised listing set)';
+    }
+    return truncateLabel(setRows[0] && setRows[0].name, 120);
+  }
+
+  /** The distributor bundle a family was split from, when every row shares one parent. */
+  function bundleForSet(setRows) {
+    if (!setRows || !setRows.length) return null;
+    const parentId = setRows[0].parent_id;
+    if (parentId == null) return null;
+    if (!setRows.every(function (r) { return r.parent_id === parentId; })) return null;
+    const parent = rowById(parentId);
+    if (!parent) return null;
+    return { name: parent.name || '', ean: parent.ean || null, sku: parent.sku || '' };
+  }
+
+  function setUsesExplicitProductFamily(setRows) {
+    return (setRows || []).some(function (r) { return parseProductFamily(r.product_family) != null; });
+  }
+
+  function familyLineResultForRow(row, data) {
+    const resultByEan = {};
+    const byName = {};
+    (data.lines || []).forEach(function (line) {
+      const e = normalizeEan(line.ean);
+      if (e) resultByEan[e] = line;
+      const nk = String(line.name || '').trim().toLowerCase();
+      if (nk) byName[nk] = line;
+    });
+    const e = normalizeEan(row.ean);
+    if (e && resultByEan[e]) return resultByEan[e];
+    const rowKey = String(row.name || '').trim().toLowerCase();
+    if (rowKey && byName[rowKey]) return byName[rowKey];
+    return null;
+  }
+
+  function parseProductFamily(raw) {
+    if (raw == null || raw === '') return null;
+    const n = parseInt(String(raw).trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  function maxProductFamilyId() {
+    let max = 0;
+    rows.forEach(function (r) {
+      const n = parseProductFamily(r.product_family);
+      if (n != null && n > max) max = n;
+    });
+    return max;
+  }
+
+  function nextProductFamilyId() {
+    return maxProductFamilyId() + 1;
+  }
+
+  function rowShowsCategoryPicker(r) {
+    return isShopLine(r) || (r && r.disposition === 'split_parent');
+  }
+
+  var FAMILY_ENRICHMENT_MAX_LINES = 48;
+
+  function pushFamilySetChunks(sets, group, familyNumber) {
     if (group.length < 2) {
       group.forEach(function (r) {
         sets.push({ setId: 'single-' + r.id, mode: 'single', rows: [r] });
       });
       return;
     }
-    var hint = productVariantFamilyKey(group[0]);
+    var hint = familyHintForSet(group);
+    var partCount = Math.ceil(group.length / FAMILY_ENRICHMENT_MAX_LINES);
     for (var i = 0; i < group.length; i += FAMILY_ENRICHMENT_MAX_LINES) {
+      var part = Math.floor(i / FAMILY_ENRICHMENT_MAX_LINES) + 1;
       var chunk = group.slice(i, i + FAMILY_ENRICHMENT_MAX_LINES);
       sets.push({
-        setId: setIdPrefix + '-chunk-' + i,
+        setId: 'pf-' + familyNumber + (partCount > 1 ? '-part-' + part : ''),
         mode: 'family',
         rows: chunk,
+        familyNumber: familyNumber,
+        part: part,
+        partCount: partCount,
         familyHint: hint
       });
     }
@@ -201,70 +311,116 @@
 
   function buildListingSets(targets) {
     const sets = [];
+    const byFamilyNum = {};
     const byExplicit = {};
-    const autoRows = [];
+    const noFamily = [];
     targets.forEach(function (r) {
-      if (r.listing_set_id) {
+      const fam = parseProductFamily(r.product_family);
+      if (fam != null) {
+        if (!byFamilyNum[fam]) byFamilyNum[fam] = [];
+        byFamilyNum[fam].push(r);
+      } else if (r.listing_set_id) {
         if (!byExplicit[r.listing_set_id]) byExplicit[r.listing_set_id] = [];
         byExplicit[r.listing_set_id].push(r);
       } else {
-        autoRows.push(r);
+        noFamily.push(r);
       }
+    });
+    Object.keys(byFamilyNum).sort(function (a, b) { return Number(a) - Number(b); }).forEach(function (num) {
+      pushFamilySetChunks(sets, byFamilyNum[num], num);
     });
     Object.keys(byExplicit).forEach(function (sid) {
-      const group = byExplicit[sid];
-      pushFamilySetChunks(sets, group, sid);
+      pushFamilySetChunks(sets, byExplicit[sid], sid);
     });
-    const byKey = {};
-    autoRows.forEach(function (r) {
-      const key = productVariantFamilyKey(r);
-      if (!byKey[key]) byKey[key] = [];
-      byKey[key].push(r);
-    });
-    Object.keys(byKey).forEach(function (key) {
-      const group = byKey[key];
-      if (key.length >= 8 && group.length >= 2) {
-        pushFamilySetChunks(sets, group, 'auto-' + key.slice(0, 40));
-      } else {
-        group.forEach(function (r) {
-          sets.push({ setId: 'single-' + r.id, mode: 'single', rows: [r] });
-        });
-      }
+    noFamily.forEach(function (r) {
+      sets.push({ setId: 'single-' + r.id, mode: 'single', rows: [r] });
     });
     return sets;
   }
 
+  function describeEnrichPlan(sets) {
+    let familySets = 0;
+    let singleSets = 0;
+    let familyLines = 0;
+    sets.forEach(function (s) {
+      if (s.mode === 'family') {
+        familySets += 1;
+        familyLines += s.rows.length;
+      } else {
+        singleSets += 1;
+      }
+    });
+    return { familySets: familySets, singleSets: singleSets, familyLines: familyLines };
+  }
+
+  function appendEnrichPlanLog(sets) {
+    const plan = describeEnrichPlan(sets);
+    appendLog(
+      'Plan: ' + plan.familySets + ' harmonised batch(es) (' + plan.familyLines + ' lines), ' +
+      plan.singleSets + ' individual line(s).'
+    );
+    if (plan.singleSets > 0 && plan.familySets === 0) {
+      appendLog(
+        'No harmonised batches — enter the same Family # on lines that should share copy and images, then Enrich selected again.'
+      );
+    }
+    sets.forEach(function (s, idx) {
+      if (s.mode === 'family') {
+        var names = s.rows.map(function (r) { return truncateLabel(r.name, 48); });
+        var shown = names.slice(0, 8).join('; ');
+        var more = names.length > 8 ? ' (+' + (names.length - 8) + ' more)' : '';
+        var title = 'Family #' + s.familyNumber + ' · ' + s.rows.length + ' lines';
+        if (s.partCount > 1) {
+          title += ' · part ' + s.part + ' of ' + s.partCount;
+        }
+        appendLog('  Batch ' + (idx + 1) + ': ' + title);
+        appendLog('    ' + shown + more);
+        if (s.partCount > 1 && s.part === 1) {
+          appendLog(
+            '    This Family # has more than ' + FAMILY_ENRICHMENT_MAX_LINES +
+            ' lines, so it is sent as separate parts. Lines that should stay together need the same Family # and a smaller group.'
+          );
+        }
+      } else {
+        appendLog('  Batch ' + (idx + 1) + ': single line · ' + truncateLabel(s.rows[0].name, 72));
+      }
+    });
+  }
+
   function enrichSetPreviewLabel(sets) {
-    let familyIdx = 0;
     return sets.map(function (s) {
       if (s.mode === 'family') {
-        familyIdx += 1;
-        return 'Set ' + familyIdx + ' (' + s.rows.length + ' lines, harmonised)';
+        const pfMatch = String(s.setId || '').match(/^pf-(\d+)/);
+        if (pfMatch) {
+          return 'Family #' + pfMatch[1] + ' (' + s.rows.length + ' lines, harmonised)';
+        }
+        return 'Auto family (' + s.rows.length + ' lines, harmonised)';
       }
       return 'Single: ' + truncateLabel(s.rows[0].name, 36);
     }).join('; ');
   }
 
-  function linkSelectedListingSet() {
+  function assignProductFamilyToSelected() {
     const picked = rows.filter(function (r) {
       return r.enrich && rowCanOfferEnrichment(r);
     });
     if (picked.length < 2) {
-      setStatus('Tick Enrich on at least 2 shop lines to link as one listing set.', 'warn');
+      setStatus('Tick Enrich on at least 2 shop lines to assign one product family.', 'warn');
       return;
     }
-    const setId = 'set-' + Date.now();
+    const familyId = nextProductFamilyId();
     picked.forEach(function (r) {
-      r.listing_set_id = setId;
+      r.product_family = familyId;
+      r.listing_set_id = null;
     });
-    setStatus('Linked ' + picked.length + ' lines as one listing set. Run Enrich selected once.', 'ok');
+    setStatus('Assigned family #' + familyId + ' to ' + picked.length + ' lines. Run Enrich selected once.', 'ok');
     renderPreview();
   }
 
-  function unlinkListingSetForRow(id) {
+  function clearProductFamilyForRow(id) {
     const row = rowById(id);
     if (!row) return;
-    row.listing_set_id = null;
+    row.product_family = null;
     renderPreview();
   }
 
@@ -286,24 +442,75 @@
     return true;
   }
 
-  async function enrichFamilySetInternal(set, mistralKey, quiet) {
+  const IMAGE_SOURCE_LABELS = {
+    isbn_cover: 'book cover by EAN (Open Library)',
+    mistral_url: 'image URL from search results',
+    source_page: 'cited product page',
+    cited_page: 'cited page with this barcode',
+    range_link: 'variant page linked from range page',
+    pattern_lookup: 'variant page on the family image site',
+    search_result: 'search result thumbnail',
+    shop_catalogue: 'manufacturer shop catalogue'
+  };
+
+  function imageSourceLabel(source, hasImage) {
+    if (!hasImage) return 'MISSING';
+    return IMAGE_SOURCE_LABELS[source] || source || 'yes';
+  }
+
+  function logFamilyEnrichReport(set, data, ok, setRows) {
+    const dbg = data && data.debug ? data.debug : null;
+    logProgress('[invoice-import] family set finished', {
+      set_id: set.setId,
+      lines: setRows.length,
+      ok: ok,
+      web_searches: dbg && dbg.web_searches,
+      cited_pages: dbg && dbg.cited_pages,
+      images_ok: dbg && dbg.images_ok,
+      images_ms: dbg && dbg.images_ms,
+      line_details: dbg && dbg.lines
+    });
+    if (dbg) {
+      appendLog(
+        'Family summary: ' + (dbg.web_searches != null ? dbg.web_searches : '?') + ' web search(es), ' +
+        (dbg.cited_pages != null ? dbg.cited_pages : '?') + ' search result(s), ' +
+        (dbg.lines_catalogue != null ? dbg.lines_catalogue + ' from shop catalogue, ' : '') +
+        (dbg.line_facts != null ? dbg.line_facts : '?') + ' line fact(s), copy ' +
+        (dbg.copy_ms != null ? Math.round(dbg.copy_ms / 1000) + 's' : '?') + ', image pattern ' +
+        (dbg.image_pattern || 'none') + ', images ' +
+        (dbg.images_ok != null ? dbg.images_ok : '?') + ' of ' + setRows.length +
+        (dbg.images_ms != null ? ' in ' + Math.round(dbg.images_ms / 1000) + 's' : '')
+      );
+    }
+  }
+
+  async function enrichFamilySetInternal(set, mistralKey, quiet, onSearchLimit) {
     const setRows = set.rows;
     setRows.forEach(function (r) { r.copy_pending = true; });
     renderPreview();
-    logProgress('[invoice-import] family set: ' + setRows.length + ' lines, 1 web search', {
-      hint: set.familyHint
+    const familyId = setRows.length ? parseProductFamily(setRows[0].product_family) : null;
+    appendLog(
+      'Harmonised family enrich starting: Family #' + (familyId != null ? familyId : '?') +
+      ', ' + setRows.length + ' lines · research, then copy, then images · ' + (set.setId || '')
+    );
+    logProgress('[invoice-import] harmonised family batch', {
+      lines: setRows.length,
+      set_id: set.setId,
+      product_family: familyId
     });
     try {
-      const data = await api('/admin/invoice-import/enrich-family', {
-        method: 'POST',
+      const data = await apiNdjson('/admin/invoice-import/enrich-family', {
+        timeoutMs: 10 * 60 * 1000,
         body: JSON.stringify({
           lines: setRows.map(function (r) {
             return { name: r.name, ean: r.ean || null };
           }),
-          family_hint: set.familyHint || productVariantFamilyKey(setRows[0]),
+          family_hint: set.familyHint || familyHintForSet(setRows),
+          product_family: familyId,
+          bundle: bundleForSet(setRows),
           mistral_api_key: mistralKey
         })
-      });
+      }, function (message) { appendLog(message); });
       const resultByEan = {};
       (data.lines || []).forEach(function (line) {
         const e = normalizeEan(line.ean);
@@ -312,36 +519,31 @@
       let ok = 0;
       const failedRows = [];
       setRows.forEach(function (row) {
-        const e = normalizeEan(row.ean);
-        const lineData = e && resultByEan[e] ? resultByEan[e] : null;
+        const lineData = familyLineResultForRow(row, data);
         if (lineData && !lineData.error && applyFamilyLineToRow(row, lineData, data)) ok++;
         else {
-          row.notes = ['Family enrich: no matching result for this line'];
+          const errMsg = lineData && lineData.error ? String(lineData.error) : 'no matching result';
+          row.notes = ['Family enrich: ' + errMsg];
           failedRows.push(row);
         }
       });
-      for (let fi = 0; fi < failedRows.length; fi++) {
-        appendLog('Family line fallback (single): ' + failedRows[fi].name);
-        const success = await generateCopyForRowInternal(failedRows[fi], mistralKey, true, {
-          index: fi + 1,
-          total: failedRows.length
-        });
-        if (success) ok++;
+      if (failedRows.length) {
+        appendLog(
+          'Family enrich failed for ' + failedRows.length + ' of ' + setRows.length +
+          ' line(s). Not retrying and not switching those lines to individual enrich.'
+        );
       }
+      logFamilyEnrichReport(set, data, ok, setRows);
       appendLog('Family set OK: ' + ok + ' of ' + setRows.length + ' line(s)' +
         (data.web_search_ms != null ? ' (' + Math.round(data.web_search_ms / 1000) + 's web search)' : ''));
       return ok;
     } catch (e) {
-      appendLog('Family enrich failed (' + setRows.length + ' lines): ' + e.message + ' — retrying individually…');
-      let ok = 0;
-      for (let i = 0; i < setRows.length; i++) {
-        const success = await generateCopyForRowInternal(setRows[i], mistralKey, true, {
-          index: i + 1,
-          total: setRows.length
-        });
-        if (success) ok++;
-      }
-      return ok;
+      if (typeof onSearchLimit === 'function') onSearchLimit(e.message);
+      appendLog('Family enrich failed (' + setRows.length + ' lines): ' + e.message);
+      setRows.forEach(function (r) {
+        if (r.copy_pending) r.notes = ['Family enrich failed: ' + e.message];
+      });
+      return 0;
     } finally {
       setRows.forEach(function (r) { r.copy_pending = false; });
       renderPreview();
@@ -523,8 +725,10 @@
         notes: [],
         split_text: '',
         split_default_qty: 1,
+        split_default_price_pence: null,
         split_child_disposition: 'shop',
         listing_set_id: null,
+        product_family: null,
         unit_foreign_minor: null
       };
       syncRowCostFields(rowObj);
@@ -582,6 +786,60 @@
         row.cost_manual = true;
       }
     });
+    host.querySelectorAll('.invoice-import-product-family').forEach(function (node) {
+      const row = rowById(node.getAttribute('data-id'));
+      if (!row) return;
+      const raw = String(node.value || '').trim();
+      if (!raw) {
+        row.product_family = null;
+        return;
+      }
+      const n = parseProductFamily(raw);
+      row.product_family = n;
+    });
+  }
+
+  const INVOICE_PRICE_STEP_GBP = 0.5;
+
+  function snapInvoicePriceGbp(raw) {
+    const p = parseFloat(raw);
+    if (!Number.isFinite(p) || p < 0) return null;
+    return Math.round(p * 2) / 2;
+  }
+
+  function applyInvoiceImportTabOrder(host) {
+    if (!host) return;
+    const stops = [];
+    host.querySelectorAll('tbody tr').forEach(function (tr) {
+      function pick(selector) {
+        tr.querySelectorAll(selector).forEach(function (el) {
+          if (el.disabled) return;
+          stops.push(el);
+        });
+      }
+      if (tr.hasAttribute('data-row')) {
+        pick('.invoice-import-name');
+        pick('.invoice-import-qty');
+        pick('.invoice-import-cost');
+        pick('.invoice-import-cost-foreign');
+        pick('.invoice-import-price');
+        pick('.invoice-import-product-family');
+        pick('.invoice-import-cat-input');
+        pick('.invoice-import-summary');
+        pick('.invoice-import-description');
+      } else if (tr.hasAttribute('data-split-panel')) {
+        pick('.invoice-import-split-text');
+        pick('.invoice-import-split-default-qty');
+        pick('.invoice-import-split-default-price');
+        pick('.invoice-import-split-child-disp');
+      }
+    });
+    host.querySelectorAll('input, select, textarea, button').forEach(function (el) {
+      el.tabIndex = -1;
+    });
+    stops.forEach(function (el, index) {
+      el.tabIndex = index + 1;
+    });
   }
 
   function mountCategoryPickers(host) {
@@ -590,7 +848,7 @@
     host.querySelectorAll('.invoice-import-category-mount').forEach(function (cell) {
       const id = cell.getAttribute('data-row-id');
       const row = rowById(id);
-      if (!row || !isShopLine(row)) return;
+      if (!row || !rowShowsCategoryPicker(row)) return;
       ShopCategoryPicker.mount(cell, {
         rowId: id,
         category: row.category,
@@ -730,6 +988,30 @@
     );
   }
 
+  function seedSplitDefaultPriceFromParent(row) {
+    if (!row || row.disposition !== 'split_parent') return;
+    if (row.split_default_price_pence != null && row.split_default_price_pence > 0) return;
+    const mult = multiplierValue();
+    const fromParent =
+      row.price_pence != null && row.price_pence > 0
+        ? row.price_pence
+        : retailPricePence(row.unit_net, mult);
+    if (fromParent != null && fromParent > 0) row.split_default_price_pence = fromParent;
+  }
+
+  function splitDefaultPricePoundsDisplay(r) {
+    const pence =
+      r.split_default_price_pence != null && r.split_default_price_pence > 0
+        ? r.split_default_price_pence
+        : null;
+    if (pence != null) return (pence / 100).toFixed(2);
+    seedSplitDefaultPriceFromParent(r);
+    if (r.split_default_price_pence != null && r.split_default_price_pence > 0) {
+      return (r.split_default_price_pence / 100).toFixed(2);
+    }
+    return '';
+  }
+
   function syncSplitDraftsFromDom() {
     const host = el('invoice-import-preview');
     if (!host) return;
@@ -740,6 +1022,13 @@
     host.querySelectorAll('.invoice-import-split-default-qty').forEach(function (node) {
       const row = rowById(node.getAttribute('data-id'));
       if (row) row.split_default_qty = parseInt(node.value, 10) || 1;
+    });
+    host.querySelectorAll('.invoice-import-split-default-price').forEach(function (node) {
+      const row = rowById(node.getAttribute('data-id'));
+      if (!row) return;
+      const snapped = snapInvoicePriceGbp(node.value);
+      row.split_default_price_pence =
+        snapped != null && snapped >= 0 ? Math.round(snapped * 100) : null;
     });
     host.querySelectorAll('.invoice-import-split-child-disp').forEach(function (node) {
       const row = rowById(node.getAttribute('data-id'));
@@ -753,23 +1042,27 @@
     if (childCount) {
       return (
         '<tr data-split-panel="' + r.id + '" class="invoice-import-split-panel">' +
-        '<td colspan="10" class="invoice-import-split-panel-cell">' +
+        '<td colspan="11" class="invoice-import-split-panel-cell">' +
         '<span class="admin-text-small">' + childCount + ' split line(s) grouped below.</span> ' +
         '<button type="button" class="btn btn-secondary btn-sm invoice-import-split-remove" data-id="' + r.id + '">Remove split lines</button>' +
         '</td></tr>'
       );
     }
+    seedSplitDefaultPriceFromParent(r);
     const defQty = r.split_default_qty != null ? r.split_default_qty : 1;
+    const defPrice = splitDefaultPricePoundsDisplay(r);
     return (
       '<tr data-split-panel="' + r.id + '">' +
-      '<td colspan="10" style="padding:0.75rem;background:rgba(var(--color-neutral-100),0.6);border-bottom:1px solid rgb(var(--color-neutral-200));">' +
+      '<td colspan="11" style="padding:0.75rem;background:rgba(var(--color-neutral-100),0.6);border-bottom:1px solid rgb(var(--color-neutral-200));">' +
       '<p class="admin-text-small" style="margin:0 0 0.5rem;"><strong>Split this line:</strong> paste distributor pick-list or bundle detail for <em>' + esc(r.name) + '</em>.</p>' +
-      '<p class="admin-text-small admin-text-muted" style="margin:0 0 0.75rem;">Child lines should use full product titles (brand, range, size). Enrichment uses the name when there is no EAN, so keep names accurate before you tick Enrich.</p>' +
+      '<p class="admin-text-small admin-text-muted" style="margin:0 0 0.75rem;">Child lines share the next product family # for harmonised enrichment. Categories on this row copy to each child. Enrichment uses the name when there is no EAN, so keep names accurate before you tick Enrich.</p>' +
       '<label class="form-label" for="invoice-import-split-text-' + r.id + '">Bundle line text</label>' +
       '<textarea id="invoice-import-split-text-' + r.id + '" class="form-input invoice-import-split-text" data-id="' + r.id + '" rows="6" style="width:100%;font-family:inherit;">' + esc(r.split_text || '') + '</textarea>' +
-      '<div class="admin-grid-2" style="margin-top:0.75rem;max-width:28rem;">' +
+      '<div class="admin-grid-2" style="margin-top:0.75rem;max-width:36rem;">' +
       '<div><label class="form-label">Default qty per line</label>' +
       '<input type="number" min="1" class="form-input invoice-import-split-default-qty" data-id="' + r.id + '" value="' + esc(defQty) + '"></div>' +
+      '<div><label class="form-label">Default sell price (£)</label>' +
+      '<input type="number" min="0" step="0.5" class="form-input invoice-import-split-default-price" data-id="' + r.id + '" value="' + esc(defPrice) + '" style="max-width:8rem;"></div>' +
       '<div><label class="form-label">Default child disposition</label>' +
       '<select class="form-select invoice-import-split-child-disp" data-id="' + r.id + '">' +
       '<option value="shop"' + (r.split_child_disposition === 'shop' ? ' selected' : '') + '>Shop stock</option>' +
@@ -822,9 +1115,13 @@
         nameCell +=
           '<p class="admin-text-small admin-text-muted" style="margin:0.35rem 0 0;">No EAN — enrichment searches by this name; make it accurate before ticking Enrich.</p>';
       }
-      if (offerEnrich && r.listing_set_id) {
+      if (offerEnrich && parseProductFamily(r.product_family) != null) {
         nameCell +=
-          '<p class="admin-text-small admin-text-muted" style="margin:0.35rem 0 0;">Linked listing set · ' +
+          '<p class="admin-text-small admin-text-muted" style="margin:0.35rem 0 0;">Product family #' + esc(String(r.product_family)) + ' · ' +
+          '<button type="button" class="btn btn-secondary btn-sm invoice-import-clear-family" data-id="' + r.id + '">Clear</button></p>';
+      } else if (offerEnrich && r.listing_set_id) {
+        nameCell +=
+          '<p class="admin-text-small admin-text-muted" style="margin:0.35rem 0 0;">Linked listing set (legacy) · ' +
           '<button type="button" class="btn btn-secondary btn-sm invoice-import-unlink-set" data-id="' + r.id + '">Unlink</button></p>';
       }
       const enrichCell = offerEnrich
@@ -835,7 +1132,7 @@
         ? '<span class="admin-text-muted">—</span>'
         : (readOnlyShop
           ? '£' + esc(pricePounds)
-          : '<input type="number" min="0" step="0.01" class="form-input invoice-import-price" data-id="' + r.id + '" value="' + esc(pricePounds) + '" style="width:5rem;">');
+          : '<input type="number" min="0" step="0.5" class="form-input invoice-import-price" data-id="' + r.id + '" value="' + esc(pricePounds) + '" style="width:5rem;">');
       const costPounds = r.unit_cost_pence != null ? (r.unit_cost_pence / 100).toFixed(2) : '';
       const costForeign = formatForeignMajor(rowForeignMinor(r));
       const costCell = isForeignInvoice()
@@ -868,8 +1165,14 @@
           '<span class="admin-text-small invoice-import-parent-badge">Bundle parent (not imported)</span>' +
           '<button type="button" class="btn btn-secondary btn-sm invoice-import-split-remove" data-id="' + r.id + '" style="margin-top:0.35rem;">Remove split lines</button>';
       }
-      const categoryCell = shop
+      const categoryCell = rowShowsCategoryPicker(r)
         ? '<div class="invoice-import-category-mount" data-row-id="' + r.id + '" style="min-width:11rem;"></div>'
+        : '<span class="admin-text-muted">—</span>';
+      const familyVal = r.product_family != null ? String(r.product_family) : '';
+      const familyCell = offerEnrich
+        ? (
+          '<input type="number" min="1" step="1" class="form-input invoice-import-product-family" data-id="' + r.id + '" value="' + esc(familyVal) + '" placeholder="#" title="Same number = one harmonised family enrich" style="width:3.5rem;">'
+        )
         : '<span class="admin-text-muted">—</span>';
       let notesText = r.notes.join('; ');
       if (r.copy_pending) notesText = notesText ? notesText + '; Enriching listing…' : 'Enriching listing…';
@@ -889,6 +1192,7 @@
         '<td style="padding:0.35rem;vertical-align:top;"><input type="number" min="1" class="form-input invoice-import-qty" data-id="' + r.id + '" value="' + esc(r.quantity) + '" style="width:4rem;"></td>' +
         '<td style="padding:0.35rem;vertical-align:top;">' + costCell + '</td>' +
         '<td style="padding:0.35rem;vertical-align:top;">' + priceCell + '</td>' +
+        '<td style="padding:0.35rem;vertical-align:top;text-align:center;">' + familyCell + '</td>' +
         '<td style="padding:0.35rem;vertical-align:top;">' + categoryCell + '</td>' +
         '<td style="padding:0.35rem;vertical-align:top;" class="admin-text-small">' + esc(notesText) + '</td>' +
         '</tr>' + splitPanelRowHtml(r)
@@ -902,7 +1206,7 @@
         esc(enrichSetPreviewLabel(buildListingSets(enrichTargets))) +
         '</p>' +
         '<p style="margin:0 0 0.75rem;">' +
-        '<button type="button" class="btn btn-secondary btn-sm" id="invoice-import-link-listing-set">Link selected as one set</button>' +
+        '<button type="button" class="btn btn-secondary btn-sm" id="invoice-import-assign-family">Assign next family # to enrich-selected lines</button>' +
         '</p>'
       )
       : '';
@@ -931,6 +1235,7 @@
       '<thead><tr style="text-align:left;border-bottom:2px solid rgb(var(--color-neutral-300));">' +
       '<th style="padding:0.35rem;">Inc</th><th style="padding:0.35rem;" title="Run listing enrichment on checked shop lines">Enrich</th><th style="padding:0.35rem;">Disposition</th><th style="padding:0.35rem;">Img</th><th style="padding:0.35rem;">Product</th>' +
       '<th style="padding:0.35rem;">Qty</th><th style="padding:0.35rem;">' + esc(costColumnLabel()) + '</th><th style="padding:0.35rem;">Sell</th>' +
+      '<th style="padding:0.35rem;" title="Same integer = one harmonised enrich batch (copy and images)">Family</th>' +
       '<th style="padding:0.35rem;">Category</th><th style="padding:0.35rem;">Notes</th>' +
       '</tr></thead><tbody>' + body + '</tbody></table></div>' +
       (blocker && included.length
@@ -950,6 +1255,7 @@
     mountCategoryPickers(host);
     hydrateSuggestedImageThumbs(host);
     updateSettlementFieldVisibility();
+    applyInvoiceImportTabOrder(host);
   }
 
   function rowById(id) {
@@ -991,13 +1297,22 @@
         }
         return;
       }
-      if (e.target.closest('#invoice-import-link-listing-set')) {
-        linkSelectedListingSet();
+      if (e.target.closest('#invoice-import-assign-family')) {
+        assignProductFamilyToSelected();
+        return;
+      }
+      const clearFamilyBtn = e.target.closest('.invoice-import-clear-family');
+      if (clearFamilyBtn) {
+        clearProductFamilyForRow(clearFamilyBtn.getAttribute('data-id'));
         return;
       }
       const unlinkBtn = e.target.closest('.invoice-import-unlink-set');
       if (unlinkBtn) {
-        unlinkListingSetForRow(unlinkBtn.getAttribute('data-id'));
+        const row = rowById(unlinkBtn.getAttribute('data-id'));
+        if (row) {
+          row.listing_set_id = null;
+          renderPreview();
+        }
         return;
       }
       const splitExpandBtn = e.target.closest('.invoice-import-split-expand');
@@ -1025,7 +1340,11 @@
       if (!id) return;
       const row = rowById(id);
       if (!row) return;
-      if (t.classList.contains('invoice-import-include')) row.include = t.checked;
+      if (t.classList.contains('invoice-import-include')) {
+        row.include = t.checked;
+        renderPreview();
+        return;
+      }
       if (t.classList.contains('invoice-import-enrich')) {
         row.enrich = t.checked;
         renderPreview();
@@ -1039,8 +1358,9 @@
           row.enrich = true;
         }
         syncEnrichFlagForRow(row);
-        if (row.disposition === 'split_parent' && parentHasChildren(row.id)) {
-          row.include = false;
+        if (row.disposition === 'split_parent') {
+          seedSplitDefaultPriceFromParent(row);
+          if (parentHasChildren(row.id)) row.include = false;
         }
         renderPreview();
         return;
@@ -1061,13 +1381,20 @@
         renderPreview();
         return;
       }
-      if (t.classList.contains('invoice-import-name')) row.name = t.value;
-      if (t.classList.contains('invoice-import-qty')) row.quantity = parseInt(t.value, 10) || 0;
+      if (t.classList.contains('invoice-import-name')) {
+        row.name = t.value;
+        return;
+      }
+      if (t.classList.contains('invoice-import-qty')) {
+        row.quantity = parseInt(t.value, 10) || 0;
+        return;
+      }
       if (t.classList.contains('invoice-import-cost')) {
         const p = parseFloat(t.value);
         row.cost_manual = true;
         row.unit_cost_pence = Number.isFinite(p) ? Math.round(p * 100) : null;
         row.unit_net = Number.isFinite(p) ? p : row.unit_net;
+        return;
       }
       if (t.classList.contains('invoice-import-cost-foreign')) {
         const p = parseFloat(t.value);
@@ -1075,21 +1402,66 @@
         row.unit_foreign_minor = Number.isFinite(p) ? Math.round(p * 100) : null;
         row.unit_cost_pence = null;
         row.unit_net = Number.isFinite(p) ? p : row.unit_net;
+        return;
       }
       if (t.classList.contains('invoice-import-price')) {
-        const p = parseFloat(t.value);
-        row.price_manual = true;
-        row.price_pence = Number.isFinite(p) ? Math.round(p * 100) : null;
+        const snapped = snapInvoicePriceGbp(t.value);
+        if (snapped != null) {
+          t.value = snapped.toFixed(2);
+          row.price_manual = true;
+          row.price_pence = Math.round(snapped * 100);
+        }
+        return;
       }
-      if (t.classList.contains('invoice-import-summary')) row.summary = t.value;
-      if (t.classList.contains('invoice-import-split-text')) row.split_text = t.value;
+      if (t.classList.contains('invoice-import-product-family')) {
+        const raw = String(t.value || '').trim();
+        row.product_family = raw ? parseProductFamily(raw) : null;
+        return;
+      }
+      if (t.classList.contains('invoice-import-summary')) {
+        row.summary = t.value;
+        return;
+      }
+      if (t.classList.contains('invoice-import-split-text')) {
+        row.split_text = t.value;
+        return;
+      }
       if (t.classList.contains('invoice-import-split-default-qty')) {
         row.split_default_qty = parseInt(t.value, 10) || 1;
+        return;
+      }
+      if (t.classList.contains('invoice-import-split-default-price')) {
+        const snapped = snapInvoicePriceGbp(t.value);
+        if (snapped != null) {
+          t.value = snapped.toFixed(2);
+          row.split_default_price_pence = Math.round(snapped * 100);
+        } else {
+          row.split_default_price_pence = null;
+        }
+        return;
       }
       if (t.classList.contains('invoice-import-split-child-disp')) {
         row.split_child_disposition = t.value;
+        return;
       }
-      renderPreview();
+    });
+
+    host.addEventListener('keydown', function (e) {
+      const t = e.target;
+      if (!t.classList || !t.classList.contains('invoice-import-price')) return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      const row = rowById(t.getAttribute('data-id'));
+      const base = snapInvoicePriceGbp(t.value);
+      const current = base != null ? base : 0;
+      const next = e.key === 'ArrowUp'
+        ? current + INVOICE_PRICE_STEP_GBP
+        : Math.max(0, current - INVOICE_PRICE_STEP_GBP);
+      t.value = next.toFixed(2);
+      if (row) {
+        row.price_manual = true;
+        row.price_pence = Math.round(next * 100);
+      }
     });
 
     host.addEventListener('input', function (e) {
@@ -1107,8 +1479,8 @@
         const row = rowById(id);
         if (!row) return;
         row.price_manual = true;
-        const p = parseFloat(t.value);
-        if (Number.isFinite(p)) row.price_pence = Math.round(p * 100);
+        const snapped = snapInvoicePriceGbp(t.value);
+        if (snapped != null) row.price_pence = Math.round(snapped * 100);
       }
       if (t.classList.contains('invoice-import-cost')) {
         const row = rowById(id);
@@ -1206,23 +1578,18 @@
       row.source_product_verified = data.product_verified === true;
     }
     const secs = data.duration_ms != null ? Math.round(data.duration_ms / 1000) : null;
-    const srcLabel =
-      data.copy_source === 'web_search'
-        ? 'web research'
-        : data.copy_source === 'family'
-          ? 'harmonised family set'
-          : 'chat fallback';
+    const srcLabel = 'web research';
     let note = 'Listing enriched (' + srcLabel + (secs != null ? ', ' + secs + 's' : '') + ')';
     if (data.image_url) {
-      note += '; suggested image pending review (not saved)';
+      note += '; suggested image from ' + imageSourceLabel(data.image_source, true) + ', pending review (not saved)';
     } else if (data.image_rejected) {
-      note += '; no suitable image (' + data.image_rejected + ')';
+      note += '; no image found (' + data.image_rejected + ')';
     }
     row.notes = [note];
     return { secs: secs, srcLabel: srcLabel };
   }
 
-  async function generateCopyForRowInternal(row, mistralKey, quiet, batchMeta) {
+  async function generateCopyForRowInternal(row, mistralKey, quiet, batchMeta, onSearchLimit) {
     if (!row || row.copy_pending) return false;
     row.copy_pending = true;
     renderPreview();
@@ -1238,21 +1605,22 @@
       if (!quiet) {
         setStatus('Enriching listing (web research can take 30–60 seconds)…', 'info');
       }
-      const data = await api('/admin/invoice-import/generate-copy', {
-        method: 'POST',
+      const data = await apiNdjson('/admin/invoice-import/generate-copy', {
+        timeoutMs: 4 * 60 * 1000,
         body: JSON.stringify({
           name: row.name,
           ean: row.ean || null,
           category: row.category || null,
           mistral_api_key: mistralKey
         })
-      });
+      }, function (message) { appendLog(message); });
       const meta = applyEnrichmentApiResult(row, data);
       logProgress('Enrichment API done ' + batchLabel + row.name, {
         ms: Date.now() - started,
         copy_source: data.copy_source,
-        web_search_ms: data.web_search_ms,
+        source_url: data.source_url || null,
         suggested_image: !!data.image_url,
+        image_source: data.image_source || null,
         image_rejected: data.image_rejected || null,
         product_verified: data.product_verified,
         saved_to_storage: false
@@ -1292,6 +1660,7 @@
       if (!quiet) {
         setStatus('Listing enrichment failed: ' + e.message, 'err');
       }
+      if (typeof onSearchLimit === 'function') onSearchLimit(e.message);
       appendLog('Enrichment failed: ' + row.name + ' — ' + e.message);
       return false;
     } finally {
@@ -1314,29 +1683,44 @@
     const sets = buildListingSets(targets);
     busy = true;
     renderPreview();
-    logProgress('Enrichment batch starting', { lines: targets.length, sets: sets.length });
-    appendLog('Enriching ' + targets.length + ' line(s) in ' + sets.length + ' listing set(s)…');
+    logProgress('Enrichment batch starting', {
+      lines: targets.length,
+      sets: sets.length,
+      plan: describeEnrichPlan(sets)
+    });
+    appendLog('Enriching ' + targets.length + ' line(s) in ' + sets.length + ' batch(es)…');
+    appendEnrichPlanLog(sets);
     const batchStarted = Date.now();
     let ok = 0;
+    let haltBatch = false;
+    function noteSearchLimit(message) {
+      if (haltBatch) return;
+      if (!/refused further web searches|web_search rate limit/i.test(String(message || ''))) return;
+      haltBatch = true;
+      appendLog('Stopped the rest of this batch. ' + message);
+    }
     try {
       for (let si = 0; si < sets.length; si++) {
+        if (haltBatch) break;
         const set = sets[si];
         if (set.mode === 'family') {
           setStatus(
             'Harmonised family set (' + (si + 1) + ' of ' + sets.length + '): ' + set.rows.length + ' lines…',
             'info'
           );
-          ok += await enrichFamilySetInternal(set, mistralKey, true);
+          ok += await enrichFamilySetInternal(set, mistralKey, true, noteSearchLimit);
         } else {
           const r = set.rows[0];
+          appendLog('Single-line enrich (not harmonised): ' + r.name);
           setStatus(
             'Enriching single (' + (si + 1) + ' of ' + sets.length + '): ' + r.name + '…',
             'info'
           );
+          logProgress('Single-line enrich started', { name: r.name, ean: r.ean || null, set: set.setId });
           const success = await generateCopyForRowInternal(r, mistralKey, true, {
             index: si + 1,
             total: sets.length
-          });
+          }, noteSearchLimit);
           if (success) ok++;
         }
       }
@@ -1408,8 +1792,13 @@
       const parentUnit = isForeignInvoice() ? rowForeignMinor(parent) : parent.unit_cost_pence;
       const unitCosts = allocateSplitUnitCosts(parentUnit, parent.quantity, qtys);
       const mult = multiplierValue();
+      const defaultSellPence =
+        parent.split_default_price_pence != null && parent.split_default_price_pence > 0
+          ? parent.split_default_price_pence
+          : null;
       const parentIndex = rows.findIndex(function (r) { return r.id === parent.id; });
-      const splitSetId = 'split-' + parent.id;
+      const bundleFamilyId = nextProductFamilyId();
+      const parentCategory = parent.category || '';
       const newChildren = [];
       childLines.forEach(function (line, i) {
         const ean = normalizeEan(line.ean);
@@ -1431,10 +1820,13 @@
           unit_net: unitNet,
           unit_cost_pence: isForeignInvoice() ? null : unitPence,
           unit_foreign_minor: isForeignInvoice() ? unitPence : null,
-          price_pence: retailPricePence(unitNet, mult),
-          price_manual: false,
+          price_pence:
+            defaultSellPence != null
+              ? defaultSellPence
+              : retailPricePence(unitNet, mult),
+          price_manual: defaultSellPence != null,
           cost_manual: true,
-          category: '',
+          category: parentCategory,
           summary: '',
           description: '',
           image_url: '',
@@ -1449,8 +1841,10 @@
           notes: ['Split from ' + parent.name],
           split_text: '',
           split_default_qty: 1,
+          split_default_price_pence: null,
           split_child_disposition: 'shop',
-          listing_set_id: splitSetId
+          listing_set_id: null,
+          product_family: bundleFamilyId
         };
         childRow.enrich = childDisp === 'shop';
         newChildren.push(childRow);
@@ -1461,7 +1855,7 @@
         rows.push.apply(rows, newChildren);
       }
       parent.include = false;
-      setStatus('Added ' + childLines.length + ' split line(s) for ' + parent.name + '.', 'ok');
+      setStatus('Added ' + childLines.length + ' split line(s) for ' + parent.name + ' (family #' + bundleFamilyId + ').', 'ok');
       renderPreview();
     } catch (e) {
       setStatus('Split failed: ' + e.message, 'err');

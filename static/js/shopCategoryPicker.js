@@ -3,6 +3,27 @@
  */
 (function (global) {
   const mounts = new WeakMap();
+  const recentCategoryLabels = [];
+
+  function recordRecentCategoryLabel(name) {
+    const d = categoryDisplay(name);
+    if (!d) return;
+    for (let i = recentCategoryLabels.length - 1; i >= 0; i--) {
+      if (categoryKey(recentCategoryLabels[i]) === categoryKey(d)) {
+        recentCategoryLabels.splice(i, 1);
+      }
+    }
+    recentCategoryLabels.unshift(d);
+    if (recentCategoryLabels.length > 3) recentCategoryLabels.length = 3;
+  }
+
+  function recentCategorySuggestions(selected, needle) {
+    return recentCategoryLabels.filter(function (c) {
+      if (selected.some(function (s) { return categoryKey(s) === categoryKey(c); })) return false;
+      if (needle && String(c).toLowerCase().indexOf(needle) === -1) return false;
+      return true;
+    });
+  }
 
   function escapeHtml(s) {
     if (global.utils && global.utils.escapeHtml) return global.utils.escapeHtml(s);
@@ -70,11 +91,22 @@
         return !needle || String(c).toLowerCase().indexOf(needle) !== -1;
       })
       .sort(function (a, b) { return String(a).localeCompare(String(b)); });
-    const exact = typed && matches.some(function (c) { return categoryKey(c) === categoryKey(typed); });
+    const recent = recentCategorySuggestions(selected, needle);
+    const recentKeys = new Set(recent.map(function (c) { return categoryKey(c); }));
+    const merged = [];
+    recent.forEach(function (c) {
+      if (!merged.some(function (m) { return categoryKey(m) === categoryKey(c); })) merged.push(c);
+    });
+    matches.forEach(function (c) {
+      if (recentKeys.has(categoryKey(c))) return;
+      if (!merged.some(function (m) { return categoryKey(m) === categoryKey(c); })) merged.push(c);
+    });
+    const exact = typed && merged.some(function (c) { return categoryKey(c) === categoryKey(typed); });
     const alreadySelected = typed && selected.some(function (s) { return categoryKey(s) === categoryKey(typed); });
     return {
       typed: typed,
-      matches: matches,
+      matches: merged,
+      recentKeys: recentKeys,
       showCreate: !!(typed && !exact && !alreadySelected)
     };
   }
@@ -104,7 +136,8 @@
     const data = suggestionItems(state.selected, inputEl.value, state.catalog);
     const rows = data.matches.map(function (name, idx) {
       const active = idx === state.suggestIndex ? ' is-active' : '';
-      return '<li><button type="button" class="admin-category-suggest-item' + active + '" data-name="' + encodeURIComponent(name) + '">' + escapeHtml(name) + '</button></li>';
+      const recentClass = data.recentKeys && data.recentKeys.has(categoryKey(name)) ? ' admin-category-suggest-recent' : '';
+      return '<li><button type="button" class="admin-category-suggest-item' + active + recentClass + '" data-name="' + encodeURIComponent(name) + '">' + escapeHtml(name) + '</button></li>';
     });
     if (data.showCreate) {
       const createIdx = data.matches.length;
@@ -131,6 +164,7 @@
     }
     if (state.selected.some(function (s) { return categoryKey(s) === categoryKey(name); })) return;
     state.selected.push(name);
+    recordRecentCategoryLabel(name);
     state.catalog.add(name);
     if (global.allCategories instanceof Set) global.allCategories.add(name);
     onChange(state.selected.slice());

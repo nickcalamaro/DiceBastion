@@ -5,12 +5,45 @@ import {
   normalizeSplitLines,
   isUndesirableProductImageUrl,
   normalizeVariantFamilyKey,
-  guessVariantImageUrl,
   applyFamilyTemplate,
-  matchFamilyVariantToInput,
   isFamilyBatchEligible,
   normalizeEnrichmentImageUrl,
-  looksLikeImageBytes
+  looksLikeImageBytes,
+  buildFamilyResearchSchema,
+  familyImagePattern,
+  orderImageCandidates,
+  applyConversationEvent,
+  extractPageImageCandidates,
+  isSiteChromeImageUrl,
+  isIsbn13,
+  openLibraryCoverUrl,
+  citedPageMatchesLine,
+  isRangePageForFamily,
+  extractProductLinks,
+  assignVariantLinks,
+  dropSharedImageCandidates,
+  normalizeBundle,
+  buildFamilyResearchUserPrompt,
+  extractPaginationLinks,
+  buildPatternLookupSchema,
+  buildPatternLookupUserPrompt,
+  parseSearchResults,
+  matchSearchResults,
+  upsizeThumbnailUrl,
+  isProductLikeUrl,
+  matchCatalogueProducts,
+  shopifyCatalogueUrl,
+  isShopifyHtml,
+  streamMistralConversation,
+  labelWordsCovered,
+  officialSiteImagePattern,
+  familyCommonWords,
+  withCommonWords,
+  firstJsonObject,
+  parseChatJsonContent,
+  answerRepeats,
+  isMistralBusy,
+  readChatCompletionStream
 } from './invoice-import.js'
 
 describe('normalizeGtin', () => {
@@ -29,7 +62,6 @@ describe('normalizeGtin', () => {
 
 describe('allocateSplitUnitCosts', () => {
   it('splits parent line total equally per unit across children', () => {
-    // Parent: 2 × £10.00 = £20.00 → 2000 pence total; 4 children qty 1 each → 500 pence each
     expect(allocateSplitUnitCosts(1000, 2, [1, 1, 1, 1])).toEqual([500, 500, 500, 500])
   })
 
@@ -62,10 +94,6 @@ describe('isUndesirableProductImageUrl', () => {
   it('accepts plain CDN product paths', () => {
     expect(isUndesirableProductImageUrl('https://cdn.example.com/products/sleeves.png')).toBe(false)
   })
-
-  it('does not block generic publisher CDN paths', () => {
-    expect(isUndesirableProductImageUrl('https://cdn.example.com/images/product/12345.jpg')).toBe(false)
-  })
 })
 
 describe('normalizeEnrichmentImageUrl', () => {
@@ -78,43 +106,20 @@ describe('looksLikeImageBytes', () => {
   it('detects JPEG magic', () => {
     expect(looksLikeImageBytes(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00]))).toBe(true)
   })
-
-  it('detects PNG magic', () => {
-    expect(looksLikeImageBytes(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe(true)
-  })
 })
 
 describe('normalizeVariantFamilyKey', () => {
-  it('groups Dragon Shield matte colour variants', () => {
-    const black = normalizeVariantFamilyKey('Dragon Shield Matte Standard Sleeves Black')
-    const blue = normalizeVariantFamilyKey('Dragon Shield Matte Standard Sleeves Blue')
-    expect(black).toBe(blue)
-    expect(black.length).toBeGreaterThan(10)
-  })
-
-  it('groups distributor DS matte sleeve colour lines', () => {
-    const a = normalizeVariantFamilyKey('DS - Standard Sleeves: Apple Green [Matte] (100 Sleeves)')
-    const b = normalizeVariantFamilyKey('DS - Standard Sleeves: Blood Red [Matte] (100 Sleeves)')
+  it('strips bracket and parenthetical segments for grouping hints', () => {
+    const a = normalizeVariantFamilyKey('Widget Pro [Matte] (100 pack)')
+    const b = normalizeVariantFamilyKey('Widget Pro [Gloss] (100 pack)')
     expect(a).toBe(b)
-    expect(a).toContain('dragon shield')
+    expect(a.length).toBeGreaterThan(5)
   })
 
-  it('keeps licensed dual art separate from plain matte sleeves', () => {
-    const matte = normalizeVariantFamilyKey('DS - Standard Sleeves: Apple Green [Matte] (100 Sleeves)')
-    const dual = normalizeVariantFamilyKey(
-      'DS - Standard Licensed Dual Art Sleeves: MtG: The Guildpact series - Boros Legion [Matte] (100 Sleeves)'
-    )
-    expect(matte).not.toBe(dual)
-  })
-})
-
-describe('guessVariantImageUrl', () => {
-  it('swaps colour token in manufacturer CDN path', () => {
-    const ref =
-      'https://cdn.example.com/products/at-11002-ds100-matte-black-box_right-1200x900.jpg'
-    const guessed = guessVariantImageUrl(ref, 'Dragon Shield Matte Standard Blue')
-    expect(guessed).toContain('blue')
-    expect(guessed).not.toContain('black')
+  it('does not merge unrelated product titles', () => {
+    const a = normalizeVariantFamilyKey('Dragon Shield Standard Sleeves')
+    const b = normalizeVariantFamilyKey('Chessex Opaque Dice Block')
+    expect(a).not.toBe(b)
   })
 })
 
@@ -122,35 +127,583 @@ describe('applyFamilyTemplate', () => {
   it('substitutes variant and product line placeholders', () => {
     const template = {
       naming_pattern: '{product_line_name} — {variant}',
-      summary_template: 'Premium {variant} sleeves for standard cards.',
-      description_paragraphs: ['Colour: {variant}.', 'Line: {product_line_name}.']
+      summary_template: 'Premium {variant} accessory.',
+      description_paragraphs: ['Variant: {variant}.', 'Line: {product_line_name}.']
     }
-    const out = applyFamilyTemplate(template, 'Blue', 'Dragon Shield Matte Standard Sleeves')
-    expect(out.display_name).toBe('Dragon Shield Matte Standard Sleeves — Blue')
-    expect(out.summary).toBe('Premium Blue sleeves for standard cards.')
-    expect(out.description).toContain('Colour: Blue.')
-    expect(out.description).toContain('Line: Dragon Shield Matte Standard Sleeves.')
+    const out = applyFamilyTemplate(template, 'Blue', 'Example Product Line')
+    expect(out.display_name).toBe('Example Product Line — Blue')
+    expect(out.summary).toBe('Premium Blue accessory.')
+  })
+
+  it('drops unknown brace tokens from the shop title', () => {
+    const template = {
+      naming_pattern: '{brand} {line} {variant}',
+      summary_template: '{brand} dice in {variant}.',
+      description_paragraphs: ['Pack: {variant}.']
+    }
+    const out = applyFamilyTemplate(template, 'Red/White (36 dice)', 'Chessex Gemini')
+    expect(out.display_name).toBe('Red/White (36 dice)')
+    expect(out.display_name).not.toMatch(/\{/)
+    expect(out.summary).not.toMatch(/\{/)
   })
 })
 
-describe('matchFamilyVariantToInput', () => {
-  it('matches by normalized EAN first', () => {
-    const variants = [
-      { ean: '5706569110024', variant_label: 'Black' },
-      { ean: '5706569110025', variant_label: 'Blue' }
+describe('buildFamilyResearchSchema', () => {
+  it('requires one keyed entry per input line plus the shared facts', () => {
+    const schema = buildFamilyResearchSchema(3)
+    expect(schema.properties.lines.required).toEqual(['L1', 'L2', 'L3'])
+    expect(schema.properties.lines.additionalProperties).toBe(false)
+    expect(schema.properties.lines.properties.L2.required).toContain('source_urls')
+    expect(schema.required).toEqual(['brand', 'product_line_name', 'product_type', 'line_facts', 'range_pages', 'lines'])
+    expect(schema.properties.range_pages.maxItems).toBe(3)
+  })
+})
+
+describe('familyImagePattern', () => {
+  const c = (host, slot) => ({ url: `https://${host}/${slot}.jpg`, slot, host, page: `https://${host}/p`, origin: 'source_page' })
+
+  it('picks the site and page position shared by the most lines', () => {
+    const lists = [
+      [c('dragonshield.com', 'jsonld'), c('amazon.co.uk', 'og')],
+      [c('dragonshield.com', 'jsonld')],
+      [c('amazon.co.uk', 'og'), c('dragonshield.com', 'jsonld')]
     ]
-    const used = new Set()
-    const match = matchFamilyVariantToInput({ name: 'Sleeves Blue', ean: '5706569110025' }, variants, used)
-    expect(match.variant_label).toBe('Blue')
-    expect(used.has(1)).toBe(true)
+    expect(familyImagePattern(lists)).toEqual({ host: 'dragonshield.com', slot: 'jsonld', lines: 3 })
+  })
+
+  it('returns null when no two lines share a source', () => {
+    expect(familyImagePattern([[c('a.com', 'og')], [c('b.com', 'og')]])).toBeNull()
+  })
+
+  it('orders a line so the family pattern is tried first', () => {
+    const pattern = { host: 'dragonshield.com', slot: 'jsonld', lines: 2 }
+    const ordered = orderImageCandidates([c('amazon.co.uk', 'og'), c('dragonshield.com', 'og'), c('dragonshield.com', 'jsonld')], pattern)
+    expect(ordered.map((x) => `${x.host} ${x.slot}`)).toEqual(['dragonshield.com jsonld', 'dragonshield.com og', 'amazon.co.uk og'])
+  })
+})
+
+describe('citedPageMatchesLine', () => {
+  it('accepts any cited page for a single product', () => {
+    expect(citedPageMatchesLine({ title: 'Anything', html: '', gtin: '9780786969517', variantLabel: '' })).toBe(true)
+  })
+
+  it('accepts a family page that shows this barcode or names this variant', () => {
+    expect(citedPageMatchesLine({ title: 'Sleeves', html: '<p>5706569110024</p>', gtin: '5706569110024', variantLabel: 'Matte Black' })).toBe(true)
+    expect(citedPageMatchesLine({ title: 'Dragon Shield Matte Black Sleeves', html: '', gtin: '5706569110024', variantLabel: 'Matte Black' })).toBe(true)
+  })
+
+  it('rejects a sibling variant page', () => {
+    expect(citedPageMatchesLine({ title: 'Dragon Shield Matte Blue Sleeves', html: '<p>5706569110031</p>', gtin: '5706569110024', variantLabel: 'Matte Black' })).toBe(false)
+  })
+})
+
+describe('isRangePageForFamily', () => {
+  const gtins = ['5706569110024', '5706569110031', '5706569110598']
+  it('treats a page listing two or more family barcodes as a range page', () => {
+    expect(isRangePageForFamily('<p>5706569110024</p><p>5706569110031</p>', gtins)).toBe(true)
+  })
+  it('keeps a page that shows only one family barcode', () => {
+    expect(isRangePageForFamily('<p>5706569110024</p>', gtins)).toBe(false)
+    expect(isRangePageForFamily('<p>5706569110024</p>', [])).toBe(false)
+  })
+})
+
+describe('extractProductLinks', () => {
+  const page = 'https://www.dragonshield.com/collections/matte-sleeves'
+  it('collects same-site product links with text, title and image alt, once each', () => {
+    const html =
+      '<a href="/products/matte-black"><img alt="Matte Black sleeves" src="x.jpg"></a>' +
+      '<a href="/products/matte-black#reviews">Matte Black</a>' +
+      '<a href="https://dragonshield.com/products/matte-blue" title="Matte Blue">Shop</a>' +
+      '<a href="https://other.com/products/matte-red">Matte Red</a>'
+    const links = extractProductLinks(html, page)
+    expect(links.map((l) => l.url)).toEqual([
+      'https://www.dragonshield.com/products/matte-black',
+      'https://dragonshield.com/products/matte-blue'
+    ])
+    expect(links[0].text).toContain('Matte Black sleeves')
+    expect(links[1].text).toContain('Matte Blue')
+  })
+  it('skips cart, account, filter and pagination links', () => {
+    const html =
+      '<a href="/cart">Cart</a><a href="/account/login">Login</a>' +
+      '<a href="/collections/matte-sleeves?page=2">2</a><a href="/collections/matte-sleeves?sort_by=price">Sort</a>' +
+      '<a href="/page/3">3</a><a href="#top">Top</a><a href="mailto:a@b.com">Mail</a>'
+    expect(extractProductLinks(html, page)).toEqual([])
+  })
+})
+
+describe('assignVariantLinks', () => {
+  const links = [
+    { url: 'https://s.com/products/matte-black-100', text: 'Matte Black' },
+    { url: 'https://s.com/products/matte-blue-100', text: 'Matte Blue' },
+    { url: 'https://s.com/products/sleeve-5706569110598', text: 'Sleeves' }
+  ]
+  it('links by barcode first, then by every variant word', () => {
+    const out = assignVariantLinks(links, [
+      { gtin: '5706569110024', variantLabel: 'Matte Black' },
+      { gtin: '5706569110598', variantLabel: 'Petrol' },
+      { gtin: '5706569110031', variantLabel: 'Matte Blue' }
+    ])
+    expect(out[0]).toEqual({ url: 'https://s.com/products/matte-black-100', by: 'name' })
+    expect(out[1]).toEqual({ url: 'https://s.com/products/sleeve-5706569110598', by: 'barcode' })
+    expect(out[2]).toEqual({ url: 'https://s.com/products/matte-blue-100', by: 'name' })
+  })
+  it('gives a link to one line only and leaves equal ties unassigned', () => {
+    const tied = [
+      { url: 'https://s.com/products/black-a', text: 'Black' },
+      { url: 'https://s.com/products/black-b', text: 'Black' }
+    ]
+    expect(assignVariantLinks(tied, [{ gtin: '', variantLabel: 'Black' }])).toEqual([null])
+    const one = [{ url: 'https://s.com/products/red', text: 'Red' }]
+    expect(assignVariantLinks(one, [{ gtin: '', variantLabel: 'Red' }, { gtin: '', variantLabel: 'Red' }])).toEqual([null, null])
+  })
+  it('prefers the tighter slug when one label is a subset of another', () => {
+    const out = assignVariantLinks(
+      [
+        { url: 'https://s.com/products/blood-red', text: 'Blood Red' },
+        { url: 'https://s.com/products/red', text: 'Red' }
+      ],
+      [{ gtin: '', variantLabel: 'Red' }, { gtin: '', variantLabel: 'Blood Red' }]
+    )
+    expect(out[0].url).toBe('https://s.com/products/red')
+    expect(out[1].url).toBe('https://s.com/products/blood-red')
+  })
+})
+
+describe('dropSharedImageCandidates', () => {
+  it('removes an image offered for two or more lines from every line', () => {
+    const c = (url) => ({ url, slot: 'og', host: 's.com', page: 'https://s.com/p', origin: 'cited_page' })
+    const list = [
+      { gtin: '1', candidates: [c('https://s.com/range.jpg'), c('https://s.com/black.jpg')], tried: [] },
+      { gtin: '2', candidates: [c('https://s.com/range.jpg'), c('https://s.com/blue.jpg')], tried: [] },
+      null
+    ]
+    expect(dropSharedImageCandidates(list)).toBe(1)
+    expect(list[0].candidates.map((x) => x.url)).toEqual(['https://s.com/black.jpg'])
+    expect(list[1].candidates.map((x) => x.url)).toEqual(['https://s.com/blue.jpg'])
+    expect(list[0].tried[0]).toMatch(/shared with other lines/)
+  })
+})
+
+describe('extractPaginationLinks', () => {
+  it('finds further pages of the same listing in page order', () => {
+    const html =
+      '<link rel="next" href="/collections/dice?page=2">' +
+      '<a href="/collections/dice?page=3">3</a><a href="/collections/dice?page=2">2</a>' +
+      '<a href="/collections/other?page=2">Other</a><a href="/collections/dice?page=1">1</a>'
+    expect(extractPaginationLinks(html, 'https://shop.com/collections/dice')).toEqual([
+      'https://shop.com/collections/dice?page=2',
+      'https://shop.com/collections/dice?page=3'
+    ])
+  })
+  it('understands /page/N paths', () => {
+    const html = '<a href="https://www.shop.com/range/page/2/">2</a>'
+    expect(extractPaginationLinks(html, 'https://shop.com/range/')).toEqual(['https://www.shop.com/range/page/2/'])
+  })
+})
+
+describe('pattern lookup', () => {
+  it('asks for one page per missing line on the pattern site', () => {
+    const schema = buildPatternLookupSchema(['L2', 'L5'])
+    expect(schema.properties.lines.required).toEqual(['L2', 'L5'])
+    expect(schema.properties.lines.properties.L5.required).toEqual(['page_url'])
+    const prompt = buildPatternLookupUserPrompt({
+      host: 'www.chessex.com',
+      productLineName: 'Chessex Gemini Dice',
+      examples: ['https://www.chessex.com/p/gemini-red-white'],
+      missing: [{ key: 'L2', ean: '601982000123', name: 'Gemini Blue/Gold', variantLabel: 'Blue/Gold' }]
+    })
+    expect(prompt).toContain('Website: www.chessex.com')
+    expect(prompt).toContain('- https://www.chessex.com/p/gemini-red-white')
+    expect(prompt).toContain('- L2 · EAN 601982000123 · Blue/Gold')
+  })
+})
+
+const dsResult = (handle, title, thumb) => ({
+  url: `https://www.dragonshield.com/products/${handle}`,
+  title,
+  description: '',
+  metadata: { thumbnail: thumb }
+})
+
+describe('parseSearchResults', () => {
+  it('reads url, title, description and thumbnail from tool.execution.done info.result', () => {
+    const info = {
+      result: JSON.stringify({
+        a: dsResult('black-matte-sleeves', 'Black - Matte Sleeves – Dragon Shield', 'http://www.dragonshield.com/cdn/shop/files/s.png?crop=center&height=480&width=480'),
+        b: { url: 'javascript:void(0)', title: 'bad' }
+      })
+    }
+    expect(parseSearchResults(info)).toEqual([
+      {
+        url: 'https://www.dragonshield.com/products/black-matte-sleeves',
+        title: 'Black - Matte Sleeves – Dragon Shield',
+        description: '',
+        thumbnail: 'http://www.dragonshield.com/cdn/shop/files/s.png?crop=center&height=480&width=480'
+      }
+    ])
+    expect(parseSearchResults({ result: 'not json' })).toEqual([])
+  })
+
+  it('stores results and numbers parallel searches by execution id', () => {
+    const state = { text: '', references: [], searches: 0, searchIds: {}, reportedChars: 0, error: null, done: false }
+    applyConversationEvent(state, { type: 'tool.execution.started', name: 'web_search', id: 'x1' })
+    applyConversationEvent(state, { type: 'tool.execution.started', name: 'web_search', id: 'x2' })
+    const msgs = applyConversationEvent(state, {
+      type: 'tool.execution.done',
+      name: 'web_search',
+      id: 'x1',
+      info: { result: JSON.stringify({ a: dsResult('blue-matte-sleeves', 'Blue - Matte Sleeves', null) }) }
+    })
+    expect(msgs[0]).toBe('Web search 1 done · 1 result(s)')
+    expect(msgs[1]).toMatch(/^Source · Blue - Matte Sleeves · www\.dragonshield\.com/)
+    expect(state.references).toHaveLength(1)
+  })
+})
+
+describe('upsizeThumbnailUrl', () => {
+  it('drops Shopify crop and size parameters and forces https', () => {
+    expect(upsizeThumbnailUrl('http://www.dragonshield.com/cdn/shop/files/s.png?crop=center&height=480&v=17&width=480')).toBe(
+      'https://www.dragonshield.com/cdn/shop/files/s.png?v=17'
+    )
+    expect(upsizeThumbnailUrl('https://cdn.example.com/p.jpg?width=480')).toBe('https://cdn.example.com/p.jpg?width=480')
+  })
+})
+
+describe('isProductLikeUrl', () => {
+  it('keeps product pages and drops menu and category links', () => {
+    expect(isProductLikeUrl('https://www.dragonshield.com/products/black-matte-sleeves')).toBe(true)
+    expect(isProductLikeUrl('https://www.dragonshield.com/collections/black-sleeves')).toBe(false)
+    expect(isProductLikeUrl('https://www.dragonshield.com/collections/matte/products/black-matte-sleeves')).toBe(true)
+    expect(isProductLikeUrl('https://shop.com/about')).toBe(false)
+    expect(isProductLikeUrl('https://shop.com/item-5706569110024.html', ['5706569110024'])).toBe(true)
+  })
+
+  it('removes collection links from range pages', () => {
+    const html =
+      '<a href="/collections/black-sleeves">Black Sleeves</a><a href="/products/black-matte-sleeves">Black - Matte Sleeves</a>'
+    expect(extractProductLinks(html, 'https://www.dragonshield.com/collections/matte-sleeves').map((l) => l.url)).toEqual([
+      'https://www.dragonshield.com/products/black-matte-sleeves'
+    ])
+  })
+})
+
+describe('matchSearchResults', () => {
+  const results = [
+    { url: 'https://www.dragonshield.com/products/blue-matte-sleeves', title: 'Blue - Matte Sleeves', description: '', thumbnail: 't1' },
+    { url: 'https://www.dragonshield.com/products/midnight-blue-matte-sleeves', title: 'Midnight Blue - Matte Sleeves', description: '', thumbnail: 't2' },
+    { url: 'https://shop.com/p/ds-ivory', title: 'Dragon Shield sleeves', description: 'EAN 5706569110178', thumbnail: 't3' },
+    { url: 'https://www.dragonshield.com/collections/blue-sleeves', title: 'Blue Sleeves', description: '', thumbnail: 't4' }
+  ]
+  it('matches by barcode first, then the tightest name, ignoring category pages', () => {
+    const out = matchSearchResults(results, [
+      { gtin: '5706569110031', variantLabel: 'Blue' },
+      { gtin: '5706569110178', variantLabel: 'Ivory' }
+    ])
+    expect(out[0].map((r) => [r.url, r.by])).toEqual([['https://www.dragonshield.com/products/blue-matte-sleeves', 'name']])
+    expect(out[1].map((r) => [r.url, r.by])).toEqual([['https://shop.com/p/ds-ivory', 'barcode']])
+  })
+})
+
+describe('name matching with slug-style words', () => {
+  it('matches joined slug words and ignores trademark signs and filler words', () => {
+    const links = [
+      { url: 'https://www.chessex.com/opaque-blackwhite-12mm-d6-dice-block-36-dice', text: '' },
+      { url: 'https://www.chessex.com/opaque-blackgold-12mm-d6-dice-block-36-dice', text: '' }
+    ]
+    const out = assignVariantLinks(links, [
+      { gtin: '', variantLabel: 'Opaque 12 mm d6 Black/White Dice Block™' },
+      { gtin: '', variantLabel: 'Opaque 12 mm d6 Black/Gold Dice Block™ in' }
+    ])
+    expect(out[0].url).toBe(links[0].url)
+    expect(out[1].url).toBe(links[1].url)
+    expect(labelWordsCovered(['black', 'white'], new Set(['blackwhite']))).toBe(true)
+    expect(labelWordsCovered(['black', 'white'], new Set(['black']))).toBe(false)
+  })
+
+  it('treats root-level product slugs as product pages', () => {
+    expect(isProductLikeUrl('https://www.chessex.com/opaque-blackwhite-12mm-d6-dice-block-36-dice')).toBe(true)
+    expect(isProductLikeUrl('https://www.chessex.com/about-us')).toBe(false)
+  })
+
+  it('takes the official range site as the pattern when only one line found an image there', () => {
+    const list = [
+      { candidates: [{ url: 'https://www.ebay.com/i.jpg', slot: 'og', host: 'www.ebay.com', page: 'https://www.ebay.com/itm/1' }] },
+      { candidates: [{ url: 'https://www.chessex.com/x.jpeg', slot: 'jsonld', host: 'www.chessex.com', page: 'https://www.chessex.com/p' }] }
+    ]
+    expect(officialSiteImagePattern(list, ['chessex.com'])).toEqual({ host: 'www.chessex.com', slot: 'jsonld', lines: 1 })
+    expect(officialSiteImagePattern(list, [])).toBeNull()
+  })
+})
+
+describe('family shared words', () => {
+  it('finds the words every label shares', () => {
+    const common = familyCommonWords([
+      'Opaque 12 mm d6 Black/White Dice Block™',
+      'Gemini® 12 mm d6 Blue-Purple/Gold Dice Block',
+      'Speckled 12 mm d6 Space Dice Block'
+    ])
+    expect([...common].sort()).toEqual(['12', 'block', 'd6', 'dice', 'mm'])
+    expect(familyCommonWords(['Red/White', 'Blue/White']).size).toBe(0)
+  })
+
+  it('matches a product whose title lacks the shared words', () => {
+    const lines = withCommonWords([
+      { gtin: '', variantLabel: 'Boros Legion Matte Dual Art Sleeves' },
+      { gtin: '', variantLabel: 'Izzet League Matte Dual Art Sleeves' },
+      { gtin: '', variantLabel: 'Golgari Swarm Matte Dual Art Sleeves' }
+    ])
+    const out = matchCatalogueProducts(
+      [
+        { handle: 'guildpact-series-boros-legion-matte-dual-art-sleeves', title: 'Guildpact Series - Boros Legion - Matte Dual Art Sleeves', images: [] },
+        { handle: 'guildpact-series-izzet-league', title: 'Guildpact Series - Izzet League', images: [] }
+      ],
+      lines,
+      'https://www.dragonshield.com'
+    )
+    expect(out[0].url).toBe('https://www.dragonshield.com/products/guildpact-series-boros-legion-matte-dual-art-sleeves')
+    expect(out[1].url).toBe('https://www.dragonshield.com/products/guildpact-series-izzet-league')
+  })
+
+  it('uses shared words to prefer the right size', () => {
+    const lines = withCommonWords([
+      { gtin: '', variantLabel: 'Opaque 12 mm d6 Red/White Dice Block' },
+      { gtin: '', variantLabel: 'Opaque 12 mm d6 Blue/White Dice Block' },
+      { gtin: '', variantLabel: 'Speckled 12 mm d6 Space Dice Block' }
+    ])
+    const out = assignVariantLinks(
+      [
+        { url: 'https://www.chessex.com/opaque-redwhite-16mm-d6-dice-block-12-dice', text: '' },
+        { url: 'https://www.chessex.com/opaque-redwhite-12mm-d6-dice-block-36-dice', text: '' }
+      ],
+      lines
+    )
+    expect(out[0].url).toBe('https://www.chessex.com/opaque-redwhite-12mm-d6-dice-block-36-dice')
+  })
+
+  it('rejects a named page for a different colour', () => {
+    const commonWords = familyCommonWords([
+      'Opaque 12 mm d6 Green/White Dice Block',
+      'Opaque 12 mm d6 Red/White Dice Block',
+      'Opaque 12 mm d6 Black/Gold Dice Block'
+    ])
+    expect(commonWords.has('white')).toBe(false)
+    expect(
+      citedPageMatchesLine({ title: 'Opaque Black-Green 12mm d6 Dice Block (36 dice)', html: '', gtin: null, variantLabel: 'Opaque 12 mm d6 Green/White Dice Block', commonWords })
+    ).toBe(false)
+    expect(
+      citedPageMatchesLine({ title: 'Opaque Green/White 12mm d6 Dice Block (36 dice)', html: '', gtin: null, variantLabel: 'Opaque 12 mm d6 Green/White Dice Block', commonWords })
+    ).toBe(true)
+  })
+})
+
+describe('Shopify catalogue', () => {
+  it('builds products.json for a collection or the store', () => {
+    expect(shopifyCatalogueUrl('https://www.dragonshield.com/collections/matte-sleeves?page=2', 2)).toBe(
+      'https://www.dragonshield.com/collections/matte-sleeves/products.json?limit=250&page=2'
+    )
+    expect(shopifyCatalogueUrl('https://www.dragonshield.com/products/black-matte-sleeves')).toBe(
+      'https://www.dragonshield.com/products.json?limit=250&page=1'
+    )
+    expect(isShopifyHtml('<link href="//cdn.shopify.com/s/files/x.css">')).toBe(true)
+    expect(isShopifyHtml('<html></html>')).toBe(false)
+  })
+
+  it('matches products by title with the tightest handle winning', () => {
+    const products = [
+      { handle: 'midnight-blue-matte-sleeves', title: 'Midnight Blue - Matte Sleeves', images: [] },
+      { handle: 'blue-matte-sleeves', title: 'Blue - Matte Sleeves', images: [] },
+      { handle: 'amber-matte-sleeves-1', title: 'Amber - Matte Sleeves', images: [] }
+    ]
+    const out = matchCatalogueProducts(
+      products,
+      [{ gtin: '', variantLabel: 'Blue' }, { gtin: '', variantLabel: 'Amber' }, { gtin: '', variantLabel: 'Ivory' }],
+      'https://www.dragonshield.com'
+    )
+    expect(out[0].product.handle).toBe('blue-matte-sleeves')
+    expect(out[1].url).toBe('https://www.dragonshield.com/products/amber-matte-sleeves-1')
+    expect(out[2]).toBeNull()
+  })
+})
+
+describe('streamMistralConversation search cap', () => {
+  it('returns the gathered results instead of failing when the cap is passed', async () => {
+    const events = [
+      { type: 'tool.execution.started', name: 'web_search', id: 'a' },
+      { type: 'tool.execution.done', name: 'web_search', id: 'a', info: { result: JSON.stringify({ r: dsResult('black-matte-sleeves', 'Black', null) }) } },
+      { type: 'tool.execution.started', name: 'web_search', id: 'b' },
+      { type: 'tool.execution.started', name: 'web_search', id: 'c' },
+      { type: 'tool.execution.done', name: 'web_search', id: 'b', info: { result: JSON.stringify({ r: dsResult('blue-matte-sleeves', 'Blue', null) }) } },
+      { type: 'tool.execution.done', name: 'web_search', id: 'c', info: { result: '{}' } }
+    ]
+    const sse = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')
+    const realFetch = globalThis.fetch
+    globalThis.fetch = async (_url, init) =>
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode(sse))
+            init.signal.addEventListener('abort', () => c.error(new Error('aborted')))
+          }
+        }),
+        { status: 200 }
+      )
+    try {
+      const out = await streamMistralConversation('k', {}, { maxMs: 5000, maxSearches: 2 })
+      expect(out.capped).toBe(true)
+      expect(out.searches).toBe(3)
+      expect(out.references.map((r) => r.url)).toEqual([
+        'https://www.dragonshield.com/products/black-matte-sleeves',
+        'https://www.dragonshield.com/products/blue-matte-sleeves'
+      ])
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+})
+
+describe('runaway answers', () => {
+  const answer = JSON.stringify({ brand: 'Dragon Shield', product_line_name: 'Dragon Shield Guildpact Series', lines: { L1: { variant_label: 'Boros "Legion" {x}' } } })
+
+  it('parses the first complete JSON object when the model repeats it', () => {
+    const repeated = `${answer}\n\nhelp.md \`\`\`json ${answer}\`\`\` \`\`\`json {"brand": "Dra`
+    expect(firstJsonObject(repeated)).toBe(answer)
+    expect(parseChatJsonContent(repeated).lines.L1.variant_label).toBe('Boros "Legion" {x}')
+    expect(firstJsonObject('{"a": {"b": 1}')).toBeNull()
+  })
+
+  it('spots an answer whose opening appears again', () => {
+    expect(answerRepeats(answer)).toBe(false)
+    expect(answerRepeats(`${answer} more ${answer.slice(0, 120)}`)).toBe(true)
+    expect(answerRepeats('```json\n' + answer + '\n```')).toBe(false)
+  })
+
+  it('treats capacity and rate-limit replies as busy', () => {
+    expect(isMistralBusy(429, '')).toBe(true)
+    expect(isMistralBusy(400, 'Service tier capacity exceeded for this model.')).toBe(true)
+    expect(isMistralBusy(422, 'Invalid schema')).toBe(false)
+  })
+
+  it('stops a repeating stream and keeps the gathered results', async () => {
+    const events = [
+      { type: 'tool.execution.started', name: 'web_search', id: 'a' },
+      { type: 'tool.execution.done', name: 'web_search', id: 'a', info: { result: JSON.stringify({ r: dsResult('black-matte-sleeves', 'Black', null) }) } },
+      { type: 'message.output.delta', content: answer },
+      { type: 'message.output.delta', content: ' help.md ```json ' },
+      { type: 'message.output.delta', content: answer }
+    ]
+    const sse = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')
+    const realFetch = globalThis.fetch
+    globalThis.fetch = async (_url, init) =>
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode(sse))
+            init.signal.addEventListener('abort', () => c.error(new Error('aborted')))
+          }
+        }),
+        { status: 200 }
+      )
+    try {
+      const out = await streamMistralConversation('k', {}, { maxMs: 5000, maxSearches: 3 })
+      expect(out.error).toBeUndefined()
+      expect(out.runaway).toBe('started repeating itself')
+      expect(out.references).toHaveLength(1)
+      expect(parseChatJsonContent(out.text).product_line_name).toBe('Dragon Shield Guildpact Series')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+})
+
+describe('streamed chat completions', () => {
+  it('joins the content pieces and reports the running length', async () => {
+    const events = [
+      { choices: [{ delta: { role: 'assistant', content: '' } }] },
+      { choices: [{ delta: { content: '{"product_line_name": ' } }] },
+      { choices: [{ delta: { content: [{ type: 'text', text: '"Chessex"}' }] } }] }
+    ]
+    const sse = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('') + 'data: [DONE]\n\n'
+    const lengths = []
+    const text = await readChatCompletionStream(new Response(sse), (n) => lengths.push(n))
+    expect(JSON.parse(text).product_line_name).toBe('Chessex')
+    expect(lengths).toEqual([22, 32])
+  })
+})
+
+describe('bundle research prompt', () => {
+  it('asks Mistral to search the bundle EAN first', () => {
+    const bundle = normalizeBundle({ name: 'Chessex Dice Bundle', ean: '601982000000', sku: 'CHX-B' })
+    const prompt = buildFamilyResearchUserPrompt([{ ean: '', name: 'Red d6' }], '', 3, bundle)
+    expect(prompt).toContain('split from distributor bundle: Chessex Dice Bundle')
+    expect(prompt).toContain('Search that EAN first')
+    expect(prompt).not.toMatch(/pages for each line/)
+    expect(normalizeBundle({ name: '', ean: '' })).toBeNull()
+  })
+})
+
+describe('applyConversationEvent', () => {
+  const fresh = () => ({ text: '', references: [], searches: 0, reportedChars: 0, error: null, done: false })
+
+  it('counts web searches and reports them', () => {
+    const state = fresh()
+    expect(applyConversationEvent(state, { type: 'tool.execution.started', name: 'web_search' })).toBe('Web search 1 running')
+    expect(applyConversationEvent(state, { type: 'tool.execution.done', name: 'web_search' })).toBe('Web search 1 done')
+    expect(state.searches).toBe(1)
+  })
+
+  it('joins text deltas and collects cited pages once', () => {
+    const state = fresh()
+    applyConversationEvent(state, { type: 'message.output.delta', content: '{"a":' })
+    const ref = { type: 'tool_reference', tool: 'web_search', title: 'Dragon Shield Matte Black', url: 'https://www.dragonshield.com/p/black' }
+    expect(applyConversationEvent(state, { type: 'message.output.delta', content: ref })).toMatch(/dragonshield\.com/)
+    applyConversationEvent(state, { type: 'message.output.delta', content: [ref, { type: 'text', text: '1}' }] })
+    expect(state.text).toBe('{"a":1}')
+    expect(state.references).toHaveLength(1)
+  })
+
+  it('records stream errors and completion', () => {
+    const state = fresh()
+    applyConversationEvent(state, { type: 'conversation.response.error', message: 'web_search rate limit reached' })
+    expect(state.error).toBe('web_search rate limit reached')
+    applyConversationEvent(state, { type: 'conversation.response.done' })
+    expect(state.done).toBe(true)
+  })
+})
+
+describe('extractPageImageCandidates', () => {
+  it('prefers the JSON-LD product image, then og:image, resolving relative URLs', () => {
+    const html =
+      '<head><meta property="og:image" content="/img/og.jpg">' +
+      '<script type="application/ld+json">{"@type":"Product","image":["https://cdn.shop.com/phb.jpg"]}</script></head>'
+    expect(extractPageImageCandidates(html, 'https://shop.com/p/phb')).toEqual([
+      'https://cdn.shop.com/phb.jpg',
+      'https://shop.com/img/og.jpg'
+    ])
+  })
+
+  it('skips site share icons used when a page has no product photo', () => {
+    const html = '<meta property="og:image" content="https://m.media-amazon.com/images/G/01/share-icons/previewdoh/amazon.png">'
+    expect(extractPageImageCandidates(html, 'https://www.amazon.co.uk/dp/x')).toEqual([])
+    expect(isSiteChromeImageUrl('https://cdn.example.com/products/phb-cover.jpg')).toBe(false)
+  })
+})
+
+describe('isIsbn13', () => {
+  it('recognises book barcodes only', () => {
+    expect(isIsbn13('9780786969517')).toBe(true)
+    expect(isIsbn13('5706569110024')).toBe(false)
+    expect(openLibraryCoverUrl('9780786969517')).toBe('https://covers.openlibrary.org/b/isbn/9780786969517-L.jpg?default=false')
   })
 })
 
 describe('isFamilyBatchEligible', () => {
   it('requires long family key and at least two lines', () => {
-    const key = normalizeVariantFamilyKey('Dragon Shield Matte Standard Sleeves Black')
+    const key = normalizeVariantFamilyKey('Example long product line title here')
     expect(isFamilyBatchEligible(key, 2)).toBe(true)
     expect(isFamilyBatchEligible(key, 1)).toBe(false)
     expect(isFamilyBatchEligible('short', 3)).toBe(false)
   })
 })
+

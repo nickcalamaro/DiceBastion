@@ -6,17 +6,17 @@ showDate: false
 ---
 
 <!-- Shared Utilities -->
-<script src="/js/utils.js?v=20261031b"></script>
+<script src="/js/utils.js?v=20261031c"></script>
 <script src="/js/modal.js"></script>
 <script src="/js/shopCategories.js"></script>
-<script src="/js/shopCategoryPicker.js?v=20261031a"></script>
+<script src="/js/shopCategoryPicker.js?v=20261031c"></script>
 <script src="/js/shopImportLinePayload.js?v=20261031l"></script>
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261031l"></script>
-<script src="/js/shopInvoiceImportAdmin.js?v=20261031m"></script>
+<script src="/js/shopInvoiceImportAdmin.js?v=20261031ak"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -185,6 +185,7 @@ showDate: false
 .admin-category-suggest-item:hover, .admin-category-suggest-item.is-active { background: rgb(var(--color-primary-50)); color: rgb(var(--color-primary-800)); }
 .dark .admin-category-suggest-item:hover, .dark .admin-category-suggest-item.is-active { background: rgba(var(--color-primary-900), 0.35); color: rgb(var(--color-primary-200)); }
 .admin-category-suggest-create { font-weight: 600; }
+.admin-category-suggest-recent { font-weight: 600; }
 #shop-category-select { max-width: 100%; }
 
 /* Item cards (extends forms.css .card) */
