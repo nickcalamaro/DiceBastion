@@ -10,6 +10,7 @@ import {
   normalizeEnrichmentImageUrl,
   looksLikeImageBytes,
   buildFamilyResearchSchema,
+  buildFamilyCopyUserPrompt,
   familyImagePattern,
   orderImageCandidates,
   applyConversationEvent,
@@ -209,8 +210,31 @@ describe('buildFamilyResearchSchema', () => {
     expect(schema.properties.lines.required).toEqual(['L1', 'L2', 'L3'])
     expect(schema.properties.lines.additionalProperties).toBe(false)
     expect(schema.properties.lines.properties.L2.required).toContain('source_urls')
-    expect(schema.required).toEqual(['brand', 'product_line_name', 'product_type', 'line_facts', 'range_pages', 'lines'])
+    expect(schema.required).toEqual(['brand', 'product_line_name', 'product_type', 'line_facts', 'source_descriptions', 'range_pages', 'lines'])
     expect(schema.properties.range_pages.maxItems).toBe(3)
+  })
+})
+
+describe('buildFamilyCopyUserPrompt', () => {
+  it('passes the source descriptions and descriptive search snippets to the copy step', () => {
+    const research = {
+      brand: 'Magic: The Gathering',
+      product_line_name: 'Magic: The Gathering Star Trek Play Booster Display',
+      product_type: 'booster display',
+      line_facts: ['30 Play Boosters'],
+      source_descriptions: ['wizards.com: A Universes Beyond set dedicated to the Star Trek universe, legal in all formats.'],
+      lines: { L1: { variant_label: 'English' }, L2: { variant_label: 'German' } }
+    }
+    const refs = [
+      { url: 'https://shop.example/st', title: 'Star Trek Display', description: 'Captains such as James T. Kirk, Spock and Jean-Luc Picard face the Borg Queen and Q.' },
+      { url: 'https://other.example/st', title: 'Short', description: 'Buy now' }
+    ]
+    const json = JSON.parse(buildFamilyCopyUserPrompt(research, [{}, {}], refs).split('\n').slice(2).join('\n'))
+    expect(json.source_descriptions[0]).toContain('Universes Beyond')
+    expect(json.search_result_snippets).toEqual([
+      'shop.example: Star Trek Display · Captains such as James T. Kirk, Spock and Jean-Luc Picard face the Borg Queen and Q.'
+    ])
+    expect(json.variant_labels).toEqual(['English', 'German'])
   })
 })
 

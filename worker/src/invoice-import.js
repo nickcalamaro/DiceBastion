@@ -103,14 +103,22 @@ const SHOP_CONTEXT =
 
 const COPY_TONE =
   'Tone of voice (Dice Bastion site guidelines):\n' +
-  '- Factual, friendly British English for hobbyists.\n' +
-  '- No emojis. No arrow characters. No decorative Unicode symbols.\n' +
-  '- Plain, descriptive wording — no hype or empty marketing filler.\n' +
+  '- Warm, friendly British English for hobbyists, written to make someone want the product.\n' +
+  '- Describe what the product is and what makes it appealing: its theme, setting, characters, art, contents, feel and how it is used, as the sources describe them.\n' +
+  '- Numbers and specs support the description; they do not lead it or replace it.\n' +
+  '- No emojis. No arrow characters. No decorative Unicode symbols. No invented superlatives or empty filler.\n' +
   '- Short card summary; longer modal description in clear paragraphs.\n\n'
+
+const SOURCE_COPY_GUIDE =
+  'Stay close to the source copy:\n' +
+  '- Base the summary and description on the product descriptions in the sources, the publisher or manufacturer first. Keep their descriptive detail and much of their wording, lightly edited into British English and this tone.\n' +
+  '- Leave out other shops\' details: prices, stock, delivery, store names, ratings and calls to action.\n' +
+  '- Do not add claims the sources do not make. When the sources say little, write less rather than filling the gap.\n\n'
 
 const PRODUCT_TYPE_GUIDE =
   'Product-type guidance:\n' +
   '- Card sleeves, deck boxes, binders, playmats: state size or fit when a source states it. A size word does not authorise naming games.\n' +
+  '- Name a game, card size or product as compatible only when a source says this exact product fits it. Sources often also list what a product does not fit, or compare sizes; never turn those into a fit claim. When unsure, name no games.\n' +
   '- TCG sealed product (boosters, decks, tins): use official set or product name from the EAN; do not invent card lists or pull rates.\n' +
   '- Board games and standalone card games: player count, play time, or age rating only when stated in publisher sources; never invent stats. Each title/edition is usually a distinct product — write copy for that EAN only.\n' +
   '- RPG books, adventure modules, dice sets, paints, terrain, miniatures: practical use for tabletop and RPG players; match format (hardcover, softcover, layer, scale) when sources specify.\n' +
@@ -123,9 +131,9 @@ const IDENTIFY_GUIDE =
 
 const SUMMARY_GUIDE =
   'Summary (SEO-aware, same field as manual product add; max 500 characters, aim 140–160, shown as the shop card blurb and Google meta description):\n' +
-  '- One clear sentence: product type, brand or line name, and one factual spec customers search for (size, player count, format) when known.\n' +
+  '- One or two sentences: the brand or line name and what makes the product appealing, drawn from the source description. Add a spec only when customers would choose by it (size, player count, format).\n' +
   '- Natural British English keywords; no hype, no keyword stuffing, no emojis.\n' +
-  '- Description: 2-4 short plain-text paragraphs for the product page body, no HTML.\n\n'
+  '- Description: 2-4 short plain-text paragraphs for the product page body, no HTML. Open with what the product is and offers, following the source description; practical specs come after.\n\n'
 
 const SOURCES_GUIDE =
   'Sources and images:\n' +
@@ -139,6 +147,7 @@ const LISTING_ENRICHMENT_INSTRUCTIONS =
   'You write shop listing copy. ' + SHOP_CONTEXT +
   COPY_TONE +
   'Always use web search before writing. ' + IDENTIFY_GUIDE +
+  SOURCE_COPY_GUIDE +
   PRODUCT_TYPE_GUIDE +
   'Return JSON with display_name (shop product title with expanded brand/name, max 200 characters), summary, and description.\n\n' +
   SUMMARY_GUIDE +
@@ -159,7 +168,10 @@ const FAMILY_RESEARCH_INSTRUCTIONS =
   '- brand: the brand name printed on the product (for example Dragon Shield, even when the publisher is Arcane Tinmen).\n' +
   '- product_line_name: the official line name including the brand, as sources name it.\n' +
   '- product_type: a short noun phrase (for example "card sleeves", "d6 dice block").\n' +
-  '- line_facts: every spec the sources state that applies to all lines: size, count, dimensions, material, finish, contents, compatibility. One short factual phrase each, copied from sources. Include every one you found; do not infer or generalise.\n' +
+  '- line_facts: every spec the sources state that applies to all lines: size, count, dimensions, material, finish, contents, compatibility. One short factual phrase each, copied from sources. Include every one you found; do not infer or generalise. ' +
+  'Keep fit and compatibility exactly as stated, including "does not fit" and size comparisons, and only when the source is about this product line.\n' +
+  '- source_descriptions: up to 6 passages from the product descriptions in your results that describe the whole line (what it is, theme, setting, characters, contents, what it is for, legality), the publisher or manufacturer first. ' +
+  'Copy the wording as it appears, each prefixed with its site, for example "wizards.com: ...". Leave out passages about only one variant and other shops\' prices, stock or delivery. Empty when none appeared.\n' +
   '- lines has one entry per input key (L1, L2, ...). Answer each key for the product listed under that key.\n' +
   '- variant_label: the part of the title that differs between lines (e.g. "Apple Green", or "Translucent Red/White" when finishes also differ).\n' +
   '- range_pages: up to 3 official manufacturer or publisher pages that list the variants of this line (a collection, category or range page), copied exactly from your results. Empty when none appeared.\n' +
@@ -173,8 +185,10 @@ const FAMILY_COPY_INSTRUCTIONS =
   'You write shop listing copy. ' + SHOP_CONTEXT +
   COPY_TONE +
   PRODUCT_TYPE_GUIDE +
-  'You receive research JSON for one product family: brand, product line, product type, line_facts, and the variant labels.\n' +
-  '- Write from that research only. Every spec you state must appear in line_facts. Use the line_facts customers care about so the copy is genuinely useful.\n' +
+  'You receive research JSON for one product family: brand, product line, product type, line_facts, source_descriptions, search result snippets, and the variant labels.\n' +
+  SOURCE_COPY_GUIDE +
+  '- source_descriptions are the source copy to follow. Search result snippets back them up; use a snippet only when it describes this product line, not a single variant or another product.\n' +
+  '- Write from that research only. Every spec you state must appear in line_facts or the source descriptions. Use the specs customers care about after the descriptive copy.\n' +
   '- All variants share the same summary_template and description_paragraphs. Use the {variant} placeholder where the variant label belongs.\n' +
   '- naming_pattern uses {product_line_name} and {variant} only (e.g. "{product_line_name} — {variant}").\n' +
   '- product_line_name: the research product_line_name, tidied for a shop title.\n\n' +
@@ -369,6 +383,7 @@ export function buildFamilyResearchSchema(lineCount) {
       product_line_name: { type: 'string' },
       product_type: { type: 'string' },
       line_facts: { type: 'array', items: { type: 'string' }, maxItems: 15 },
+      source_descriptions: { type: 'array', items: { type: 'string' }, maxItems: 6 },
       range_pages: { type: 'array', items: { type: 'string' }, maxItems: 3 },
       lines: {
         type: 'object',
@@ -377,7 +392,7 @@ export function buildFamilyResearchSchema(lineCount) {
         required: keys
       }
     },
-    required: ['brand', 'product_line_name', 'product_type', 'line_facts', 'range_pages', 'lines']
+    required: ['brand', 'product_line_name', 'product_type', 'line_facts', 'source_descriptions', 'range_pages', 'lines']
   }
 }
 
@@ -458,7 +473,7 @@ export function buildFamilyResearchUserPrompt(inputLines, familyHint, productFam
     fam != null ? `User-assigned Family #: ${fam}. Every line belongs to this one set.` : '',
     hint ? `Product line hint: ${hint}` : '',
     bundleLine,
-    `Search the product line, at most ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} searches in total. Collect every spec the sources state and the official range page.`,
+    `Search the product line, at most ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} searches in total. Collect every spec the sources state, their product descriptions of the line, and the official range page.`,
     '',
     'Lines (answer each key in lines{}):',
     ...bullets
@@ -522,7 +537,21 @@ async function callMistralFamilyResearch(apiKey, { inputLines, familyHint, produ
   return { error: 'invalid_mistral_response', message: 'Mistral did not return family research JSON from the gathered results.' }
 }
 
-function buildFamilyCopyUserPrompt(research, inputLines) {
+/** Search result snippets with text, for the copy step to draw descriptive wording from. */
+export function copySnippets(references, max = 12) {
+  const seen = new Set()
+  const out = []
+  for (const r of references || []) {
+    const text = String(r?.description || '').replace(/\s+/g, ' ').trim()
+    if (text.length < 40 || seen.has(text)) continue
+    seen.add(text)
+    out.push(`${hostOf(r.url) || 'source'}: ${String(r.title || '').trim()} · ${text.slice(0, 600)}`)
+    if (out.length >= max) break
+  }
+  return out
+}
+
+export function buildFamilyCopyUserPrompt(research, inputLines, references = []) {
   const variants = inputLines.map((_, i) => {
     const row = research.lines[familyLineKey(i)]
     return row && row.variant_label ? String(row.variant_label).trim() : null
@@ -536,6 +565,8 @@ function buildFamilyCopyUserPrompt(research, inputLines) {
         product_line_name: research.product_line_name,
         product_type: research.product_type,
         line_facts: research.line_facts || [],
+        source_descriptions: research.source_descriptions || [],
+        search_result_snippets: copySnippets(references),
         variant_labels: variants.filter(Boolean)
       },
       null,
@@ -544,10 +575,10 @@ function buildFamilyCopyUserPrompt(research, inputLines) {
   ].join('\n')
 }
 
-async function callMistralFamilyCopy(apiKey, research, inputLines, onProgress) {
+async function callMistralFamilyCopy(apiKey, research, inputLines, references, onProgress) {
   return callMistralChatJson(apiKey, {
     system: FAMILY_COPY_INSTRUCTIONS,
-    user: buildFamilyCopyUserPrompt(research, inputLines),
+    user: buildFamilyCopyUserPrompt(research, inputLines, references),
     schemaName: 'family_copy',
     schema: FAMILY_COPY_SCHEMA,
     model: FAMILY_COPY_MODEL,
@@ -609,10 +640,14 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
     `Research returned in ${Math.round(webMs / 1000)}s · ${String(research.brand || '').trim() || 'brand unknown'} · ${String(research.product_line_name).trim()} · ${String(research.product_type || '').trim()} · ${researched.references.length} search results`
   )
   await progress(`Facts for the whole line (${lineFacts.length}): ${lineFacts.join(' | ') || 'none stated by sources'}`)
+  const sourceDescriptions = (research.source_descriptions || []).map((s) => String(s || '').trim()).filter(Boolean)
+  await progress(
+    `Source descriptions (${sourceDescriptions.length}): ${sourceDescriptions.map((s) => s.slice(0, 160)).join(' | ') || 'none found, copy will lean on search snippets'}`
+  )
 
   const copyStarted = Date.now()
   await progress(`Step 2 copy · writing one template from the research · ${FAMILY_COPY_MODEL}`)
-  const copy = await callMistralFamilyCopy(apiKey, research, inputLines, onProgress)
+  const copy = await callMistralFamilyCopy(apiKey, research, inputLines, researched.references, onProgress)
   const copyMs = Date.now() - copyStarted
   if (copy.error) {
     console.log(`[invoice-import/enrich-family] copy failed ms=${copyMs} error=${copy.error}`)
