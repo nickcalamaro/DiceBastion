@@ -669,12 +669,15 @@ window.initEventPurchase = function initEventPurchase(event) {
     const redirectUrl = '/thank-you?orderRef=' + encodeURIComponent(ref) + 
       (data.emailSent === false ? '&emailPending=1' : '');
     console.log('[confirmPayment] Redirecting to:', redirectUrl);
+    pendingPaymentOrderRef = null;
     window.location.href = redirectUrl;
   }
 
   let scaWatcher = null;
   let checkoutHadFailure = false;
   let paymentConfirmed = false;
+  /** Same EVT order_ref while customer retries with a fresh SumUp checkout after a decline. */
+  let pendingPaymentOrderRef = null;
 
   function setScaNote(visible) {
     const note = modal.querySelector('.evt-sca-note');
@@ -700,14 +703,16 @@ window.initEventPurchase = function initEventPurchase(event) {
       },
       onFailed: (msg) => {
         scaWatcher = null;
-        returnToDetailsStep();
+        returnToDetailsStep(orderRef);
         showError(msg);
       }
     });
   }
 
-  /** A failed SumUp checkout cannot be retried cleanly, so the next attempt creates a new one. */
-  function returnToDetailsStep() {
+  /** After a terminal SumUp failure the checkout is dead — unmount and require Continue for a fresh checkout. */
+  function returnToDetailsStep(failedOrderRef) {
+    if (failedOrderRef) pendingPaymentOrderRef = failedOrderRef;
+    checkoutHadFailure = false;
     unmountWidget();
     const user = getLoggedInUser();
     const isLoggedIn = !!(user && user.email);
@@ -716,6 +721,13 @@ window.initEventPurchase = function initEventPurchase(event) {
     if (detailsEl) detailsEl.style.display = isLoggedIn ? 'none' : 'block';
     if (confirmLoggedEl) confirmLoggedEl.style.display = isLoggedIn ? 'block' : 'none';
     renderTurnstile(isLoggedIn).catch((e) => console.error('Failed to render Turnstile:', e));
+  }
+
+  async function handleWidgetTerminalFailure(orderRef, body, message) {
+    checkoutHadFailure = true;
+    await stopScaWatcher();
+    returnToDetailsStep(orderRef);
+    showError(message || (body && body.message) || 'Payment failed. Please try another card.');
   }
 
   async function confirmPayment(ref, pollOptions = {}) {
@@ -729,6 +741,7 @@ window.initEventPurchase = function initEventPurchase(event) {
       },
       onError: (errorMsg) => {
         console.error('[confirmPayment] ❌ Error callback triggered:', errorMsg);
+        returnToDetailsStep(ref);
         showError(errorMsg);
       },
       onTimeout: () => {
@@ -810,18 +823,15 @@ window.initEventPurchase = function initEventPurchase(event) {
             if (paymentConfirmed) return;
             const bodyStatus = String((body && body.status) || '').toUpperCase();
             if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
-              checkoutHadFailure = true;
-              showError((body && body.message) || 'Payment failed. Please try again.');
+              await handleWidgetTerminalFailure(orderRef, body, 'Payment failed. Please try another card.');
               return;
             }
             await confirmPayment(orderRef, { pollInterval: 3000, maxAttempts: 20 });
           } else if (t === 'error' || t === 'fail') {
-            // An earlier failed attempt makes /events/confirm report FAILED for this checkout,
-            // so in-widget retries are left to the widget's own response.
-            checkoutHadFailure = true;
-            await stopScaWatcher();
-            showError((body && body.message) || 'Payment failed. Please try again.');
+            await handleWidgetTerminalFailure(orderRef, body);
           } else if (t === 'cancel') {
+            await stopScaWatcher();
+            returnToDetailsStep(orderRef);
             showError('Payment cancelled. You can try again when ready.');
           } else {
             console.log('SumUp intermediate state:', t, body);
@@ -936,7 +946,8 @@ window.initEventPurchase = function initEventPurchase(event) {
           name,
           privacyConsent: privacy,
           turnstileToken,
-          apply_store_credit: applyStoreCredit
+          apply_store_credit: applyStoreCredit,
+          retry_order_ref: pendingPaymentOrderRef || undefined
         })
       });
     } catch(e) {
@@ -951,12 +962,14 @@ window.initEventPurchase = function initEventPurchase(event) {
     }
 
     if (data.paid_with_credit_only) {
+      pendingPaymentOrderRef = null;
       showSuccess();
       return;
     }
     
     if (data.checkoutId) {
       checkoutEmail = email || checkoutEmail;
+      pendingPaymentOrderRef = data.orderRef;
       mountWidget(data.checkoutId, data.orderRef);
       return;
     }
@@ -1034,7 +1047,10 @@ window.initEventPurchase = function initEventPurchase(event) {
           privacyConsent: privacy,
           turnstileToken,
           membershipPlan: selectedMembershipPlan,
-          autoRenew
+          autoRenew,
+          retry_order_ref: pendingPaymentOrderRef && String(pendingPaymentOrderRef).startsWith('BUNDLE-')
+            ? pendingPaymentOrderRef
+            : undefined
         })
       });
     } catch(e) {
@@ -1050,6 +1066,7 @@ window.initEventPurchase = function initEventPurchase(event) {
     
     if (data.checkoutId) {
       checkoutEmail = email || checkoutEmail;
+      pendingPaymentOrderRef = data.orderRef;
       mountWidget(data.checkoutId, data.orderRef);
       return;
     }

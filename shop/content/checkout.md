@@ -489,6 +489,7 @@ grid-template-columns: 1fr;
 const API_BASE = (window.utils && window.utils.getApiBase(true)) || 'https://dicebastion.com/api';
 let cart = [];
 let currentOrderNumber = null;
+let shopRetryOrderNumber = null;
 let currentCheckoutId = null;
 let appliedDiscountPence = 0;
 let storeCreditPence = 0;
@@ -774,6 +775,10 @@ country: formData.get('country')
 };
 }
 
+if (shopRetryOrderNumber) {
+orderData.retry_order_number = shopRetryOrderNumber;
+}
+
 // Show processing UI
 document.getElementById('checkout-form-container').style.display = 'none';
 document.getElementById('payment-processing').style.display = 'block';
@@ -797,6 +802,7 @@ throw new Error(detail);
 
 currentOrderNumber = result.order_number;
 currentCheckoutId = result.checkoutId || null;
+if (!result.retried) shopRetryOrderNumber = null;
 
 // Credit-only: skip SumUp and go to confirmation
 if (result.paid_with_credit_only || (!result.checkoutId && result.success)) {
@@ -833,6 +839,7 @@ window.SumUpCard.unmount({ id: 'sumup-card' });
 } catch (_) {}
 const cardHost = document.getElementById('sumup-card');
 if (cardHost) cardHost.innerHTML = '';
+if (currentOrderNumber) shopRetryOrderNumber = currentOrderNumber;
 document.getElementById('checkout-form-container').style.display = 'block';
 document.getElementById('payment-processing').style.display = 'none';
 submitBtn.disabled = false;

@@ -35,6 +35,22 @@ showPagination: false
   var products = [], modal = null, cart = {};
   var scaWatcher = null;
   var paymentConfirmed = false;
+  var pendingDrinksOrder = null;
+
+  function unmountPayWidget() {
+    try {
+      if (window.SumUpCard && window.SumUpCard.unmount) window.SumUpCard.unmount({ id: 'pay-widget' });
+    } catch (_) {}
+    var widget = document.getElementById('pay-widget');
+    if (widget) widget.innerHTML = '';
+  }
+
+  function resetDrinksPayment(failedRef, msg) {
+    if (failedRef) pendingDrinksOrder = failedRef;
+    stopScaWatcher();
+    unmountPayWidget();
+    showErr(msg || 'Payment failed. Tap Checkout to try again with another card.');
+  }
 
   function inCategory(product, name) {
     var wanted = String(name || '').trim().toLowerCase();
@@ -151,7 +167,7 @@ showPagination: false
       onFailed: function (msg) {
         scaWatcher = null;
         setScaNote(false);
-        showErr(msg);
+        resetDrinksPayment(ref, msg);
       }
     });
   }
@@ -170,7 +186,7 @@ showPagination: false
         }
         var status = String((data && data.status) || '').toUpperCase();
         if (status === 'FAILED' || status === 'DECLINED') {
-          showErr('Payment failed. Please try again.');
+          resetDrinksPayment(ref, (data && data.message) || 'Payment failed. Please try again.');
           return;
         }
         startScaWatcher(ref);
@@ -182,13 +198,16 @@ showPagination: false
     utils.hideError('pay-error');
     var items = products.filter(function (p) { return cart[p.id] > 0; }).map(function (p) { return { id: p.id, qty: cart[p.id] }; });
     try {
+      var payload = { items: items };
+      if (pendingDrinksOrder) payload.retry_order_number = pendingDrinksOrder;
       var res = await fetch(API + '/orders/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: items })
+        body: JSON.stringify(payload)
       });
       var data = await res.json();
       if (!res.ok || !data.checkoutId) { showErr(data.error || 'Checkout failed.'); return; }
+      pendingDrinksOrder = data.orderNumber;
       await mountWidget(data.checkoutId, data.orderNumber);
     } catch (e) { showErr('Checkout error.'); }
   }
@@ -229,7 +248,7 @@ showPagination: false
             stopScaWatcher().then(function () {
               if (paymentConfirmed) return;
               if (bodyStatus === 'FAILED' || bodyStatus === 'DECLINED') {
-                showErr((body && body.message) || 'Payment failed. Please try again.');
+                resetDrinksPayment(ref, (body && body.message) || 'Payment failed. Please try again.');
                 return;
               }
               confirmOrder(ref);
@@ -237,12 +256,12 @@ showPagination: false
             return;
           }
           if (t === 'error' || t === 'fail') {
-            stopScaWatcher().then(function () { settleWidgetOutcome(ref); });
+            resetDrinksPayment(ref, (body && body.message) || 'Payment failed. Please try again.');
             return;
           }
           if (t === 'cancel') {
             stopScaWatcher();
-            showErr('Payment cancelled.');
+            resetDrinksPayment(ref, 'Payment cancelled.');
           }
         }
       });

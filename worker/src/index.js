@@ -1060,6 +1060,373 @@ function isCheckoutFailed(payment) {
   })
 }
 
+/** SumUp checkout_reference for payment retries (unique per attempt; maps back to our order_ref). */
+function normalizeCheckoutReferenceToOrderRef(ref) {
+  if (!ref || typeof ref !== 'string') return ref
+  const tilde = ref.indexOf('~')
+  return tilde > 0 ? ref.slice(0, tilde) : ref
+}
+
+function sumUpCheckoutReferenceForRetry(orderRef) {
+  return `${orderRef}~${crypto.randomUUID().slice(0, 8)}`
+}
+
+function terminalPaymentStatusFromSumUp(payment, sumupBody) {
+  const pmt = payment || sumupBody
+  if (!pmt) return null
+  const status = String(pmt.status || '').toUpperCase()
+  const txStatuses = (pmt.transactions || []).map(t => String(t?.status || '').toUpperCase())
+  const hasDeclined = status === 'DECLINED' || txStatuses.includes('DECLINED')
+  const hasFailed = status === 'FAILED' || status === 'EXPIRED' || txStatuses.includes('FAILED')
+  if (hasDeclined) return 'DECLINED'
+  if (hasFailed) return 'FAILED'
+  return null
+}
+
+async function persistTransactionPaymentFailure(db, { transactionId, orderRef, payment, sumupBody } = {}) {
+  const terminal = terminalPaymentStatusFromSumUp(payment, sumupBody)
+  if (!terminal) return false
+  const binds = [terminal, toIso(new Date())]
+  let sql = `UPDATE transactions SET payment_status = ?, updated_at = ?`
+  if (transactionId != null) {
+    binds.push(transactionId)
+    sql += ` WHERE id = ? AND UPPER(IFNULL(payment_status, '')) != 'PAID'`
+  } else if (orderRef) {
+    binds.push(orderRef)
+    sql += ` WHERE order_ref = ? AND UPPER(IFNULL(payment_status, '')) != 'PAID'`
+  } else {
+    return false
+  }
+  await db.prepare(sql).bind(...binds).run()
+  await updateTransactionPaymentMeta(db, { transactionId, orderRef, payment, sumupBody })
+  console.log('[TransactionFailure]', { transactionId: transactionId ?? null, orderRef: orderRef ?? null, status: terminal })
+  return true
+}
+
+/**
+ * Create a fresh SumUp checkout after a terminal failure on the previous one.
+ * Keeps the same ticket + EVT order_ref; SumUp gets a new checkout_reference suffix (~).
+ */
+async function retryTicketSumUpCheckout(env, db, {
+  evId, ev, ident, retryOrderRef, cardDuePence, creditAppliedPence, currency
+}) {
+  const transaction = await db.prepare(`
+    SELECT t.*, ti.id as ticket_id, ti.status as ticket_status, ti.event_id
+    FROM transactions t
+    JOIN tickets ti ON ti.id = t.reference_id
+    WHERE t.order_ref = ? AND t.transaction_type = 'ticket'
+  `).bind(retryOrderRef).first()
+  if (!transaction) return { status: 404, body: { error: 'order_not_found' } }
+  if (Number(transaction.event_id) !== evId) return { status: 400, body: { error: 'event_mismatch' } }
+  if (transaction.user_id !== ident.id) return { status: 403, body: { error: 'forbidden' } }
+  if (transaction.ticket_status === 'active' || String(transaction.payment_status || '').toUpperCase() === 'PAID') {
+    return { status: 200, body: { orderRef: retryOrderRef, checkoutId: transaction.checkout_id, reused: true, already_paid: true } }
+  }
+  if (cardDuePence <= 0) return { status: 400, body: { error: 'card_not_required' } }
+
+  const expectedCard = transaction.card_charged_pence != null
+    ? Number(transaction.card_charged_pence)
+    : Math.round(Number(transaction.amount) * 100)
+  if (expectedCard !== cardDuePence) {
+    return { status: 409, body: { error: 'amount_changed', message: 'Price or store credit changed. Refresh the page and try again.' } }
+  }
+
+  if (transaction.checkout_id) {
+    try {
+      const existingPmt = await fetchPayment(env, transaction.checkout_id)
+      if (isCheckoutPaid(existingPmt)) {
+        const confirm = await confirmTicketPurchase(db, env, { orderRef: retryOrderRef, payment: existingPmt })
+        if (confirm.ok) {
+          return { status: 200, body: { orderRef: retryOrderRef, checkoutId: transaction.checkout_id, paid: true } }
+        }
+      }
+      if (existingPmt && !isCheckoutFailed(existingPmt) && !isCheckoutPaid(existingPmt)) {
+        return {
+          status: 200,
+          body: {
+            orderRef: retryOrderRef,
+            checkoutId: transaction.checkout_id,
+            reused: true,
+            payment_in_progress: true
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[events/checkout retry] fetchPayment:', err)
+    }
+  }
+
+  const sumupRef = sumUpCheckoutReferenceForRetry(retryOrderRef)
+  let checkout
+  try {
+    checkout = await createCheckout(env, {
+      amount: cardDuePence / 100,
+      currency,
+      orderRef: sumupRef,
+      title: ev.event_name,
+      description: `Ticket for ${ev.event_name}` + (creditAppliedPence > 0 ? ` (store credit £${(creditAppliedPence / 100).toFixed(2)})` : ''),
+      redirectUrl: `${siteUrl(env)}/thank-you?orderRef=${encodeURIComponent(retryOrderRef)}`,
+      webhookUrl: `${siteUrl(env)}/api/webhooks/sumup`
+    })
+  } catch (e) {
+    console.error('[events/checkout retry] SumUp checkout failed', retryOrderRef, e)
+    return { status: 502, body: { error: 'sumup_checkout_failed', message: String(e?.message || e) } }
+  }
+  if (!checkout?.id) return { status: 502, body: { error: 'sumup_missing_id' } }
+
+  await db.prepare(`
+    UPDATE transactions SET checkout_id = ?, payment_status = 'pending', updated_at = ?
+    WHERE id = ? AND UPPER(IFNULL(payment_status, '')) != 'PAID'
+  `).bind(checkout.id, toIso(new Date()), transaction.id).run()
+
+  console.log('[events/checkout retry] New SumUp checkout', {
+    orderRef: retryOrderRef,
+    sumupCheckoutReference: sumupRef,
+    checkoutId: checkout.id
+  })
+
+  return {
+    status: 200,
+    body: {
+      orderRef: retryOrderRef,
+      checkoutId: checkout.id,
+      retried: true,
+      credit_applied_pence: Number(transaction.credit_applied_pence || 0),
+      card_charged_pence: cardDuePence
+    }
+  }
+}
+
+/** Mark a shop/drinks order row failed after terminal SumUp state (not PAID). */
+async function persistOrderPaymentFailure(db, { orderNumber, payment, sumupBody } = {}) {
+  const terminal = terminalPaymentStatusFromSumUp(payment, sumupBody)
+  if (!terminal || !orderNumber) return false
+  await db.prepare(`
+    UPDATE orders SET payment_status = 'failed', updated_at = ?
+    WHERE order_number = ? AND UPPER(COALESCE(payment_status, '')) NOT IN ('PAID', 'COMPLETED')
+      AND IFNULL(status, '') != 'completed'
+  `).bind(toIso(new Date()), orderNumber).run()
+  console.log('[OrderFailure]', { orderNumber, status: terminal })
+  return true
+}
+
+async function persistDonationPaymentFailure(db, { orderRef, payment, sumupBody } = {}) {
+  const terminal = terminalPaymentStatusFromSumUp(payment, sumupBody)
+  if (!terminal || !orderRef) return false
+  const ps = terminal === 'DECLINED' ? 'DECLINED' : 'FAILED'
+  await db.prepare(`
+    UPDATE donations SET payment_status = ?, updated_at = ?
+    WHERE order_ref = ? AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(ps, toIso(new Date()), orderRef).run()
+  await persistTransactionPaymentFailure(db, { orderRef, payment, sumupBody })
+  console.log('[DonationFailure]', { orderRef, status: ps })
+  return true
+}
+
+/**
+ * Telemetry from the card widget: persist terminal failure for any supported order ref type.
+ */
+async function persistPaymentFailureFromTelemetry(db, orderRef, sumupBody) {
+  const canon = normalizeCheckoutReferenceToOrderRef(orderRef)
+  if (!canon || !terminalPaymentStatusFromSumUp(null, sumupBody)) return false
+  if (ORD_UUID_RE.test(canon)) {
+    return persistOrderPaymentFailure(db, { orderNumber: canon, sumupBody })
+  }
+  if (DON_UUID_RE.test(canon)) {
+    return persistDonationPaymentFailure(db, { orderRef: canon, sumupBody })
+  }
+  const tx = await db.prepare(
+    'SELECT id FROM transactions WHERE order_ref = ? ORDER BY id DESC LIMIT 1'
+  ).bind(canon).first()
+  if (tx) {
+    return persistTransactionPaymentFailure(db, { transactionId: tx.id, orderRef: canon, sumupBody })
+  }
+  return false
+}
+
+/**
+ * Fresh SumUp checkout for a pending shop or walk-in drinks order (same order_number).
+ */
+async function retryPendingOrderSumUpCheckout(env, db, {
+  orderNumber,
+  email = null,
+  redirectUrl,
+  title,
+  description
+}) {
+  const order = await db.prepare('SELECT * FROM orders WHERE order_number = ?').bind(orderNumber).first()
+  if (!order) return { status: 404, body: { error: 'order_not_found' } }
+  if (email && String(order.email || '').trim().toLowerCase() !== String(email).trim().toLowerCase()) {
+    return { status: 403, body: { error: 'forbidden' } }
+  }
+  if (String(order.status || '') === 'completed' || ['paid', 'PAID'].includes(String(order.payment_status || ''))) {
+    return { status: 200, body: { orderNumber, checkoutId: order.checkout_id, already_paid: true } }
+  }
+
+  const cardDuePence = order.card_charged_pence != null
+    ? Math.max(0, Number(order.card_charged_pence))
+    : Math.max(0, Math.round(Number(order.total) || 0))
+  if (cardDuePence <= 0) return { status: 400, body: { error: 'card_not_required' } }
+
+  if (order.checkout_id) {
+    try {
+      const existingPmt = await fetchPayment(env, order.checkout_id)
+      if (isCheckoutPaid(existingPmt)) {
+        await completePaidShopOrder(db, env, order, existingPmt.id || existingPmt.payment_id)
+        return { status: 200, body: { orderNumber, checkoutId: order.checkout_id, paid: true } }
+      }
+      if (existingPmt && !isCheckoutFailed(existingPmt) && !isCheckoutPaid(existingPmt)) {
+        return {
+          status: 200,
+          body: { orderNumber, checkoutId: order.checkout_id, reused: true, payment_in_progress: true }
+        }
+      }
+    } catch (err) {
+      console.error('[order checkout retry] fetchPayment:', err)
+    }
+  }
+
+  const currency = order.currency || env.CURRENCY || 'GBP'
+  const sumupRef = sumUpCheckoutReferenceForRetry(orderNumber)
+  let checkout
+  try {
+    checkout = await createCheckout(env, {
+      amount: cardDuePence / 100,
+      currency,
+      orderRef: sumupRef,
+      title: title || `Dice Bastion order ${orderNumber}`,
+      description: description || `Order ${orderNumber}`,
+      redirectUrl,
+      webhookUrl: `${siteUrl(env)}/api/webhooks/sumup`
+    })
+  } catch (e) {
+    console.error('[order checkout retry] SumUp failed', orderNumber, e)
+    return { status: 502, body: { error: 'sumup_checkout_failed', message: String(e?.message || e) } }
+  }
+  if (!checkout?.id) return { status: 502, body: { error: 'sumup_missing_id' } }
+
+  await db.prepare(`
+    UPDATE orders SET checkout_id = ?, payment_status = 'pending', updated_at = ?
+    WHERE id = ? AND UPPER(COALESCE(payment_status, '')) != 'PAID'
+  `).bind(checkout.id, toIso(new Date()), order.id).run()
+
+  console.log('[order checkout retry]', { orderNumber, sumupCheckoutReference: sumupRef, checkoutId: checkout.id })
+  return { status: 200, body: { orderNumber, checkoutId: checkout.id, retried: true } }
+}
+
+async function retryDonationSumUpCheckout(env, db, { orderRef, donationAmount, currency, redirectUrl }) {
+  const donation = await db.prepare('SELECT * FROM donations WHERE order_ref = ?').bind(orderRef).first()
+  if (!donation) return { status: 404, body: { error: 'donation_not_found' } }
+  if (String(donation.payment_status || '').toUpperCase() === 'PAID') {
+    return { status: 200, body: { orderRef, checkoutId: donation.checkout_id, already_paid: true } }
+  }
+  const expected = Number(donation.amount)
+  if (!Number.isFinite(expected) || Math.abs(expected - donationAmount) > 0.005) {
+    return { status: 409, body: { error: 'amount_changed', message: 'Donation amount changed. Start again from the form.' } }
+  }
+
+  if (donation.checkout_id) {
+    try {
+      const existingPmt = await fetchPayment(env, donation.checkout_id)
+      if (isCheckoutPaid(existingPmt)) {
+        await completePaidDonation(env, donation, existingPmt.id, existingPmt)
+        return { status: 200, body: { orderRef, checkoutId: donation.checkout_id, paid: true } }
+      }
+      if (existingPmt && !isCheckoutFailed(existingPmt) && !isCheckoutPaid(existingPmt)) {
+        return { status: 200, body: { orderRef, checkoutId: donation.checkout_id, payment_in_progress: true } }
+      }
+    } catch (err) {
+      console.error('[donations/checkout retry] fetchPayment:', err)
+    }
+  }
+
+  const sumupRef = sumUpCheckoutReferenceForRetry(orderRef)
+  let checkout
+  try {
+    checkout = await createCheckout(env, {
+      amount: donationAmount,
+      currency,
+      orderRef: sumupRef,
+      title: 'Dice Bastion and the Gibraltar Warhammer Club donation',
+      description: `Donation of £${donationAmount.toFixed(2)}`,
+      redirectUrl,
+      webhookUrl: `${siteUrl(env)}/api/webhooks/sumup`
+    })
+  } catch (e) {
+    return { status: 502, body: { error: 'sumup_checkout_failed', message: String(e?.message || e) } }
+  }
+  if (!checkout?.id) return { status: 502, body: { error: 'sumup_missing_id' } }
+
+  const now = toIso(new Date())
+  await db.batch([
+    db.prepare(`UPDATE donations SET checkout_id = ?, payment_status = 'pending', updated_at = ? WHERE id = ?`)
+      .bind(checkout.id, now, donation.id),
+    db.prepare(`UPDATE transactions SET checkout_id = ?, payment_status = 'pending', updated_at = ?
+      WHERE order_ref = ? AND transaction_type = 'donation'`)
+      .bind(checkout.id, now, orderRef)
+  ])
+
+  return { status: 200, body: { orderRef, checkoutId: checkout.id, retried: true } }
+}
+
+async function retryBundleSumUpCheckout(env, db, {
+  evId, ev, ident, retryOrderRef, totalAmount, currency, membershipPlan
+}) {
+  const bundle = await resolveBundleRecords(db, retryOrderRef)
+  if (!bundle) return { status: 404, body: { error: 'order_not_found' } }
+  if (Number(bundle.eventId) !== evId) return { status: 400, body: { error: 'event_mismatch' } }
+  if (bundle.identityId !== ident.id) return { status: 403, body: { error: 'forbidden' } }
+  const { transaction, membership, ticket } = bundle
+  if (membership.status === 'active' && ticket.status === 'active') {
+    return { status: 200, body: { orderRef: retryOrderRef, checkoutId: transaction.checkout_id, already_paid: true } }
+  }
+
+  if (transaction.checkout_id) {
+    try {
+      const existingPmt = await fetchPayment(env, transaction.checkout_id)
+      if (isCheckoutPaid(existingPmt)) {
+        await confirmBundlePurchase(db, env, { bundle, paymentId: existingPmt.id, checkoutId: transaction.checkout_id })
+        return { status: 200, body: { orderRef: retryOrderRef, paid: true } }
+      }
+      if (existingPmt && !isCheckoutFailed(existingPmt) && !isCheckoutPaid(existingPmt)) {
+        return {
+          status: 200,
+          body: { orderRef: retryOrderRef, checkoutId: transaction.checkout_id, payment_in_progress: true }
+        }
+      }
+    } catch (err) {
+      console.error('[bundle checkout retry] fetchPayment:', err)
+    }
+  }
+
+  const customerId = await getOrCreateSumUpCustomer(env, ident)
+  const sumupRef = sumUpCheckoutReferenceForRetry(retryOrderRef)
+  let checkout
+  try {
+    checkout = await createCheckout(env, {
+      amount: totalAmount,
+      currency,
+      orderRef: sumupRef,
+      title: `${membershipPlan} Membership + ${ev.event_name}`,
+      description: `Bundle: ${membershipPlan} membership and ticket for ${ev.event_name}`,
+      savePaymentInstrument: true,
+      customerId,
+      redirectUrl: `${siteUrl(env)}/thank-you?orderRef=${encodeURIComponent(retryOrderRef)}`,
+      webhookUrl: `${siteUrl(env)}/api/webhooks/sumup`
+    })
+  } catch (e) {
+    return { status: 502, body: { error: 'sumup_checkout_failed', message: String(e?.message || e) } }
+  }
+  if (!checkout?.id) return { status: 502, body: { error: 'sumup_missing_id' } }
+
+  await db.prepare(`
+    UPDATE transactions SET checkout_id = ?, payment_status = 'pending', updated_at = ?
+    WHERE id = ? AND UPPER(IFNULL(payment_status, '')) != 'PAID'
+  `).bind(checkout.id, toIso(new Date()), transaction.id).run()
+
+  return { status: 200, body: { orderRef: retryOrderRef, checkoutId: checkout.id, retried: true } }
+}
+
 /** Pull SumUp transaction_code from checkout response (top-level or transactions[]). */
 function extractSumUpTransactionCode(payment) {
   if (!payment) return null
@@ -1303,6 +1670,9 @@ async function confirmTicketPurchase(db, env, { orderRef, payment = null }) {
       const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
       const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
       console.log('[confirmTicket] Payment not paid, status:', currentStatus, 'txStatuses:', txStatuses)
+      if (isCheckoutFailed(pmt)) {
+        await persistTransactionPaymentFailure(db, { transactionId: transaction.id, orderRef, payment: pmt })
+      }
       if (creditAppliedPence > 0 && transaction.user_id && isCheckoutFailed(pmt)) {
         await settleTicketCredit(db, { userId: transaction.user_id, ticketId: ticket.id, orderRef, targetPence: 0 })
           .catch(err => console.error('[confirmTicket] credit release failed:', err))
@@ -4471,7 +4841,8 @@ app.post('/client-payment-log', async (c) => {
     if (orderRef && isTelemetryOrderRef(orderRef)) {
       try {
         if (scaEvent) await markTransactionScaFired(c.env.DB, orderRef)
-        if (txCode) await updateTransactionPaymentMeta(c.env.DB, { orderRef, sumupBody: body.sumupBody })
+        if (txCode) await updateTransactionPaymentMeta(c.env.DB, { orderRef: normalizeCheckoutReferenceToOrderRef(orderRef), sumupBody: body.sumupBody })
+        await persistPaymentFailureFromTelemetry(c.env.DB, orderRef, body.sumupBody)
       } catch (dbErr) {
         console.error('[ClientPaymentLog] DB update failed:', dbErr)
       }
@@ -5640,7 +6011,8 @@ app.post('/webhooks/sumup', async (c) => {
   // the API rather than the (unauthenticated) request body.
   let payment
   try { payment = await fetchPayment(c.env, paymentId) } catch (e) { return c.json({ ok: false, error: 'verify_failed' }, 400) }
-  const orderRef = payment?.checkout_reference
+  const orderRefRaw = payment?.checkout_reference
+  const orderRef = normalizeCheckoutReferenceToOrderRef(orderRefRaw)
   const currency = payment?.currency
   if (!orderRef) return c.json({ ok: false, error: 'missing_checkout_reference' }, 400)
   if (!isCheckoutPaid(payment)) return c.json({ ok: true })
@@ -5650,7 +6022,7 @@ app.post('/webhooks/sumup', async (c) => {
   const isShopOrder = orderRef.startsWith('ORD-')
   const isDonation = orderRef.startsWith('DON-')
   // Standalone paid event ticket (EVT-{eventId}-{uuid})
-  const isTicket = EVT_UUID_RE.test(orderRef)
+  const isTicket = EVT_UUID_RE.test(normalizeCheckoutReferenceToOrderRef(orderRef))
 
   const sponsorshipTx = !isBundle && !isShopOrder && !isDonation && !isTicket
     ? await c.env.DB.prepare(
@@ -5748,9 +6120,12 @@ app.post('/webhooks/sumup', async (c) => {
   // the buyer returns to the /events/confirm thank-you page). Uses the same
   // confirmTicketPurchase() helper as the redirect, so both paths stay in sync.
   if (isTicket) {
-    console.log('[webhook-ticket] Processing event ticket order:', orderRef)
+    console.log('[webhook-ticket] Processing event ticket order:', normalizeCheckoutReferenceToOrderRef(orderRef))
     try {
-      const result = await confirmTicketPurchase(c.env.DB, c.env, { orderRef, payment })
+      const result = await confirmTicketPurchase(c.env.DB, c.env, {
+        orderRef: normalizeCheckoutReferenceToOrderRef(orderRef),
+        payment
+      })
       if (!result.ok) {
         if (result.notPaid) {
           // Webhook fired on a non-terminal/declined state — ack and wait for the paid event.
@@ -6212,7 +6587,10 @@ app.get('/events/confirm', async c => {
         const txStatuses = payment?.transactions?.map(t => t.status) || []
         const hasFailed = txStatuses.includes('FAILED') || currentStatus === 'FAILED'
         const hasDeclined = txStatuses.includes('DECLINED') || currentStatus === 'DECLINED'
-        return c.json({ 
+        if (isCheckoutFailed(payment)) {
+          await persistTransactionPaymentFailure(c.env.DB, { transactionId: transaction.id, orderRef, payment })
+        }
+        return c.json({
           ok: false, 
           status: hasFailed ? 'FAILED' : hasDeclined ? 'DECLINED' : currentStatus,
           message: hasFailed ? 'Payment failed. Please try again.' :
@@ -8264,6 +8642,20 @@ app.post('/events/:id/checkout', async c => {
 
     await migrateToTransactions(c.env.DB)
 
+    const retryOrderRef = typeof body.retry_order_ref === 'string' ? body.retry_order_ref.trim() : ''
+    if (retryOrderRef && EVT_UUID_RE.test(retryOrderRef)) {
+      const retry = await retryTicketSumUpCheckout(c.env, c.env.DB, {
+        evId,
+        ev,
+        ident,
+        retryOrderRef,
+        cardDuePence,
+        creditAppliedPence,
+        currency
+      })
+      if (retry) return c.json(retry.body, retry.status || 200)
+    }
+
     const order_ref = `EVT-${evId}-${crypto.randomUUID()}`
     
     // Idempotency check in transactions table
@@ -8400,7 +8792,8 @@ app.post('/events/:id/checkout-with-membership', async c => {
     }
     
     const idem = c.req.header('Idempotency-Key')?.trim()
-    const { email, name, privacyConsent, marketingConsent, turnstileToken, membershipPlan, autoRenew } = await c.req.json()
+    const body = await c.req.json().catch(() => ({}))
+    const { email, name, privacyConsent, marketingConsent, turnstileToken, membershipPlan, autoRenew } = body
     if (!email) return c.json({ error:'email_required' },400)
     if (!EMAIL_RE.test(email)) return c.json({ error:'invalid_email' },400)
     if (!privacyConsent) return c.json({ error:'privacy_consent_required' },400)
@@ -8437,6 +8830,20 @@ app.post('/events/:id/checkout-with-membership', async c => {
 
     const s = await getSchema(c.env.DB)
     await migrateToTransactions(c.env.DB)
+
+    const retryOrderRef = typeof body.retry_order_ref === 'string' ? body.retry_order_ref.trim() : ''
+    if (retryOrderRef && BUNDLE_UUID_RE.test(retryOrderRef)) {
+      const retry = await retryBundleSumUpCheckout(c.env, c.env.DB, {
+        evId,
+        ev,
+        ident,
+        retryOrderRef,
+        totalAmount,
+        currency,
+        membershipPlan
+      })
+      if (retry) return c.json(retry.body, retry.status || 200)
+    }
 
     const order_ref = `BUNDLE-${evId}-${crypto.randomUUID()}`
     
@@ -13118,7 +13525,8 @@ app.post('/donations/checkout', async c => {
     }
 
     const idem = c.req.header('Idempotency-Key')?.trim()
-    const { amount, name, email, message, showName, showMessage, privacyConsent, turnstileToken } = await c.req.json()
+    const body = await c.req.json().catch(() => ({}))
+    const { amount, name, email, message, showName, showMessage, privacyConsent, turnstileToken } = body
 
     // Validate amount
     const donationAmount = Number(amount)
@@ -13142,6 +13550,18 @@ app.post('/donations/checkout', async c => {
 
     const currency = c.env.CURRENCY || 'GBP'
     const campaign = 'pokemon-day-2026'
+
+    const retryOrderRef = typeof body.retry_order_ref === 'string' ? body.retry_order_ref.trim() : ''
+    if (retryOrderRef && DON_UUID_RE.test(retryOrderRef)) {
+      const retry = await retryDonationSumUpCheckout(c.env, c.env.DB, {
+        orderRef: retryOrderRef,
+        donationAmount,
+        currency,
+        redirectUrl: `${siteUrl(c.env)}/donations/?orderRef=${encodeURIComponent(retryOrderRef)}`
+      })
+      return c.json(retry.body, retry.status || 200)
+    }
+
     const order_ref = `DON-${campaign}-${crypto.randomUUID()}`
 
     // Idempotency: only reuse a pending checkout when email is known AND amount matches.
@@ -13264,8 +13684,8 @@ app.get('/donations/confirm', async c => {
     }
 
     if (!isCheckoutPaid(payment)) {
-      // One failed card attempt must not abort the checkout while bank verification is still pending.
       if (isCheckoutFailed(payment)) {
+        await persistDonationPaymentFailure(c.env.DB, { orderRef, payment })
         const status = String(payment?.status || '').toUpperCase()
         const declined = status === 'DECLINED'
         return c.json({
@@ -14198,6 +14618,29 @@ app.post('/shop/checkout', async c => {
       return c.json({ error: 'invalid_email' }, 400)
     }
 
+    const retryOrderNumber = typeof body.retry_order_number === 'string' ? body.retry_order_number.trim() : ''
+    if (retryOrderNumber && ORD_UUID_RE.test(retryOrderNumber)) {
+      const retry = await retryPendingOrderSumUpCheckout(c.env, c.env.DB, {
+        orderNumber: retryOrderNumber,
+        email: String(email).trim(),
+        redirectUrl: `${siteUrl(c.env)}/order-confirmation?order=${encodeURIComponent(retryOrderNumber)}`,
+        title: 'Dice Bastion Shop order',
+        description: `Shop order ${retryOrderNumber}`
+      })
+      if (retry.status === 200 && (retry.body.paid || retry.body.already_paid)) {
+        return c.json({ success: true, order_number: retryOrderNumber, paid: true })
+      }
+      if (retry.body?.checkoutId) {
+        return c.json({
+          success: true,
+          order_number: retryOrderNumber,
+          checkoutId: retry.body.checkoutId,
+          retried: !!retry.body.retried
+        })
+      }
+      return c.json(retry.body, retry.status || 400)
+    }
+
     const orderItemsPayload = []
     const promoLines = []
     let subtotal = 0
@@ -14540,8 +14983,23 @@ app.get('/shop/order/:orderNumber', async c => {
 
 app.post('/orders/checkout', async c => {
   try {
-    const { email, name, items } = await c.req.json()
+    const body = await c.req.json().catch(() => ({}))
+    const { email, name, items } = body
     if (!items?.length) return c.json({ error: 'invalid_request' }, 400)
+
+    const retryOrderNumber = typeof body.retry_order_number === 'string' ? body.retry_order_number.trim() : ''
+    if (retryOrderNumber && ORD_UUID_RE.test(retryOrderNumber)) {
+      const retry = await retryPendingOrderSumUpCheckout(c.env, c.env.DB, {
+        orderNumber: retryOrderNumber,
+        redirectUrl: `${siteUrl(c.env)}/thank-you?orderRef=${encodeURIComponent(retryOrderNumber)}&type=drinks`,
+        title: 'Dice Bastion drinks order',
+        description: `Drinks order ${retryOrderNumber}`
+      })
+      if (retry.body?.checkoutId) {
+        return c.json({ orderNumber: retry.body.orderNumber, checkoutId: retry.body.checkoutId, retried: !!retry.body.retried })
+      }
+      return c.json(retry.body, retry.status || 400)
+    }
 
     // Let the DB do the math — one query to validate items and compute the total
     const ids = items.map(i => parseInt(i.id)).filter(n => n > 0)
@@ -14609,7 +15067,19 @@ app.get('/orders/confirm', async c => {
   if (String(order.payment_status || '').toUpperCase() === 'PAID') return c.json({ ok: true, status: 'active' })
 
   const payment = await fetchPayment(c.env, order.checkout_id)
-  if (!isCheckoutPaid(payment)) return c.json({ ok: false, status: payment?.status || 'PENDING' })
+  if (isCheckoutFailed(payment)) {
+    await persistOrderPaymentFailure(c.env.DB, { orderNumber: ref, payment })
+    const status = String(payment?.status || '').toUpperCase()
+    return c.json({
+      ok: false,
+      status: status === 'DECLINED' ? 'DECLINED' : 'FAILED',
+      message: 'Payment was declined or failed. Please try again with another card.'
+    })
+  }
+  if (!isCheckoutPaid(payment)) {
+    const pendingStatus = payment?.status || 'PENDING'
+    return c.json({ ok: false, status: pendingStatus })
+  }
 
   if (isDrinksWalkInOrder(order)) {
     await completePaidDrinksOrder(c.env.DB, order, payment.id)

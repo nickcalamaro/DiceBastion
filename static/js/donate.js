@@ -25,6 +25,8 @@
   let currentCheckoutId = null;
   let scaWatcher = null;
   let paymentConfirmed = false;
+  let pendingDonationOrderRef = null;
+  let currentDonationOrderRef = null;
 
   // ───────── DOM refs ─────────
   const $totalRaised = document.getElementById('total-raised');
@@ -205,7 +207,8 @@
         showName: $showName.checked,
         showMessage: $showMessage.checked,
         privacyConsent: true,
-        turnstileToken: null
+        turnstileToken: null,
+        retry_order_ref: pendingDonationOrderRef || undefined
       };
 
       const res = await fetch(`${API_BASE}/donations/checkout`, {
@@ -224,6 +227,8 @@
 
       currentCheckoutId = data.checkoutId;
       const orderRef = data.orderRef;
+      currentDonationOrderRef = orderRef;
+      pendingDonationOrderRef = orderRef;
 
       // Show payment section, hide form
       $formCard.style.display = 'none';
@@ -253,6 +258,12 @@
   }
 
   function returnToForm(msg) {
+    try {
+      if (window.SumUpCard && window.SumUpCard.unmount) {
+        window.SumUpCard.unmount({ id: 'donation-sumup-card' });
+      }
+    } catch (_) {}
+    if (currentDonationOrderRef) pendingDonationOrderRef = currentDonationOrderRef;
     $paymentProcessing.style.display = 'none';
     $paymentSection.style.display = 'none';
     $formCard.style.display = '';
@@ -394,6 +405,8 @@
 
   // ───────── Thank You ─────────
   function showThankYou(amount, currency) {
+    pendingDonationOrderRef = null;
+    currentDonationOrderRef = null;
     $paymentSection.style.display = 'none';
     $formCard.style.display = 'none';
     $thankYou.style.display = '';
