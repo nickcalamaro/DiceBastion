@@ -2,8 +2,30 @@ import { describe, expect, it } from 'vitest'
 import {
   allocateSettlementToLines,
   normalizeInvoiceCurrency,
-  isForeignInvoiceCurrency
+  isForeignInvoiceCurrency,
+  importLineProblem
 } from './shop-ledger.js'
+
+describe('importLineProblem', () => {
+  it('flags a foreign line without a unit cost', () => {
+    expect(importLineProblem({ quantity: 2, name: 'Dice' }, true, 'EUR')).toEqual({ error: 'missing_foreign_cost', message: 'missing EUR unit cost' })
+  })
+
+  it('accepts complete lines', () => {
+    expect(importLineProblem({ quantity: 2, name: 'Dice', unit_foreign_minor: 450 }, true)).toBe(null)
+    expect(importLineProblem({ quantity: 1, product_id: 7, unit_cost_pence: 0 }, false)).toBe(null)
+  })
+
+  it('flags an image that is not a link', () => {
+    expect(importLineProblem({ quantity: 1, name: 'Dice', unit_cost_pence: 10, image_url: 'data:image/jpeg;base64,xx' }, false).error).toBe('invalid_image')
+  })
+})
+
+describe('allocateSettlementToLines missing cost', () => {
+  it('rejects a line without a foreign cost instead of failing the split', () => {
+    expect(allocateSettlementToLines({ settlementGbpPence: 1000, lines: [{ quantity: 1, foreignMinorPerUnit: 500 }, { quantity: 1 }] })).toEqual({ error: 'invalid_line' })
+  })
+})
 
 describe('normalizeInvoiceCurrency', () => {
   it('defaults invalid to GBP', () => {

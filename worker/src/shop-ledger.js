@@ -38,7 +38,7 @@ export function allocateSettlementToLines({ settlementGbpPence, lines }) {
   const normalized = (lines || []).map((l) => {
     const quantity = parseInt(l.quantity, 10)
     const foreignMinorPerUnit = parseInt(l.foreignMinorPerUnit, 10)
-    if (!quantity || quantity <= 0 || foreignMinorPerUnit == null || foreignMinorPerUnit < 0) {
+    if (!quantity || quantity <= 0 || !Number.isFinite(foreignMinorPerUnit) || foreignMinorPerUnit < 0) {
       return null
     }
     return { quantity, foreignMinorPerUnit, foreignExtended: quantity * foreignMinorPerUnit }
@@ -822,6 +822,37 @@ export async function addImportLine(db, sessionId, input) {
  * Adds many import lines at once; for foreign-currency sessions allocates GBP unit costs
  * from settlement_amount_pence before inserting lines.
  */
+/** Checks that need no database lookups, run on every line before any line is saved. */
+export function importLineProblem(line, foreign, currency = 'EUR') {
+  const quantity = parseInt(line?.quantity, 10)
+  if (!quantity || quantity <= 0 || quantity > 100000) return { error: 'invalid_quantity', message: 'quantity must be 1 to 100000' }
+  if (foreign) {
+    if (parsePence(line.unit_foreign_minor) == null) {
+      return { error: 'missing_foreign_cost', message: `missing ${currency} unit cost` }
+    }
+  } else if (parsePence(line.unit_cost_pence) == null) {
+    return { error: 'invalid_unit_cost', message: 'missing unit cost' }
+  }
+  if (line.image_url != null && cleanUrl(line.image_url) === undefined) {
+    return { error: 'invalid_image', message: 'image is not a stored link' }
+  }
+  const productId = parseInt(line.product_id, 10)
+  if (!(productId > 0) && !String(line.name || '').trim() && !cleanEan(line.ean)) {
+    return { error: 'missing_name', message: 'missing product name' }
+  }
+  return null
+}
+
+function lineError(line, index, error, message) {
+  const name = String(line?.name || line?.ean || `product ${line?.product_id || '?'}`).slice(0, 120)
+  return {
+    error,
+    line_index: index,
+    line_name: name,
+    message: `Line ${index + 1} (${name}): ${message || error.replace(/_/g, ' ')}`
+  }
+}
+
 export async function addImportLinesBatch(db, sessionId, input) {
   await ensureLedgerSchema(db)
   const session = await db.prepare('SELECT * FROM stock_import_sessions WHERE id = ?').bind(sessionId).first()
@@ -831,10 +862,16 @@ export async function addImportLinesBatch(db, sessionId, input) {
   if (!Array.isArray(rawLines) || !rawLines.length) return { error: 'no_lines' }
 
   const invoiceCurrency = normalizeInvoiceCurrency(session.invoice_currency)
+  const foreign = isForeignInvoiceCurrency(invoiceCurrency)
   let unitCosts = null
   let foreignTotal = null
 
-  if (isForeignInvoiceCurrency(invoiceCurrency)) {
+  for (let i = 0; i < rawLines.length; i++) {
+    const problem = importLineProblem(rawLines[i], foreign, invoiceCurrency)
+    if (problem) return lineError(rawLines[i], i, problem.error, problem.message)
+  }
+
+  if (foreign) {
     const settlement = parsePence(session.settlement_amount_pence)
     if (settlement == null || settlement <= 0) return { error: 'missing_settlement' }
     const alloc = allocateSettlementToLines({
@@ -856,7 +893,9 @@ export async function addImportLinesBatch(db, sessionId, input) {
       lineInput.unit_cost_pence = unitCosts[i]
     }
     const added = await addImportLine(db, sessionId, lineInput)
-    if (added.error) return added
+    if (added.error) {
+      return lineError(rawLines[i], i, added.error, `${added.error.replace(/_/g, ' ')}; ${i} earlier line(s) were saved`)
+    }
     results.push(added)
   }
 

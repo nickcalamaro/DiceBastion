@@ -43,8 +43,63 @@ import {
   parseChatJsonContent,
   answerRepeats,
   isMistralBusy,
-  readChatCompletionStream
+  readChatCompletionStream,
+  normalizeItemCode,
+  leadingItemCode,
+  textHasItemCode,
+  pageShowsItemCode
 } from './invoice-import.js'
+
+describe('item numbers', () => {
+  it('keeps codes that are distinctive enough to match on', () => {
+    expect(normalizeItemCode('27830')).toBe('27830')
+    expect(normalizeItemCode(' AT-11021 ')).toBe('AT-11021')
+    expect(normalizeItemCode('d6')).toBe(null)
+    expect(normalizeItemCode('ABCDE')).toBe(null)
+    expect(normalizeItemCode('two words 123')).toBe(null)
+  })
+
+  it('reads a code written before the name', () => {
+    expect(leadingItemCode('1x 27830 Vortex® 12 mm d6 Light Green/Black Dice Block™ (36 dice)')).toBe('27830')
+    expect(leadingItemCode('27830 Vortex Dice')).toBe('27830')
+    expect(leadingItemCode('2026 Calendar')).toBe(null)
+    expect(leadingItemCode('12mm d6 Dice')).toBe(null)
+    expect(leadingItemCode('Dragon Shield Matte Black')).toBe(null)
+  })
+
+  it('matches whole tokens only', () => {
+    expect(textHasItemCode('https://shop.example/images/0000798_27830.jpeg', '27830')).toBe(true)
+    expect(textHasItemCode('https://shop.example/p/278301-red', '27830')).toBe(false)
+    expect(textHasItemCode('Item 27830, Vortex', '27830')).toBe(true)
+  })
+
+  it('accepts a page by its URL, product data or own image, not by a code elsewhere', () => {
+    const own = '<html><head><meta property="og:image" content="https://cdn.example/0000798_27830.jpeg"></head></html>'
+    expect(pageShowsItemCode({ html: own, title: 'Vortex Bright Green/black', pageUrl: 'https://maker.example/vortex', itemCode: '27830' })).toBe(true)
+    const ld = '<script type="application/ld+json">{"@type":"Product","sku":"27830"}</script>'
+    expect(pageShowsItemCode({ html: ld, title: 'Vortex', pageUrl: 'https://maker.example/v', itemCode: '27830' })).toBe(true)
+    const sibling = '<html><body><a href="/other">Related: 27830</a></body></html>'
+    expect(pageShowsItemCode({ html: sibling, title: 'Vortex Red', pageUrl: 'https://maker.example/red', itemCode: '27830' })).toBe(false)
+  })
+
+  it('matches a search result by item number when the name wording differs', () => {
+    const out = matchSearchResults(
+      [{ url: 'https://www.chessex.com/vortex-bright-greenblack', title: 'Vortex 12mm d6 Bright Green/black', thumbnail: 'https://www.chessex.com/images/thumbs/0000798_27830.jpeg' }],
+      [{ gtin: null, itemCode: '27830', variantLabel: 'Light Green/Black' }]
+    )
+    expect(out[0].map((r) => r.by)).toEqual(['item number'])
+  })
+
+  it('lets the item number confirm a page whose colour wording differs', () => {
+    const html = '<meta property="og:image" content="https://cdn.example/0000798_27830.jpeg">'
+    expect(
+      citedPageMatchesLine({ title: 'Vortex Bright Green/black', html, gtin: null, variantLabel: 'Light Green/Black', itemCode: '27830', pageUrl: 'https://maker.example/vortex' })
+    ).toBe(true)
+    expect(
+      citedPageMatchesLine({ title: 'Vortex Bright Green/black', html, gtin: null, variantLabel: 'Light Green/Black', itemCode: null, pageUrl: 'https://maker.example/vortex' })
+    ).toBe(false)
+  })
+})
 
 describe('normalizeGtin', () => {
   it('accepts 13-digit EAN', () => {

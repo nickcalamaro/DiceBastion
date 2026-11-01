@@ -41,8 +41,9 @@
       ean: r.ean || null
     };
     if (isForeign) {
-      const fm = r.unit_foreign_minor != null ? Math.round(Number(r.unit_foreign_minor)) : null;
-      if (fm != null) payload.unit_foreign_minor = fm;
+      let fm = r.unit_foreign_minor != null && r.unit_foreign_minor !== '' ? Math.round(Number(r.unit_foreign_minor)) : NaN;
+      if (!Number.isFinite(fm) && ctx && typeof ctx.foreignMinor === 'function') fm = ctx.foreignMinor(r);
+      if (Number.isFinite(fm) && fm >= 0) payload.unit_foreign_minor = fm;
     } else {
       payload.unit_cost_pence = r.unit_cost_pence;
     }

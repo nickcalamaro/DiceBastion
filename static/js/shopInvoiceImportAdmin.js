@@ -438,7 +438,7 @@
       row.source_product_verified = lineData.product_verified === true;
     }
     row.notes = ['Listing enriched (harmonised family set)'];
-    if (lineData.image_url) row.notes[0] += '; suggested image pending review';
+    if (lineData.image_url) row.notes[0] += '; image from ' + imageSourceLabel(lineData.image_source, true);
     return true;
   }
 
@@ -503,7 +503,7 @@
         timeoutMs: 10 * 60 * 1000,
         body: JSON.stringify({
           lines: setRows.map(function (r) {
-            return { name: r.name, ean: r.ean || null };
+            return { name: r.name, ean: r.ean || null, sku: r.sku || null };
           }),
           family_hint: set.familyHint || familyHintForSet(setRows),
           product_family: familyId,
@@ -536,6 +536,7 @@
       logFamilyEnrichReport(set, data, ok, setRows);
       appendLog('Family set OK: ' + ok + ' of ' + setRows.length + ' line(s)' +
         (data.web_search_ms != null ? ' (' + Math.round(data.web_search_ms / 1000) + 's web search)' : ''));
+      await autoSaveSuggestedImages(setRows);
       return ok;
     } catch (e) {
       if (typeof onSearchLimit === 'function') onSearchLimit(e.message);
@@ -1506,11 +1507,17 @@
     });
   }
 
+  /** The shared crop modal uploads product crops itself and returns the stored URL; older callers pass a data URL. */
   function uploadCroppedProductImage(row, croppedImage, successNote) {
     row.image_pending = true;
     renderPreview();
-    logProgress('Uploading cropped product image to storage…', { name: row.name });
-    return window.utils.uploadAdminImage(croppedImage, 'invoice-product.jpg')
+    const value = String(croppedImage || '');
+    const alreadyStored = /^https?:\/\//i.test(value) || value.indexOf('/r2-placeholder/') === 0;
+    if (!alreadyStored) logProgress('Uploading cropped product image to storage…', { name: row.name });
+    const stored = alreadyStored
+      ? Promise.resolve(value)
+      : window.utils.uploadAdminImage(value, 'invoice-product.jpg');
+    return stored
       .then(function (url) {
         revokeSuggestedThumbBlob(row);
         row.image_url = url;
@@ -1541,6 +1548,51 @@
         uploadCroppedProductImage(row, croppedImage);
       }, 336 / 220, 'product');
     });
+  }
+
+  /**
+   * Frames the suggested source image in the shop product frame and saves it, so no review is needed.
+   * The source stays on the row, so Adjust crop and Upload image can still replace it.
+   */
+  async function autoSaveSuggestedImage(row) {
+    if (!row || !row.source_image_url || row.image_url) return false;
+    if (!window.utils || !window.utils.productImage) return false;
+    row.image_pending = true;
+    const baseNote = row.notes && row.notes[0] ? row.notes[0] : 'Listing enriched';
+    try {
+      const framed = await window.utils.productImage.exportProductImageFromUrl(row.source_image_url);
+      const url = await window.utils.uploadAdminImage(framed, 'invoice-product.jpg');
+      revokeSuggestedThumbBlob(row);
+      row.image_url = url;
+      row.notes = [baseNote + '; image saved (Adjust crop or Upload image to change it)'];
+      return true;
+    } catch (e) {
+      row.notes = [baseNote + '; image could not be saved automatically (' + e.message + '), use Review and crop'];
+      appendLog('Image auto-save failed: ' + row.name + ' · ' + e.message);
+      return false;
+    } finally {
+      row.image_pending = false;
+    }
+  }
+
+  async function autoSaveSuggestedImages(targetRows) {
+    const pending = (targetRows || []).filter(function (r) { return r.source_image_url && !r.image_url; });
+    if (!pending.length) return;
+    appendLog('Saving ' + pending.length + ' suggested image(s) to the shop…');
+    renderPreview();
+    let saved = 0;
+    let next = 0;
+    async function worker() {
+      while (next < pending.length) {
+        const row = pending[next++];
+        if (await autoSaveSuggestedImage(row)) saved++;
+        renderPreview();
+      }
+    }
+    const workers = [];
+    for (let i = 0; i < Math.min(3, pending.length); i++) workers.push(worker());
+    await Promise.all(workers);
+    appendLog('Images saved: ' + saved + ' of ' + pending.length + (saved < pending.length ? ' (the rest need Review and crop)' : ''));
   }
 
   async function openAdjustCropForRow(id) {
@@ -1581,7 +1633,7 @@
     const srcLabel = 'web research';
     let note = 'Listing enriched (' + srcLabel + (secs != null ? ', ' + secs + 's' : '') + ')';
     if (data.image_url) {
-      note += '; suggested image from ' + imageSourceLabel(data.image_source, true) + ', pending review (not saved)';
+      note += '; image from ' + imageSourceLabel(data.image_source, true);
     } else if (data.image_rejected) {
       note += '; no image found (' + data.image_rejected + ')';
     }
@@ -1610,11 +1662,13 @@
         body: JSON.stringify({
           name: row.name,
           ean: row.ean || null,
+          sku: row.sku || null,
           category: row.category || null,
           mistral_api_key: mistralKey
         })
       }, function (message) { appendLog(message); });
       const meta = applyEnrichmentApiResult(row, data);
+      if (data.image_url && !row.image_url) await autoSaveSuggestedImages([row]);
       logProgress('Enrichment API done ' + batchLabel + row.name, {
         ms: Date.now() - started,
         copy_source: data.copy_source,
@@ -1623,10 +1677,10 @@
         image_source: data.image_source || null,
         image_rejected: data.image_rejected || null,
         product_verified: data.product_verified,
-        saved_to_storage: false
+        saved_to_storage: !!row.image_url
       });
       if (data.image_url && !row.image_url) {
-        logProgress('Suggested source image ready for review (use Review and crop to save)', {
+        logProgress('Suggested source image not saved (use Review and crop to save)', {
           name: row.name,
           confidence: data.confidence,
           product_verified: data.product_verified
@@ -1953,7 +2007,8 @@
     if (global.ShopImportLinePayload) {
       return ShopImportLinePayload.fromInvoiceRow(r, {
         isEventLine: isEventLine,
-        isForeignInvoice: isForeignInvoice
+        isForeignInvoice: isForeignInvoice,
+        foreignMinor: rowForeignMinor
       });
     }
     const payload = {
@@ -2007,6 +2062,21 @@
     }
     if (isForeignInvoice() && !settlementGbpPenceFromDom()) {
       setStatus('Enter the amount paid in GBP for this invoice.', 'warn');
+      return;
+    }
+
+    const costField = isForeignInvoice() ? 'unit_foreign_minor' : 'unit_cost_pence';
+    const noCost = toImport.filter(function (r) {
+      const v = buildLinePayload(r)[costField];
+      return !(Number.isInteger(v) && v >= 0);
+    });
+    if (noCost.length) {
+      setStatus(
+        noCost.length + ' line(s) have no unit cost: ' +
+        noCost.slice(0, 5).map(function (r) { return r.name; }).join('; ') +
+        (noCost.length > 5 ? '; …' : '') + '. Enter a cost for each before importing.',
+        'warn'
+      );
       return;
     }
 

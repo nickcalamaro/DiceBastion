@@ -186,7 +186,9 @@ const PATTERN_LOOKUP_INSTRUCTIONS =
   'When a website is given, the shop already has images for sibling variants from that site and needs the same kind of page for the rest.\n' +
   `- At most ${MISTRAL_MAX_PATTERN_WEB_SEARCHES} web searches in total. With a website, search site:{website} with the product line name; ` +
   'without one, search the brand and product line name, preferring the manufacturer\'s own site. One search usually lists several variants. Never search one barcode at a time.\n' +
-  '- When your results lack some lines, use your remaining searches on those lines (their variant names together) before answering.\n' +
+  '- When your results lack some lines, use your remaining searches on those lines (their variant names together) before answering. ' +
+  'An item no. is the supplier\'s code and is often the manufacturer\'s own part number: search the brand with the missing lines\' item numbers when their names find nothing.\n' +
+  '- A page whose URL, title or product code shows the line\'s item no. is that line\'s page, even when its colour or variant wording differs from the line name.\n' +
   '- page_url per line: this exact variant\'s own product page (on the website when one is given), copied exactly from your results. ' +
   'Follow the URL style of any example pages. Never construct, guess or reuse a sibling\'s page. null when your results lack it.\n' +
   '- After your searches, stop and return pattern_lookup JSON only.'
@@ -226,7 +228,9 @@ export function buildPatternLookupUserPrompt({ host, brand, productLineName, exa
     ...examples.map((u) => `- ${u}`),
     '',
     `Find the product page${host ? ' on that site' : ''} for each line (answer each key in lines{}):`,
-    ...missing.map((m) => `- ${m.key} · EAN ${m.ean || 'none'} · ${m.variantLabel || m.name}`)
+    ...missing.map(
+      (m) => `- ${m.key} · EAN ${m.ean || 'none'}${m.itemCode ? ` · item no. ${m.itemCode}` : ''} · ${m.variantLabel || m.name}`
+    )
   ]
     .filter((s) => s !== '')
     .join('\n')
@@ -413,9 +417,19 @@ function normalizeFamilyInputLines(rawLines) {
     const name = String(line.name || '').trim()
     if (!name) continue
     const ean = line.ean != null ? normalizeGtin(String(line.ean)) : null
-    out.push({ name, ean })
+    out.push({ name, ean, itemCode: normalizeItemCode(line.sku) || leadingItemCode(name) })
   }
   return out
+}
+
+/**
+ * A code written before the product name, as split bundle lines often are ("1x 27830 Vortex ...").
+ * At least 5 characters, so a leading year or size is not taken for a code.
+ */
+export function leadingItemCode(name) {
+  const m = String(name || '').match(/^\s*(?:\d+\s*x\s+)?([A-Za-z0-9][A-Za-z0-9._/-]*)\s+\S/i)
+  if (!m || m[1].length < 5) return null
+  return normalizeItemCode(m[1])
 }
 
 export function normalizeBundle(raw) {
@@ -433,7 +447,9 @@ export function buildFamilyResearchUserPrompt(inputLines, familyHint, productFam
     productFamily != null && Number.isFinite(Number(productFamily)) && Number(productFamily) > 0
       ? Number(productFamily)
       : null
-  const bullets = inputLines.map((l, i) => `- ${familyLineKey(i)} · EAN ${l.ean || 'none'} · ${l.name}`)
+  const bullets = inputLines.map(
+    (l, i) => `- ${familyLineKey(i)} · EAN ${l.ean || 'none'}${l.itemCode ? ` · item no. ${l.itemCode}` : ''} · ${l.name}`
+  )
   const bundleLine = bundle
     ? `These lines were split from distributor bundle: ${bundle.name || 'unnamed'}, EAN ${bundle.ean || 'none'}${bundle.sku ? `, SKU ${bundle.sku}` : ''}. Search that EAN first to identify the product line; the lines below are its individual items.`
     : ''
@@ -647,7 +663,9 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
     if (a) await progress(`${familyLineKey(i)} · EAN ${inputLines[i].ean || 'none'} · linked by ${a.by} · ${hostOf(a.url)}`)
   }
 
-  const matchLines = withCommonWords(inputLines.map((l, i) => ({ gtin: normalizeGtin(l.ean), variantLabel: variantLabels[i] })))
+  const matchLines = withCommonWords(
+    inputLines.map((l, i) => ({ gtin: normalizeGtin(l.ean), itemCode: l.itemCode, variantLabel: variantLabels[i] }))
+  )
   const commonWords = matchLines[0].commonWords
   const searchMatches = matchSearchResults(researched.references, matchLines)
   const resultsMatched = searchMatches.filter((m) => m.length).length
@@ -696,7 +714,8 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       familyGtins,
       catalogue: catalogue.perLine[i],
       searchMatches: searchMatches[i],
-      commonWords
+      commonWords,
+      itemCode: input.itemCode
     })
   })
   const sharedDropped = dropSharedImageCandidates(collected)
@@ -1417,20 +1436,22 @@ async function finishFromGatheredResults(apiKey, { instructions, userPrompt, ref
   })
 }
 
-function buildListingCopyUserPrompt({ name, ean, category }) {
+function buildListingCopyUserPrompt({ name, ean, category, sku }) {
   const title = String(name || '').trim()
   const eanNorm = ean ? String(ean).replace(/\D/g, '') : ''
   const lines = [`Product: ${title}`]
   if (eanNorm) lines.push(`EAN: ${eanNorm}`)
   else lines.push('EAN: none')
+  const itemCode = normalizeItemCode(sku)
+  if (itemCode) lines.push(`Supplier item no.: ${itemCode} (often the manufacturer's part number; search it with the brand when the EAN finds nothing)`)
   const cat = category ? String(category).trim() : ''
   if (cat) lines.push(`Categories: ${cat}`)
   lines.push('', 'Web search once, then return listing_enrichment JSON for this product.')
   return lines.join('\n')
 }
 
-async function callMistralWebSearchListingCopy(apiKey, { name, ean, category, onProgress }) {
-  const userPrompt = buildListingCopyUserPrompt({ name, ean, category })
+async function callMistralWebSearchListingCopy(apiKey, { name, ean, category, sku, onProgress }) {
+  const userPrompt = buildListingCopyUserPrompt({ name, ean, category, sku })
   const out = await streamMistralConversation(
     apiKey,
     {
@@ -1701,10 +1722,44 @@ async function fetchPageHtml(url, pageCache) {
  * A cited page belongs to this family line when it shows the line's barcode or its title names the variant.
  * Single products have no siblings in the search, so every cited page is about that product.
  */
-export function citedPageMatchesLine({ title, html, gtin, variantLabel, commonWords = null }) {
+export function citedPageMatchesLine({ title, html, gtin, variantLabel, commonWords = null, itemCode = null, pageUrl = '' }) {
   if (!variantLabel) return true
   if (gtin && html.includes(gtin)) return true
+  if (itemCode && pageShowsItemCode({ html, title, pageUrl, itemCode })) return true
   return variantWordsCovered(variantLabel, commonWords, new Set(wordTokens(title))).ok
+}
+
+/**
+ * A supplier item number (often the maker's part number) used for matching. Short or letter-only codes
+ * would match unrelated text, so it needs at least 4 characters including a digit.
+ */
+export function normalizeItemCode(raw) {
+  const s = String(raw || '').trim()
+  if (s.length < 4 || s.length > 32 || !/\d/.test(s) || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(s)) return null
+  return s
+}
+
+/** The code appears as a whole token (not inside a longer number or word). */
+export function textHasItemCode(text, code) {
+  if (!code || !text) return false
+  const escaped = code.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+  return new RegExp(`(^|[^A-Za-z0-9])${escaped}([^A-Za-z0-9]|$)`, 'i').test(String(text))
+}
+
+/**
+ * The page is this item's own page: its code is in the page URL, title, product data (sku/mpn), or the
+ * page's own product image file. Codes elsewhere in the body may belong to related products.
+ */
+export function pageShowsItemCode({ html, title, pageUrl, itemCode }) {
+  if (!itemCode) return false
+  if (textHasItemCode(pageUrl, itemCode) || textHasItemCode(title, itemCode)) return true
+  const escaped = itemCode.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+  const data = new RegExp(
+    `"(?:sku|mpn|productID)"\\s*:\\s*"${escaped}"|itemprop=["']?(?:sku|mpn)["']?[^>]*content=["']${escaped}["']`,
+    'i'
+  )
+  if (data.test(String(html || ''))) return true
+  return extractPageImageSlots(String(html || ''), pageUrl || 'https://invalid.local/').some((s) => textHasItemCode(s.url, itemCode))
 }
 
 /** A page listing two or more of the family's barcodes describes the range, so its own photo fits no single variant. */
@@ -1852,7 +1907,7 @@ async function lookupLinePages(
     if (hit) {
       if (host && examples.length < 3 && !examples.includes(hit.page)) examples.push(hit.page)
     } else {
-      gaps.push({ i, key: familyLineKey(i), ean: input.ean, name: input.name, variantLabel: variantLabels[i] })
+      gaps.push({ i, key: familyLineKey(i), ean: input.ean, itemCode: input.itemCode, name: input.name, variantLabel: variantLabels[i] })
     }
   })
   if (!gaps.length) return { asked: 0, found: 0 }
@@ -1877,7 +1932,7 @@ async function lookupLinePages(
   const matchFor = (pool, lines) =>
     matchSearchResults(
       pool,
-      lines.map((g) => ({ gtin: normalizeGtin(g.ean), variantLabel: g.variantLabel || '', commonWords }))
+      lines.map((g) => ({ gtin: normalizeGtin(g.ean), itemCode: g.itemCode, variantLabel: g.variantLabel || '', commonWords }))
     )
 
   /** Tries the model's page, then matching result pages. True when a page with this variant's image was added. */
@@ -1908,7 +1963,17 @@ async function lookupLinePages(
         if (page.error === 'fetch_limit') return false
         continue
       }
-      if (!citedPageMatchesLine({ title: pageTitle(page.html), html: page.html, gtin: c.gtin, variantLabel: g.variantLabel, commonWords })) {
+      if (
+        !citedPageMatchesLine({
+          title: pageTitle(page.html),
+          html: page.html,
+          gtin: c.gtin,
+          variantLabel: g.variantLabel,
+          commonWords,
+          itemCode: g.itemCode,
+          pageUrl: page.url
+        })
+      ) {
         s.problems.push(`${hostOf(url)} page is another variant`)
         continue
       }
@@ -2095,6 +2160,9 @@ function variantLinkScore(link, line) {
   if (line.gtin && (link.url.includes(line.gtin) || link.text.includes(line.gtin) || (link.barcodeText || '').includes(line.gtin))) {
     return { score: 1000, by: 'barcode' }
   }
+  if (line.itemCode && (textHasItemCode(link.url, line.itemCode) || textHasItemCode(link.text, line.itemCode))) {
+    return { score: 900, by: 'item number' }
+  }
   const slug = slugTokens(link.url)
   const tokens = new Set([...wordTokens(link.text), ...slug])
   const m = variantWordsCovered(line.variantLabel, line.commonWords, tokens)
@@ -2170,10 +2238,14 @@ export function matchSearchResults(results, lines) {
   const usable = (results || []).filter((r) => r && r.url && isProductLikeUrl(r.url, familyGtins))
   const out = lines.map(() => [])
   lines.forEach((line, li) => {
-    if (!line.gtin) return
     for (const r of usable) {
-      if (r.url.includes(line.gtin) || (r.title || '').includes(line.gtin) || (r.description || '').includes(line.gtin)) {
+      if (line.gtin && (r.url.includes(line.gtin) || (r.title || '').includes(line.gtin) || (r.description || '').includes(line.gtin))) {
         out[li].push({ ...r, by: 'barcode' })
+      } else if (
+        line.itemCode &&
+        (textHasItemCode(r.url, line.itemCode) || textHasItemCode(r.title, line.itemCode) || textHasItemCode(r.thumbnail, line.itemCode))
+      ) {
+        out[li].push({ ...r, by: 'item number' })
       }
     }
   })
@@ -2356,7 +2428,9 @@ async function linkFamilyVariants({ research, references, inputLines, variantLab
       links.push(link)
     }
   }
-  const lines = withCommonWords(inputLines.map((l, i) => ({ gtin: normalizeGtin(l.ean), variantLabel: variantLabels[i] || '' })))
+  const lines = withCommonWords(
+    inputLines.map((l, i) => ({ gtin: normalizeGtin(l.ean), itemCode: l.itemCode, variantLabel: variantLabels[i] || '' }))
+  )
   return { rangeUrls, rangeHosts: [...new Set(pages.map((p) => hostOf(p.url)))], assigned: assignVariantLinks(links, lines), notes }
 }
 
@@ -2378,7 +2452,8 @@ async function collectImageCandidates({
   familyGtins = [],
   catalogue = null,
   searchMatches = [],
-  commonWords = null
+  commonWords = null,
+  itemCode = null
 }) {
   const tried = []
   const candidates = []
@@ -2432,7 +2507,9 @@ async function collectImageCandidates({
   for (const url of named.slice(0, 3)) {
     const page = await fetchPageHtml(url, pageCache)
     if (page.error) tried.push(`${hostOf(url)} ${page.error}`)
-    else if (!citedPageMatchesLine({ title: pageTitle(page.html), html: page.html, gtin, variantLabel, commonWords })) {
+    else if (
+      !citedPageMatchesLine({ title: pageTitle(page.html), html: page.html, gtin, variantLabel, commonWords, itemCode, pageUrl: page.url })
+    ) {
       tried.push(`${hostOf(url)} named page is another variant`)
     } else addPage(page, url, 'source_page')
   }
@@ -2448,7 +2525,9 @@ async function collectImageCandidates({
       tried.push(`${hostOf(url)} ${page.error}`)
       continue
     }
-    if (citedPageMatchesLine({ title: ref.title, html: page.html, gtin, variantLabel, commonWords })) addPage(page, url, 'cited_page')
+    if (citedPageMatchesLine({ title: ref.title, html: page.html, gtin, variantLabel, commonWords, itemCode, pageUrl: page.url })) {
+      addPage(page, url, 'cited_page')
+    }
   }
 
   return { gtin, candidates, tried }
@@ -2793,7 +2872,7 @@ export async function expandSplitFromText(apiKey, { text, default_quantity }) {
   return { success: true, lines }
 }
 
-export async function generateListingCopy(apiKey, { name, ean, category }, onProgress) {
+export async function generateListingCopy(apiKey, { name, ean, category, sku }, onProgress) {
   if (!apiKey) {
     return { error: 'missing_mistral_key', message: 'Mistral API key is required.' }
   }
@@ -2810,7 +2889,7 @@ export async function generateListingCopy(apiKey, { name, ean, category }, onPro
     await onProgress(`Searching EAN ${eanNorm || 'none'} · ${title}`)
   }
   const webStarted = Date.now()
-  const researched = await callMistralWebSearchListingCopy(apiKey, { name: title, ean, category, onProgress })
+  const researched = await callMistralWebSearchListingCopy(apiKey, { name: title, ean, category, sku, onProgress })
   const webMs = Date.now() - webStarted
 
   if (!researched.parsed) {
