@@ -2,7 +2,7 @@ import { calculateNextOccurrence } from './recurring.js'
 
 const DEFAULT_HORIZON_WEEKS = 12
 /** How many upcoming session rows to show per recurring series on the public site. */
-export const PUBLIC_SESSIONS_PER_SERIES = 2
+export const PUBLIC_SESSIONS_PER_SERIES = 1
 
 export function limitSessionsPerSeries(sessions, maxPerSeries = PUBLIC_SESSIONS_PER_SERIES) {
   const counts = new Map()
