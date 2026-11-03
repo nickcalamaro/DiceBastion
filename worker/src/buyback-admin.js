@@ -45,15 +45,24 @@ function greetingName(name) {
   return n.split(/\s+/)[0]
 }
 
-export function buybackOfferCopy({ name, amountPence, caseId }) {
+function normaliseOfferNote(note) {
+  const text = String(note ?? '').replace(/\r\n/g, '\n').trim()
+  if (text.length > 2000) return null
+  return text
+}
+
+export function buybackOfferCopy({ name, amountPence, caseId, note = '' }) {
   const who = escapeHtml(greetingName(name))
   const money = escapeHtml(formatBuybackPounds(amountPence))
+  const extra = String(note || '').trim()
+  const safeNote = escapeHtml(extra).replace(/\n/g, '<br>')
   const text = [
     `Hi ${greetingName(name)},`,
     '',
     'Thanks for sending your list.',
     '',
     `We can offer ${formatBuybackPounds(amountPence)} in store credit for these cards. Reply to this email if you would like to go ahead, and we will arrange a time for you to bring them in. We check each card when you arrive. The credit is added to your account once we have the cards.`,
+    ...(extra ? ['', extra] : []),
     '',
     'Dice Bastion'
   ].join('\n')
@@ -64,6 +73,7 @@ export function buybackOfferCopy({ name, amountPence, caseId }) {
     htmlInner: `<p>Hi ${who},</p>
 <p>Thanks for sending your list.</p>
 <p>We can offer <strong>${money}</strong> in store credit for these cards. Reply to this email if you would like to go ahead, and we will arrange a time for you to bring them in. We check each card when you arrive. The credit is added to your account once we have the cards.</p>
+${safeNote ? `<p>${safeNote}</p>` : ''}
 <p>Dice Bastion</p>`
   }
 }
@@ -173,7 +183,7 @@ export async function getBuybackCaseDetail(db, caseId) {
   return { case: row, items }
 }
 
-export async function prepareBuybackOffer(db, { caseId, amountPence }) {
+export async function prepareBuybackOffer(db, { caseId, amountPence, note = '' }) {
   const row = await loadCase(db, caseId)
   if (!row) return { ok: false, error: 'not_found' }
   if (!OFFER_STATUSES.has(row.status)) return { ok: false, error: 'case_closed' }
@@ -181,25 +191,31 @@ export async function prepareBuybackOffer(db, { caseId, amountPence }) {
   if (!Number.isInteger(amount) || amount <= 0 || amount > BUYBACK_MAX_CREDIT_PENCE) {
     return { ok: false, error: 'invalid_amount' }
   }
+  const offerNote = normaliseOfferNote(note)
+  if (offerNote === null) return { ok: false, error: 'invalid_note' }
   return {
     ok: true,
     case: row,
     amountPence: amount,
-    copy: buybackOfferCopy({ name: row.user_name, amountPence: amount, caseId: row.id })
+    note: offerNote,
+    copy: buybackOfferCopy({ name: row.user_name, amountPence: amount, caseId: row.id, note: offerNote })
   }
 }
 
-export async function saveBuybackOffer(db, { caseId, amountPence, nowIso }) {
+export async function saveBuybackOffer(db, { caseId, amountPence, note = '', nowIso }) {
   const now = nowIso || new Date().toISOString()
   const amount = Math.trunc(Number(amountPence))
+  const offerNote = normaliseOfferNote(note)
+  if (offerNote === null) return { ok: false, error: 'invalid_note' }
   const upd = await db.prepare(`
     UPDATE buyback_cases
     SET status = 'quoted',
         agreed_value_pence = ?,
+        staff_comments = ?,
         quoted_at = ?,
         updated_at = ?
     WHERE id = ? AND status IN ('submitted', 'under_review', 'quoted')
-  `).bind(amount, now, now, Number(caseId)).run()
+  `).bind(amount, offerNote || null, now, now, Number(caseId)).run()
   if (!Number(upd.meta?.changes ?? 0)) return { ok: false, error: 'case_changed' }
   const row = await loadCase(db, caseId)
   return { ok: true, case: row }

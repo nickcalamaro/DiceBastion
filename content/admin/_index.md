@@ -17,7 +17,7 @@ showDate: false
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261031l"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261101b"></script>
-<script src="/js/buybackAdmin.js?v=20261103b"></script>
+<script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->

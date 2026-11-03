@@ -54,7 +54,7 @@ showDate: false
 <p>Open Admin and choose Trade-ins. That screen follows the statuses below.</p>
 <ul>
   <li><strong>Download PDF</strong> prints the customer, their notes, and every card.</li>
-  <li><strong>Send offer</strong> emails the amount and marks the case <code>quoted</code>. The list stays unchanged if the email does not send.</li>
+  <li><strong>Send offer</strong> emails the amount, plus an optional note, and marks the case <code>quoted</code>. The list stays unchanged if the email does not send.</li>
   <li><strong>Issue store credit</strong> is available after an offer, including when the customer has agreed on the website. Enter the amount to add, including a different figure if you agreed one by email. This writes a <code>buyback_credit</code> ledger row with key <code>buyback_credit:&lt;case id&gt;</code> and marks the case <code>completed</code>. Doing it again does not add the credit twice.</li>
   <li><strong>Send rejection</strong> emails the message you write and marks the case <code>rejected</code>.</li>
 </ul>

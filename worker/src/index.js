@@ -13946,7 +13946,8 @@ app.get('/buyback/cases', async c => {
       created_at: row.created_at,
       quoted_at: row.quoted_at,
       resolved_at: row.resolved_at,
-      rejection_message: row.status === 'rejected' ? row.staff_comments : null
+      rejection_message: row.status === 'rejected' ? row.staff_comments : null,
+      offer_note: (row.status === 'quoted' || row.status === 'accepted') ? row.staff_comments : null
     }))
     return c.json({ ok: true, cases })
   } catch (e) {
@@ -14171,6 +14172,7 @@ ${customerNotes ? `<p>Customer notes: ${escapeHtml(customerNotes)}</p>` : ''}
 const BUYBACK_ADMIN_ERRORS = {
   case_closed: 'This list is already finished, so an offer cannot be sent.',
   invalid_amount: 'Enter an amount in pounds, such as 12.50. The most we can add here is £20,000.',
+  invalid_note: 'The note is too long. Keep it under 2,000 characters.',
   offer_required: 'Send an offer before adding store credit.',
   already_completed: 'Store credit has already been added for this list.',
   already_rejected: 'This list has already been rejected.',
@@ -14258,7 +14260,8 @@ app.post('/admin/buyback/cases/:id/offer', requireAdmin, async c => {
     const amountPence = parseBuybackPounds(body.amount)
     const prepared = await prepareBuybackOffer(c.env.DB, {
       caseId: c.req.param('id'),
-      amountPence
+      amountPence,
+      note: body.note
     })
     if (!prepared.ok) {
       const err = buybackAdminError(prepared)
@@ -14277,6 +14280,7 @@ app.post('/admin/buyback/cases/:id/offer', requireAdmin, async c => {
     const saved = await saveBuybackOffer(c.env.DB, {
       caseId: prepared.case.id,
       amountPence: prepared.amountPence,
+      note: prepared.note,
       nowIso: toIso(new Date())
     })
     if (!saved.ok) {

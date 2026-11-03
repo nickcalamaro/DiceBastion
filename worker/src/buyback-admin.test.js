@@ -114,16 +114,30 @@ describe('buyback admin', () => {
     }
     expect(offer.text).toContain('£24.50')
     expect(offer.text).toContain('Hi Nick,')
+    const withNote = buybackOfferCopy({ name: 'Nick', amountPence: 1000, caseId: 4, note: 'The Bolt is the card we are pricing.' })
+    expect(withNote.text).toContain('The Bolt is the card we are pricing.')
+    expect(withNote.htmlInner).toContain('The Bolt is the card we are pricing.')
     expect(reject.text).toContain('heavily played')
   })
 
   test('quote, revised amount, and a single credit issue', async () => {
     const caseId = await makeCase('offer@example.com')
-    const prepared = await prepareBuybackOffer(env.DB, { caseId, amountPence: 1500 })
+    const prepared = await prepareBuybackOffer(env.DB, {
+      caseId,
+      amountPence: 1500,
+      note: 'Near mint copies only.'
+    })
     expect(prepared.ok).toBe(true)
-    const saved = await saveBuybackOffer(env.DB, { caseId, amountPence: 1500, nowIso: '2026-11-03T13:00:00.000Z' })
+    expect(prepared.copy.text).toContain('Near mint copies only.')
+    const saved = await saveBuybackOffer(env.DB, {
+      caseId,
+      amountPence: 1500,
+      note: prepared.note,
+      nowIso: '2026-11-03T13:00:00.000Z'
+    })
     expect(saved.case.status).toBe('quoted')
     expect(saved.case.agreed_value_pence).toBe(1500)
+    expect(saved.case.staff_comments).toBe('Near mint copies only.')
 
     const issued = await issueBuybackCredit(env.DB, {
       caseId,

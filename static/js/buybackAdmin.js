@@ -15,6 +15,7 @@
   const ERRORS = {
     case_closed: 'This list is already finished, so an offer cannot be sent.',
     invalid_amount: 'Enter an amount in pounds, such as 12.50. The most we can add here is £20,000.',
+    invalid_note: 'The note is too long. Keep it under 2,000 characters.',
     offer_required: 'Send an offer before adding store credit.',
     already_completed: 'Store credit has already been added for this list.',
     already_rejected: 'This list has already been rejected.',
@@ -181,6 +182,7 @@
     const canCredit = row.status === 'quoted' || row.status === 'accepted';
     const canReject = row.status !== 'completed' && row.status !== 'rejected';
     const offerValue = row.agreed_value_pence != null ? (Number(row.agreed_value_pence) / 100).toFixed(2) : '';
+    const offerNote = (row.status === 'quoted' || row.status === 'accepted') ? (row.staff_comments || '') : '';
     const cards = items.map((item, index) => {
       const printing = [item.set_name, item.set_code ? String(item.set_code).toUpperCase() : '', item.collector_number ? '#' + item.collector_number : ''].filter(Boolean).join(' ');
       return `<li style="padding:0.45rem 0; border-bottom:1px solid rgb(var(--color-neutral-200));">
@@ -195,18 +197,22 @@
       <p class="admin-text-muted" style="margin-top:0;">${esc(STATUS_LABELS[row.status] || row.status)} · ${esc(when(row.created_at))}</p>
       <p style="margin-bottom:0.25rem;"><strong>${esc(row.user_name || '')}</strong> · ${esc(row.user_email || '')}</p>
       ${row.customer_notes ? `<p style="margin-top:0;"><span style="color:rgb(var(--color-neutral-600));">Customer notes:</span> ${esc(row.customer_notes)}</p>` : ''}
-      ${row.status === 'quoted' ? `<p>Offer emailed: <strong>${esc(pounds(row.agreed_value_pence))}</strong>${row.quoted_at ? ' on ' + esc(when(row.quoted_at)) : ''}.</p>` : ''}
-      ${row.status === 'accepted' ? `<p>The customer agreed on the website: <strong>${esc(pounds(row.agreed_value_pence))}</strong>.</p>` : ''}
+      ${(row.status === 'quoted' || row.status === 'accepted') && row.agreed_value_pence != null ? `<p>${row.status === 'accepted' ? 'The customer agreed on the website' : 'Offer emailed'}: <strong>${esc(pounds(row.agreed_value_pence))}</strong>${row.status === 'quoted' && row.quoted_at ? ' on ' + esc(when(row.quoted_at)) : ''}.</p>` : ''}
+      ${offerNote ? `<p style="white-space:pre-wrap;"><span style="color:rgb(var(--color-neutral-600));">Note with the offer:</span> ${esc(offerNote)}</p>` : ''}
       ${row.status === 'completed' ? `<p>Store credit added: <strong>${esc(pounds(row.agreed_value_pence))}</strong>${row.resolved_at ? ' on ' + esc(when(row.resolved_at)) : ''}.</p>` : ''}
       ${row.status === 'rejected' && row.staff_comments ? `<p><span style="color:rgb(var(--color-neutral-600));">Message sent:</span> ${esc(row.staff_comments)}</p>` : ''}
       <p><button type="button" class="btn btn-secondary" id="buyback-admin-pdf">Download PDF</button></p>
       <ul style="list-style:none; padding:0; margin:0 0 1.25rem;">${cards}</ul>
       ${canOffer ? `
         <h3 style="font-size:1.05rem;">Send an offer</h3>
-        <p class="admin-text-muted">The customer gets an email with this amount and a reply address.</p>
+        <p class="admin-text-muted">The customer gets an email with this amount. Add a note if you want to explain the price.</p>
         <div class="form-group" style="max-width:16rem;">
           <label class="form-label" for="buyback-offer-amount">Offer amount (£)</label>
           <input type="text" id="buyback-offer-amount" class="form-input" inputmode="decimal" value="${esc(offerValue)}" placeholder="12.50">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="buyback-offer-note">Note to the customer (optional)</label>
+          <textarea id="buyback-offer-note" class="form-textarea" rows="3" maxlength="2000">${esc(offerNote)}</textarea>
         </div>
         <button type="button" class="btn btn-primary" id="buyback-send-offer">Send offer</button>
       ` : ''}
@@ -232,14 +238,14 @@
       ` : ''}
       <p id="buyback-admin-status" class="admin-text-small" style="margin-top:0.75rem;"></p>`;
 
-    document.getElementById('buyback-admin-back').addEventListener('click', load);
-    document.getElementById('buyback-admin-pdf').addEventListener('click', () => downloadPdf(row.id));
+    document.getElementById('buyback-admin-back').addEventListener('click', () => { setTimeout(load, 0); });
+    document.getElementById('buyback-admin-pdf').addEventListener('click', () => { setTimeout(() => downloadPdf(row.id), 0); });
     const offerBtn = document.getElementById('buyback-send-offer');
-    if (offerBtn) offerBtn.addEventListener('click', () => sendOffer(row));
+    if (offerBtn) offerBtn.addEventListener('click', () => { setTimeout(() => sendOffer(row), 0); });
     const creditBtn = document.getElementById('buyback-issue-credit');
-    if (creditBtn) creditBtn.addEventListener('click', () => issueCredit(row));
+    if (creditBtn) creditBtn.addEventListener('click', () => { setTimeout(() => issueCredit(row), 0); });
     const rejectBtn = document.getElementById('buyback-send-reject');
-    if (rejectBtn) rejectBtn.addEventListener('click', () => sendReject(row));
+    if (rejectBtn) rejectBtn.addEventListener('click', () => { setTimeout(() => sendReject(row), 0); });
   }
 
   async function downloadPdf(id) {
@@ -269,19 +275,23 @@
   async function sendOffer(row) {
     if (busy) return;
     const amount = document.getElementById('buyback-offer-amount').value.trim();
+    const note = document.getElementById('buyback-offer-note').value.trim();
     if (!amount) {
       setStatus('Enter the offer amount.', true);
       return;
     }
-    if (!window.confirm('Email an offer of £' + amount.replace(/^£/, '') + ' to ' + (row.user_email || 'this customer') + '?')) return;
+    const btn = document.getElementById('buyback-send-offer');
     busy = true;
+    if (btn) btn.disabled = true;
     setStatus('Sending the offer...');
     try {
-      await api('/admin/buyback/cases/' + row.id + '/offer', { method: 'POST', body: { amount } });
+      await api('/admin/buyback/cases/' + row.id + '/offer', { method: 'POST', body: { amount, note } });
       await openCase(row.id);
       setStatus('Offer emailed.');
     } catch (err) {
       setStatus(err.message, true);
+      const again = document.getElementById('buyback-send-offer');
+      if (again) again.disabled = false;
     } finally {
       busy = false;
     }

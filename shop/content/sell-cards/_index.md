@@ -970,12 +970,14 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
     if (row.status === 'quoted' && money) {
       return `
         <div class="sell-history__title">${escapeHtml(COPY.status.quoted)}: ${escapeHtml(money)}</div>
+        ${row.offer_note ? `<p style="margin:0.35rem 0; white-space:pre-wrap;">${escapeHtml(row.offer_note)}</p>` : ''}
         <p class="sell-help">${escapeHtml(COPY.historyOffer)}</p>
         <button type="button" class="btn btn-primary sell-small-btn" data-accept-id="${escapeHtml(row.id)}" data-accept-amount="${escapeHtml(money)}">Agree to this offer</button>`;
     }
     if (row.status === 'accepted' && money) {
       return `
         <div class="sell-history__title">${escapeHtml(COPY.status.accepted)}: ${escapeHtml(money)}</div>
+        ${row.offer_note ? `<p style="margin:0.35rem 0;">${escapeHtml(row.offer_note)}</p>` : ''}
         <p class="sell-help" style="margin-bottom:0;">${escapeHtml(COPY.historyAccepted)}</p>`;
     }
     if (row.status === 'completed' && money) {
