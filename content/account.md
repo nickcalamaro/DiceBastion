@@ -234,7 +234,7 @@ Go to Login
 <div class="card-label">Available balance</div>
 <div class="card-value" id="store-credit-balance" style="font-size: 1.5rem; font-weight: 700; color: rgb(var(--color-primary-600));">£0.00</div>
 <p class="text-muted" style="margin: 0.5rem 0 0; font-size: 0.875rem;">
-Store credit can be used for shop purchases and event tickets. It cannot be used for memberships or donations.
+Store credit can be used for shop purchases and event tickets. It cannot be used for memberships. Currently we are only able to provide store credits for rare cards and above. If you have any bulk you would like to give away, speak to us at one of our events. 
 </p>
 </div>
 <div id="store-credit-ledger"></div>

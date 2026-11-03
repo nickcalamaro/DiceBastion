@@ -37,22 +37,42 @@ export const BUYBACK_GAMES = [
 const searchCache = new Map()
 const CACHE_TTL_MS = 60_000
 
+const PRINTS_CACHE_TTL_MS = 10 * 60 * 1000
+const MAX_PRINT_PAGES = 4
+
 function cacheGet(key) {
   const hit = searchCache.get(key)
   if (!hit) return null
-  if (Date.now() - hit.at > CACHE_TTL_MS) {
+  if (Date.now() - hit.at > (hit.ttl || CACHE_TTL_MS)) {
     searchCache.delete(key)
     return null
   }
   return hit.data
 }
 
-function cacheSet(key, data) {
+function cacheSet(key, data, ttl) {
   if (searchCache.size > 200) {
     const first = searchCache.keys().next().value
     searchCache.delete(first)
   }
-  searchCache.set(key, { at: Date.now(), data })
+  searchCache.set(key, { at: Date.now(), data, ttl: ttl || CACHE_TTL_MS })
+}
+
+function scryfallHeaders() {
+  return {
+    Accept: 'application/json',
+    'User-Agent': SCRYFALL_UA
+  }
+}
+
+function assertScryfallUrl(url) {
+  const parsed = new URL(url)
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'api.scryfall.com') {
+    const err = new Error('scryfall_bad_url')
+    err.status = 502
+    throw err
+  }
+  return parsed.toString()
 }
 
 /**
@@ -108,12 +128,7 @@ async function searchScryfall(q) {
 
   // Autocomplete for typeahead names
   const autoUrl = `https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(query)}`
-  const autoRes = await fetch(autoUrl, {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': SCRYFALL_UA
-    }
-  })
+  const autoRes = await fetch(autoUrl, { headers: scryfallHeaders() })
   if (autoRes.status === 429) {
     const err = new Error('scryfall_rate_limited')
     err.status = 429
@@ -129,9 +144,7 @@ async function searchScryfall(q) {
   if (!names.length) {
     // Fallback: fuzzy search
     const searchUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}&unique=prints&order=name`
-    const searchRes = await fetch(searchUrl, {
-      headers: { Accept: 'application/json', 'User-Agent': SCRYFALL_UA }
-    })
+    const searchRes = await fetch(searchUrl, { headers: scryfallHeaders() })
     if (searchRes.status === 404) return []
     if (searchRes.status === 429) {
       const err = new Error('scryfall_rate_limited')
@@ -157,9 +170,7 @@ async function searchScryfall(q) {
   for (const name of names) {
     const namedUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(name)}`
     try {
-      const namedRes = await fetch(namedUrl, {
-        headers: { Accept: 'application/json', 'User-Agent': SCRYFALL_UA }
-      })
+      const namedRes = await fetch(namedUrl, { headers: scryfallHeaders() })
       if (namedRes.status === 429) {
         const err = new Error('scryfall_rate_limited')
         err.status = 429
@@ -225,6 +236,113 @@ async function searchScrydex(env, q) {
       imageUrl: card.images?.[0]?.small || card.images?.[0]?.medium || null
     })
   )
+}
+
+function scryfallImage(card) {
+  return card?.image_uris?.small || card?.card_faces?.[0]?.image_uris?.small || null
+}
+
+function mapScryfallPrint(card) {
+  const printed = card.printed_name && card.printed_name !== card.name
+    ? String(card.printed_name)
+    : null
+  return {
+    id: String(card.id || ''),
+    name: String(card.name || ''),
+    printed_name: printed,
+    lang: card.lang ? String(card.lang) : null,
+    set_code: card.set ? String(card.set) : null,
+    set_name: card.set_name ? String(card.set_name) : null,
+    collector_number: card.collector_number != null ? String(card.collector_number) : null,
+    image_url: scryfallImage(card)
+  }
+}
+
+async function fetchScryfallPrintPages(startUrl) {
+  const prints = []
+  let url = assertScryfallUrl(startUrl)
+  for (let page = 0; page < MAX_PRINT_PAGES; page++) {
+    if (page > 0) await new Promise(r => setTimeout(r, 100))
+    const res = await fetch(url, { headers: scryfallHeaders() })
+    if (res.status === 429) {
+      const err = new Error('scryfall_rate_limited')
+      err.status = 429
+      throw err
+    }
+    if (res.status === 404) return prints
+    if (!res.ok) {
+      const err = new Error('scryfall_prints_failed')
+      err.status = 502
+      throw err
+    }
+    const json = await res.json()
+    for (const card of json.data || []) prints.push(mapScryfallPrint(card))
+    if (!json.has_more || !json.next_page) break
+    url = assertScryfallUrl(json.next_page)
+  }
+  return prints
+}
+
+/**
+ * All printings of one MTG card, loaded after the customer picks a name.
+ * Uses Scryfall's oracle print list (the same table as the card page), newest first.
+ * Does not include every language reprint of the same printing.
+ *
+ * @param {'mtg'|'riftbound'} game
+ * @param {string} cardId Scryfall card UUID from search results
+ */
+export async function listBuybackPrints(game, cardId) {
+  const g = String(game || '').toLowerCase()
+  if (g !== 'mtg') {
+    const err = new Error('prints_mtg_only')
+    err.status = 400
+    throw err
+  }
+  const id = String(cardId || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
+    const err = new Error('invalid_card_id')
+    err.status = 400
+    throw err
+  }
+
+  const byCard = cacheGet(`prints:card:${id}`)
+  if (byCard) return byCard
+
+  const cardRes = await fetch(`https://api.scryfall.com/cards/${id}`, { headers: scryfallHeaders() })
+  if (cardRes.status === 404) {
+    const err = new Error('card_not_found')
+    err.status = 404
+    throw err
+  }
+  if (cardRes.status === 429) {
+    const err = new Error('scryfall_rate_limited')
+    err.status = 429
+    throw err
+  }
+  if (!cardRes.ok) {
+    const err = new Error('scryfall_prints_failed')
+    err.status = 502
+    throw err
+  }
+  const card = await cardRes.json()
+  const oracleId = card.oracle_id ? String(card.oracle_id) : ''
+  const cacheKey = oracleId ? `prints:${oracleId}` : ''
+  const cached = cacheKey ? cacheGet(cacheKey) : null
+  if (cached) {
+    cacheSet(`prints:card:${id}`, cached, PRINTS_CACHE_TTL_MS)
+    return cached
+  }
+
+  const searchUrl = card.prints_search_uri
+  if (!searchUrl) {
+    const err = new Error('scryfall_prints_failed')
+    err.status = 502
+    throw err
+  }
+  const prints = await fetchScryfallPrintPages(searchUrl)
+  if (cacheKey) cacheSet(cacheKey, prints, PRINTS_CACHE_TTL_MS)
+  cacheSet(`prints:card:${id}`, prints, PRINTS_CACHE_TTL_MS)
+  return prints
 }
 
 /**
