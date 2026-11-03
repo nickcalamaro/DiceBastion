@@ -26,7 +26,7 @@ showDate: false
 
 <a href="/admin/docs/store-credit/" style="display: block; padding: 1.5rem; background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; text-decoration: none; transition: all 0.2s;">
   <h3 style="margin: 0 0 0.5rem 0; color: rgb(var(--color-primary-600));">Store Credit &amp; Buyback</h3>
-  <p style="margin: 0; color: rgb(var(--color-neutral-600)); font-size: 0.9rem;">Ledger, buyback cases, SQL recipes, Scryfall/Scrydex, compliance</p>
+  <p style="margin: 0; color: rgb(var(--color-neutral-600)); font-size: 0.9rem;">Trade-ins tab, ledger, SQL fallback, Scryfall/Scrydex, compliance</p>
 </a>
 
 <div style="display: block; padding: 1.5rem; background: rgb(var(--color-neutral-50)); border: 1px solid rgb(var(--color-neutral-200)); border-radius: 12px; opacity: 0.6;">

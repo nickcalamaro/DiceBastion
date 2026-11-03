@@ -181,13 +181,14 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
 }
 .sell-message { margin: 1rem 0 0; min-height: 1.25em; font-size: 0.875rem; }
 .sell-message.is-error { color: #b00020; }
-.sell-cases-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-.sell-cases-table th, .sell-cases-table td {
-  text-align: left;
-  padding: 0.55rem 0.5rem;
+.sell-history { list-style: none; padding: 0; margin: 0; }
+.sell-history li {
+  padding: 0.85rem 0;
   border-bottom: 1px solid rgb(var(--color-neutral-200));
 }
-.sell-cases-table th { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); font-weight: 600; }
+.sell-history li:last-child { border-bottom: 0; }
+.sell-history__title { font-weight: 600; }
+.sell-history__meta { font-size: 0.8125rem; color: rgb(var(--color-neutral-600)); margin-top: 0.15rem; }
 </style>
 
 <div class="page-container" style="max-width: 880px; margin: 0 auto;">
@@ -284,8 +285,8 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
           <div id="buyback-search-results"></div>
         </div>
         <h3 style="font-size: 1.05rem; margin: 1.25rem 0 0.5rem;">Your list <span id="buyback-count" style="font-weight: 400; color: rgb(var(--color-neutral-600));"></span></h3>
-        <div class="sell-box">
-          <p id="buyback-list-empty" style="margin: 0; color: rgb(var(--color-neutral-600)); font-size: 0.9375rem;" data-copy="listEmpty"></p>
+        <p id="buyback-list-empty" style="margin: 0; color: rgb(var(--color-neutral-600)); font-size: 0.9375rem;" data-copy="listEmpty"></p>
+        <div class="sell-box" id="buyback-list-box" style="display: none;">
           <ul id="buyback-list" class="sell-list"></ul>
         </div>
         <div class="sell-nav">
@@ -322,6 +323,8 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
     </div>
     <section id="buyback-history" class="sell-shell" style="display: none;">
       <h2>Your submissions</h2>
+      <p class="sell-help">Pending means we are still looking at the list. An offer shows the price, and you can agree to it here.</p>
+      <p id="buyback-history-note" class="sell-message" style="margin-top: 0;"></p>
       <div id="buyback-history-body"></div>
     </section>
   </div>
@@ -363,13 +366,21 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
     resumeHelp: n => `This browser still has a list of ${n} card${n === 1 ? '' : 's'} that you have not sent. You can go back to that list, or clear it and start again.`,
     caseRef: n => `Your list number is #${n}.`,
     historyEmpty: 'You haven\'t sent us any lists yet.',
+    historyPending: 'We are looking at this list and will email you an offer.',
+    historyOffer: 'Agreeing emails the shop. Bring the cards in and we will add the credit after we check them.',
+    historyAccepted: 'You agreed to this offer. Bring the cards in and we will add the store credit.',
+    historySold: 'This store credit is on your account.',
+    historyRejectedFallback: 'We are not able to buy this list.',
+    agreeConfirm: (amount, id) => `Agree to the offer of ${amount} for list #${id}? We will email the shop.`,
+    agreeFailed: 'We could not save your answer. Please try again.',
+    agreedNote: 'The shop has your answer. Bring the cards in and we will add the store credit.',
     status: {
-      submitted: 'Sent',
-      under_review: 'Being looked at',
-      quoted: 'Offer sent',
+      submitted: 'Pending',
+      under_review: 'Pending',
+      quoted: 'Offer made',
       accepted: 'Accepted',
-      rejected: 'Declined',
-      completed: 'Credit added',
+      rejected: 'Rejected',
+      completed: 'Sold',
       cancelled: 'Cancelled'
     }
   };
@@ -534,6 +545,7 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
   function renderList() {
     const n = state.items.length;
     $('buyback-list-empty').style.display = n ? 'none' : 'block';
+    $('buyback-list-box').style.display = n ? 'block' : 'none';
     $('buyback-count').textContent = n ? `(${n} card${n === 1 ? '' : 's'})` : '';
     $('buyback-to-review').disabled = !n;
     $('buyback-list').innerHTML = state.items.map((it, idx) => itemRow(it, `
@@ -940,6 +952,68 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
     return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  function formatPounds(pence) {
+    const n = Number(pence);
+    if (!Number.isFinite(n)) return '';
+    return '£' + (n / 100).toFixed(2);
+  }
+
+  function setHistoryNote(text, isError) {
+    const el = $('buyback-history-note');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('is-error', !!isError);
+  }
+
+  function historyDetail(row) {
+    const money = formatPounds(row.agreed_value_pence);
+    if (row.status === 'quoted' && money) {
+      return `
+        <div class="sell-history__title">${escapeHtml(COPY.status.quoted)}: ${escapeHtml(money)}</div>
+        <p class="sell-help">${escapeHtml(COPY.historyOffer)}</p>
+        <button type="button" class="btn btn-primary sell-small-btn" data-accept-id="${escapeHtml(row.id)}" data-accept-amount="${escapeHtml(money)}">Agree to this offer</button>`;
+    }
+    if (row.status === 'accepted' && money) {
+      return `
+        <div class="sell-history__title">${escapeHtml(COPY.status.accepted)}: ${escapeHtml(money)}</div>
+        <p class="sell-help" style="margin-bottom:0;">${escapeHtml(COPY.historyAccepted)}</p>`;
+    }
+    if (row.status === 'completed' && money) {
+      return `
+        <div class="sell-history__title">${escapeHtml(COPY.status.completed)}: ${escapeHtml(money)}</div>
+        <p class="sell-help" style="margin-bottom:0;">${escapeHtml(COPY.historySold)}</p>`;
+    }
+    if (row.status === 'rejected') {
+      return `
+        <div class="sell-history__title">${escapeHtml(COPY.status.rejected)}</div>
+        <p class="sell-help" style="margin-bottom:0;">${escapeHtml(row.rejection_message || COPY.historyRejectedFallback)}</p>`;
+    }
+    if (row.status === 'cancelled') {
+      return `<div class="sell-history__title">${escapeHtml(COPY.status.cancelled)}</div>`;
+    }
+    return `
+      <div class="sell-history__title">${escapeHtml(COPY.status[row.status] || 'Pending')}</div>
+      <p class="sell-help" style="margin-bottom:0;">${escapeHtml(COPY.historyPending)}</p>`;
+  }
+
+  async function agreeToOffer(id, amount) {
+    if (!window.confirm(COPY.agreeConfirm(amount, id))) return;
+    setHistoryNote('');
+    try {
+      const res = await fetch(`${API_BASE}/buyback/cases/${id}/accept`, {
+        method: 'POST',
+        headers: headers(),
+        credentials: 'include'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || COPY.agreeFailed);
+      await loadHistory();
+      setHistoryNote(COPY.agreedNote);
+    } catch (err) {
+      setHistoryNote(err.message || COPY.agreeFailed, true);
+    }
+  }
+
   async function loadHistory() {
     try {
       const res = await fetch(`${API_BASE}/buyback/cases`, { headers: headers(), credentials: 'include' });
@@ -952,19 +1026,16 @@ description: "Sell Magic: The Gathering and Riftbound singles to Dice Bastion in
         return;
       }
       $('buyback-history-body').innerHTML = `
-        <table class="sell-cases-table">
-          <thead><tr><th>List</th><th>Sent</th><th>Cards</th><th>Status</th><th>Offer</th></tr></thead>
-          <tbody>
-            ${cases.map(c => `
-              <tr>
-                <td>#${escapeHtml(c.id)}</td>
-                <td>${escapeHtml(formatDate(c.created_at))}</td>
-                <td>${c.item_count != null ? escapeHtml(c.item_count) : ''}</td>
-                <td>${escapeHtml(COPY.status[c.status] || c.status)}</td>
-                <td>${c.agreed_value_pence != null ? '&pound;' + (Number(c.agreed_value_pence) / 100).toFixed(2) : ''}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>`;
+        <ul class="sell-history">
+          ${cases.map(c => `
+            <li>
+              <div class="sell-history__meta">List #${escapeHtml(c.id)} · ${escapeHtml(formatDate(c.created_at))} · ${escapeHtml(c.item_count != null ? c.item_count : '')} card${Number(c.item_count) === 1 ? '' : 's'}</div>
+              ${historyDetail(c)}
+            </li>`).join('')}
+        </ul>`;
+      $('buyback-history-body').querySelectorAll('[data-accept-id]').forEach(btn => {
+        btn.addEventListener('click', () => agreeToOffer(btn.getAttribute('data-accept-id'), btn.getAttribute('data-accept-amount')));
+      });
     } catch (_) {}
   }
 

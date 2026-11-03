@@ -17,6 +17,7 @@ showDate: false
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261031l"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261101b"></script>
+<script src="/js/buybackAdmin.js?v=20261103b"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -328,6 +329,7 @@ Logout
 <button class="admin-tab-btn tab-btn" data-tab="events">Events</button>
 <button class="admin-tab-btn tab-btn" data-tab="registrations">Registrations</button>
 <button class="admin-tab-btn tab-btn" data-tab="orders">Orders</button>
+<button class="admin-tab-btn tab-btn" data-tab="trade-ins">Trade-ins</button>
 <button class="admin-tab-btn tab-btn" data-tab="memberships">Memberships</button>
 <button class="admin-tab-btn tab-btn" data-tab="accounts" id="accounts-tab-btn" style="display: none;">Club accounts</button>
 <button class="admin-tab-btn tab-btn" data-tab="finance" id="finance-tab-btn" style="display: none;">Shop and events accounts</button>
@@ -345,6 +347,7 @@ Logout
 <a href="#events">Events</a>
 <a href="#registrations">Registrations</a>
 <a href="#orders">Orders</a>
+<a href="#trade-ins">Trade-ins</a>
 <a href="#memberships">Memberships</a>
 <a href="#accounts" id="accounts-jump-link" style="display: none;">Club accounts</a>
 <a href="#finance" id="finance-jump-link" style="display: none;">Shop and events accounts</a>
@@ -1069,6 +1072,13 @@ Show delivered
 </div>
 <p class="admin-text-muted admin-mb-1">Undelivered, paid shop orders only by default (online + POS). Failed or abandoned checkouts are hidden. Drinks sales are not listed here.</p>
 <div id="orders-list"></div>
+</div>
+
+<!-- Trade-ins Tab -->
+<div id="trade-ins-tab" class="tab-content" style="display: none;">
+<h2 id="admin-section-trade-ins" class="admin-section-heading">Trade-ins <a href="#trade-ins" class="admin-permalink" aria-label="Link to trade-ins">#</a></h2>
+<p class="admin-text-muted admin-mb-1">Lists customers have sent in. Download a list, email an offer, and add store credit once they have brought the cards in.</p>
+<div id="buyback-admin-root"></div>
 </div>
 
 <!-- Club Accounts Tab (owner-only) -->
@@ -3598,7 +3608,7 @@ document.getElementById('crop-confirm').addEventListener('click', async () => {
 });
 
 // Tabs & deep links (e.g. /admin#bookings-upcoming, /admin#events)
-const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'memberships', 'accounts', 'finance', 'bookings', 'cron', 'newsletter', 'blog'];
+const ADMIN_TABS = ['activity', 'products', 'shop-promos', 'events', 'registrations', 'orders', 'trade-ins', 'memberships', 'accounts', 'finance', 'bookings', 'cron', 'newsletter', 'blog'];
 const ACCOUNTS_OWNER_EMAIL = 'ncalamaro@gmail.com';
 let accountsReportRows = [];
 
@@ -3866,6 +3876,15 @@ function switchAdminTab(tab, options = {}) {
   if (tab === 'bookings') loadBookingsAndCalendar();
   if (tab === 'memberships') loadMemberships();
   if (tab === 'orders') loadOrders();
+  if (tab === 'trade-ins') {
+    const tradeRoot = document.getElementById('buyback-admin-root');
+    if (!window.BuybackAdmin) {
+      if (tradeRoot) tradeRoot.textContent = 'Trade-in tools failed to load. Refresh the page.';
+    } else {
+      BuybackAdmin.init({ apiBase: API_BASE, token: () => sessionToken });
+      BuybackAdmin.load();
+    }
+  }
   if (tab === 'accounts') loadAccountsReport();
   if (tab === 'finance' && window.ShopFinance) ShopFinance.load();
   if (tab === 'newsletter') {

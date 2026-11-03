@@ -16,7 +16,7 @@ showDate: false
 </div>
 
 <h1>Store Credit &amp; TCG Buyback</h1>
-<p style="color: rgb(var(--color-neutral-600));">Operational reference for v1 (SQL-first staff ops). Migration: <code>worker/migrations/0010_store_credit_buyback.sql</code>.</p>
+<p style="color: rgb(var(--color-neutral-600));">Review lists from the Trade-ins tab in the admin dashboard. The SQL below is the fallback if that tab cannot be used. Migration: <code>worker/migrations/0010_store_credit_buyback.sql</code>.</p>
 
 <h2>Session across shop and main site</h2>
 <p>Login sets a <code>db_session</code> cookie on <code>.dicebastion.com</code> so the shop can share auth with the main site. Shop pages sync via <code>utils.session.syncFromSharedCookie</code>. Guests cannot use credit or buyback.</p>
@@ -25,7 +25,7 @@ showDate: false
 <ul>
   <li><strong>Balance</strong> — <code>users.store_credit_pence</code> (integer pence).</li>
   <li><strong>Ledger</strong> — append-only <code>store_credit_ledger</code>. Every credit change writes a history row with an <code>idempotency_key</code>.</li>
-  <li><strong>Buyback case</strong> — <code>buyback_cases</code> + <code>buyback_case_items</code>. Customer submission; staff quote and credit via SQL until an admin UI exists.</li>
+  <li><strong>Buyback case</strong> — <code>buyback_cases</code> + <code>buyback_case_items</code>. Customers submit a list. Staff review it in Admin, Trade-ins: download a PDF, email an offer, reject with a message, or add store credit once the customer has accepted and brought the cards in.</li>
   <li><strong>Spend targets</strong> — shop orders and paid event tickets only. Not memberships or donations.</li>
   <li><strong>Guests</strong> — never see or use store credit.</li>
 </ul>
@@ -39,7 +39,7 @@ showDate: false
 <tr><td style="padding:0.4rem;"><code>submitted</code></td><td style="padding:0.4rem;">Customer just submitted</td></tr>
 <tr><td style="padding:0.4rem;"><code>under_review</code></td><td style="padding:0.4rem;">Staff reviewing</td></tr>
 <tr><td style="padding:0.4rem;"><code>quoted</code></td><td style="padding:0.4rem;">Quote communicated; <code>agreed_value_pence</code> may be set</td></tr>
-<tr><td style="padding:0.4rem;"><code>accepted</code></td><td style="padding:0.4rem;">Customer accepted quote</td></tr>
+<tr><td style="padding:0.4rem;"><code>accepted</code></td><td style="padding:0.4rem;">Customer agreed on the trade-in page. The shop is emailed at admin@dicebastion.com. Credit is still added by staff once the cards are in.</td></tr>
 <tr><td style="padding:0.4rem;"><code>rejected</code></td><td style="padding:0.4rem;">Declined / cancelled by staff</td></tr>
 <tr><td style="padding:0.4rem;"><code>completed</code></td><td style="padding:0.4rem;">Cards taken; credit issued</td></tr>
 <tr><td style="padding:0.4rem;"><code>cancelled</code></td><td style="padding:0.4rem;">Abandoned</td></tr>
@@ -49,6 +49,15 @@ showDate: false
 <h2>Sub-£1 card charge rule</h2>
 <p>If applying available credit would leave a card remainder of 1–99p, credit is <strong>not</strong> applied and the full amount is charged on card (SumUp minimum £1.00). Credit applies only when the remainder is £0 or ≥ £1.00.</p>
 <p>Credit is held as soon as a checkout starts, so a customer's balance drops before they pay by card. Held credit is given back when the card is declined, when the same customer starts another checkout more than 2 minutes later without paying the first, or by the nightly job for checkouts over an hour old. If a released checkout is paid later, the credit is taken again. If the customer has spent it by then, the order or ticket still goes through and staff get a "Store credit debit failed after card payment" email to settle the difference.</p>
+
+<h2>Admin: Trade-ins</h2>
+<p>Open Admin and choose Trade-ins. That screen follows the statuses below.</p>
+<ul>
+  <li><strong>Download PDF</strong> prints the customer, their notes, and every card.</li>
+  <li><strong>Send offer</strong> emails the amount and marks the case <code>quoted</code>. The list stays unchanged if the email does not send.</li>
+  <li><strong>Issue store credit</strong> is available after an offer, including when the customer has agreed on the website. Enter the amount to add, including a different figure if you agreed one by email. This writes a <code>buyback_credit</code> ledger row with key <code>buyback_credit:&lt;case id&gt;</code> and marks the case <code>completed</code>. Doing it again does not add the credit twice.</li>
+  <li><strong>Send rejection</strong> emails the message you write and marks the case <code>rejected</code>.</li>
+</ul>
 
 <h2>SQL recipes (D1)</h2>
 <p>Run against the production D1 database. Prefer a single batch / transaction mentally: update the case, then ledger + balance together. Use a unique <code>idempotency_key</code> every time.</p>

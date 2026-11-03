@@ -31,6 +31,19 @@ import {
   settleStoreCredit
 } from './store-credit.js'
 import {
+  buildBuybackListPdf,
+  getBuybackCaseDetail,
+  issueBuybackCredit,
+  listBuybackCases,
+  parseBuybackPounds,
+  prepareBuybackAccept,
+  prepareBuybackOffer,
+  prepareBuybackReject,
+  saveBuybackAccept,
+  saveBuybackOffer,
+  saveBuybackReject
+} from './buyback-admin.js'
+import {
   listBuybackMeta,
   searchBuybackCards,
   listBuybackPrints,
@@ -13840,6 +13853,7 @@ async function validateAndComputeShopPromo(db, { promoCodeInput, checkoutEmail, 
 
 const buybackSearchRateLimits = new Map()
 const buybackSubmitRateLimits = new Map()
+const buybackAcceptRateLimits = new Map()
 
 const BUYBACK_CONDITION_CODES = new Set(BUYBACK_CONDITIONS.map(c => c.code))
 const BUYBACK_LANGUAGE_CODES = new Set(BUYBACK_LANGUAGES.map(l => l.code))
@@ -13915,7 +13929,7 @@ app.get('/buyback/cases', async c => {
     if (!sessionUser) return c.json({ error: 'login_required' }, 401)
 
     const { results } = await c.env.DB.prepare(`
-      SELECT id, status, agreed_value_pence, game_systems_json, customer_notes,
+      SELECT id, status, agreed_value_pence, staff_comments, customer_notes,
              created_at, updated_at, quoted_at, resolved_at,
              (SELECT COUNT(*) FROM buyback_case_items i WHERE i.case_id = buyback_cases.id) AS item_count
       FROM buyback_cases
@@ -13924,9 +13938,75 @@ app.get('/buyback/cases', async c => {
       LIMIT 25
     `).bind(sessionUser.user_id).all()
 
-    return c.json({ ok: true, cases: results || [] })
+    const cases = (results || []).map(row => ({
+      id: row.id,
+      status: row.status,
+      agreed_value_pence: row.agreed_value_pence,
+      item_count: row.item_count,
+      created_at: row.created_at,
+      quoted_at: row.quoted_at,
+      resolved_at: row.resolved_at,
+      rejection_message: row.status === 'rejected' ? row.staff_comments : null
+    }))
+    return c.json({ ok: true, cases })
   } catch (e) {
     console.error('[buyback/cases]', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/buyback/cases/:id/accept', async c => {
+  try {
+    const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+    if (!sessionUser) return c.json({ error: 'login_required' }, 401)
+
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, buybackAcceptRateLimits, 10, 1)) {
+      return c.json({ error: 'rate_limit_exceeded', message: 'Too many attempts. Please try again in a minute.' }, 429)
+    }
+
+    const prepared = await prepareBuybackAccept(c.env.DB, {
+      caseId: c.req.param('id'),
+      userId: sessionUser.user_id
+    })
+    if (!prepared.ok) {
+      const messages = {
+        not_found: 'That list could not be found.',
+        already_accepted: 'You have already agreed to this offer.',
+        no_offer: 'There is no offer to agree to on this list.'
+      }
+      const status = prepared.error === 'not_found' ? 404 : 409
+      return c.json({ error: prepared.error, message: messages[prepared.error] || 'That offer could not be accepted.' }, status)
+    }
+
+    const sent = await sendBuybackCustomerEmail(c.env, {
+      to: 'admin@dicebastion.com',
+      copy: prepared.copy,
+      caseId: prepared.case.id,
+      emailType: 'buyback_offer_accepted',
+      replyTo: sessionUser.email
+    })
+    if (!emailWentOut(sent)) {
+      return c.json({
+        error: 'email_failed',
+        message: 'We could not email the shop, so your answer was not saved. Please try again.'
+      }, 502)
+    }
+
+    const saved = await saveBuybackAccept(c.env.DB, {
+      caseId: prepared.case.id,
+      userId: sessionUser.user_id,
+      nowIso: toIso(new Date())
+    })
+    if (!saved.ok) {
+      return c.json({
+        error: saved.error || 'case_changed',
+        message: 'The shop was emailed, but the list could not be updated. Refresh the page before agreeing again.'
+      }, 409)
+    }
+    return c.json({ ok: true, case: { id: saved.case.id, status: saved.case.status, agreed_value_pence: saved.case.agreed_value_pence } })
+  } catch (e) {
+    console.error('[buyback/accept]', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })
@@ -14058,14 +14138,14 @@ app.post('/buyback/cases', async c => {
           '',
           itemLines + more,
           '',
-          'Issue credit via documented SQL in /admin/docs/store-credit/ after quoting.'
+          'Review it under Trade-ins in the admin dashboard.'
         ].filter(Boolean).join('\n'),
         html: `<p><strong>New buyback submission #${caseId}</strong></p>
 <p>User: ${escapeHtml(clampStr(sessionUser.name || '', 80))} &lt;${escapeHtml(sessionUser.email)}&gt; (id ${sessionUser.user_id})</p>
 <p>Games: ${[...games].join(', ')} · Items: ${normalized.length}</p>
 ${customerNotes ? `<p>Customer notes: ${escapeHtml(customerNotes)}</p>` : ''}
 <pre style="white-space:pre-wrap;font-size:13px;">${escapeHtml(itemLines + more)}</pre>
-<p>Issue credit via documented SQL in admin store-credit docs after quoting.</p>`,
+<p>Review the list under Trade-ins in the admin dashboard.</p>`,
         emailType: 'buyback_case_submitted',
         relatedId: caseId,
         relatedType: 'buyback_case',
@@ -14085,6 +14165,206 @@ ${customerNotes ? `<p>Customer notes: ${escapeHtml(customerNotes)}</p>` : ''}
   } catch (e) {
     console.error('[buyback/cases POST]', e)
     return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
+  }
+})
+
+const BUYBACK_ADMIN_ERRORS = {
+  case_closed: 'This list is already finished, so an offer cannot be sent.',
+  invalid_amount: 'Enter an amount in pounds, such as 12.50. The most we can add here is £20,000.',
+  offer_required: 'Send an offer before adding store credit.',
+  already_completed: 'Store credit has already been added for this list.',
+  already_rejected: 'This list has already been rejected.',
+  invalid_message: 'Write a short message for the customer, at least 10 characters.',
+  not_found: 'That list could not be found.',
+  case_changed: 'The email was sent, but the list changed before it could be updated. Refresh it before trying again.',
+  email_failed: 'The email did not send, so the list was left unchanged.'
+}
+
+function buybackAdminError(result, fallbackStatus = 400) {
+  const error = result?.error || 'internal_error'
+  const status = error === 'not_found' ? 404
+    : error === 'email_failed' ? 502
+    : ['case_closed', 'offer_required', 'already_completed', 'already_rejected', 'case_changed'].includes(error) ? 409
+    : fallbackStatus
+  return { body: { error, message: BUYBACK_ADMIN_ERRORS[error] || 'That action could not be completed.' }, status }
+}
+
+function buybackReplyTo(env) {
+  return env.SUPPORT_CONTACT_EMAIL || env.MAILERSEND_FROM_EMAIL || 'admin@dicebastion.com'
+}
+
+async function sendBuybackCustomerEmail(env, { to, copy, caseId, emailType, replyTo = null }) {
+  const html = createEmailTemplate({
+    headerTitle: copy.headerTitle,
+    content: copy.htmlInner
+  })
+  return sendEmail(env, {
+    to,
+    subject: copy.subject,
+    text: copy.text,
+    html,
+    replyTo: replyTo || buybackReplyTo(env),
+    emailType,
+    relatedId: caseId,
+    relatedType: 'buyback_case'
+  })
+}
+
+function emailWentOut(result) {
+  return !!(result && result.success === true)
+}
+
+app.get('/admin/buyback/cases', requireAdmin, async c => {
+  try {
+    const cases = await listBuybackCases(c.env.DB, { status: String(c.req.query('status') || '') })
+    return c.json({ ok: true, cases })
+  } catch (e) {
+    console.error('[admin/buyback] list', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/buyback/cases/:id/pdf', requireAdmin, async c => {
+  try {
+    const detail = await getBuybackCaseDetail(c.env.DB, c.req.param('id'))
+    if (!detail) return c.json({ error: 'not_found', message: BUYBACK_ADMIN_ERRORS.not_found }, 404)
+    const pdf = buildBuybackListPdf(detail)
+    return new Response(pdf, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="trade-in-${detail.case.id}.pdf"`
+      }
+    })
+  } catch (e) {
+    console.error('[admin/buyback] pdf', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/buyback/cases/:id', requireAdmin, async c => {
+  try {
+    const detail = await getBuybackCaseDetail(c.env.DB, c.req.param('id'))
+    if (!detail) return c.json({ error: 'not_found', message: BUYBACK_ADMIN_ERRORS.not_found }, 404)
+    return c.json({ ok: true, ...detail })
+  } catch (e) {
+    console.error('[admin/buyback] detail', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/buyback/cases/:id/offer', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const amountPence = parseBuybackPounds(body.amount)
+    const prepared = await prepareBuybackOffer(c.env.DB, {
+      caseId: c.req.param('id'),
+      amountPence
+    })
+    if (!prepared.ok) {
+      const err = buybackAdminError(prepared)
+      return c.json(err.body, err.status)
+    }
+    const sent = await sendBuybackCustomerEmail(c.env, {
+      to: prepared.case.user_email,
+      copy: prepared.copy,
+      caseId: prepared.case.id,
+      emailType: 'buyback_offer'
+    })
+    if (!emailWentOut(sent)) {
+      const err = buybackAdminError({ error: 'email_failed' })
+      return c.json(err.body, err.status)
+    }
+    const saved = await saveBuybackOffer(c.env.DB, {
+      caseId: prepared.case.id,
+      amountPence: prepared.amountPence,
+      nowIso: toIso(new Date())
+    })
+    if (!saved.ok) {
+      const err = buybackAdminError(saved)
+      return c.json(err.body, err.status)
+    }
+    return c.json({ ok: true, email_sent: true, case: saved.case })
+  } catch (e) {
+    console.error('[admin/buyback] offer', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/buyback/cases/:id/reject', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const prepared = await prepareBuybackReject(c.env.DB, {
+      caseId: c.req.param('id'),
+      message: body.message
+    })
+    if (!prepared.ok) {
+      const err = buybackAdminError(prepared)
+      return c.json(err.body, err.status)
+    }
+    const sent = await sendBuybackCustomerEmail(c.env, {
+      to: prepared.case.user_email,
+      copy: prepared.copy,
+      caseId: prepared.case.id,
+      emailType: 'buyback_reject'
+    })
+    if (!emailWentOut(sent)) {
+      const err = buybackAdminError({ error: 'email_failed' })
+      return c.json(err.body, err.status)
+    }
+    const saved = await saveBuybackReject(c.env.DB, {
+      caseId: prepared.case.id,
+      message: prepared.message,
+      nowIso: toIso(new Date())
+    })
+    if (!saved.ok) {
+      const err = buybackAdminError(saved)
+      return c.json(err.body, err.status)
+    }
+    return c.json({ ok: true, email_sent: true, case: saved.case })
+  } catch (e) {
+    console.error('[admin/buyback] reject', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/buyback/cases/:id/credit', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const admin = c.get('adminUser')
+    const issued = await issueBuybackCredit(c.env.DB, {
+      caseId: c.req.param('id'),
+      amountPence: parseBuybackPounds(body.amount),
+      createdBy: admin?.email || 'admin',
+      nowIso: toIso(new Date())
+    })
+    if (!issued.ok) {
+      const err = buybackAdminError(issued)
+      return c.json(err.body, err.status)
+    }
+    let emailSent = true
+    if (!issued.already && issued.copy && issued.case?.user_email) {
+      try {
+        const sent = await sendBuybackCustomerEmail(c.env, {
+          to: issued.case.user_email,
+          copy: issued.copy,
+          caseId: issued.case.id,
+          emailType: 'buyback_credit'
+        })
+        emailSent = emailWentOut(sent)
+      } catch (mailErr) {
+        console.error('[admin/buyback] credit email', mailErr)
+        emailSent = false
+      }
+    }
+    return c.json({
+      ok: true,
+      already: !!issued.already,
+      email_sent: issued.already ? null : emailSent,
+      case: issued.case
+    })
+  } catch (e) {
+    console.error('[admin/buyback] credit', e)
+    return c.json({ error: 'internal_error' }, 500)
   }
 })
 
