@@ -300,6 +300,8 @@
 
   // Load Cloudflare Web Analytics only after analytics consent (manual snippet, not auto-inject).
   function loadAnalytics() {
+    const host = location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return;
     const consent = getConsent();
     if (!consent || !consent.preferences.analytics) return;
     if (!CF_WEB_ANALYTICS_TOKEN) return;

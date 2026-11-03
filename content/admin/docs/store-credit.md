@@ -141,7 +141,7 @@ SELECT * FROM store_credit_ledger WHERE user_id = :user_id ORDER BY created_at D
 
 <h2>Card search APIs</h2>
 <ul>
-  <li><strong>MTG</strong> — Scryfall (free fair-use). Worker proxies <code>GET /buyback/cards/search?game=mtg&amp;q=…</code>. No API key. Descriptive User-Agent set server-side. Prices are never returned to the client.</li>
+  <li><strong>MTG</strong> — Scryfall (free fair-use). Worker proxies <code>GET /buyback/cards/search?game=mtg&amp;q=…</code> for the name, then <code>GET /buyback/cards/prints?game=mtg&amp;id=…</code> for that card's printings (Scryfall's oracle print list, newest first) once the customer has chosen a name. No API key. Descriptive User-Agent set server-side. Prices are never returned to the client.</li>
   <li><strong>Riftbound</strong> — Scrydex (<code>https://api.scrydex.com/riftbound/v1/…</code>). Requires secrets <code>SCRYDEX_API_KEY</code> and <code>SCRYDEX_TEAM_ID</code> (<code>wrangler secret put</code>). Until set, Riftbound search returns 503 and the submit form blocks Riftbound.</li>
   <li><strong>Cardmarket</strong> — not used for search (new API apps closed). Condition labels only: MT, NM, EX, GD, LP, PL, PO.</li>
 </ul>

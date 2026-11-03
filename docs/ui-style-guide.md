@@ -76,6 +76,20 @@ From `.github/instructions/instructions.md.instructions.md`:
 - Use CSS (border accents, colour, spacing) for visual differentiation
 - Section headings: plain, descriptive text
 
+## Tone of voice
+
+Write like a member of the club talking to another player at the counter: friendly, plain and specific. Say "we" for Dice Bastion and "you" for the reader. Use British spelling (colour, organise, cancelled).
+
+- No em dashes. Use a full stop, comma or "and" instead.
+- No short punchy filler lines ("No fuss.", "Simple as that.", "It's that easy.").
+- No appeals that don't help the reader do anything ("Keep cards in Gibraltar", "Support your local scene").
+- Don't turn explanations into lists of selling points. If it can be said in a sentence or two, write the sentences.
+- Say what happens next and when ("We will email you an offer within a few days"), rather than vague promises ("We'll be in touch soon!").
+- Buttons say what they do: "Send list", "Review list", "Add to list". Not "Let's go" or "Get started".
+- Helper text sits next to the field it explains and stays to one short sentence where possible.
+
+Example, from the trade-in page: "We buy Magic: The Gathering and Riftbound singles in exchange for store credit, which you can spend in our online shop or on event entry."
+
 ## Hugo theme notes
 
 - Site uses Blowfish layouts vendored at repo root (theme line commented out in `config/_default/hugo.toml`)

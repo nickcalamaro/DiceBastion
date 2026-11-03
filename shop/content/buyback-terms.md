@@ -18,16 +18,16 @@ description: "Terms for selling trading card game singles to Dice Bastion in exc
   <p>You offer to sell authentic trading card game singles (currently Magic: The Gathering and Riftbound, as enabled on our form) that you own and are entitled to sell. By submitting a list and later completing a buyback, you confirm that you have good title to the cards free of third-party claims.</p>
 
   <h2 style="font-size: 1.125rem; margin-top: 1.75rem;">3. Quotes are not an automatic purchase</h2>
-  <p>Submitting a card list creates a buyback case for review. Any quote we provide is an offer we may make after assessing market conditions, authenticity, and condition. We may accept in full, accept in part, request changes, or reject a case or individual cards. Ownership of cards transfers to Dice Bastion only when we confirm acceptance and completion of the purchase (including any agreed hand-over or inspection steps we communicate to you).</p>
+  <p>Submitting a card list creates a buyback case for review. Any quote we provide is an offer we may make after assessing market conditions, authenticity, and condition. We may accept in full, accept in part, request changes, or reject a case or individual cards. Ownership of cards transfers to Dice Bastion only when we confirm acceptance and completion of the purchase (including any agreed hand-over or inspection steps we communicate to you). If you accept our offer, we will email you to arrange a time for you to bring the cards in.</p>
 
-  <h2 style="font-size: 1.125rem; margin-top: 1.75rem;">4. Condition, language, and grading</h2>
+  <h2 id="condition" style="font-size: 1.125rem; margin-top: 1.75rem;">4. Condition, language, and grading</h2>
   <p>You must describe condition using the grades we present (aligned with common Cardmarket-style labels) and state language accurately. We may re-grade cards on inspection. Disputes over condition are resolved by our reasonable assessment; we may adjust or withdraw a quote if cards do not match your description.</p>
 
   <h2 style="font-size: 1.125rem; margin-top: 1.75rem;">5. Counterfeits and altered cards</h2>
   <p>We may refuse or reverse any transaction involving counterfeit, proxy, stolen, or improperly altered cards. You remain responsible for cards you submit. Suspected illegal activity may be reported to authorities where appropriate.</p>
 
   <h2 style="font-size: 1.125rem; margin-top: 1.75rem;">6. Consideration: store credit only</h2>
-  <p>If we complete a buyback, payment is made solely as <strong>Dice Bastion store credit</strong> credited to your account — not cash, bank transfer, or third-party payout. Store credit may be used toward:</p>
+  <p>If we complete a buyback, payment is made solely as <strong>Dice Bastion store credit</strong> credited to your account. We do not pay in cash, by bank transfer or through any third party. Store credit may be used toward:</p>
   <ul>
     <li>Purchases of goods via our online shop; and</li>
     <li>Paid entry to eligible Dice Bastion events.</li>
@@ -52,6 +52,6 @@ description: "Terms for selling trading card game singles to Dice Bastion in exc
   </div>
 
   <p style="margin-top: 2.5rem;">
-    <a href="/sell-cards/#submit" class="btn btn-primary">Back to sell cards form</a>
+    <a href="/sell-cards/#submit" class="btn btn-primary">Back to trade in your singles</a>
   </p>
 </div>

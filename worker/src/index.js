@@ -33,6 +33,7 @@ import {
 import {
   listBuybackMeta,
   searchBuybackCards,
+  listBuybackPrints,
   BUYBACK_CONDITIONS,
   BUYBACK_LANGUAGES,
   isRiftboundSearchConfigured
@@ -13859,7 +13860,7 @@ app.get('/buyback/cards/search', async c => {
     if (!sessionUser) return c.json({ error: 'login_required' }, 401)
 
     const ip = c.req.header('CF-Connecting-IP')
-    if (!checkRateLimit(ip, buybackSearchRateLimits, 40, 1)) {
+    if (!checkRateLimit(ip, buybackSearchRateLimits, 80, 1)) {
       return c.json({ error: 'rate_limit_exceeded' }, 429)
     }
 
@@ -13881,6 +13882,33 @@ app.get('/buyback/cards/search', async c => {
   }
 })
 
+app.get('/buyback/cards/prints', async c => {
+  try {
+    const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
+    if (!sessionUser) return c.json({ error: 'login_required' }, 401)
+
+    const ip = c.req.header('CF-Connecting-IP')
+    if (!checkRateLimit(ip, buybackSearchRateLimits, 80, 1)) {
+      return c.json({ error: 'rate_limit_exceeded' }, 429)
+    }
+
+    const game = String(c.req.query('game') || '').toLowerCase()
+    const id = String(c.req.query('id') || '')
+    const prints = await listBuybackPrints(game, id)
+    return c.json({ ok: true, prints })
+  } catch (e) {
+    const status = e.status || 500
+    console.error('[buyback/prints]', e)
+    const message = e.message === 'prints_mtg_only'
+      ? 'Versions are available for Magic: The Gathering cards.'
+      : undefined
+    return c.json(
+      { error: e.message || 'prints_failed', message },
+      status >= 400 && status < 600 ? status : 500
+    )
+  }
+})
+
 app.get('/buyback/cases', async c => {
   try {
     const sessionUser = await getSessionUser(c.env.DB, c.req.header('X-Session-Token'))
@@ -13888,7 +13916,8 @@ app.get('/buyback/cases', async c => {
 
     const { results } = await c.env.DB.prepare(`
       SELECT id, status, agreed_value_pence, game_systems_json, customer_notes,
-             created_at, updated_at, quoted_at, resolved_at
+             created_at, updated_at, quoted_at, resolved_at,
+             (SELECT COUNT(*) FROM buyback_case_items i WHERE i.case_id = buyback_cases.id) AS item_count
       FROM buyback_cases
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -14005,14 +14034,21 @@ app.post('/buyback/cases', async c => {
     const notifyTo = c.env.BUYBACK_NOTIFY_EMAIL || c.env.SUPPORT_CONTACT_EMAIL || 'admin@dicebastion.com'
     const itemLines = normalized
       .slice(0, 40)
-      .map((it, i) => `${i + 1}. [${it.game_system}] ${it.card_name} (${it.condition}/${it.language})${it.set_code ? ` — ${it.set_code}` : ''}`)
+      .map((it, i) => {
+        const printing = [
+          it.set_name,
+          it.set_code ? String(it.set_code).toUpperCase() : '',
+          it.collector_number ? `#${it.collector_number}` : ''
+        ].filter(Boolean).join(' ')
+        return `${i + 1}. [${it.game_system}] ${it.card_name} (${it.condition}/${it.language})${printing ? `, ${printing}` : ''}`
+      })
       .join('\n')
     const more = normalized.length > 40 ? `\n…and ${normalized.length - 40} more` : ''
 
     try {
       await sendEmail(c.env, {
         to: notifyTo,
-        subject: `Buyback case #${caseId} — ${sessionUser.email}`,
+        subject: `Buyback case #${caseId} from ${sessionUser.email}`,
         text: [
           `New buyback submission #${caseId}`,
           `User: ${sessionUser.name || ''} <${sessionUser.email}> (id ${sessionUser.user_id})`,
@@ -14044,7 +14080,7 @@ ${customerNotes ? `<p>Customer notes: ${escapeHtml(customerNotes)}</p>` : ''}
       case_id: caseId,
       status: 'submitted',
       item_count: normalized.length,
-      message: 'Thanks — we will get back to you as soon as possible with a quote. No prices are shown at submission.'
+      message: 'Thanks, we have your list. We will look through it and email you an offer within a few days.'
     })
   } catch (e) {
     console.error('[buyback/cases POST]', e)
