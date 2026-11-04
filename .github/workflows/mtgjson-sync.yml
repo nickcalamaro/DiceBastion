@@ -1,0 +1,42 @@
+name: MTG card catalog
+
+on:
+  schedule:
+    # Sunday 06:00 UTC. Adds new printings only.
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: seed loads the full catalog once. weekly adds new printings only.
+        type: choice
+        options:
+          - weekly
+          - seed
+        default: weekly
+
+concurrency:
+  group: mtgjson-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Update Magic card catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Update catalog
+        working-directory: ./worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MTG_SYNC_MODE: ${{ github.event.inputs.mode || 'weekly' }}
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: node scripts/mtgjson-sync.mjs

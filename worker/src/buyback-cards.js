@@ -1,9 +1,10 @@
 /**
  * Card database proxies for buyback smart-search.
+ * Magic names and printings come from the local catalog. Riftbound still uses Scrydex.
  * Never return prices to the client.
  */
 
-const SCRYFALL_UA = 'DiceBastionBuyback/1.0 (https://dicebastion.com; contact@dicebastion.com)'
+import { nameKey } from './mtgjson-import.js'
 
 export const BUYBACK_CONDITIONS = [
   { code: 'MT', label: 'Mint (MT)' },
@@ -37,9 +38,6 @@ export const BUYBACK_GAMES = [
 const searchCache = new Map()
 const CACHE_TTL_MS = 60_000
 
-const PRINTS_CACHE_TTL_MS = 10 * 60 * 1000
-const MAX_PRINT_PAGES = 4
-
 function cacheGet(key) {
   const hit = searchCache.get(key)
   if (!hit) return null
@@ -56,23 +54,6 @@ function cacheSet(key, data, ttl) {
     searchCache.delete(first)
   }
   searchCache.set(key, { at: Date.now(), data, ttl: ttl || CACHE_TTL_MS })
-}
-
-function scryfallHeaders() {
-  return {
-    Accept: 'application/json',
-    'User-Agent': SCRYFALL_UA
-  }
-}
-
-function assertScryfallUrl(url) {
-  const parsed = new URL(url)
-  if (parsed.protocol !== 'https:' || parsed.hostname !== 'api.scryfall.com') {
-    const err = new Error('scryfall_bad_url')
-    err.status = 502
-    throw err
-  }
-  return parsed.toString()
 }
 
 /**
@@ -122,79 +103,68 @@ function normalizeCard({ id, name, setCode, setName, collectorNumber, imageUrl }
   }
 }
 
-async function searchScryfall(q) {
-  const query = String(q || '').trim()
-  if (query.length < 2) return []
+function catalogUpdating() {
+  const err = new Error('catalog_updating')
+  err.status = 503
+  return err
+}
 
-  // Autocomplete for typeahead names
-  const autoUrl = `https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(query)}`
-  const autoRes = await fetch(autoUrl, { headers: scryfallHeaders() })
-  if (autoRes.status === 429) {
-    const err = new Error('scryfall_rate_limited')
-    err.status = 429
-    throw err
+async function assertCatalog(env) {
+  let row
+  try {
+    row = await env.DB.prepare('SELECT print_count FROM mtg_catalog WHERE id = 1').first()
+  } catch (e) {
+    if (/no such table/i.test(String(e?.message || e))) throw catalogUpdating()
+    throw e
   }
-  if (!autoRes.ok) {
-    const err = new Error('scryfall_autocomplete_failed')
-    err.status = 502
-    throw err
-  }
-  const autoJson = await autoRes.json()
-  const names = (autoJson?.data || []).slice(0, 8)
-  if (!names.length) {
-    // Fallback: fuzzy search
-    const searchUrl = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}&unique=prints&order=name`
-    const searchRes = await fetch(searchUrl, { headers: scryfallHeaders() })
-    if (searchRes.status === 404) return []
-    if (searchRes.status === 429) {
-      const err = new Error('scryfall_rate_limited')
-      err.status = 429
-      throw err
-    }
-    if (!searchRes.ok) return []
-    const searchJson = await searchRes.json()
-    return (searchJson.data || []).slice(0, 12).map(card =>
-      normalizeCard({
-        id: card.id,
-        name: card.name,
-        setCode: card.set,
-        setName: card.set_name,
-        collectorNumber: card.collector_number,
-        imageUrl: card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small || null
-      })
-    )
-  }
+  if (!row || Number(row.print_count) <= 0) throw catalogUpdating()
+}
 
-  // Resolve each autocomplete name to a print (named + fuzzy)
-  const results = []
-  for (const name of names) {
-    const namedUrl = `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(name)}`
-    try {
-      const namedRes = await fetch(namedUrl, { headers: scryfallHeaders() })
-      if (namedRes.status === 429) {
-        const err = new Error('scryfall_rate_limited')
-        err.status = 429
-        throw err
-      }
-      if (!namedRes.ok) continue
-      const card = await namedRes.json()
-      results.push(
-        normalizeCard({
-          id: card.id,
-          name: card.name,
-          setCode: card.set,
-          setName: card.set_name,
-          collectorNumber: card.collector_number,
-          imageUrl: card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small || null
-        })
-      )
-    } catch (e) {
-      if (e.status === 429) throw e
-    }
-    // Soft pace under Scryfall named limit (2/s)
-    await new Promise(r => setTimeout(r, 120))
+function mapPrinting(row) {
+  const printed = row.printed_name && row.printed_name !== row.name ? String(row.printed_name) : null
+  return {
+    id: String(row.id || ''),
+    name: String(row.name || ''),
+    printed_name: printed,
+    lang: row.lang ? String(row.lang) : null,
+    set_code: row.set_code ? String(row.set_code) : null,
+    set_name: row.set_name ? String(row.set_name) : null,
+    collector_number: row.collector_number != null ? String(row.collector_number) : null,
+    image_url: row.image_url || null
   }
-  return results
+}
+
+async function searchMtgCatalog(env, query) {
+  await assertCatalog(env)
+  const q = nameKey(query).replace(/[%_\\]/g, '')
+  if (q.length < 2) return []
+  const { results } = await env.DB.prepare(`
+    SELECT p.scryfall_id AS id, p.name, p.printed_name, p.lang, p.set_code, p.set_name,
+           p.collector_number, p.image_url, p.name_key
+    FROM mtg_printings p
+    JOIN (
+      SELECT name_key, MAX(released_at) AS released_at
+      FROM mtg_printings
+      WHERE name_key LIKE ?1 OR instr(name_key, ?2) > 0
+      GROUP BY name_key
+    ) m ON m.name_key = p.name_key
+       AND ((m.released_at = p.released_at) OR (m.released_at IS NULL AND p.released_at IS NULL))
+    ORDER BY
+      CASE WHEN p.name_key = ?3 THEN 0 WHEN p.name_key LIKE ?1 THEN 1 ELSE 2 END,
+      length(p.name_key),
+      p.name
+    LIMIT 24
+  `).bind(`${q}%`, ` ${q}`, q).all()
+
+  const seen = new Set()
+  const out = []
+  for (const row of results || []) {
+    if (seen.has(row.name_key)) continue
+    seen.add(row.name_key)
+    out.push(mapPrinting(row))
+    if (out.length === 8) break
+  }
+  return out
 }
 
 async function searchScrydex(env, q) {
@@ -238,60 +208,15 @@ async function searchScrydex(env, q) {
   )
 }
 
-function scryfallImage(card) {
-  return card?.image_uris?.small || card?.card_faces?.[0]?.image_uris?.small || null
-}
-
-function mapScryfallPrint(card) {
-  const printed = card.printed_name && card.printed_name !== card.name
-    ? String(card.printed_name)
-    : null
-  return {
-    id: String(card.id || ''),
-    name: String(card.name || ''),
-    printed_name: printed,
-    lang: card.lang ? String(card.lang) : null,
-    set_code: card.set ? String(card.set) : null,
-    set_name: card.set_name ? String(card.set_name) : null,
-    collector_number: card.collector_number != null ? String(card.collector_number) : null,
-    image_url: scryfallImage(card)
-  }
-}
-
-async function fetchScryfallPrintPages(startUrl) {
-  const prints = []
-  let url = assertScryfallUrl(startUrl)
-  for (let page = 0; page < MAX_PRINT_PAGES; page++) {
-    if (page > 0) await new Promise(r => setTimeout(r, 100))
-    const res = await fetch(url, { headers: scryfallHeaders() })
-    if (res.status === 429) {
-      const err = new Error('scryfall_rate_limited')
-      err.status = 429
-      throw err
-    }
-    if (res.status === 404) return prints
-    if (!res.ok) {
-      const err = new Error('scryfall_prints_failed')
-      err.status = 502
-      throw err
-    }
-    const json = await res.json()
-    for (const card of json.data || []) prints.push(mapScryfallPrint(card))
-    if (!json.has_more || !json.next_page) break
-    url = assertScryfallUrl(json.next_page)
-  }
-  return prints
-}
-
 /**
  * All printings of one MTG card, loaded after the customer picks a name.
- * Uses Scryfall's oracle print list (the same table as the card page), newest first.
- * Does not include every language reprint of the same printing.
+ * Newest first. Does not include every language reprint of the same printing.
  *
+ * @param {object} env
  * @param {'mtg'|'riftbound'} game
  * @param {string} cardId Scryfall card UUID from search results
  */
-export async function listBuybackPrints(game, cardId) {
+export async function listBuybackPrints(env, game, cardId) {
   const g = String(game || '').toLowerCase()
   if (g !== 'mtg') {
     const err = new Error('prints_mtg_only')
@@ -305,44 +230,39 @@ export async function listBuybackPrints(game, cardId) {
     throw err
   }
 
-  const byCard = cacheGet(`prints:card:${id}`)
-  if (byCard) return byCard
-
-  const cardRes = await fetch(`https://api.scryfall.com/cards/${id}`, { headers: scryfallHeaders() })
-  if (cardRes.status === 404) {
+  await assertCatalog(env)
+  const { results } = await env.DB.prepare(`
+    SELECT scryfall_id AS id, name, printed_name, lang, set_code, set_name, collector_number, image_url
+    FROM mtg_printings
+    WHERE oracle_id = (SELECT oracle_id FROM mtg_printings WHERE scryfall_id = ?1)
+    ORDER BY released_at DESC, set_code, collector_number
+  `).bind(id).all()
+  if (!results?.length) {
     const err = new Error('card_not_found')
     err.status = 404
     throw err
   }
-  if (cardRes.status === 429) {
-    const err = new Error('scryfall_rate_limited')
-    err.status = 429
-    throw err
-  }
-  if (!cardRes.ok) {
-    const err = new Error('scryfall_prints_failed')
-    err.status = 502
-    throw err
-  }
-  const card = await cardRes.json()
-  const oracleId = card.oracle_id ? String(card.oracle_id) : ''
-  const cacheKey = oracleId ? `prints:${oracleId}` : ''
-  const cached = cacheKey ? cacheGet(cacheKey) : null
-  if (cached) {
-    cacheSet(`prints:card:${id}`, cached, PRINTS_CACHE_TTL_MS)
-    return cached
-  }
+  return results.map(mapPrinting)
+}
 
-  const searchUrl = card.prints_search_uri
-  if (!searchUrl) {
-    const err = new Error('scryfall_prints_failed')
-    err.status = 502
-    throw err
+export function buybackCardFailure(error, fallback) {
+  if (error?.message === 'catalog_updating') {
+    return {
+      status: 503,
+      body: {
+        error: 'catalog_updating',
+        message: 'The card list is updating. Please try again shortly.'
+      }
+    }
   }
-  const prints = await fetchScryfallPrintPages(searchUrl)
-  if (cacheKey) cacheSet(cacheKey, prints, PRINTS_CACHE_TTL_MS)
-  cacheSet(`prints:card:${id}`, prints, PRINTS_CACHE_TTL_MS)
-  return prints
+  const status = error?.status || 500
+  const message = error?.message === 'prints_mtg_only'
+    ? 'Versions are available for Magic: The Gathering cards.'
+    : undefined
+  return {
+    status: status >= 400 && status < 600 ? status : 500,
+    body: { error: error?.message || fallback, message }
+  }
 }
 
 /**
@@ -365,7 +285,7 @@ export async function searchBuybackCards(env, game, q) {
   if (cached) return cached
 
   let results
-  if (g === 'mtg') results = await searchScryfall(query)
+  if (g === 'mtg') results = await searchMtgCatalog(env, query)
   else results = await searchScrydex(env, query)
 
   cacheSet(cacheKey, results)

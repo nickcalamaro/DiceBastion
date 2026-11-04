@@ -47,6 +47,7 @@ import {
   listBuybackMeta,
   searchBuybackCards,
   listBuybackPrints,
+  buybackCardFailure,
   BUYBACK_CONDITIONS,
   BUYBACK_LANGUAGES,
   isRiftboundSearchConfigured
@@ -13890,9 +13891,9 @@ app.get('/buyback/cards/search', async c => {
     const results = await searchBuybackCards(c.env, game, q)
     return c.json({ ok: true, results })
   } catch (e) {
-    const status = e.status || 500
     console.error('[buyback/search]', e)
-    return c.json({ error: e.message || 'search_failed' }, status >= 400 && status < 600 ? status : 500)
+    const failure = buybackCardFailure(e, 'search_failed')
+    return c.json(failure.body, failure.status)
   }
 })
 
@@ -13908,18 +13909,12 @@ app.get('/buyback/cards/prints', async c => {
 
     const game = String(c.req.query('game') || '').toLowerCase()
     const id = String(c.req.query('id') || '')
-    const prints = await listBuybackPrints(game, id)
+    const prints = await listBuybackPrints(c.env, game, id)
     return c.json({ ok: true, prints })
   } catch (e) {
-    const status = e.status || 500
     console.error('[buyback/prints]', e)
-    const message = e.message === 'prints_mtg_only'
-      ? 'Versions are available for Magic: The Gathering cards.'
-      : undefined
-    return c.json(
-      { error: e.message || 'prints_failed', message },
-      status >= 400 && status < 600 ? status : 500
-    )
+    const failure = buybackCardFailure(e, 'prints_failed')
+    return c.json(failure.body, failure.status)
   }
 })
 
