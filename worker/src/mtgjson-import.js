@@ -50,6 +50,48 @@ export function nameKey(name) {
   return String(name || '').toLowerCase().replace(/-/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+/** Exclusive end of a text prefix, so an index can answer "starts with" without a scan. */
+export function prefixEnd(prefix) {
+  const chars = [...String(prefix || '')]
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const code = chars[i].codePointAt(0)
+    if (code < 0x10ffff) {
+      chars[i] = String.fromCodePoint(code + 1)
+      return chars.slice(0, i + 1).join('')
+    }
+  }
+  return null
+}
+
+export function nameWords(key) {
+  return [...new Set(String(key || '').split(' ').filter(word => word.length >= 2))]
+}
+
+/** One search row per card name, keeping the newest printing. */
+export function namesFromRows(rows) {
+  const byName = new Map()
+  for (const row of rows || []) {
+    if (!row?.name_key) continue
+    const prev = byName.get(row.name_key)
+    if (!prev || String(row.released_at || '') >= String(prev.released_at || '')) byName.set(row.name_key, row)
+  }
+  return [...byName.values()]
+}
+
+export function wordRows(names) {
+  const out = []
+  const seen = new Set()
+  for (const row of names || []) {
+    for (const word of nameWords(row.name_key)) {
+      const key = `${word}\0${row.name_key}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ word, name_key: row.name_key })
+    }
+  }
+  return out
+}
+
 export function sqlText(value) {
   if (value == null || value === '') return 'NULL'
   return `'${String(value).replace(/'/g, "''").replace(/[\0\r\n]/g, ' ')}'`
@@ -170,6 +212,45 @@ ON CONFLICT(scryfall_id) DO UPDATE SET
   collector_number = excluded.collector_number,
   released_at = excluded.released_at,
   image_url = COALESCE(excluded.image_url, mtg_printings.image_url)`
+}
+
+const NAME_COLS = [
+  'name_key',
+  'name',
+  'scryfall_id',
+  'printed_name',
+  'lang',
+  'set_code',
+  'set_name',
+  'collector_number',
+  'released_at',
+  'image_url'
+]
+
+export function nameUpsertSql(rows) {
+  if (!rows?.length) return null
+  const values = rows.map(row => `(${NAME_COLS.map(col => sqlText(row[col])).join(', ')})`).join(',\n')
+  return `INSERT INTO mtg_names (${NAME_COLS.join(', ')}) VALUES
+${values}
+ON CONFLICT(name_key) DO UPDATE SET
+  name = excluded.name,
+  scryfall_id = excluded.scryfall_id,
+  printed_name = excluded.printed_name,
+  lang = excluded.lang,
+  set_code = excluded.set_code,
+  set_name = excluded.set_name,
+  collector_number = excluded.collector_number,
+  released_at = excluded.released_at,
+  image_url = COALESCE(excluded.image_url, mtg_names.image_url)
+WHERE excluded.released_at >= mtg_names.released_at
+   OR mtg_names.released_at IS NULL`
+}
+
+export function wordInsertSql(rows) {
+  if (!rows?.length) return null
+  const values = rows.map(row => `(${sqlText(row.word)}, ${sqlText(row.name_key)})`).join(',\n')
+  return `INSERT OR IGNORE INTO mtg_name_words (word, name_key) VALUES
+${values}`
 }
 
 export function setUpsertSql(sets, importedAt) {

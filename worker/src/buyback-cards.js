@@ -4,7 +4,7 @@
  * Never return prices to the client.
  */
 
-import { nameKey } from './mtgjson-import.js'
+import { nameKey, prefixEnd } from './mtgjson-import.js'
 
 export const BUYBACK_CONDITIONS = [
   { code: 'MT', label: 'Mint (MT)' },
@@ -137,28 +137,39 @@ function mapPrinting(row) {
 async function searchMtgCatalog(env, query) {
   await assertCatalog(env)
   const q = nameKey(query).replace(/[%_\\]/g, '')
-  if (q.length < 2) return []
-  const { results } = await env.DB.prepare(`
-    SELECT p.scryfall_id AS id, p.name, p.printed_name, p.lang, p.set_code, p.set_name,
-           p.collector_number, p.image_url, p.name_key
-    FROM mtg_printings p
-    JOIN (
-      SELECT name_key, MAX(released_at) AS released_at
-      FROM mtg_printings
-      WHERE name_key LIKE ?1 OR instr(name_key, ?2) > 0
-      GROUP BY name_key
-    ) m ON m.name_key = p.name_key
-       AND ((m.released_at = p.released_at) OR (m.released_at IS NULL AND p.released_at IS NULL))
-    ORDER BY
-      CASE WHEN p.name_key = ?3 THEN 0 WHEN p.name_key LIKE ?1 THEN 1 ELSE 2 END,
-      length(p.name_key),
-      p.name
-    LIMIT 24
-  `).bind(`${q}%`, ` ${q}`, q).all()
+  const end = prefixEnd(q)
+  if (q.length < 2 || !end) return []
 
+  const nameSql = `
+    SELECT name_key, name, scryfall_id AS id, printed_name, lang, set_code, set_name,
+           collector_number, image_url
+    FROM mtg_names
+    WHERE name_key >= ?1 AND name_key < ?2
+    ORDER BY length(name_key), name
+    LIMIT 8
+  `
+  const wordSql = `
+    SELECT n.name_key, n.name, n.scryfall_id AS id, n.printed_name, n.lang, n.set_code, n.set_name,
+           n.collector_number, n.image_url
+    FROM mtg_name_words w
+    JOIN mtg_names n ON n.name_key = w.name_key
+    WHERE w.word >= ?1 AND w.word < ?2
+    ORDER BY length(n.name_key), n.name
+    LIMIT 8
+  `
+  const [byName, byWord] = await Promise.all([
+    env.DB.prepare(nameSql).bind(q, end).all(),
+    env.DB.prepare(wordSql).bind(q, end).all()
+  ])
+
+  const ranked = [...(byName.results || []), ...(byWord.results || [])]
+  ranked.sort((a, b) => {
+    const rank = row => row.name_key === q ? 0 : String(row.name_key).startsWith(q) ? 1 : 2
+    return rank(a) - rank(b) || String(a.name_key).length - String(b.name_key).length || String(a.name).localeCompare(String(b.name))
+  })
   const seen = new Set()
   const out = []
-  for (const row of results || []) {
+  for (const row of ranked) {
     if (seen.has(row.name_key)) continue
     seen.add(row.name_key)
     out.push(mapPrinting(row))

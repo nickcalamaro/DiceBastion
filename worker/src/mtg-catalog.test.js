@@ -39,7 +39,30 @@ async function setup() {
       updated_at TEXT
     )
   `).run()
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS mtg_names (
+      name_key TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      scryfall_id TEXT NOT NULL,
+      printed_name TEXT,
+      lang TEXT,
+      set_code TEXT,
+      set_name TEXT,
+      collector_number TEXT,
+      released_at TEXT,
+      image_url TEXT
+    )
+  `).run()
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS mtg_name_words (
+      word TEXT NOT NULL,
+      name_key TEXT NOT NULL,
+      PRIMARY KEY (word, name_key)
+    )
+  `).run()
   await env.DB.prepare('DELETE FROM mtg_printings').run()
+  await env.DB.prepare('DELETE FROM mtg_names').run()
+  await env.DB.prepare('DELETE FROM mtg_name_words').run()
   await env.DB.prepare('DELETE FROM mtg_catalog').run()
 }
 
@@ -165,6 +188,20 @@ describe('catalog search', () => {
     await env.DB.prepare(
       'INSERT INTO mtg_catalog (id, print_count, seeded_at, updated_at) VALUES (1, 3, ?, ?)'
     ).bind('2026-11-04T00:00:00Z', '2026-11-04T00:00:00Z').run()
+    await env.DB.prepare(`
+      INSERT INTO mtg_names
+        (name_key, name, scryfall_id, printed_name, lang, set_code, set_name, collector_number, released_at, image_url)
+      VALUES
+        ('lightning bolt', 'Lightning Bolt', ?, 'Éclair', 'fr', 'fbb', 'Foreign Black Border', '161', '2024-02-01', 'https://cards.scryfall.io/thumb/new.webp'),
+        ('lightning strike', 'Lightning Strike', ?, NULL, 'en', 'm14', 'Magic 2014', '146', '2013-07-19', 'https://cards.scryfall.io/thumb/strike.webp')
+    `).bind(NEW_ID, STRIKE_ID).run()
+    await env.DB.prepare(`
+      INSERT INTO mtg_name_words (word, name_key) VALUES
+        ('lightning', 'lightning bolt'),
+        ('bolt', 'lightning bolt'),
+        ('lightning', 'lightning strike'),
+        ('strike', 'lightning strike')
+    `).run()
 
     const names = (await searchBuybackCards(env, 'mtg', 'bolt')).map(card => card.name)
     expect(names).toEqual(['Lightning Bolt'])

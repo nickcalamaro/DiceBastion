@@ -17,12 +17,16 @@ import { promisify } from 'util'
 import { pipeline } from 'stream/promises'
 import { Readable } from 'stream'
 import {
+  nameUpsertSql,
+  namesFromRows,
   printingInsertSql,
   rowsFromSet,
   setsToSync,
   setUpsertSql,
   sqlText,
-  thumbFromScryfall
+  thumbFromScryfall,
+  wordInsertSql,
+  wordRows
 } from '../src/mtgjson-import.js'
 
 const gunzipBuffer = promisify(gunzip)
@@ -100,9 +104,23 @@ async function d1(account, token, sql) {
 }
 
 async function ensureSchema(account, token) {
-  const migration = readFileSync(new URL('../migrations/0018_mtg_printings.sql', import.meta.url), 'utf8')
-  for (const statement of sqlStatements(migration)) {
-    await d1(account, token, statement)
+  for (const file of ['0018_mtg_printings.sql', '0019_mtg_names.sql']) {
+    const migration = readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8')
+    for (const statement of sqlStatements(migration)) {
+      await d1(account, token, statement)
+    }
+  }
+}
+
+async function writeNames(account, token, rows) {
+  const names = namesFromRows(rows)
+  for (const batch of chunks(names, BATCH)) {
+    const sql = nameUpsertSql(batch)
+    if (sql) await d1(account, token, sql)
+  }
+  for (const batch of chunks(wordRows(names), 80)) {
+    const sql = wordInsertSql(batch)
+    if (sql) await d1(account, token, sql)
   }
 }
 
@@ -223,6 +241,7 @@ async function seed(account, token, dir) {
   }
 
   await writeRows(account, token, unique, 'upsert')
+  await writeNames(account, token, unique)
   const now = new Date().toISOString()
   for (const batch of chunks(sets, 40)) {
     const sql = setUpsertSql(batch, now)
@@ -267,11 +286,28 @@ async function fillMissingThumbs(account, token, extraIds) {
   console.log(`[mtg] filled ${filled} thumbnail addresses`)
 }
 
+async function backfillNamesIfEmpty(account, token) {
+  const names = await d1(account, token, 'SELECT COUNT(*) AS n FROM mtg_names')
+  if (Number(names[0]?.n || 0) > 0) return
+  const total = await d1(account, token, 'SELECT COUNT(*) AS n FROM mtg_printings')
+  if (!Number(total[0]?.n || 0)) return
+  console.log('[mtg] building the name index from printings already stored')
+  let offset = 0
+  for (;;) {
+    const page = await d1(account, token, `SELECT scryfall_id, name, name_key, printed_name, lang, set_code, set_name, collector_number, released_at, image_url FROM mtg_printings LIMIT 400 OFFSET ${offset}`)
+    if (!page.length) break
+    await writeNames(account, token, page)
+    offset += page.length
+    if (page.length < 400) break
+  }
+}
+
 async function weekly(account, token, dir) {
   const catalog = await d1(account, token, 'SELECT print_count FROM mtg_catalog WHERE id = 1')
   if (!catalog.length || Number(catalog[0].print_count) <= 0) {
     throw new Error('The catalog is empty. Run this workflow manually and choose seed.')
   }
+  await backfillNamesIfEmpty(account, token)
 
   console.log('[mtg] downloading SetList.json')
   const setListPath = join(dir, 'SetList.json')
@@ -294,6 +330,7 @@ async function weekly(account, token, dir) {
       const rows = rowsFromSet({ ...setData, code: setData.code || set.code, name: setData.name || set.name })
       console.log(`[mtg] ${set.code}: ${rows.length} printings (${set.allowUpdate ? 'update' : 'add'})`)
       await writeRows(account, token, rows, set.allowUpdate ? 'upsert' : 'ignore')
+      await writeNames(account, token, rows)
       const now = new Date().toISOString()
       const sql = setUpsertSql([{
         code: set.code,
