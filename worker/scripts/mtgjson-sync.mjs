@@ -1,14 +1,13 @@
 /**
  * Fill the Magic trade-in catalog from MTGJSON.
  *
- * seed   — once. Downloads AllPrintings and Scryfall Default Cards, then upserts every paper printing.
+ * seed   — once. Reads each set file, then copies Scryfall thumbnail addresses. The combined file is too large for Node to hold as one string.
  * weekly — SetList only. Downloads a set file when it is new, larger, still in preview, or released in the last 21 days.
  *
  * Run from worker/: node scripts/mtgjson-sync.mjs
  * Requires CLOUDFLARE_API_TOKEN with D1 edit. Optional CLOUDFLARE_ACCOUNT_ID when the token sees more than one account.
  */
 
-import { createHash } from 'crypto'
 import { createReadStream, createWriteStream, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -31,8 +30,6 @@ const UA = 'DiceBastionBuyback/1.0 (https://dicebastion.com; contact@dicebastion
 const BATCH = 40
 const DATABASE_ID = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8')
   .match(/database_id\s*=\s*"([^"]+)"/)?.[1]
-
-const SKIP_SET = new Set(['token', 'memorabilia'])
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -58,16 +55,6 @@ async function download(url, dest) {
   const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: '*/*' } })
   if (!res.ok) throw new Error(`Download failed (${res.status}) ${url}`)
   await pipeline(Readable.fromWeb(res.body), createWriteStream(dest))
-}
-
-function sha256(file) {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256')
-    createReadStream(file)
-      .on('data', chunk => hash.update(chunk))
-      .on('end', () => resolve(hash.digest('hex')))
-      .on('error', reject)
-  })
 }
 
 async function accountId(token) {
@@ -144,22 +131,25 @@ ON CONFLICT(id) DO UPDATE SET
   return n
 }
 
-function paperSets(data) {
-  const rows = []
-  const sets = []
-  for (const set of Object.values(data || {})) {
-    if (!set || set.isOnlineOnly || SKIP_SET.has(String(set.type || ''))) continue
-    const setRows = rowsFromSet(set)
-    if (!setRows.length) continue
-    rows.push(...setRows)
-    sets.push({
-      code: String(set.code || '').toUpperCase(),
-      name: set.name || set.code,
-      releaseDate: set.releaseDate || null,
-      totalSetSize: Number(set.totalSetSize) || setRows.length
-    })
+async function readSetFile(dir, set) {
+  const file = join(dir, `${set.code}.json.gz`)
+  await download(`https://mtgjson.com/api/v5/${set.code}.json.gz`, file)
+  try {
+    const parsed = JSON.parse((await gunzipBuffer(readFileSync(file))).toString('utf8'))
+    const setData = parsed.data || {}
+    const rows = rowsFromSet({ ...setData, code: setData.code || set.code, name: setData.name || set.name })
+    return {
+      rows,
+      meta: {
+        code: set.code,
+        name: setData.name || set.name,
+        releaseDate: setData.releaseDate || set.releaseDate,
+        totalSetSize: Number(setData.totalSetSize) || set.totalSetSize || rows.length
+      }
+    }
+  } finally {
+    rmSync(file, { force: true })
   }
-  return { rows, sets }
 }
 
 async function applyDefaultCards(file, byId) {
@@ -183,22 +173,33 @@ async function applyDefaultCards(file, byId) {
 }
 
 async function seed(account, token, dir) {
-  console.log('[mtg] downloading AllPrintings.json.gz')
-  const gz = join(dir, 'AllPrintings.json.gz')
-  const sumFile = join(dir, 'AllPrintings.json.gz.sha256')
-  await download('https://mtgjson.com/api/v5/AllPrintings.json.gz', gz)
-  await download('https://mtgjson.com/api/v5/AllPrintings.json.gz.sha256', sumFile)
-  const expected = readFileSync(sumFile, 'utf8').trim().split(/\s+/)[0].toLowerCase()
-  const actual = await sha256(gz)
-  if (actual !== expected) throw new Error('AllPrintings hash did not match. Nothing was written.')
-
-  console.log('[mtg] reading printings')
-  const parsed = JSON.parse((await gunzipBuffer(readFileSync(gz))).toString('utf8'))
-  const { rows, sets } = paperSets(parsed.data)
-  console.log(`[mtg] ${rows.length} paper printings in ${sets.length} sets`)
+  console.log('[mtg] downloading SetList.json')
+  const setListPath = join(dir, 'SetList.json')
+  await download('https://mtgjson.com/api/v5/SetList.json', setListPath)
+  const setList = JSON.parse(readFileSync(setListPath, 'utf8'))
+  const today = new Date().toISOString().slice(0, 10)
+  const todo = setsToSync(setList.data || [], {}, today)
+  console.log(`[mtg] reading ${todo.length} set files`)
 
   const byId = new Map()
-  for (const row of rows) byId.set(row.scryfall_id, row)
+  const sets = []
+  let failed = 0
+  for (let i = 0; i < todo.length; i++) {
+    const set = todo[i]
+    try {
+      const loaded = await readSetFile(dir, set)
+      for (const row of loaded.rows) byId.set(row.scryfall_id, row)
+      sets.push(loaded.meta)
+    } catch (error) {
+      failed++
+      console.error(`[mtg] ${set.code} failed and will be retried if you run seed again.`, error.message || error)
+    }
+    if ((i + 1) % 50 === 0 || i + 1 === todo.length) {
+      console.log(`[mtg] read ${i + 1} of ${todo.length} sets, ${byId.size} printings`)
+    }
+  }
+  if (!byId.size) throw new Error('No printings were read. Nothing was written.')
+  if (failed) console.log(`[mtg] ${failed} set files failed`)
   const unique = [...byId.values()]
   let thumbsOk = false
   try {
