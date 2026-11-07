@@ -71,10 +71,12 @@ import {
   parsePence,
   getBooksStartDate,
   todayIso,
+  cleanReceiptKey,
   EXPENSE_CATEGORIES,
   PAID_FROM,
   OWNER_ACCOUNTS
 } from './shop-ledger.js'
+import { buildAccountsPack } from './accounts-pack.js'
 import { registerInvoiceImportRoutes } from './invoice-import.js'
 import { registerAdminImageProxyRoute } from './admin-image-proxy.js'
 
@@ -7280,7 +7282,9 @@ const LEDGER_ERROR_STATUS = {
   missing_foreign_cost: 400,
   invalid_settlement: 400,
   zero_foreign_total: 400,
-  allocation_failed: 400
+  allocation_failed: 400,
+  missing_receipt: 400,
+  receipt_not_found: 404
 }
 
 function ledgerText(value, max) {
@@ -7454,6 +7458,15 @@ function parseExpenseBody(body, partial) {
     out.paid_date = paid.paidDate
     out.paid_from = paid.paidFrom
   }
+  if (body.receipt_key !== undefined) {
+    const key = cleanReceiptKey(body.receipt_key)
+    if (key === undefined) return { error: 'invalid_receipt' }
+    out.receipt_key = key
+  }
+  if (body.require_receipt) {
+    if (!out.receipt_key) return { error: 'missing_receipt' }
+    if (!out.description) return { error: 'missing_description' }
+  }
   return out
 }
 
@@ -7487,9 +7500,9 @@ app.post('/admin/finance/expenses', requireAdmin, requireAccountsOwner, async c 
     const parsed = parseExpenseBody(await c.req.json().catch(() => ({})), false)
     if (parsed.error) return c.json(parsed, 400)
     const row = await c.env.DB.prepare(`
-      INSERT INTO business_expenses (expense_date, category, event_id, description, amount_pence, paid_date, paid_from)
-      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
-    `).bind(parsed.expense_date, parsed.category, parsed.event_id, parsed.description, parsed.amount_pence, parsed.paid_date, parsed.paid_from).first()
+      INSERT INTO business_expenses (expense_date, category, event_id, description, amount_pence, paid_date, paid_from, receipt_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `).bind(parsed.expense_date, parsed.category, parsed.event_id, parsed.description, parsed.amount_pence, parsed.paid_date, parsed.paid_from, parsed.receipt_key || null).first()
     return c.json({ success: true, id: row.id })
   } catch (e) {
     console.error('[finance/expenses POST] ERROR:', e)
@@ -7763,6 +7776,48 @@ app.post('/admin/finance/receipts', requireAdmin, requireAccountsOwner, async c 
   } catch (e) {
     console.error('[finance/receipts] ERROR:', e)
     return c.json({ error: 'upload_failed' }, 500)
+  }
+})
+
+app.get('/admin/finance/receipts/:kind/:id', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    await ensureLedgerSchema(c.env.DB)
+    const kind = c.req.param('kind')
+    const id = parseInt(c.req.param('id'), 10)
+    const table = kind === 'import' ? 'stock_import_sessions' : kind === 'expense' ? 'business_expenses' : null
+    if (!table || !id) return c.json({ error: 'receipt_not_found' }, 404)
+    const row = await c.env.DB.prepare(`SELECT receipt_key FROM ${table} WHERE id = ?`).bind(id).first()
+    if (!row?.receipt_key || !c.env.IMAGES) return c.json({ error: 'receipt_not_found' }, 404)
+    const object = await c.env.IMAGES.get(row.receipt_key)
+    if (!object) return c.json({ error: 'receipt_not_found' }, 404)
+    const ext = String(row.receipt_key).split('.').pop() || 'bin'
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="receipt-${kind}-${id}.${ext}"`
+      }
+    })
+  } catch (e) {
+    console.error('[finance/receipts GET] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/finance/accounts-pack', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const from = parseLedgerDate(c.req.query('from'))
+    const to = parseLedgerDate(c.req.query('to'))
+    if (!from || !to || from > to) return c.json({ error: 'invalid_date' }, 400)
+    const zip = await buildAccountsPack(c.env.DB, c.env.IMAGES, from, to)
+    return new Response(zip, {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="dicebastion-accounts-${from}-to-${to}.zip"`
+      }
+    })
+  } catch (e) {
+    console.error('[finance/accounts-pack] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
   }
 })
 

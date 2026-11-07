@@ -15,8 +15,8 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261031l"></script>
-<script src="/js/shopInvoiceImportAdmin.js?v=20261101b"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261107a"></script>
+<script src="/js/shopInvoiceImportAdmin.js?v=20261107a"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
 
@@ -1169,7 +1169,7 @@ Show delivered
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-finance" class="admin-section-heading admin-m-0">Shop and events accounts <a href="#finance" class="admin-permalink" aria-label="Link to shop and events accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first.</p>
+<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out and shown as excluded. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first. Download accounts pack uses the profit and loss dates and includes the statements, each import line, expenses, events, and the receipt files.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="finance-books-start">Books start date</label>
@@ -1203,7 +1203,8 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 </div>
 <div>
 <label class="form-label" for="invoice-import-pdf">Invoice PDF</label>
-<input type="file" id="invoice-import-pdf" accept="application/pdf,.pdf" class="form-input">
+<input type="file" id="invoice-import-pdf" accept="application/pdf,.pdf" class="form-input" required>
+<small class="admin-text-small">Required. This file is saved as the receipt for the import.</small>
 </div>
 </div>
 <div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap;">
@@ -1272,6 +1273,7 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 </div>
 <button type="button" id="finance-pnl-run" class="btn btn-primary">Run P&amp;L</button>
 <button type="button" id="finance-pnl-csv" class="btn btn-secondary" disabled>Download CSV</button>
+<button type="button" id="finance-accounts-pack" class="btn btn-secondary">Download accounts pack</button>
 </div>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
 <div class="stat-card" style="background: rgb(var(--color-primary-700));">
@@ -1314,6 +1316,7 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 <h3 id="admin-section-finance-expenses" class="admin-section-heading">Expenses</h3>
 <div class="admin-flex admin-mb-1">
 <button type="button" id="finance-expense-add" class="btn btn-primary">Add expense</button>
+<button type="button" id="finance-expense-other" class="btn btn-secondary">Other expense</button>
 </div>
 <div id="finance-expenses-list" class="admin-mb-2"></div>
 

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   allocateSettlementToLines,
+  cleanReceiptKey,
   normalizeInvoiceCurrency,
   isForeignInvoiceCurrency,
   importLineProblem
 } from './shop-ledger.js'
+import { unzipStore, zipStore } from './zip-store.js'
 
 describe('importLineProblem', () => {
   it('flags a foreign line without a unit cost', () => {
@@ -67,5 +69,27 @@ describe('allocateSettlementToLines', () => {
     })
     const total = result.unit_cost_pence.reduce((s, u, i) => s + [1, 1, 1][i] * u, 0)
     expect(total).toBe(101)
+  })
+})
+
+describe('cleanReceiptKey', () => {
+  it('keeps a receipt object key and rejects anything else', () => {
+    expect(cleanReceiptKey('receipts/1710000000-invoice.pdf')).toBe('receipts/1710000000-invoice.pdf')
+    expect(cleanReceiptKey('')).toBe(null)
+    expect(cleanReceiptKey('https://cdn.example/receipts/a.pdf')).toBe(undefined)
+    expect(cleanReceiptKey('../secrets')).toBe(undefined)
+  })
+})
+
+describe('zipStore', () => {
+  it('round-trips a statement and a receipt', () => {
+    const packed = zipStore([
+      { name: 'profit-and-loss.csv', data: new TextEncoder().encode('Line,GBP\n') },
+      { name: 'receipts/import-4.pdf', data: new Uint8Array([1, 2, 3, 4]) }
+    ])
+    const files = unzipStore(packed)
+    expect(files.map(file => file.name)).toEqual(['profit-and-loss.csv', 'receipts/import-4.pdf'])
+    expect(new TextDecoder().decode(files[0].data)).toBe('Line,GBP\n')
+    expect(Array.from(files[1].data)).toEqual([1, 2, 3, 4])
   })
 })

@@ -2000,7 +2000,7 @@
       method: 'POST',
       body: JSON.stringify({ file: dataUrl, filename: file.name })
     });
-    return data.url;
+    return data;
   }
 
   function buildLinePayload(r) {
@@ -2064,6 +2064,11 @@
       setStatus('Enter the amount paid in GBP for this invoice.', 'warn');
       return;
     }
+    const file = el('invoice-import-pdf') && el('invoice-import-pdf').files && el('invoice-import-pdf').files[0];
+    if (!file) {
+      setStatus('Choose the invoice PDF. It is saved as the receipt for this import.', 'warn');
+      return;
+    }
 
     const costField = isForeignInvoice() ? 'unit_foreign_minor' : 'unit_cost_pence';
     const noCost = toImport.filter(function (r) {
@@ -2086,16 +2091,15 @@
     renderPreview();
 
     try {
-      let receiptUrl = null;
-      const file = el('invoice-import-pdf') && el('invoice-import-pdf').files && el('invoice-import-pdf').files[0];
-      if (file) receiptUrl = await uploadReceipt(file);
+      const uploaded = await uploadReceipt(file);
 
       const sessionBody = Object.assign({
         supplier: supplier,
         received_date: receivedDate,
         reference: (el('invoice-import-reference') && el('invoice-import-reference').value) || null,
         notes: (el('invoice-import-notes') && el('invoice-import-notes').value) || 'Supplier invoice import',
-        receipt_url: receiptUrl,
+        receipt_url: uploaded.url,
+        receipt_key: uploaded.key,
         invoice_currency: invoiceCurrency
       }, sessionPaidBody());
       if (isForeignInvoice()) {

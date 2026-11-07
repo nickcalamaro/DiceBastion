@@ -38,6 +38,9 @@
     missing_price: 'Enter the selling price.',
     ean_already_exists: 'That EAN is already used by another product.',
     invalid_receipt: 'The receipt link is not valid.',
+    missing_receipt: 'Add a photo or PDF of the receipt.',
+    missing_description: 'Enter a description.',
+    receipt_not_found: 'That receipt is not on file.',
     invalid_file: 'Choose a photo or PDF of the receipt.',
     unsupported_file: 'Receipts must be a JPEG, PNG, WEBP, GIF or PDF.',
     file_too_large: 'That receipt is larger than 8 MB.',
@@ -334,6 +337,40 @@
     downloadCsv('dicebastion-shop-events-pnl-' + d.from + '-to-' + d.to + '.csv', rows);
   }
 
+  async function downloadAccountsPack() {
+    const from = el('finance-pnl-from') && el('finance-pnl-from').value;
+    const to = el('finance-pnl-to') && el('finance-pnl-to').value;
+    if (!from || !to || from > to) {
+      setStatus('Choose the from and to dates first.');
+      return;
+    }
+    const button = el('finance-accounts-pack');
+    if (button) button.disabled = true;
+    setStatus('Building the accounts pack.');
+    try {
+      const res = await fetch(opts.apiBase() + '/admin/finance/accounts-pack?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to), {
+        headers: { 'X-Session-Token': opts.token() || '' }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(function () { return {}; });
+        throw new Error(errorText(data, 'Could not build the accounts pack.'));
+      }
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'dicebastion-accounts-' + from + '-to-' + to + '.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      setStatus('Accounts pack downloaded.');
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Balance sheet
   // -------------------------------------------------------------------------
@@ -521,6 +558,7 @@
           '<td style="' + NUM + '">' + esc(gbp(x.amount_pence)) + '</td>' +
           '<td>' + statusText(x.paid_date, x.paid_from) + '</td>' +
           '<td style="white-space: nowrap;">' + (x.paid_date ? '' : smallBtn('finance-expense-pay', x.id, 'Mark paid')) +
+          (x.receipt_key ? smallBtn('finance-expense-receipt', x.id, 'Download receipt') : '') +
           smallBtn('finance-expense-edit', x.id, 'Edit') + smallBtn('finance-expense-delete', x.id, 'Delete') + '</td></tr>';
       }).join(''),
       'No expenses recorded yet.'
@@ -546,7 +584,8 @@
         field('Event', '<select name="event_id" class="modal-form-input">' + eventOptions + '</select>', 'Linking an event shows this cost against that event in the P&L.') +
         field('Amount (£)', '<input type="number" step="0.01" min="0" name="amount" class="modal-form-input" required value="' + (expense ? (x.amount_pence / 100).toFixed(2) : '') + '">') +
         field('Paid', paidSelect('paid_from', x.paid_date ? x.paid_from : 'bank')) +
-        field('Paid date', '<input type="date" name="paid_date" class="modal-form-input" value="' + esc(x.paid_date || '') + '">', 'Leave blank to use the expense date.'),
+        field('Paid date', '<input type="date" name="paid_date" class="modal-form-input" value="' + esc(x.paid_date || '') + '">', 'Leave blank to use the expense date.') +
+        field('Receipt photo or PDF', '<input type="file" name="receipt" accept="image/*,application/pdf" class="modal-form-input">', 'Optional. Kept with this expense.'),
       onSubmit: async function (fd, modal) {
         const amount = toPence(fd.get('amount'));
         if (!amount) throw new Error(ERROR_MESSAGES.invalid_amount);
@@ -560,7 +599,48 @@
           paid_from: paidFrom || null,
           paid_date: paidFrom ? (fd.get('paid_date') || fd.get('expense_date')) : null
         };
+        const file = fd.get('receipt');
+        if (file && file.size) {
+          const uploaded = await uploadReceipt(file);
+          body.receipt_key = uploaded.key;
+        }
         await api('/admin/finance/expenses' + (expense ? '/' + expense.id : ''), { method: expense ? 'PUT' : 'POST', body: body });
+        modal.close();
+        refreshAfterChange();
+      }
+    });
+  }
+
+  function openOtherExpenseForm() {
+    Modal.form({
+      title: 'Other expense',
+      submitText: 'Add expense',
+      formContent:
+        field('Date', '<input type="date" name="expense_date" class="modal-form-input" required value="' + today() + '">') +
+        field('Amount (£)', '<input type="number" step="0.01" min="0" name="amount" class="modal-form-input" required>') +
+        field('Description', '<input name="description" class="modal-form-input" required placeholder="What was this for?">') +
+        field('Receipt photo or PDF', '<input type="file" name="receipt" accept="image/*,application/pdf" class="modal-form-input" required>', 'Required. Recorded as paid from the bank on this date.'),
+      onSubmit: async function (fd, modal) {
+        const amount = toPence(fd.get('amount'));
+        if (!amount) throw new Error(ERROR_MESSAGES.invalid_amount);
+        const description = String(fd.get('description') || '').trim();
+        if (!description) throw new Error(ERROR_MESSAGES.missing_description);
+        const file = fd.get('receipt');
+        if (!file || !file.size) throw new Error(ERROR_MESSAGES.missing_receipt);
+        const uploaded = await uploadReceipt(file);
+        await api('/admin/finance/expenses', {
+          method: 'POST',
+          body: {
+            expense_date: fd.get('expense_date'),
+            category: 'other',
+            description: description,
+            amount_pence: amount,
+            paid_from: 'bank',
+            paid_date: fd.get('expense_date'),
+            receipt_key: uploaded.key,
+            require_receipt: true
+          }
+        });
         modal.close();
         refreshAfterChange();
       }
@@ -826,8 +906,26 @@
 
   async function uploadReceipt(file) {
     const dataUrl = await readFile(file);
-    const data = await api('/admin/finance/receipts', { method: 'POST', body: { file: dataUrl, filename: file.name } });
-    return data.url;
+    return api('/admin/finance/receipts', { method: 'POST', body: { file: dataUrl, filename: file.name } });
+  }
+
+  async function downloadReceipt(kind, id) {
+    const res = await fetch(opts.apiBase() + '/admin/finance/receipts/' + kind + '/' + id, {
+      headers: { 'X-Session-Token': opts.token() || '' }
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(function () { return {}; });
+      throw new Error(errorText(data, 'Could not download the receipt.'));
+    }
+    const blob = await res.blob();
+    const match = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = match ? match[1] : 'receipt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
   }
 
   function sessionPaidBody(fd, dateFallback) {
@@ -848,9 +946,11 @@
       list.innerHTML = table(
         [{ label: 'Date' }, { label: 'Supplier' }, { label: 'Reference' }, { label: 'Items', num: true }, { label: 'Cost', num: true }, { label: 'Receipt' }, { label: '' }],
         sessions.map(function (s) {
-          const receipt = s.receipt_url
-            ? '<a href="' + esc(s.receipt_url) + '" target="_blank" rel="noopener">View</a>'
-            : '<span class="admin-text-muted">None</span>';
+          const receipt = s.receipt_key
+            ? smallBtn('finance-session-receipt', s.id, 'Download receipt')
+            : (s.receipt_url
+              ? '<a href="' + esc(s.receipt_url) + '" target="_blank" rel="noopener">View</a>'
+              : '<span class="admin-text-muted">None</span>');
           return '<tr><td style="white-space: nowrap;">' + esc(formatDate(s.received_date)) + '</td>' +
             '<td>' + esc(s.supplier) + '</td><td>' + esc(s.reference || '') + '</td>' +
             '<td style="' + NUM + '">' + (Number(s.line_count) || 0) + '</td>' +
@@ -920,9 +1020,11 @@
     const tableHeaders = foreignSession
       ? [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: costEachLabel, num: true }, { label: 'Cost each (GBP)', num: true }, { label: 'Line cost (GBP)', num: true }, { label: '' }]
       : [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: 'Cost each', num: true }, { label: 'Line cost', num: true }, { label: '' }];
-    const receipt = session.receipt_url
-      ? '<p class="admin-text-small"><a href="' + esc(session.receipt_url) + '" target="_blank" rel="noopener">View current receipt</a></p>'
-      : '';
+    const receipt = session.receipt_key
+      ? '<p class="admin-text-small"><button type="button" class="btn btn-secondary btn-sm" id="finance-session-receipt-open">Download receipt</button></p>'
+      : (session.receipt_url
+        ? '<p class="admin-text-small"><a href="' + esc(session.receipt_url) + '" target="_blank" rel="noopener">View current receipt</a></p>'
+        : '');
     panel.innerHTML =
       '<button type="button" id="finance-session-back" class="btn btn-secondary admin-mb-1">Back to sessions</button>' +
       '<h3 class="admin-section-heading">' + esc(session.supplier) + ', ' + esc(formatDate(session.received_date)) + '</h3>' +
@@ -984,18 +1086,22 @@
       submit.disabled = true;
       try {
         let receiptUrl = session.receipt_url || null;
+        let receiptKey;
         const file = fd.get('receipt');
-        if (file && file.size) receiptUrl = await uploadReceipt(file);
-        await api('/admin/finance/import-sessions/' + session.id, {
-          method: 'PUT',
-          body: Object.assign({
-            supplier: fd.get('supplier'),
-            received_date: fd.get('received_date'),
-            reference: fd.get('reference'),
-            notes: fd.get('notes'),
-            receipt_url: receiptUrl
-          }, sessionPaidBody(fd, fd.get('received_date')))
-        });
+        if (file && file.size) {
+          const uploaded = await uploadReceipt(file);
+          receiptUrl = uploaded.url;
+          receiptKey = uploaded.key;
+        }
+        const body = Object.assign({
+          supplier: fd.get('supplier'),
+          received_date: fd.get('received_date'),
+          reference: fd.get('reference'),
+          notes: fd.get('notes'),
+          receipt_url: receiptUrl
+        }, sessionPaidBody(fd, fd.get('received_date')));
+        if (receiptKey) body.receipt_key = receiptKey;
+        await api('/admin/finance/import-sessions/' + session.id, { method: 'PUT', body: body });
         setStatus('Receipt details saved.');
         refreshAfterChange();
       } catch (err) {
@@ -1014,16 +1120,16 @@
         field('Supplier', '<input name="supplier" class="modal-form-input" required>') +
         field('Date on the receipt', '<input type="date" name="received_date" class="modal-form-input" required value="' + today() + '">') +
         field('Reference', '<input name="reference" class="modal-form-input" placeholder="Invoice number">') +
-        field('Receipt photo or PDF', '<input type="file" name="receipt" accept="image/*,application/pdf" class="modal-form-input">', 'Optional. You can add it later.') +
+        field('Receipt photo or PDF', '<input type="file" name="receipt" accept="image/*,application/pdf" class="modal-form-input" required>', 'Required. This file is kept with the import.') +
         field('Paid', paidSelect('paid_from', '')) +
         field('Paid date', '<input type="date" name="paid_date" class="modal-form-input">', 'Leave blank to use the receipt date.') +
         field('Notes', '<input name="notes" class="modal-form-input">'),
       onSubmit: async function (fd, modal) {
         const supplier = String(fd.get('supplier') || '').trim();
         if (!supplier) throw new Error(ERROR_MESSAGES.missing_supplier);
-        let receiptUrl = null;
         const file = fd.get('receipt');
-        if (file && file.size) receiptUrl = await uploadReceipt(file);
+        if (!file || !file.size) throw new Error(ERROR_MESSAGES.missing_receipt);
+        const uploaded = await uploadReceipt(file);
         const created = await api('/admin/finance/import-sessions', {
           method: 'POST',
           body: Object.assign({
@@ -1031,7 +1137,8 @@
             received_date: fd.get('received_date'),
             reference: fd.get('reference'),
             notes: fd.get('notes'),
-            receipt_url: receiptUrl
+            receipt_url: uploaded.url,
+            receipt_key: uploaded.key
           }, sessionPaidBody(fd, fd.get('received_date')))
         });
         modal.close();
@@ -1190,6 +1297,8 @@
     on('finance-books-start-save', 'click', saveSettings);
     on('finance-bill-add', 'click', function () { openBillForm(null); });
     on('finance-expense-add', 'click', function () { openExpenseForm(null); });
+    on('finance-expense-other', 'click', function () { openOtherExpenseForm(); });
+    on('finance-accounts-pack', 'click', downloadAccountsPack);
     on('finance-owner-add', 'click', function () { openOwnerForm(null); });
     on('finance-bills-unpaid', 'change', loadBills);
     on('finance-lots-remaining', 'change', loadLots);
@@ -1202,18 +1311,24 @@
         if (!btn || !tab.contains(btn)) return;
         if (btn.id === 'finance-session-back') { closeSessionPanel(); return; }
         if (btn.id === 'finance-session-add-manual') { openSessionLine(); return; }
+        if (btn.id === 'finance-session-receipt-open') {
+          downloadReceipt('import', openSessionId).catch(function (err) { setStatus(err.message); });
+          return;
+        }
         const id = btn.getAttribute('data-id');
         if (!id) return;
         if (btn.classList.contains('finance-bill-pay')) openMarkPaid('bill', findById(bills, id));
         else if (btn.classList.contains('finance-bill-edit')) openBillForm(findById(bills, id));
         else if (btn.classList.contains('finance-expense-pay')) openMarkPaid('expense', findById(expenses, id));
         else if (btn.classList.contains('finance-expense-edit')) openExpenseForm(findById(expenses, id));
+        else if (btn.classList.contains('finance-expense-receipt')) downloadReceipt('expense', id).catch(function (err) { setStatus(err.message); });
         else if (btn.classList.contains('finance-expense-delete')) {
           confirmDelete('Delete this expense?', function () { return api('/admin/finance/expenses/' + id, { method: 'DELETE' }); });
         } else if (btn.classList.contains('finance-owner-edit')) openOwnerForm(findById(ownerMovements, id));
         else if (btn.classList.contains('finance-owner-delete')) {
           confirmDelete('Delete this owner money entry?', function () { return api('/admin/finance/owner-movements/' + id, { method: 'DELETE' }); });
         } else if (btn.classList.contains('finance-session-open')) openSession(id);
+        else if (btn.classList.contains('finance-session-receipt')) downloadReceipt('import', id).catch(function (err) { setStatus(err.message); });
         else if (btn.classList.contains('finance-session-line-remove')) {
           confirmDelete('Remove this item from the receipt and from stock?', function () {
             return api('/admin/finance/import-sessions/' + openSessionId + '/lines/' + id, { method: 'DELETE' });

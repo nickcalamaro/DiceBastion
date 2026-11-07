@@ -193,7 +193,9 @@ export async function ensureLedgerSchema(db) {
     ['stock_import_sessions', 'settlement_amount_pence', 'INTEGER'],
     ['stock_import_sessions', 'foreign_goods_total_minor', 'INTEGER'],
     ['stock_import_lines', 'unit_foreign_minor', 'INTEGER'],
-    ['stock_lots', 'unit_foreign_minor', 'INTEGER']
+    ['stock_lots', 'unit_foreign_minor', 'INTEGER'],
+    ['stock_import_sessions', 'receipt_key', 'TEXT'],
+    ['business_expenses', 'receipt_key', 'TEXT']
   ]
   for (const [table, col, type] of ledgerAlters) {
     try {
@@ -508,6 +510,14 @@ async function applySubmittedCopy(db, productId, input) {
   return filled
 }
 
+/** R2 object key for a receipt saved by POST /admin/finance/receipts. */
+export function cleanReceiptKey(value) {
+  if (value == null || String(value).trim() === '') return null
+  const key = String(value).trim()
+  if (!/^receipts\/[A-Za-z0-9._-]{1,120}$/.test(key)) return undefined
+  return key
+}
+
 /** https URL or site path. null when blank, undefined when not a usable URL. */
 function cleanUrl(value) {
   if (value == null || String(value).trim() === '') return null
@@ -533,6 +543,9 @@ export async function createImportSession(db, input) {
   const notes = input.notes ? String(input.notes).trim().slice(0, 1000) : null
   const receiptUrl = cleanUrl(input.receipt_url)
   if (receiptUrl === undefined) return { error: 'invalid_receipt' }
+  const receiptKey = cleanReceiptKey(input.receipt_key)
+  if (receiptKey === undefined) return { error: 'invalid_receipt' }
+  if (!receiptKey) return { error: 'missing_receipt' }
   const paid = paidFields(input, receivedDate)
   if (paid.error) return paid
 
@@ -559,13 +572,14 @@ export async function createImportSession(db, input) {
   ).first()
 
   const session = await db.prepare(`
-    INSERT INTO stock_import_sessions (supplier, received_date, reference, receipt_url, notes, paid_date, paid_from, supplier_bill_id, invoice_currency, settlement_amount_pence)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    INSERT INTO stock_import_sessions (supplier, received_date, reference, receipt_url, receipt_key, notes, paid_date, paid_from, supplier_bill_id, invoice_currency, settlement_amount_pence)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
   `).bind(
     supplier,
     receivedDate,
     reference,
     receiptUrl,
+    receiptKey,
     notes,
     paid.paidDate,
     paid.paidFrom,
@@ -598,6 +612,11 @@ export async function updateImportSession(db, id, input) {
     receiptUrl = cleanUrl(input.receipt_url)
     if (receiptUrl === undefined) return { error: 'invalid_receipt' }
   }
+  let receiptKey = session.receipt_key || null
+  if (input.receipt_key !== undefined) {
+    receiptKey = cleanReceiptKey(input.receipt_key)
+    if (receiptKey === undefined) return { error: 'invalid_receipt' }
+  }
   const paid = (input.paid_from !== undefined || input.paid_date !== undefined)
     ? paidFields(input, receivedDate)
     : { paidDate: session.paid_date, paidFrom: session.paid_from }
@@ -605,9 +624,9 @@ export async function updateImportSession(db, id, input) {
 
   await db.prepare(`
     UPDATE stock_import_sessions
-    SET supplier = ?, received_date = ?, reference = ?, notes = ?, receipt_url = ?, paid_date = ?, paid_from = ?
+    SET supplier = ?, received_date = ?, reference = ?, notes = ?, receipt_url = ?, receipt_key = ?, paid_date = ?, paid_from = ?
     WHERE id = ?
-  `).bind(supplier, receivedDate, reference, notes, receiptUrl, paid.paidDate, paid.paidFrom, id).run()
+  `).bind(supplier, receivedDate, reference, notes, receiptUrl, receiptKey, paid.paidDate, paid.paidFrom, id).run()
 
   await db.prepare(`
     UPDATE supplier_bills

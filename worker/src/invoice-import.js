@@ -103,10 +103,12 @@ const SHOP_CONTEXT =
 
 const COPY_TONE =
   'Tone of voice (Dice Bastion site guidelines):\n' +
-  '- Warm, friendly British English for hobbyists, written to make someone want the product.\n' +
-  '- Describe what the product is and what makes it appealing: its theme, setting, characters, art, contents, feel and how it is used, as the sources describe them.\n' +
-  '- Numbers and specs support the description; they do not lead it or replace it.\n' +
-  '- No emojis. No arrow characters. No decorative Unicode symbols. No invented superlatives or empty filler.\n' +
+ 
+  '- Write like someone at the club counter talking to another player: friendly, plain and specific. British spelling.\n' +
+  '- Say what the product is, what is in the pack, and how people use it, using facts from the sources. Do not invent praise or selling points.\n' +
+  '- Numbers and specs support the description; they do not replace it.\n' +
+  '- No emojis. No arrow characters. No decorative Unicode symbols. No em dashes (use a full stop, comma, or "and").\n' +
+  '- Avoid marketing and AI filler: no "elevate your game", "must-have", "perfect for every player", "premium quality", or keyword stuffing.\n' +
   '- Short card summary; longer modal description in clear paragraphs.\n\n'
 
 const SOURCE_COPY_GUIDE =
@@ -117,7 +119,9 @@ const SOURCE_COPY_GUIDE =
 
 const PRODUCT_TYPE_GUIDE =
   'Product-type guidance:\n' +
-  '- Card sleeves, deck boxes, binders, playmats: state size or fit when a source states it. A size word does not authorise naming games.\n' +
+  '- Gaming dice (Chessex blocks, polyhedral RPG sets, speckled or gemini d6, and similar): name the brand and line, what is in the box (die types, count, colours), and typical use when sources say it (RPG, board game, wargame). Stay factual; do not call dice "essential" or "premium".\n' +
+  '- Card sleeves (Ultra Pro, Dragon Shield, and similar): lead with brand, line, finish, and pack count from sources. When sources say standard size or list compatible card games, you may mention Magic: The Gathering, Riftbound and other standard TCGs once in plain language. Never claim a fit the source does not state.\n' +
+  '- Other deck boxes, binders, playmats: state size or fit when a source states it. A size word alone does not authorise naming games.\n' +
   '- Name a game, card size or product as compatible only when a source says this exact product fits it. Sources often also list what a product does not fit, or compare sizes; never turn those into a fit claim. When unsure, name no games.\n' +
   '- TCG sealed product (boosters, decks, tins): use official set or product name from the EAN; do not invent card lists or pull rates.\n' +
   '- Board games and standalone card games: player count, play time, or age rating only when stated in publisher sources; never invent stats. Each title/edition is usually a distinct product — write copy for that EAN only.\n' +
@@ -131,9 +135,9 @@ const IDENTIFY_GUIDE =
 
 const SUMMARY_GUIDE =
   'Summary (SEO-aware, same field as manual product add; max 500 characters, aim 140–160, shown as the shop card blurb and Google meta description):\n' +
-  '- One or two sentences: the brand or line name and what makes the product appealing, drawn from the source description. Add a spec only when customers would choose by it (size, player count, format).\n' +
-  '- Natural British English keywords; no hype, no keyword stuffing, no emojis.\n' +
-  '- Description: 2-4 short plain-text paragraphs for the product page body, no HTML. Open with what the product is and offers, following the source description; practical specs come after.\n\n'
+  '- One or two sentences: brand and product line, plus the detail shoppers choose by (finish, pack count, die types, size). Draw wording from sources; include game names only when sources support compatibility.\n' +
+  '- Natural British English keywords (e.g. Chessex, Ultra Pro, MTG, Riftbound) where they describe this product; no hype, no stuffing, no emojis.\n' +
+  '- Description: 2-4 short plain-text paragraphs for the product page body, no HTML. Open with what the product is; practical specs and compatibility after.\n\n'
 
 const SOURCES_GUIDE =
   'Sources and images:\n' +
