@@ -468,8 +468,7 @@
     let rows = '';
     rows += statementHeading('Assets');
     rows += statementRow('Stock at cost', d.assets.stock_at_cost_pence, { indent: true });
-    rows += statementRow('Bank and SumUp (calculated)', d.assets.bank_and_sumup_pence, { indent: true });
-    rows += statementRow('Cash (calculated)', d.assets.cash_pence, { indent: true });
+    rows += statementRow('Money generated', d.assets.money_generated_pence, { indent: true });
     rows += statementRow('Total assets', d.assets.total_pence, { total: true });
     rows += statementHeading('Liabilities');
     rows += statementRow('Unpaid supplier bills', d.liabilities.unpaid_supplier_bills_pence, { indent: true });
@@ -483,15 +482,10 @@
     rows += statementRow('Total liabilities', d.liabilities.total_pence, { total: true });
     rows += statementRow('Net assets', d.net_assets_pence, { total: true });
 
-    const check = d.balances
-      ? ''
-      : '<p class="admin-text-small" style="color: rgb(185, 28, 28);">Does not balance (difference ' + esc(gbp(d.difference_pence)) + '). Please report this.</p>';
-
     el('finance-bs-body').innerHTML =
       '<p class="admin-text-small admin-text-muted">As of ' + esc(formatDate(d.as_of)) + '.</p>' +
       '<div class="table-wrapper admin-mb-1"><div style="overflow-x: auto;"><table><tbody>' + rows + '</tbody></table></div></div>' +
-      check +
-      '<p class="admin-text-small admin-text-muted">Net assets is stock, bank and cash, less unpaid bills, unpaid expenses and store credit. Bank, SumUp and cash are calculated from sales after fees, and from bills and expenses paid. Which account paid a bill does not change the cost. Compare the figures with your real balances. SumUp payouts to your bank are not tracked, so check SumUp and bank together.</p>';
+      '<p class="admin-text-small admin-text-muted">Money generated is sales and ticket money received, after fees and store credit, less every bill and expense that has been paid. It can be negative. Net assets is stock plus that figure, less unpaid bills, unpaid expenses and store credit.</p>';
   }
 
   function downloadBsCsv() {
@@ -502,8 +496,7 @@
       [],
       ['Line', 'GBP'],
       ['Stock at cost', poundsCsv(d.assets.stock_at_cost_pence)],
-      ['Bank and SumUp (calculated)', poundsCsv(d.assets.bank_and_sumup_pence)],
-      ['Cash (calculated)', poundsCsv(d.assets.cash_pence)],
+      ['Money generated', poundsCsv(d.assets.money_generated_pence)],
       ['Total assets', poundsCsv(d.assets.total_pence)],
       ['Unpaid supplier bills', poundsCsv(d.liabilities.unpaid_supplier_bills_pence)],
       ['Unpaid expenses', poundsCsv(d.liabilities.unpaid_expenses_pence)],

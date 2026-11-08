@@ -287,9 +287,9 @@ function balanceSheetPage(items, model) {
 
   heading(items, 'Assets', 12, 16)
   amountRow(items, 'Stock', assets.stock_at_cost_pence, { indent: 12 })
-  amountRow(items, 'Bank and SumUp', assets.bank_and_sumup_pence, { indent: 12 })
-  amountRow(items, 'Cash', assets.cash_pence, { indent: 12 })
+  amountRow(items, 'Money generated', assets.money_generated_pence, { indent: 12 })
   amountRow(items, 'Total assets', assets.total_pence, { bold: true, rule: true, gap: 18 })
+  line(items, 'Money generated is sales and tickets after fees and store credit, less bills and expenses paid. It can be negative.', { size: 9, gap: 14 })
 
   heading(items, 'Amounts owed', 12, 16)
   amountRow(items, 'Unpaid supplier bills', liabilities.unpaid_supplier_bills_pence, { indent: 12 })
@@ -322,9 +322,8 @@ function internalPage(items, model) {
   const held = sheet.liabilities.store_credit_customer_balances_pence
   amountRow(items, 'TCG store credit held', held == null ? sheet.liabilities.store_credit_owed_pence : held, { indent: 12 })
   amountRow(items, 'Card buybacks issued in the period', pnl.expenses.card_buyback_credit_pence || 0, { indent: 12 })
-  const finalBalance = (Number(sheet.assets.bank_and_sumup_pence) || 0) + (Number(sheet.assets.cash_pence) || 0)
-  amountRow(items, 'Final balance', finalBalance, { indent: 12, bold: true, rule: true })
-  line(items, 'Final balance is bank and cash. A bill is a business cost whichever account paid it.', { size: 9, indent: 12, gap: 13 })
+  amountRow(items, 'Final balance', sheet.assets.money_generated_pence, { indent: 12, bold: true, rule: true })
+  line(items, 'Final balance is the money generated. It can be negative.', { size: 9, indent: 12, gap: 13 })
   line(items, 'Memberships, donations and drinks stay in Club accounts. Personal money is reconciled at the bank.', { size: 9, indent: 12, gap: 14 })
   noteLines(items, notes.finances)
 

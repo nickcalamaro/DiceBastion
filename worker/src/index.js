@@ -2637,6 +2637,7 @@ ${details.items.map(item => `• ${item.product_name} x ${item.quantity} - ${for
         <p><strong>Event:</strong> ${details.eventName}</p>
         <p><strong>Customer:</strong> ${details.customerName} (${details.customerEmail})</p>
         <p><strong>Amount:</strong> ${formatPrice(details.amount)}</p>
+        ${details.paymentMethod ? `<p><strong>Payment:</strong> ${details.paymentMethod}</p>` : ''}
         <p><strong>Event Date:</strong> ${new Date(details.eventDate).toLocaleString('en-GB')}</p>
         <p><strong>Purchase Date:</strong> ${new Date().toLocaleString('en-GB')}</p>
         <p><strong>Ticket ID:</strong> ${details.ticketId}</p>
@@ -2648,7 +2649,7 @@ New Event Ticket Purchase
 Event: ${details.eventName}
 Customer: ${details.customerName} (${details.customerEmail})
 Amount: ${formatPrice(details.amount)}
-Event Date: ${new Date(details.eventDate).toLocaleString('en-GB')}
+${details.paymentMethod ? `Payment: ${details.paymentMethod}\n` : ''}Event Date: ${new Date(details.eventDate).toLocaleString('en-GB')}
 Purchase Date: ${new Date().toLocaleString('en-GB')}
 Ticket ID: ${details.ticketId}
 Order Reference: ${details.orderRef}
@@ -8176,11 +8177,18 @@ app.delete('/admin/events/:id', requireAdmin, async c => {
     
     // Check if event has tickets sold (only count active/confirmed tickets)
     const ticketHolders = await c.env.DB.prepare(`
-      SELECT DISTINCT u.user_id, u.name, u.email, COUNT(*) as ticket_count
+      SELECT
+        COALESCE(NULLIF(TRIM(tr.name), ''), u.name) AS name,
+        CASE
+          WHEN lower(COALESCE(NULLIF(TRIM(tr.email), ''), u.email, '')) = 'walk-in@dicebastion.local' THEN ''
+          ELSE COALESCE(NULLIF(TRIM(tr.email), ''), u.email)
+        END AS email,
+        COUNT(DISTINCT t.id) AS ticket_count
       FROM tickets t
       JOIN users u ON t.user_id = u.user_id
+      LEFT JOIN transactions tr ON tr.reference_id = t.id AND tr.transaction_type = 'ticket'
       WHERE t.event_id = ? AND t.status = 'active'
-      GROUP BY u.user_id, u.name, u.email
+      GROUP BY 1, 2
     `).bind(id).all()
     
     const confirmedTicketCount = ticketHolders.results?.reduce((sum, holder) => sum + holder.ticket_count, 0) || 0
@@ -8219,6 +8227,7 @@ app.get('/admin/events/:id/registrations', requireAdmin, async c => {
     const id = c.req.param('id')
     if (!id || isNaN(Number(id))) return c.json({ error:'invalid_event_id' },400)
     const evId = Number(id)
+    await ensureTransactionPaymentMethod(c.env.DB)
     
     // Get event details
     const event = await c.env.DB.prepare('SELECT * FROM events WHERE event_id = ?').bind(evId).first()
@@ -8236,10 +8245,14 @@ app.get('/admin/events/:id/registrations', requireAdmin, async c => {
         tr.currency,
         tr.payment_status,
         t.created_at,
-        u.email,
-        u.name,
+        CASE
+          WHEN lower(COALESCE(NULLIF(TRIM(tr.email), ''), u.email, '')) = 'walk-in@dicebastion.local' THEN ''
+          ELSE COALESCE(NULLIF(TRIM(tr.email), ''), u.email)
+        END AS email,
+        COALESCE(NULLIF(TRIM(tr.name), ''), u.name) AS name,
         tr.order_ref,
-        tr.payment_id
+        tr.payment_id,
+        tr.payment_method
       FROM tickets t
       LEFT JOIN users u ON t.user_id = u.user_id
       LEFT JOIN transactions tr ON tr.reference_id = t.id AND tr.transaction_type = 'ticket'
@@ -10900,6 +10913,256 @@ app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
     })
   } catch (e) {
     console.error('[admin/shop/pos-sale] Error:', e)
+    return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
+  }
+})
+
+/** Shared mailbox for door tickets that are not tied to a member account. */
+const DOOR_TICKET_EMAIL = 'walk-in@dicebastion.local'
+
+const MANUAL_EVENT_SALE_SQL = `
+  datetime(e.event_datetime) >= datetime('now', '-1 month')
+  AND (IFNULL(e.is_active, 0) = 1 OR datetime(e.event_datetime) < datetime('now'))
+  AND NOT (
+    IFNULL(e.is_recurring, 0) = 1
+    AND (e.series_id IS NULL OR e.series_id = '')
+    AND EXISTS (SELECT 1 FROM events s WHERE s.series_id = e.event_id)
+  )
+`
+
+function doorTicketPayLabel(method) {
+  if (method === 'cash') return 'Cash'
+  if (method === 'bank_transfer') return 'Bank transfer'
+  if (method === 'sumup') return 'SumUp'
+  return method
+}
+
+async function ensureTransactionPaymentMethod(db) {
+  try {
+    await db.prepare('ALTER TABLE transactions ADD COLUMN payment_method TEXT').run()
+  } catch (_) {
+    /* column already exists */
+  }
+}
+
+/**
+ * Events an admin can sell a door ticket for: still open, or held in the past month.
+ * GET /admin/shop/event-sale-options
+ */
+app.get('/admin/shop/event-sale-options', requireAdmin, async (c) => {
+  try {
+    await ensureEventSeriesSchema(c.env.DB)
+    const { results } = await c.env.DB.prepare(`
+      SELECT e.event_id, e.event_name, e.event_datetime, e.capacity, e.tickets_sold,
+             e.membership_price, e.non_membership_price, e.is_active
+      FROM events e
+      WHERE ${MANUAL_EVENT_SALE_SQL}
+      ORDER BY e.event_datetime ASC
+    `).all()
+
+    const nowIso = toIso(new Date())
+    const { results: memberRows } = await c.env.DB.prepare(`
+      SELECT u.user_id, u.name, u.email, m.plan
+      FROM memberships m
+      JOIN users u ON u.user_id = m.user_id
+      WHERE m.status = 'active' AND m.end_date >= ? AND IFNULL(u.is_active, 1) = 1
+      ORDER BY m.end_date DESC
+    `).bind(nowIso).all()
+
+    const seen = new Set()
+    const members = []
+    for (const row of memberRows || []) {
+      if (seen.has(row.user_id)) continue
+      seen.add(row.user_id)
+      members.push({
+        user_id: row.user_id,
+        name: row.name || '',
+        email: row.email || '',
+        plan: row.plan || ''
+      })
+    }
+    members.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email, 'en', { sensitivity: 'base' }))
+
+    return c.json({ success: true, events: results || [], members })
+  } catch (e) {
+    console.error('[admin/shop/event-sale-options] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/**
+ * Record a door ticket (cash, bank transfer, or SumUp).
+ * Member price when an active member is selected; otherwise the typed name pays the standard price.
+ * POST /admin/shop/event-sale
+ */
+app.post('/admin/shop/event-sale', requireAdmin, async (c) => {
+  try {
+    const body = await c.req.json()
+    const paymentMethod = String(body.payment_method || '').toLowerCase().trim()
+    if (paymentMethod !== 'cash' && paymentMethod !== 'bank_transfer' && paymentMethod !== 'sumup') {
+      return c.json({ error: 'invalid_payment_method', message: 'Choose cash, bank transfer, or SumUp.' }, 400)
+    }
+    const eventId = parseInt(body.event_id, 10)
+    if (!eventId || eventId <= 0) {
+      return c.json({ error: 'invalid_event', message: 'Choose an event.' }, 400)
+    }
+    const existingMember = body.existing_member === true || body.existing_member === 1 || String(body.existing_member) === 'true'
+
+    await ensureEventSeriesSchema(c.env.DB)
+    await ensureTransactionPaymentMethod(c.env.DB)
+
+    const ev = await c.env.DB.prepare(`
+      SELECT e.*
+      FROM events e
+      WHERE e.event_id = ?
+        AND ${MANUAL_EVENT_SALE_SQL}
+    `).bind(eventId).first()
+    if (!ev) {
+      return c.json({ error: 'event_not_eligible', message: 'Choose an open event, or one from the past month.' }, 400)
+    }
+    const bookable = await assertBookableEventRow(c.env.DB, ev)
+    if (!bookable.ok) {
+      return c.json({ error: bookable.error, message: bookable.message }, 400)
+    }
+
+    let userId
+    let attendeeName
+    let attendeeEmail
+    let price
+    if (existingMember) {
+      userId = parseInt(body.user_id, 10)
+      if (!userId || userId <= 0) {
+        return c.json({ error: 'member_required', message: 'Choose a member.' }, 400)
+      }
+      const user = await c.env.DB.prepare(
+        'SELECT user_id, name, email FROM users WHERE user_id = ? AND IFNULL(is_active, 1) = 1'
+      ).bind(userId).first()
+      if (!user) {
+        return c.json({ error: 'member_not_found', message: 'That member could not be found.' }, 404)
+      }
+      const membership = await getActiveMembership(c.env.DB, userId)
+      if (!membership) {
+        return c.json({ error: 'not_active_member', message: 'That person does not have an active membership.' }, 400)
+      }
+      attendeeName = clampStr(user.name || user.email, 200)
+      attendeeEmail = user.email
+      price = Number(ev.membership_price)
+    } else {
+      attendeeName = clampStr(String(body.name || '').trim(), 200)
+      if (!attendeeName) {
+        return c.json({ error: 'name_required', message: 'Enter their name.' }, 400)
+      }
+      const ident = await getOrCreateIdentity(c.env.DB, DOOR_TICKET_EMAIL, 'Walk-in')
+      if (!ident || ident.id == null) {
+        return c.json({ error: 'identity_error' }, 500)
+      }
+      userId = ident.id
+      attendeeEmail = ''
+      price = Number(ev.non_membership_price)
+    }
+
+    if (!Number.isFinite(price) || price < 0) {
+      return c.json({ error: 'invalid_amount' }, 400)
+    }
+    const amountPounds = Math.round(price * 100) / 100
+    const amountStr = amountPounds.toFixed(2)
+    const amountPence = Math.round(amountPounds * 100)
+    const now = toIso(new Date())
+    const orderRef = `EVT-${ev.event_id}-${crypto.randomUUID()}`
+
+    const ticketResult = await c.env.DB.prepare(
+      `INSERT INTO tickets (event_id, user_id, status, created_at) VALUES (?, ?, 'active', ?) RETURNING id`
+    ).bind(ev.event_id, userId, now).first()
+    const ticketId = ticketResult?.id
+    if (!ticketId) {
+      return c.json({ error: 'ticket_creation_failed' }, 500)
+    }
+
+    const tx = await c.env.DB.prepare(`
+      INSERT INTO transactions (
+        transaction_type, reference_id, user_id, email, name, order_ref,
+        payment_id, amount, currency, payment_status, payment_method,
+        credit_applied_pence, card_charged_pence, updated_at
+      ) VALUES ('ticket', ?, ?, ?, ?, ?, ?, ?, 'GBP', 'PAID', ?, 0, ?, ?)
+      RETURNING id
+    `).bind(
+      ticketId,
+      userId,
+      attendeeEmail,
+      attendeeName,
+      orderRef,
+      `POS-${paymentMethod}-${orderRef}`,
+      amountStr,
+      paymentMethod,
+      paymentMethod === 'sumup' ? amountPence : 0,
+      now
+    ).first()
+
+    const sold = await c.env.DB.prepare(
+      'UPDATE events SET tickets_sold = tickets_sold + 1 WHERE event_id = ? AND (capacity IS NULL OR tickets_sold < capacity)'
+    ).bind(ev.event_id).run()
+    if (!sold?.meta?.changes) {
+      if (tx?.id) await c.env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(tx.id).run()
+      await c.env.DB.prepare('DELETE FROM tickets WHERE id = ?').bind(ticketId).run()
+      return c.json({ error: 'sold_out', message: 'This event is full.' }, 409)
+    }
+
+    if (existingMember && attendeeEmail) {
+      try {
+        const eventForEmail = eventRowForTicketEmail(ev)
+        const emailContent = getTicketConfirmationEmail(eventForEmail, { name: attendeeName, email: attendeeEmail }, {
+          amount: amountStr,
+          currency: 'GBP',
+          order_ref: orderRef
+        })
+        await sendEmail(c.env, {
+          to: attendeeEmail,
+          ...emailContent,
+          emailType: 'event_ticket_confirmation',
+          relatedId: ticketId,
+          relatedType: 'ticket',
+          metadata: { event_id: ev.event_id, event_name: ev.event_name, payment_method: paymentMethod, source: 'door' }
+        })
+      } catch (emailErr) {
+        console.error('[event-sale] Confirmation email failed:', emailErr)
+      }
+    }
+
+    try {
+      const adminEmailContent = getAdminNotificationEmail('event_ticket', {
+        eventName: ev.event_name,
+        customerName: attendeeName,
+        customerEmail: existingMember ? attendeeEmail : 'Door sale',
+        amount: amountStr,
+        paymentMethod: doorTicketPayLabel(paymentMethod),
+        eventDate: ev.event_datetime,
+        ticketId,
+        orderRef
+      })
+      await sendEmail(c.env, {
+        to: 'admin@dicebastion.com',
+        ...adminEmailContent,
+        emailType: 'admin_event_notification',
+        relatedId: ticketId,
+        relatedType: 'ticket',
+        metadata: { event_id: ev.event_id, event_name: ev.event_name, payment_method: paymentMethod, source: 'door' }
+      })
+    } catch (adminErr) {
+      console.error('[event-sale] Admin notification failed:', adminErr)
+    }
+
+    return c.json({
+      success: true,
+      ticket_id: ticketId,
+      order_ref: orderRef,
+      event_name: ev.event_name,
+      name: attendeeName,
+      amount: amountStr,
+      payment_method: paymentMethod,
+      member: existingMember
+    })
+  } catch (e) {
+    console.error('[admin/shop/event-sale] Error:', e)
     return c.json({ error: 'internal_error', message: String(e?.message || e) }, 500)
   }
 })

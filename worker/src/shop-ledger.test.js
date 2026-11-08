@@ -149,7 +149,7 @@ describe('accounts summary PDF', () => {
     },
     sheet: {
       as_of: '2026-11-30',
-      assets: { stock_at_cost_pence: 20000, bank_and_sumup_pence: 9000, cash_pence: 1000 },
+      assets: { stock_at_cost_pence: 20000, money_generated_pence: -6000 },
       liabilities: {
         store_credit_owed_pence: 400,
         store_credit_customer_balances_pence: 450,
@@ -186,7 +186,9 @@ describe('accounts summary PDF', () => {
     expect(text).toContain('Purchases of goods')
     expect(text).toContain('CubeGolem DE')
     expect(text).toContain('Goods for events')
+    expect(text).toContain('Money generated')
     expect(text).toContain('Net assets')
+    expect(text).not.toContain('Bank and SumUp')
     expect(text).not.toContain("Owner's bank")
     expect(text).not.toContain('Capital')
     expect(text).not.toContain('Drawings')

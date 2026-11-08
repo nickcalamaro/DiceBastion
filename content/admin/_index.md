@@ -15,7 +15,8 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261109a"></script>
+<script src="/js/eventPosAdmin.js?v=20261109a"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261109b"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261107a"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
@@ -1062,6 +1063,48 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <button type="button" id="pos-submit-btn" class="btn btn-primary">Record sale</button>
 </div>
 <p id="pos-status" class="admin-text-small admin-mb-0" style="margin-top: 0.75rem;"></p>
+</div>
+<h3 class="admin-section-heading">Event ticket</h3>
+<p class="admin-text-muted admin-mb-1">Door sales for an open event, or one from the past month. Tick existing member to use the member price and pick them from the list. Otherwise type their name. The ticket is marked paid.</p>
+<div class="admin-mb-2" style="padding: 1rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px;">
+<div class="admin-mb-1">
+<label class="form-label" for="event-pos-event">Event</label>
+<select id="event-pos-event" class="form-select">
+<option value="">Loading events…</option>
+</select>
+</div>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="event-pos-payment">Payment method</label>
+<select id="event-pos-payment" class="form-select">
+<option value="cash">Cash</option>
+<option value="bank_transfer">Bank transfer</option>
+<option value="sumup">SumUp</option>
+</select>
+</div>
+<div>
+<label class="form-label">Ticket price</label>
+<div id="event-pos-price" style="padding: 0.5rem 0;">Choose an event to see the ticket price.</div>
+</div>
+</div>
+<div class="admin-mb-1">
+<label class="admin-text-small" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+<input type="checkbox" id="event-pos-existing-member">
+Existing member
+</label>
+</div>
+<div id="event-pos-member-wrap" class="admin-mb-1" style="display: none;">
+<label class="form-label" for="event-pos-member">Member</label>
+<select id="event-pos-member" class="form-select">
+<option value="">Select member…</option>
+</select>
+</div>
+<div id="event-pos-name-wrap" class="admin-mb-1">
+<label class="form-label" for="event-pos-name">Name</label>
+<input type="text" id="event-pos-name" class="form-input" placeholder="Name on the ticket" autocomplete="name">
+</div>
+<button type="button" id="event-pos-submit" class="btn btn-primary">Record ticket</button>
+<p id="event-pos-status" class="admin-text-small admin-mb-0" style="margin-top: 0.75rem;"></p>
 </div>
 <div class="admin-flex-between admin-mb-1" style="flex-wrap: wrap; align-items: center; gap: 0.75rem;">
 <h3 class="admin-section-heading admin-m-0">Shop orders</h3>
@@ -5870,6 +5913,7 @@ async function loadRecentActivity() {
 
 // Orders / POS
 let shopPosInitialized = false;
+let eventPosInitialized = false;
 async function loadOrders() {
   if (!sessionToken || typeof ShopPosAdmin === 'undefined') {
     const list = document.getElementById('orders-list');
@@ -5881,6 +5925,18 @@ async function loadOrders() {
     shopPosInitialized = true;
   } else {
     await ShopPosAdmin.loadOrders(API_BASE, sessionToken);
+  }
+  if (typeof EventPosAdmin === 'undefined') return;
+  if (!eventPosInitialized) {
+    await EventPosAdmin.init(API_BASE, sessionToken);
+    eventPosInitialized = true;
+  } else {
+    try {
+      await EventPosAdmin.loadOptions(API_BASE, sessionToken);
+    } catch (err) {
+      const status = document.getElementById('event-pos-status');
+      if (status) status.textContent = String(err.message || err);
+    }
   }
 }
 
@@ -6079,6 +6135,7 @@ async function viewEventRegistrations(eventId, eventName) {
                 <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Name</th>
                 <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Email</th>
                 ${!isFree ? '<th style="text-align: left; padding: 0.75rem; font-weight: 600;">Amount</th>' : ''}
+                ${!isFree ? '<th style="text-align: left; padding: 0.75rem; font-weight: 600;">Payment</th>' : ''}
                 <th style="text-align: left; padding: 0.75rem; font-weight: 600;">Date</th>
               </tr>
             </thead>
@@ -6089,12 +6146,17 @@ async function viewEventRegistrations(eventId, eventName) {
                 // Amount is already in pounds from transactions table
                 const amount = parseFloat(reg.amount);
                 const displayAmount = !isNaN(amount) && amount > 0 ? `£${amount.toFixed(2)}` : 'FREE';
+                const payLabels = { cash: 'Cash', bank_transfer: 'Bank transfer', sumup: 'SumUp' };
+                const payLabel = reg.payment_method
+                  ? (payLabels[reg.payment_method] || reg.payment_method)
+                  : (!isNaN(amount) && amount > 0 ? 'SumUp' : '—');
                 
                 return `
                   <tr style="border-bottom: 1px solid rgb(var(--color-neutral-200));">
                     <td style="padding: 0.75rem;">${utils.escapeHtml(reg.name || 'N/A')}</td>
-                    <td style="padding: 0.75rem;">${utils.escapeHtml(reg.email)}</td>
+                    <td style="padding: 0.75rem;">${utils.escapeHtml(reg.email || '')}</td>
                     ${!isFree ? `<td style="padding: 0.75rem;">${displayAmount}</td>` : ''}
+                    ${!isFree ? `<td style="padding: 0.75rem;">${utils.escapeHtml(payLabel)}</td>` : ''}
                     <td class="admin-text-sm" style="padding: 0.75rem;">${regDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                   </tr>
                 `;

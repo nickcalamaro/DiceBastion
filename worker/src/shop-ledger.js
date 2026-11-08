@@ -195,7 +195,8 @@ export async function ensureLedgerSchema(db) {
     ['stock_import_lines', 'unit_foreign_minor', 'INTEGER'],
     ['stock_lots', 'unit_foreign_minor', 'INTEGER'],
     ['stock_import_sessions', 'receipt_key', 'TEXT'],
-    ['business_expenses', 'receipt_key', 'TEXT']
+    ['business_expenses', 'receipt_key', 'TEXT'],
+    ['transactions', 'payment_method', 'TEXT']
   ]
   for (const [table, col, type] of ledgerAlters) {
     try {
@@ -1037,11 +1038,6 @@ function eventIdFromOrderRef(ref) {
   return m ? Number(m[1]) : null
 }
 
-/** Account money lands in: SumUp and bank transfers are combined; cash is separate. */
-function moneyAccount(paymentMethod) {
-  return String(paymentMethod || '').toLowerCase() === 'cash' ? 'cash' : 'bank'
-}
-
 /**
  * Collects income between from and to (inclusive, YYYY-MM-DD), never earlier than booksStart.
  * Returns shop order rows (tracked share only), ticket rows, and untracked-line counts.
@@ -1109,7 +1105,8 @@ async function collectIncome(db, from, to, booksStart) {
   }
 
   const { results: txRows } = await db.prepare(`
-    SELECT tr.id, tr.transaction_type, tr.order_ref, tr.amount, tr.created_at, tr.sumup_transaction_code, m.plan,
+    SELECT tr.id, tr.transaction_type, tr.order_ref, tr.amount, tr.created_at, tr.sumup_transaction_code,
+           tr.payment_method, m.plan,
            IFNULL(tr.credit_applied_pence, 0) AS credit_applied_pence
     FROM transactions tr
     LEFT JOIN memberships m ON tr.transaction_type = 'event_membership_bundle' AND m.order_ref = tr.order_ref
@@ -1135,7 +1132,8 @@ async function collectIncome(db, from, to, booksStart) {
       charged_pence: charged,
       ticket_pence: ticketPence,
       credit_pence: Math.min(ticketPence, Math.max(0, Number(t.credit_applied_pence) || 0)),
-      tx_code: t.sumup_transaction_code ? String(t.sumup_transaction_code) : null
+      tx_code: t.sumup_transaction_code ? String(t.sumup_transaction_code) : null,
+      payment_method: String(t.payment_method || 'sumup').toLowerCase()
     })
   }
 
@@ -1165,6 +1163,11 @@ async function applyFees(db, income) {
   }
 
   for (const t of income.tickets) {
+    if (String(t.payment_method || 'sumup').toLowerCase() !== 'sumup') {
+      t.fee_pence = 0
+      t.fee_basis = 'none'
+      continue
+    }
     if (t.tx_code && feeByCode.has(t.tx_code)) {
       const share = t.charged_pence > 0 ? t.ticket_pence / t.charged_pence : 1
       t.fee_pence = Math.round(feeByCode.get(t.tx_code) * share)
@@ -1414,10 +1417,10 @@ export async function buildPnl(db, from, to) {
 }
 
 /**
- * Balance sheet as of a date. Cash is calculated from recorded activity, so compare it
- * with the real balances. Which account paid a bill does not change the cost.
+ * Balance sheet as of a date. Money generated is sales and ticket receipts after
+ * fees and store credit, less bills and expenses paid. It is not a bank balance,
+ * and it can be negative. Capital is left for later.
  * Goods written off for events are a cost in the period they are written off.
- * The sheet shows what the business holds and what it owes. It has no capital account.
  */
 export function dayBefore(iso) {
   const [year, month, day] = String(iso || '').split('-').map(Number)
@@ -1474,19 +1477,16 @@ export async function buildBalanceSheet(db, asOf) {
   const booksStart = await getBooksStartDate(db)
   const epoch = '0000-01-01'
 
-  const pnl = await buildPnl(db, epoch, asOf)
-
-  // Money received, by account (SumUp and bank transfers combined as "bank")
   const income = await collectIncome(db, epoch, asOf, booksStart)
   await applyFees(db, income)
-  const cash = { bank: 0, cash: 0 }
+  let moneyIn = 0
   let creditRedeemed = 0
   for (const o of income.shopOrders) {
-    cash[moneyAccount(o.payment_method)] += o.goods_pence + o.shipping_pence - (o.credit_pence || 0) - (o.fee_pence || 0)
+    moneyIn += o.goods_pence + o.shipping_pence - (o.credit_pence || 0) - (o.fee_pence || 0)
     creditRedeemed += o.credit_pence || 0
   }
   for (const t of income.tickets) {
-    cash.bank += t.ticket_pence - (t.credit_pence || 0) - (t.fee_pence || 0)
+    moneyIn += t.ticket_pence - (t.credit_pence || 0) - (t.fee_pence || 0)
     creditRedeemed += t.credit_pence || 0
   }
 
@@ -1502,16 +1502,14 @@ export async function buildBalanceSheet(db, asOf) {
     storeCreditActualPence = Number(row?.pence) || 0
   } catch (_) {}
 
-  const paidOut = async (table, dateCol) => {
-    const { results } = await db.prepare(`
-      SELECT paid_from, SUM(${table === 'supplier_bills' ? 'total_pence' : 'amount_pence'}) AS pence
+  const paidTotal = async (table, dateCol) => {
+    const amountCol = table === 'supplier_bills' ? 'total_pence' : 'amount_pence'
+    const row = await db.prepare(`
+      SELECT COALESCE(SUM(${amountCol}), 0) AS pence
       FROM ${table}
       WHERE ${dateCol} <= ? AND paid_date IS NOT NULL AND paid_date <= ?
-      GROUP BY paid_from
-    `).bind(asOf, asOf).all()
-    const out = { bank: 0, cash: 0, owner: 0 }
-    for (const r of results || []) out[PAID_FROM.includes(r.paid_from) ? r.paid_from : 'bank'] += Number(r.pence) || 0
-    return out
+    `).bind(asOf, asOf).first()
+    return Number(row?.pence) || 0
   }
   const unpaid = async (table, dateCol) => {
     const row = await db.prepare(`
@@ -1522,47 +1520,22 @@ export async function buildBalanceSheet(db, asOf) {
     return Number(row?.pence) || 0
   }
 
-  const billsPaid = await paidOut('supplier_bills', 'bill_date')
-  const expensesPaid = await paidOut('business_expenses', 'expense_date')
-  cash.bank -= billsPaid.bank + billsPaid.owner + expensesPaid.bank + expensesPaid.owner
-  cash.cash -= billsPaid.cash + expensesPaid.cash
-
-  // Older rows can still move bank or cash. They are not shown as capital.
-  const { results: ownerRows } = await db.prepare(`
-    SELECT type, account, SUM(amount_pence) AS pence
-    FROM owner_movements
-    WHERE movement_date <= ?
-    GROUP BY type, account
-  `).bind(asOf).all()
-  let capitalIn = 0
-  let drawings = 0
-  for (const r of ownerRows || []) {
-    const acct = OWNER_ACCOUNTS.includes(r.account) ? r.account : 'bank'
-    const pence = Number(r.pence) || 0
-    if (r.type === 'capital_in') {
-      capitalIn += pence
-      cash[acct] += pence
-    } else if (r.type === 'drawing') {
-      drawings += pence
-      cash[acct] -= pence
-    }
-  }
+  const moneyOut = (await paidTotal('supplier_bills', 'bill_date')) + (await paidTotal('business_expenses', 'expense_date'))
+  const moneyGenerated = moneyIn - moneyOut
   const stockPence = await stockAtCost(db, asOf)
 
   const billsUnpaid = await unpaid('supplier_bills', 'bill_date')
   const expensesUnpaid = await unpaid('business_expenses', 'expense_date')
 
-  const assetsPence = stockPence + cash.bank + cash.cash
+  const assetsPence = stockPence + moneyGenerated
   const liabilitiesPence = billsUnpaid + expensesUnpaid + storeCreditOwedPence
-  const equityPence = capitalIn - drawings + pnl.net_profit_pence
 
   return {
     as_of: asOf,
     books_start_date: booksStart,
     assets: {
       stock_at_cost_pence: stockPence,
-      bank_and_sumup_pence: cash.bank,
-      cash_pence: cash.cash,
+      money_generated_pence: moneyGenerated,
       total_pence: assetsPence
     },
     liabilities: {
@@ -1572,8 +1545,6 @@ export async function buildBalanceSheet(db, asOf) {
       store_credit_customer_balances_pence: storeCreditActualPence,
       total_pence: liabilitiesPence
     },
-    net_assets_pence: assetsPence - liabilitiesPence,
-    balances: assetsPence - liabilitiesPence === equityPence,
-    difference_pence: assetsPence - liabilitiesPence - equityPence
+    net_assets_pence: assetsPence - liabilitiesPence
   }
 }

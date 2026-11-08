@@ -102,8 +102,10 @@ CREATE TABLE transactions (
         updated_at TEXT,
         sumup_transaction_code TEXT,
         sca_fired INTEGER DEFAULT NULL
-      , credit_applied_pence INTEGER NOT NULL DEFAULT 0, card_charged_pence INTEGER);
+      , credit_applied_pence INTEGER NOT NULL DEFAULT 0, card_charged_pence INTEGER
+      , payment_method TEXT);
 -- credit_applied_pence / card_charged_pence: store-credit split for event tickets (pence).
+-- payment_method: NULL or 'sumup' (online card) | 'cash' | 'bank_transfer' for admin door ticket sales. NULL is treated as SumUp in shop and events accounts.
 CREATE TABLE products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -187,7 +189,7 @@ CREATE TABLE owner_movements (
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
--- Legacy. Rows still move bank or cash. They are not shown as capital. type: 'capital_in' | 'drawing'. account: 'bank' | 'cash'.
+-- Not used by the accounts. type: 'capital_in' | 'drawing'. account: 'bank' | 'cash'.
 CREATE TABLE finance_settings (
   key TEXT PRIMARY KEY,
   value TEXT
