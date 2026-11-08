@@ -15,7 +15,7 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261107b"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261109a"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261107a"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
@@ -583,7 +583,7 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <option value="">Not paid yet</option>
 <option value="bank">Paid from bank</option>
 <option value="cash">Paid in cash</option>
-<option value="owner">Paid personally</option>
+<option value="owner">Owner's bank</option>
 </select>
 </div>
 </div>
@@ -1234,7 +1234,7 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 <option value="">Unpaid</option>
 <option value="bank">Bank</option>
 <option value="cash">Cash</option>
-<option value="owner">Owner</option>
+<option value="owner">Owner's bank</option>
 </select>
 </div>
 <div>
@@ -1339,12 +1339,6 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 <button type="button" id="finance-expense-other" class="btn btn-secondary">Other expense</button>
 </div>
 <div id="finance-expenses-list" class="admin-mb-2"></div>
-
-<h3 id="admin-section-finance-owner" class="admin-section-heading">Owner money in and out</h3>
-<div class="admin-flex admin-mb-1">
-<button type="button" id="finance-owner-add" class="btn btn-primary">Record money in or out</button>
-</div>
-<div id="finance-owner-list" class="admin-mb-2"></div>
 
 <h3 id="admin-section-finance-batches" class="admin-section-heading">Stock batches</h3>
 <div class="admin-flex admin-mb-1">

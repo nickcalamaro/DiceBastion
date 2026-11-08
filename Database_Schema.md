@@ -136,7 +136,7 @@ CREATE TABLE supplier_bills (
   , invoice_currency TEXT NOT NULL DEFAULT 'GBP'
   , settlement_amount_pence INTEGER
 );
--- paid_from: 'bank' | 'cash' | 'owner' (paid personally, counts as owner capital). NULL paid_date = unpaid.
+-- paid_from: 'bank' | 'cash' | 'owner'. Which account paid. It does not create capital. NULL paid_date = unpaid.
 -- invoice_currency: ISO 4217 (default GBP). settlement_amount_pence: actual GBP paid for foreign-currency bills.
 -- Bill total minus the cost of its stock batches is expensed as "Supplier bill costs not in stock".
 CREATE TABLE stock_lots (
@@ -187,7 +187,7 @@ CREATE TABLE owner_movements (
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
--- type: 'capital_in' | 'drawing'. account: 'bank' | 'cash'.
+-- Legacy. Rows still move bank or cash. They are not shown as capital. type: 'capital_in' | 'drawing'. account: 'bank' | 'cash'.
 CREATE TABLE finance_settings (
   key TEXT PRIMARY KEY,
   value TEXT

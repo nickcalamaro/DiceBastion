@@ -13,7 +13,7 @@
     software: 'Software and subscriptions',
     other: 'Other'
   };
-  const PAID_FROM_LABELS = { bank: 'Bank', cash: 'Cash', owner: 'Paid personally' };
+  const PAID_FROM_LABELS = { bank: 'Bank', cash: 'Cash', owner: "Owner's bank" };
   const ERROR_MESSAGES = {
     invalid_quantity: 'Enter a quantity of 1 or more.',
     invalid_unit_cost: 'Enter a valid cost per unit.',
@@ -54,7 +54,6 @@
   let bills = [];
   let expenses = [];
   let events = [];
-  let ownerMovements = [];
   let sessions = [];
   let openSessionId = null;
   let productChoices = null;
@@ -178,7 +177,7 @@
       '<option value=""' + (v === '' ? ' selected' : '') + '>Not paid yet</option>' +
       '<option value="bank"' + (v === 'bank' ? ' selected' : '') + '>Paid from bank</option>' +
       '<option value="cash"' + (v === 'cash' ? ' selected' : '') + '>Paid in cash</option>' +
-      '<option value="owner"' + (v === 'owner' ? ' selected' : '') + '>Paid personally</option>' +
+      '<option value="owner"' + (v === 'owner' ? ' selected' : '') + '>Owner\'s bank</option>' +
       '</select>';
   }
 
@@ -483,22 +482,16 @@
     }
     rows += statementRow('Total liabilities', d.liabilities.total_pence, { total: true });
     rows += statementRow('Net assets', d.net_assets_pence, { total: true });
-    rows += statementHeading('Owner equity');
-    rows += statementRow('Money put in', d.equity.owner_capital_in_pence, { indent: true });
-    rows += statementRow('Bills and expenses paid personally', d.equity.paid_personally_pence, { indent: true });
-    rows += statementRow('Money taken out', -d.equity.drawings_pence, { indent: true });
-    rows += statementRow('Profit to date', d.equity.retained_profit_pence, { indent: true });
-    rows += statementRow('Total equity', d.equity.total_pence, { total: true });
 
     const check = d.balances
-      ? '<p class="admin-text-small" style="color: rgb(var(--color-primary-700));">Balances: net assets equal owner equity.</p>'
+      ? ''
       : '<p class="admin-text-small" style="color: rgb(185, 28, 28);">Does not balance (difference ' + esc(gbp(d.difference_pence)) + '). Please report this.</p>';
 
     el('finance-bs-body').innerHTML =
       '<p class="admin-text-small admin-text-muted">As of ' + esc(formatDate(d.as_of)) + '.</p>' +
       '<div class="table-wrapper admin-mb-1"><div style="overflow-x: auto;"><table><tbody>' + rows + '</tbody></table></div></div>' +
       check +
-      '<p class="admin-text-small admin-text-muted">Bank, SumUp and cash are calculated from what is recorded here: sales after SumUp fees, bills and expenses paid, and owner money in and out. Compare them with your real balances; a difference usually means a payment or expense has not been recorded. SumUp payouts to your bank are not tracked, so check SumUp and bank together.</p>';
+      '<p class="admin-text-small admin-text-muted">Net assets is stock, bank and cash, less unpaid bills, unpaid expenses and store credit. Bank, SumUp and cash are calculated from sales after fees, and from bills and expenses paid. Which account paid a bill does not change the cost. Compare the figures with your real balances. SumUp payouts to your bank are not tracked, so check SumUp and bank together.</p>';
   }
 
   function downloadBsCsv() {
@@ -516,12 +509,7 @@
       ['Unpaid expenses', poundsCsv(d.liabilities.unpaid_expenses_pence)],
       ['Store credit owed to customers', poundsCsv(d.liabilities.store_credit_owed_pence || 0)],
       ['Total liabilities', poundsCsv(d.liabilities.total_pence)],
-      ['Net assets', poundsCsv(d.net_assets_pence)],
-      ['Money put in', poundsCsv(d.equity.owner_capital_in_pence)],
-      ['Bills and expenses paid personally', poundsCsv(d.equity.paid_personally_pence)],
-      ['Money taken out', poundsCsv(-d.equity.drawings_pence)],
-      ['Profit to date', poundsCsv(d.equity.retained_profit_pence)],
-      ['Total equity', poundsCsv(d.equity.total_pence)]
+      ['Net assets', poundsCsv(d.net_assets_pence)]
     ]);
   }
 
@@ -596,7 +584,7 @@
       size: 'sm',
       formContent:
         field('Paid date', '<input type="date" name="paid_date" class="modal-form-input" required value="' + today() + '">') +
-        field('Paid from', '<select name="paid_from" class="modal-form-input"><option value="bank">Bank</option><option value="cash">Cash</option><option value="owner">Paid personally</option></select>'),
+        field('Paid from', '<select name="paid_from" class="modal-form-input"><option value="bank">Bank</option><option value="cash">Cash</option><option value="owner">Owner\'s bank</option></select>'),
       onSubmit: async function (fd, modal) {
         const path = kind === 'bill' ? '/admin/finance/bills/' : '/admin/finance/expenses/';
         await api(path + row.id, { method: 'PUT', body: { paid_date: fd.get('paid_date'), paid_from: fd.get('paid_from') } });
@@ -716,67 +704,6 @@
             require_receipt: true
           }
         });
-        modal.close();
-        refreshAfterChange();
-      }
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Owner money in and out
-  // -------------------------------------------------------------------------
-
-  async function loadOwnerMovements() {
-    try {
-      const data = await api('/admin/finance/owner-movements');
-      ownerMovements = data.movements || [];
-      renderOwnerMovements();
-    } catch (e) {
-      el('finance-owner-list').innerHTML = '<p class="admin-text-muted">Could not load owner money. ' + esc(e.message) + '</p>';
-    }
-  }
-
-  function renderOwnerMovements() {
-    el('finance-owner-list').innerHTML = table(
-      [{ label: 'Date' }, { label: 'Type' }, { label: 'Account' }, { label: 'Amount', num: true }, { label: 'Notes' }, { label: '' }],
-      ownerMovements.map(function (m) {
-        return '<tr><td style="white-space: nowrap;">' + esc(formatDate(m.movement_date)) + '</td>' +
-          '<td>' + (m.type === 'capital_in' ? 'Money put in' : 'Money taken out') + '</td>' +
-          '<td>' + esc(m.account === 'cash' ? 'Cash' : 'Bank') + '</td>' +
-          '<td style="' + NUM + '">' + esc(gbp(m.amount_pence)) + '</td>' +
-          '<td>' + esc(m.notes || '') + '</td>' +
-          '<td style="white-space: nowrap;">' + smallBtn('finance-owner-edit', m.id, 'Edit') + smallBtn('finance-owner-delete', m.id, 'Delete') + '</td></tr>';
-      }).join(''),
-      'Nothing recorded yet. Record money you put into the shop (for example to buy stock) or take out for yourself.'
-    );
-  }
-
-  function openOwnerForm(movement) {
-    const m = movement || {};
-    Modal.form({
-      title: movement ? 'Edit owner money' : 'Record money in or out',
-      submitText: 'Save',
-      formContent:
-        field('Date', '<input type="date" name="movement_date" class="modal-form-input" required value="' + esc(m.movement_date || today()) + '">') +
-        field('Type', '<select name="type" class="modal-form-input">' +
-          '<option value="capital_in"' + (m.type !== 'drawing' ? ' selected' : '') + '>Money put in</option>' +
-          '<option value="drawing"' + (m.type === 'drawing' ? ' selected' : '') + '>Money taken out</option></select>') +
-        field('Account', '<select name="account" class="modal-form-input">' +
-          '<option value="bank"' + (m.account !== 'cash' ? ' selected' : '') + '>Bank</option>' +
-          '<option value="cash"' + (m.account === 'cash' ? ' selected' : '') + '>Cash</option></select>') +
-        field('Amount (£)', '<input type="number" step="0.01" min="0" name="amount" class="modal-form-input" required value="' + (movement ? (m.amount_pence / 100).toFixed(2) : '') + '">') +
-        field('Notes', '<input name="notes" class="modal-form-input" value="' + esc(m.notes || '') + '">'),
-      onSubmit: async function (fd, modal) {
-        const amount = toPence(fd.get('amount'));
-        if (!amount) throw new Error(ERROR_MESSAGES.invalid_amount);
-        const body = {
-          movement_date: fd.get('movement_date'),
-          type: fd.get('type'),
-          account: fd.get('account'),
-          amount_pence: amount,
-          notes: fd.get('notes')
-        };
-        await api('/admin/finance/owner-movements' + (movement ? '/' + movement.id : ''), { method: movement ? 'PUT' : 'POST', body: body });
         modal.close();
         refreshAfterChange();
       }
@@ -936,7 +863,6 @@
   function refreshAfterChange() {
     loadBills();
     loadExpenses();
-    loadOwnerMovements();
     loadLots();
     loadSessions();
     if (openSessionId) loadSession(openSessionId);
@@ -1378,7 +1304,6 @@
     on('finance-expense-other', 'click', function () { openOtherExpenseForm(); });
     on('finance-accounts-pack', 'click', downloadAccountsPack);
     on('finance-summary-pdf', 'click', downloadSummaryPdf);
-    on('finance-owner-add', 'click', function () { openOwnerForm(null); });
     on('finance-bills-unpaid', 'change', loadBills);
     on('finance-lots-remaining', 'change', loadLots);
     on('finance-session-new', 'click', function () { openSessionForm(); });
@@ -1405,9 +1330,6 @@
         else if (btn.classList.contains('finance-expense-receipt')) viewReceipt('expense', id).catch(function (err) { setStatus(err.message); });
         else if (btn.classList.contains('finance-expense-delete')) {
           confirmDelete('Delete this expense?', function () { return api('/admin/finance/expenses/' + id, { method: 'DELETE' }); });
-        } else if (btn.classList.contains('finance-owner-edit')) openOwnerForm(findById(ownerMovements, id));
-        else if (btn.classList.contains('finance-owner-delete')) {
-          confirmDelete('Delete this owner money entry?', function () { return api('/admin/finance/owner-movements/' + id, { method: 'DELETE' }); });
         } else if (btn.classList.contains('finance-session-open')) openSession(id);
         else if (btn.classList.contains('finance-session-receipt')) viewReceipt('import', id).catch(function (err) { setStatus(err.message); });
         else if (btn.classList.contains('finance-session-line-remove')) {
@@ -1437,7 +1359,6 @@
     runBalanceSheet();
     loadBills();
     loadExpenses();
-    loadOwnerMovements();
     loadLots();
     loadSessions();
   }

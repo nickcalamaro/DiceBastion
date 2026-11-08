@@ -2,7 +2,7 @@
  * Date-range accounts pack: statements, import lines, expenses, events, and receipt files.
  */
 
-import { buildBalanceSheet, buildPnl, ensureLedgerSchema } from './shop-ledger.js'
+import { buildBalanceSheet, buildPnl, dayBefore, ensureLedgerSchema, purchasesInPeriod, stockAtCost } from './shop-ledger.js'
 import { buildAccountsPdf, collectPeriodActivity } from './accounts-summary.js'
 import { unzipStore, zipStore } from './zip-store.js'
 
@@ -87,11 +87,7 @@ function balanceCsv(sheet) {
     ['Unpaid expenses', pounds(sheet.liabilities.unpaid_expenses_pence)],
     ['Store credit owed', pounds(sheet.liabilities.store_credit_owed_pence)],
     ['Total liabilities', pounds(sheet.liabilities.total_pence)],
-    ['Owner money in', pounds(sheet.equity.owner_capital_in_pence)],
-    ['Paid personally', pounds(sheet.equity.paid_personally_pence)],
-    ['Drawings', pounds(sheet.equity.drawings_pence)],
-    ['Retained profit', pounds(sheet.equity.retained_profit_pence)],
-    ['Total equity', pounds(sheet.equity.total_pence)]
+    ['Net assets', pounds(sheet.net_assets_pence)]
   ]
   return csv(rows)
 }
@@ -105,7 +101,8 @@ function readme(from, to, omitted) {
     'Ticket sales and event costs on or after the books start date are included.',
     'Each import line names the receipt file in the receipts folder.',
     'Each expense names its receipt file when one was saved.',
-    'accounts.pdf is the abridged statements and the internal breakdown.'
+    'accounts.pdf is the profit and loss account, the balance sheet, and an internal breakdown.',
+    'Invoices are a business cost whichever account paid them. Goods bought for events and written off are included in expenses.'
   ]
   if (omitted.length) {
     lines.push('', 'Some receipt files were not included in this zip. Download each one from the finance page.')
@@ -243,6 +240,12 @@ export async function buildAccountsPack(db, bucket, from, to, notes) {
 
   files[0].data = encode(readme(from, to, omitted))
   const activity = await collectPeriodActivity(db, pnl.from, pnl.to, pnl.books_start_date, pnl.events)
+  const periodFrom = pnl.from > pnl.books_start_date ? pnl.from : pnl.books_start_date
+  const [opening, closing, purchases] = await Promise.all([
+    stockAtCost(db, dayBefore(periodFrom)),
+    stockAtCost(db, pnl.to),
+    purchasesInPeriod(db, periodFrom, pnl.to)
+  ])
   const receiptRows = receiptRegister(sessionTotals(importRows), expenseRows, importFileBySession, expenseFileById)
   files[1].data = buildAccountsPdf({
     pnl,
@@ -250,7 +253,14 @@ export async function buildAccountsPack(db, bucket, from, to, notes) {
     activity,
     notes: notes || {},
     reinvestment_pence: receiptRows.reinvestment_pence,
-    receipts: receiptRows.rows
+    receipts: receiptRows.rows,
+    stock: {
+      opening_pence: opening,
+      closing_pence: closing,
+      amount_pence: purchases.amount_pence,
+      paid_from_owner_pence: purchases.paid_from_owner_pence,
+      invoices: purchases.invoices
+    }
   })
   return zipStore(files)
 }

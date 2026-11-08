@@ -1194,6 +1194,7 @@ async function collectMovements(db, from, to) {
   const { results } = await db.prepare(`
     SELECT sm.product_id, sm.movement_type, sm.reason, sm.lot_id,
            SUM(sm.quantity) AS quantity, SUM(sm.quantity * sm.unit_cost_pence) AS cost_pence,
+           SUM(CASE WHEN sm.movement_type = 'write_off' AND sm.reason LIKE 'Event use%' THEN sm.quantity * sm.unit_cost_pence ELSE 0 END) AS event_cost_pence,
            p.name AS product_name
     FROM stock_movements sm
     LEFT JOIN products p ON p.id = sm.product_id
@@ -1292,6 +1293,7 @@ export async function buildPnl(db, from, to) {
   }
   let cogsPence = 0
   let writeOffPence = 0
+  let eventGoodsPence = 0
   let uncostedUnits = 0
   const writeOffs = new Map()
   for (const m of movements) {
@@ -1306,6 +1308,7 @@ export async function buildPnl(db, from, to) {
       cogsPence += cost
     } else if (m.movement_type === 'write_off') {
       writeOffPence += cost
+      eventGoodsPence += Number(m.event_cost_pence) || 0
       const prev = writeOffs.get(m.product_id) || { product_id: m.product_id, name: m.product_name, units: 0, cost_pence: 0 }
       prev.units += Number(m.quantity) || 0
       prev.cost_pence += cost
@@ -1381,6 +1384,7 @@ export async function buildPnl(db, from, to) {
       sumup_fees_shop_pence: shopFees,
       sumup_fees_events_pence: ticketFees,
       stock_write_offs_pence: writeOffPence,
+      event_goods_pence: eventGoodsPence,
       by_category: [...expenseByCategory.entries()].map(([category, amount_pence]) => ({ category, amount_pence })),
       supplier_bill_extras_pence: billExtrasPence,
       card_buyback_credit_pence: creditIssued.buyback_pence,
@@ -1411,9 +1415,60 @@ export async function buildPnl(db, from, to) {
 
 /**
  * Balance sheet as of a date. Cash is calculated from recorded activity, so compare it
- * with real bank, SumUp and cash balances. Balances by construction:
- * assets - liabilities = owner capital - drawings + retained profit.
+ * with the real balances. Which account paid a bill does not change the cost.
+ * Goods written off for events are a cost in the period they are written off.
+ * The sheet shows what the business holds and what it owes. It has no capital account.
  */
+export function dayBefore(iso) {
+  const [year, month, day] = String(iso || '').split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() - 1)
+  return date.toISOString().slice(0, 10)
+}
+
+/** Stock still on hand at cost, from batches dated up to asOf less movements up to asOf. */
+export async function stockAtCost(db, asOf) {
+  await ensureLedgerSchema(db)
+  const lotsRow = await db.prepare(`
+    SELECT COALESCE(SUM(l.quantity_received * l.unit_cost_pence), 0) AS pence
+    FROM stock_lots l
+    JOIN supplier_bills b ON b.id = l.supplier_bill_id
+    WHERE b.bill_date <= ?
+  `).bind(asOf).first()
+  const movedRow = await db.prepare(`
+    SELECT COALESCE(SUM(quantity * unit_cost_pence), 0) AS pence
+    FROM stock_movements
+    WHERE substr(occurred_at, 1, 10) <= ?
+  `).bind(asOf).first()
+  return (Number(lotsRow?.pence) || 0) - (Number(movedRow?.pence) || 0)
+}
+
+/** Goods received in the period, in GBP, whichever account paid the invoice. */
+export async function purchasesInPeriod(db, from, to) {
+  await ensureLedgerSchema(db)
+  const { results } = await db.prepare(`
+    SELECT b.id, b.supplier, b.bill_date, b.paid_from,
+           COALESCE((SELECT SUM(l.quantity_received * l.unit_cost_pence) FROM stock_lots l WHERE l.supplier_bill_id = b.id), 0) AS stock_pence
+    FROM supplier_bills b
+    WHERE b.bill_date >= ? AND b.bill_date <= ?
+    ORDER BY b.bill_date, b.id
+  `).bind(from, to).all()
+  const invoices = (results || [])
+    .map(bill => ({
+      id: bill.id,
+      supplier: bill.supplier,
+      date: bill.bill_date,
+      paid_from: bill.paid_from || null,
+      amount_pence: Number(bill.stock_pence) || 0
+    }))
+    .filter(bill => bill.amount_pence > 0)
+  return {
+    amount_pence: invoices.reduce((sum, bill) => sum + bill.amount_pence, 0),
+    paid_from_owner_pence: invoices.filter(bill => bill.paid_from === 'owner').reduce((sum, bill) => sum + bill.amount_pence, 0),
+    invoices
+  }
+}
+
 export async function buildBalanceSheet(db, asOf) {
   await ensureLedgerSchema(db)
   const booksStart = await getBooksStartDate(db)
@@ -1469,9 +1524,10 @@ export async function buildBalanceSheet(db, asOf) {
 
   const billsPaid = await paidOut('supplier_bills', 'bill_date')
   const expensesPaid = await paidOut('business_expenses', 'expense_date')
-  cash.bank -= billsPaid.bank + expensesPaid.bank
+  cash.bank -= billsPaid.bank + billsPaid.owner + expensesPaid.bank + expensesPaid.owner
   cash.cash -= billsPaid.cash + expensesPaid.cash
 
+  // Older rows can still move bank or cash. They are not shown as capital.
   const { results: ownerRows } = await db.prepare(`
     SELECT type, account, SUM(amount_pence) AS pence
     FROM owner_movements
@@ -1491,28 +1547,14 @@ export async function buildBalanceSheet(db, asOf) {
       cash[acct] -= pence
     }
   }
-  const paidPersonally = billsPaid.owner + expensesPaid.owner
-
-  // Stock at cost: batches on bills dated up to asOf, less cost moved out up to asOf
-  const lotsRow = await db.prepare(`
-    SELECT COALESCE(SUM(l.quantity_received * l.unit_cost_pence), 0) AS pence
-    FROM stock_lots l
-    JOIN supplier_bills b ON b.id = l.supplier_bill_id
-    WHERE b.bill_date <= ?
-  `).bind(asOf).first()
-  const movedRow = await db.prepare(`
-    SELECT COALESCE(SUM(quantity * unit_cost_pence), 0) AS pence
-    FROM stock_movements
-    WHERE substr(occurred_at, 1, 10) <= ?
-  `).bind(asOf).first()
-  const stockPence = (Number(lotsRow?.pence) || 0) - (Number(movedRow?.pence) || 0)
+  const stockPence = await stockAtCost(db, asOf)
 
   const billsUnpaid = await unpaid('supplier_bills', 'bill_date')
   const expensesUnpaid = await unpaid('business_expenses', 'expense_date')
 
   const assetsPence = stockPence + cash.bank + cash.cash
   const liabilitiesPence = billsUnpaid + expensesUnpaid + storeCreditOwedPence
-  const equityPence = capitalIn + paidPersonally - drawings + pnl.net_profit_pence
+  const equityPence = capitalIn - drawings + pnl.net_profit_pence
 
   return {
     as_of: asOf,
@@ -1531,13 +1573,6 @@ export async function buildBalanceSheet(db, asOf) {
       total_pence: liabilitiesPence
     },
     net_assets_pence: assetsPence - liabilitiesPence,
-    equity: {
-      owner_capital_in_pence: capitalIn,
-      paid_personally_pence: paidPersonally,
-      drawings_pence: drawings,
-      retained_profit_pence: pnl.net_profit_pence,
-      total_pence: equityPence
-    },
     balances: assetsPence - liabilitiesPence === equityPence,
     difference_pence: assetsPence - liabilitiesPence - equityPence
   }

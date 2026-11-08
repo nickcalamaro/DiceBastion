@@ -143,7 +143,7 @@ describe('accounts summary PDF', () => {
       revenue: { product_sales_pence: 10000, shipping_pence: 500, event_tickets_pence: 2000, total_pence: 12500 },
       cost_of_goods_sold_pence: 4000,
       gross_profit_pence: 8500,
-      expenses: { total_pence: 1500, card_buyback_credit_pence: 300 },
+      expenses: { total_pence: 1500, card_buyback_credit_pence: 300, stock_write_offs_pence: 400, event_goods_pence: 400 },
       net_profit_pence: 7000,
       excluded_untracked: { lines: 2, pence: 800 }
     },
@@ -154,9 +154,10 @@ describe('accounts summary PDF', () => {
         store_credit_owed_pence: 400,
         store_credit_customer_balances_pence: 450,
         unpaid_supplier_bills_pence: 0,
-        unpaid_expenses_pence: 0
+        unpaid_expenses_pence: 0,
+        total_pence: 400
       },
-      net_assets_pence: 29600
+      net_assets_pence: 23600
     },
     activity: {
       games: 4,
@@ -169,20 +170,38 @@ describe('accounts summary PDF', () => {
     },
     notes: { finances: '', events: '', sales: 'Restocked sleeves.' },
     reinvestment_pence: 6000,
-    receipts: [{ date: '2026-11-01', label: 'CubeGolem DE', amount_pence: 6000, file: 'import-4.pdf' }]
+    receipts: [{ date: '2026-11-01', label: 'CubeGolem DE', amount_pence: 6000, file: 'import-4.pdf' }],
+    stock: {
+      opening_pence: 16000,
+      closing_pence: 20000,
+      amount_pence: 6000,
+      paid_from_owner_pence: 6000,
+      invoices: [{ date: '2026-11-01', supplier: 'CubeGolem DE', amount_pence: 6000, paid_from: 'owner' }]
+    }
   }
 
   it('includes the statements and the internal breakdown, without an owed-to-owners line', () => {
     const text = accountsPdfLines(model).map(line => line.text).join('\n')
-    expect(text).toContain('Profit and loss')
+    expect(text).toContain('Profit and loss account')
+    expect(text).toContain('Purchases of goods')
+    expect(text).toContain('CubeGolem DE')
+    expect(text).toContain('Goods for events')
+    expect(text).toContain('Net assets')
+    expect(text).not.toContain("Owner's bank")
+    expect(text).not.toContain('Capital')
+    expect(text).not.toContain('Drawings')
+    expect(text).not.toContain('equity')
     expect(text).toContain('Balance sheet')
     expect(text).toContain('Internal breakdown')
     expect(text).toContain('Reinvestment')
     expect(text).toContain('Most successful event: Star Trek prerelease')
-    expect(text).toContain('Games sold: 4')
-    expect(text).toContain('TCG packs sold: 9')
+    expect(text).toContain('Games sold')
+    expect(text).toContain('TCG packs sold')
     expect(text).not.toContain('Owed to')
+    expect(text).not.toContain('Paid personally')
     const pdf = buildAccountsPdf(model)
     expect(new TextDecoder().decode(pdf.slice(0, 8))).toBe('%PDF-1.4')
+    const pages = new TextDecoder().decode(pdf).match(/\/Type \/Page /g) || []
+    expect(pages.length).toBeGreaterThanOrEqual(3)
   })
 })
