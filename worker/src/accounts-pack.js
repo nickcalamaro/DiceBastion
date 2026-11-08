@@ -3,7 +3,8 @@
  */
 
 import { buildBalanceSheet, buildPnl, ensureLedgerSchema } from './shop-ledger.js'
-import { zipStore } from './zip-store.js'
+import { buildAccountsPdf, collectPeriodActivity } from './accounts-summary.js'
+import { unzipStore, zipStore } from './zip-store.js'
 
 const RECEIPT_BUDGET = 24 * 1024 * 1024
 
@@ -103,7 +104,8 @@ function readme(from, to, omitted) {
     'Sales of older stock with no cost are listed as excluded. They are not income and not profit.',
     'Ticket sales and event costs on or after the books start date are included.',
     'Each import line names the receipt file in the receipts folder.',
-    'Each expense names its receipt file when one was saved.'
+    'Each expense names its receipt file when one was saved.',
+    'accounts.pdf is the abridged statements and the internal breakdown.'
   ]
   if (omitted.length) {
     lines.push('', 'Some receipt files were not included in this zip. Download each one from the finance page.')
@@ -117,8 +119,9 @@ function readme(from, to, omitted) {
  * @param {{ get: Function } | null} bucket
  * @param {string} from
  * @param {string} to
+ * @param {{ finances?: string, events?: string, sales?: string }} [notes]
  */
-export async function buildAccountsPack(db, bucket, from, to) {
+export async function buildAccountsPack(db, bucket, from, to, notes) {
   await ensureLedgerSchema(db)
   const pnl = await buildPnl(db, from, to)
   const sheet = await buildBalanceSheet(db, to)
@@ -199,6 +202,7 @@ export async function buildAccountsPack(db, bucket, from, to) {
 
   const files = [
     { name: 'readme.txt', data: encode('') },
+    { name: 'accounts.pdf', data: new Uint8Array() },
     { name: 'profit-and-loss.csv', data: encode(pnlCsv(pnl)) },
     { name: 'balance-sheet.csv', data: encode(balanceCsv(sheet)) },
     { name: 'stock-imports.csv', data: encode(importCsv) },
@@ -238,5 +242,64 @@ export async function buildAccountsPack(db, bucket, from, to) {
   }
 
   files[0].data = encode(readme(from, to, omitted))
+  const activity = await collectPeriodActivity(db, pnl.from, pnl.to, pnl.books_start_date, pnl.events)
+  const receiptRows = receiptRegister(sessionTotals(importRows), expenseRows, importFileBySession, expenseFileById)
+  files[1].data = buildAccountsPdf({
+    pnl,
+    sheet,
+    activity,
+    notes: notes || {},
+    reinvestment_pence: receiptRows.reinvestment_pence,
+    receipts: receiptRows.rows
+  })
   return zipStore(files)
+}
+
+function sessionTotals(importRows) {
+  const sessions = new Map()
+  for (const row of importRows || []) {
+    if (!sessions.has(row.session_id)) {
+      sessions.set(row.session_id, {
+        id: row.session_id,
+        date: row.received_date,
+        label: row.supplier,
+        receipt_key: row.receipt_key,
+        amount_pence: 0
+      })
+    }
+    const session = sessions.get(row.session_id)
+    session.amount_pence += (Number(row.quantity) || 0) * (Number(row.unit_cost_pence) || 0)
+  }
+  return [...sessions.values()]
+}
+
+function receiptRegister(sessions, expenseRows, importFiles, expenseFiles) {
+  const rows = []
+  let reinvestment = 0
+  for (const session of sessions) {
+    reinvestment += session.amount_pence
+    rows.push({
+      date: session.date,
+      label: session.label,
+      amount_pence: session.amount_pence,
+      file: importFiles.get(session.id) || ''
+    })
+  }
+  for (const expense of expenseRows || []) {
+    rows.push({
+      date: expense.expense_date,
+      label: expense.description || expense.category,
+      amount_pence: Number(expense.amount_pence) || 0,
+      file: expenseFiles.get(expense.id) || ''
+    })
+  }
+  return { rows, reinvestment_pence: reinvestment }
+}
+
+/** Summary PDF on its own, without the receipt files. */
+export async function buildAccountsSummaryPdf(db, from, to, notes) {
+  const packed = await buildAccountsPack(db, null, from, to, notes)
+  const pdf = unzipStore(packed).find(file => file.name === 'accounts.pdf')
+  if (!pdf) throw new Error('summary_missing')
+  return pdf.data
 }

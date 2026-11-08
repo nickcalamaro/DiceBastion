@@ -76,7 +76,8 @@ import {
   PAID_FROM,
   OWNER_ACCOUNTS
 } from './shop-ledger.js'
-import { buildAccountsPack } from './accounts-pack.js'
+import { buildAccountsPack, buildAccountsSummaryPdf } from './accounts-pack.js'
+import { cleanSummaryNote } from './accounts-summary.js'
 import { registerInvoiceImportRoutes } from './invoice-import.js'
 import { registerAdminImageProxyRoute } from './admin-image-proxy.js'
 
@@ -7794,7 +7795,7 @@ app.get('/admin/finance/receipts/:kind/:id', requireAdmin, requireAccountsOwner,
     return new Response(object.body, {
       headers: {
         'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="receipt-${kind}-${id}.${ext}"`
+        'Content-Disposition': `inline; filename="receipt-${kind}-${id}.${ext}"`
       }
     })
   } catch (e) {
@@ -7803,20 +7804,70 @@ app.get('/admin/finance/receipts/:kind/:id', requireAdmin, requireAccountsOwner,
   }
 })
 
+async function accountsPackRequest(c) {
+  const body = c.req.method === 'GET' ? {} : await c.req.json().catch(() => ({}))
+  const from = parseLedgerDate(body.from || c.req.query('from'))
+  const to = parseLedgerDate(body.to || c.req.query('to'))
+  if (!from || !to || from > to) return { error: 'invalid_date' }
+  const raw = body.notes || {}
+  return {
+    from,
+    to,
+    notes: {
+      finances: cleanSummaryNote(raw.finances),
+      events: cleanSummaryNote(raw.events),
+      sales: cleanSummaryNote(raw.sales)
+    }
+  }
+}
+
 app.get('/admin/finance/accounts-pack', requireAdmin, requireAccountsOwner, async c => {
   try {
-    const from = parseLedgerDate(c.req.query('from'))
-    const to = parseLedgerDate(c.req.query('to'))
-    if (!from || !to || from > to) return c.json({ error: 'invalid_date' }, 400)
-    const zip = await buildAccountsPack(c.env.DB, c.env.IMAGES, from, to)
+    const request = await accountsPackRequest(c)
+    if (request.error) return c.json(request, 400)
+    const zip = await buildAccountsPack(c.env.DB, c.env.IMAGES, request.from, request.to, request.notes)
     return new Response(zip, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="dicebastion-accounts-${from}-to-${to}.zip"`
+        'Content-Disposition': `attachment; filename="dicebastion-accounts-${request.from}-to-${request.to}.zip"`
       }
     })
   } catch (e) {
     console.error('[finance/accounts-pack] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/accounts-pack', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const request = await accountsPackRequest(c)
+    if (request.error) return c.json(request, 400)
+    const zip = await buildAccountsPack(c.env.DB, c.env.IMAGES, request.from, request.to, request.notes)
+    return new Response(zip, {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="dicebastion-accounts-${request.from}-to-${request.to}.zip"`
+      }
+    })
+  } catch (e) {
+    console.error('[finance/accounts-pack POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/finance/accounts-summary', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const request = await accountsPackRequest(c)
+    if (request.error) return c.json(request, 400)
+    const pdf = await buildAccountsSummaryPdf(c.env.DB, request.from, request.to, request.notes)
+    return new Response(pdf, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="dicebastion-accounts-${request.from}-to-${request.to}.pdf"`
+      }
+    })
+  } catch (e) {
+    console.error('[finance/accounts-summary] ERROR:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })

@@ -15,7 +15,7 @@ showDate: false
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261107a"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261107b"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261107a"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
@@ -1169,7 +1169,7 @@ Show delivered
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-finance" class="admin-section-heading admin-m-0">Shop and events accounts <a href="#finance" class="admin-permalink" aria-label="Link to shop and events accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out and shown as excluded. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first. Download accounts pack uses the profit and loss dates and includes the statements, each import line, expenses, events, and the receipt files.</p>
+<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out and shown as excluded. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first. Download accounts pack uses these dates and includes the statements, each import line, expenses, events, the receipt files, and a summary PDF. Download summary PDF is that report on its own.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="finance-books-start">Books start date</label>
@@ -1274,7 +1274,23 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 <button type="button" id="finance-pnl-run" class="btn btn-primary">Run P&amp;L</button>
 <button type="button" id="finance-pnl-csv" class="btn btn-secondary" disabled>Download CSV</button>
 <button type="button" id="finance-accounts-pack" class="btn btn-secondary">Download accounts pack</button>
+<button type="button" id="finance-summary-pdf" class="btn btn-secondary">Download summary PDF</button>
 </div>
+<div class="admin-grid-2 admin-mb-1">
+<div>
+<label class="form-label" for="finance-notes-finances">Finances notes</label>
+<textarea id="finance-notes-finances" class="form-input" rows="2"></textarea>
+</div>
+<div>
+<label class="form-label" for="finance-notes-events">Events notes</label>
+<textarea id="finance-notes-events" class="form-input" rows="2"></textarea>
+</div>
+<div>
+<label class="form-label" for="finance-notes-sales">Sales notes</label>
+<textarea id="finance-notes-sales" class="form-input" rows="2"></textarea>
+</div>
+</div>
+<p class="admin-text-small admin-text-muted admin-mb-1">Notes are printed on the summary PDF. Leave a box blank for a blank notes line.</p>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
 <div class="stat-card" style="background: rgb(var(--color-primary-700));">
 <div class="stat-card-label">Revenue</div>
@@ -1294,6 +1310,10 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 </div>
 </div>
 <div id="finance-pnl-body" class="admin-mb-2"><p class="admin-text-muted">Choose dates and run the P&amp;L.</p></div>
+
+<h3 id="admin-section-finance-receipts" class="admin-section-heading">Receipts</h3>
+<p class="admin-text-small admin-text-muted admin-mb-1">Stock imports and expenses for the dates above. View receipt opens the file.</p>
+<div id="finance-receipts-list" class="admin-mb-2"></div>
 
 <h3 id="admin-section-finance-balance" class="admin-section-heading">Balance sheet</h3>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">

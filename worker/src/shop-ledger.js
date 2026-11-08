@@ -207,6 +207,21 @@ export async function ensureLedgerSchema(db) {
   await db.prepare(
     "INSERT OR IGNORE INTO finance_settings (key, value) VALUES ('books_start_date', ?)"
   ).bind(todayIso()).run()
+  try {
+    const { results } = await db.prepare(`
+      SELECT id, receipt_url FROM stock_import_sessions
+      WHERE receipt_url IS NOT NULL AND (receipt_key IS NULL OR receipt_key = '')
+    `).all()
+    for (const row of results || []) {
+      const key = receiptKeyFromStoredUrl(row.receipt_url)
+      if (!key) continue
+      await db.prepare(
+        `UPDATE stock_import_sessions SET receipt_key = ? WHERE id = ? AND (receipt_key IS NULL OR receipt_key = '')`
+      ).bind(key, row.id).run()
+    }
+  } catch (_) {
+    // Older databases gain the column on the next request.
+  }
   schemaReady = true
 }
 
@@ -516,6 +531,14 @@ export function cleanReceiptKey(value) {
   const key = String(value).trim()
   if (!/^receipts\/[A-Za-z0-9._-]{1,120}$/.test(key)) return undefined
   return key
+}
+
+/** Storage key from a receipt URL saved before the key was stored on its own. */
+export function receiptKeyFromStoredUrl(value) {
+  const match = String(value || '').match(/(receipts\/[A-Za-z0-9._-]{1,120})/)
+  if (!match) return null
+  const key = cleanReceiptKey(match[1])
+  return key || null
 }
 
 /** https URL or site path. null when blank, undefined when not a usable URL. */

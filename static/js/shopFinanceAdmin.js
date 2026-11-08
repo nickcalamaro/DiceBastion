@@ -337,38 +337,112 @@
     downloadCsv('dicebastion-shop-events-pnl-' + d.from + '-to-' + d.to + '.csv', rows);
   }
 
-  async function downloadAccountsPack() {
+  function dateRange() {
     const from = el('finance-pnl-from') && el('finance-pnl-from').value;
     const to = el('finance-pnl-to') && el('finance-pnl-to').value;
-    if (!from || !to || from > to) {
+    if (!from || !to || from > to) return null;
+    return { from: from, to: to };
+  }
+
+  function inSelectedDates(value) {
+    const range = dateRange();
+    if (!range || !value) return false;
+    const date = String(value).slice(0, 10);
+    return date >= range.from && date <= range.to;
+  }
+
+  function receiptCell(kind, id, key, url) {
+    if (key) return smallBtn(kind === 'import' ? 'finance-session-receipt' : 'finance-expense-receipt', id, 'View receipt');
+    if (url) return '<a href="' + esc(url) + '" target="_blank" rel="noopener">View receipt</a>';
+    return '<span class="admin-text-muted">No receipt</span>';
+  }
+
+  function renderReceipts() {
+    const list = el('finance-receipts-list');
+    if (!list) return;
+    const range = dateRange();
+    if (!range) {
+      list.innerHTML = '<p class="admin-text-muted">Choose the from and to dates to see receipts.</p>';
+      return;
+    }
+    const imports = sessions.filter(function (s) { return inSelectedDates(s.received_date); });
+    const costs = expenses.filter(function (x) { return inSelectedDates(x.expense_date); });
+    let html = '<h4 class="admin-section-heading" style="font-size: 1rem;">Stock imports</h4>';
+    html += table(
+      [{ label: 'Date' }, { label: 'Supplier' }, { label: 'Amount', num: true }, { label: 'Receipt' }],
+      imports.map(function (s) {
+        return '<tr><td style="white-space: nowrap;">' + esc(formatDate(s.received_date)) + '</td>' +
+          '<td>' + esc(s.supplier) + '</td>' +
+          '<td style="' + NUM + '">' + esc(gbp(s.stock_pence)) + '</td>' +
+          '<td>' + receiptCell('import', s.id, s.receipt_key, s.receipt_url) + '</td></tr>';
+      }).join(''),
+      'No stock imports in these dates.'
+    );
+    html += '<h4 class="admin-section-heading" style="font-size: 1rem;">Expenses</h4>';
+    html += table(
+      [{ label: 'Date' }, { label: 'Description' }, { label: 'Amount', num: true }, { label: 'Receipt' }],
+      costs.map(function (x) {
+        return '<tr><td style="white-space: nowrap;">' + esc(formatDate(x.expense_date)) + '</td>' +
+          '<td>' + esc(x.description || EXPENSE_LABELS[x.category] || x.category) + '</td>' +
+          '<td style="' + NUM + '">' + esc(gbp(x.amount_pence)) + '</td>' +
+          '<td>' + receiptCell('expense', x.id, x.receipt_key, null) + '</td></tr>';
+      }).join(''),
+      'No expenses in these dates.'
+    );
+    list.innerHTML = html;
+  }
+
+  function summaryNotes() {
+    return {
+      finances: (el('finance-notes-finances') && el('finance-notes-finances').value) || '',
+      events: (el('finance-notes-events') && el('finance-notes-events').value) || '',
+      sales: (el('finance-notes-sales') && el('finance-notes-sales').value) || ''
+    };
+  }
+
+  async function downloadAccountsFile(path, filename, button, statusText) {
+    const range = dateRange();
+    if (!range) {
       setStatus('Choose the from and to dates first.');
       return;
     }
-    const button = el('finance-accounts-pack');
     if (button) button.disabled = true;
-    setStatus('Building the accounts pack.');
+    setStatus(statusText);
     try {
-      const res = await fetch(opts.apiBase() + '/admin/finance/accounts-pack?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to), {
-        headers: { 'X-Session-Token': opts.token() || '' }
+      const res = await fetch(opts.apiBase() + path, {
+        method: 'POST',
+        headers: {
+          'X-Session-Token': opts.token() || '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ from: range.from, to: range.to, notes: summaryNotes() })
       });
       if (!res.ok) {
         const data = await res.json().catch(function () { return {}; });
-        throw new Error(errorText(data, 'Could not build the accounts pack.'));
+        throw new Error(errorText(data, 'Could not build the accounts file.'));
       }
       const blob = await res.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'dicebastion-accounts-' + from + '-to-' + to + '.zip';
+      a.download = filename + range.from + '-to-' + range.to + (path.indexOf('summary') >= 0 ? '.pdf' : '.zip');
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(a.href);
-      setStatus('Accounts pack downloaded.');
+      setStatus('Download started.');
     } catch (err) {
       setStatus(err.message);
     } finally {
       if (button) button.disabled = false;
     }
+  }
+
+  function downloadAccountsPack() {
+    return downloadAccountsFile('/admin/finance/accounts-pack', 'dicebastion-accounts-', el('finance-accounts-pack'), 'Building the accounts pack.');
+  }
+
+  function downloadSummaryPdf() {
+    return downloadAccountsFile('/admin/finance/accounts-summary', 'dicebastion-accounts-', el('finance-summary-pdf'), 'Building the summary PDF.');
   }
 
   // -------------------------------------------------------------------------
@@ -542,6 +616,7 @@
       expenses = data.expenses || [];
       events = data.events || [];
       renderExpenses();
+      renderReceipts();
     } catch (e) {
       el('finance-expenses-list').innerHTML = '<p class="admin-text-muted">Could not load expenses. ' + esc(e.message) + '</p>';
     }
@@ -558,7 +633,7 @@
           '<td style="' + NUM + '">' + esc(gbp(x.amount_pence)) + '</td>' +
           '<td>' + statusText(x.paid_date, x.paid_from) + '</td>' +
           '<td style="white-space: nowrap;">' + (x.paid_date ? '' : smallBtn('finance-expense-pay', x.id, 'Mark paid')) +
-          (x.receipt_key ? smallBtn('finance-expense-receipt', x.id, 'Download receipt') : '') +
+          (x.receipt_key ? smallBtn('finance-expense-receipt', x.id, 'View receipt') : '') +
           smallBtn('finance-expense-edit', x.id, 'Edit') + smallBtn('finance-expense-delete', x.id, 'Delete') + '</td></tr>';
       }).join(''),
       'No expenses recorded yet.'
@@ -909,23 +984,25 @@
     return api('/admin/finance/receipts', { method: 'POST', body: { file: dataUrl, filename: file.name } });
   }
 
-  async function downloadReceipt(kind, id) {
-    const res = await fetch(opts.apiBase() + '/admin/finance/receipts/' + kind + '/' + id, {
-      headers: { 'X-Session-Token': opts.token() || '' }
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(function () { return {}; });
-      throw new Error(errorText(data, 'Could not download the receipt.'));
+  async function viewReceipt(kind, id) {
+    const tab = window.open('', '_blank');
+    try {
+      const res = await fetch(opts.apiBase() + '/admin/finance/receipts/' + kind + '/' + id, {
+        headers: { 'X-Session-Token': opts.token() || '' }
+      });
+      if (!res.ok) {
+        if (tab) tab.close();
+        const data = await res.json().catch(function () { return {}; });
+        throw new Error(errorText(data, 'Could not open the receipt.'));
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location = url;
+      else window.open(url, '_blank');
+    } catch (err) {
+      if (tab) tab.close();
+      throw err;
     }
-    const blob = await res.blob();
-    const match = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = match ? match[1] : 'receipt';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(a.href);
   }
 
   function sessionPaidBody(fd, dateFallback) {
@@ -942,12 +1019,13 @@
     try {
       const data = await api('/admin/finance/import-sessions');
       sessions = data.sessions || [];
+      renderReceipts();
       if (openSessionId) return;
       list.innerHTML = table(
         [{ label: 'Date' }, { label: 'Supplier' }, { label: 'Reference' }, { label: 'Items', num: true }, { label: 'Cost', num: true }, { label: 'Receipt' }, { label: '' }],
         sessions.map(function (s) {
           const receipt = s.receipt_key
-            ? smallBtn('finance-session-receipt', s.id, 'Download receipt')
+            ? smallBtn('finance-session-receipt', s.id, 'View receipt')
             : (s.receipt_url
               ? '<a href="' + esc(s.receipt_url) + '" target="_blank" rel="noopener">View</a>'
               : '<span class="admin-text-muted">None</span>');
@@ -1021,9 +1099,9 @@
       ? [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: costEachLabel, num: true }, { label: 'Cost each (GBP)', num: true }, { label: 'Line cost (GBP)', num: true }, { label: '' }]
       : [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: 'Cost each', num: true }, { label: 'Line cost', num: true }, { label: '' }];
     const receipt = session.receipt_key
-      ? '<p class="admin-text-small"><button type="button" class="btn btn-secondary btn-sm" id="finance-session-receipt-open">Download receipt</button></p>'
+      ? '<p class="admin-text-small"><button type="button" class="btn btn-secondary btn-sm" id="finance-session-receipt-open">View receipt</button></p>'
       : (session.receipt_url
-        ? '<p class="admin-text-small"><a href="' + esc(session.receipt_url) + '" target="_blank" rel="noopener">View current receipt</a></p>'
+        ? '<p class="admin-text-small"><a href="' + esc(session.receipt_url) + '" target="_blank" rel="noopener">View receipt</a></p>'
         : '');
     panel.innerHTML =
       '<button type="button" id="finance-session-back" class="btn btn-secondary admin-mb-1">Back to sessions</button>' +
@@ -1299,10 +1377,13 @@
     on('finance-expense-add', 'click', function () { openExpenseForm(null); });
     on('finance-expense-other', 'click', function () { openOtherExpenseForm(); });
     on('finance-accounts-pack', 'click', downloadAccountsPack);
+    on('finance-summary-pdf', 'click', downloadSummaryPdf);
     on('finance-owner-add', 'click', function () { openOwnerForm(null); });
     on('finance-bills-unpaid', 'change', loadBills);
     on('finance-lots-remaining', 'change', loadLots);
     on('finance-session-new', 'click', function () { openSessionForm(); });
+    on('finance-pnl-from', 'change', renderReceipts);
+    on('finance-pnl-to', 'change', renderReceipts);
 
     const tab = el('finance-tab');
     if (tab) {
@@ -1312,7 +1393,7 @@
         if (btn.id === 'finance-session-back') { closeSessionPanel(); return; }
         if (btn.id === 'finance-session-add-manual') { openSessionLine(); return; }
         if (btn.id === 'finance-session-receipt-open') {
-          downloadReceipt('import', openSessionId).catch(function (err) { setStatus(err.message); });
+          viewReceipt('import', openSessionId).catch(function (err) { setStatus(err.message); });
           return;
         }
         const id = btn.getAttribute('data-id');
@@ -1321,14 +1402,14 @@
         else if (btn.classList.contains('finance-bill-edit')) openBillForm(findById(bills, id));
         else if (btn.classList.contains('finance-expense-pay')) openMarkPaid('expense', findById(expenses, id));
         else if (btn.classList.contains('finance-expense-edit')) openExpenseForm(findById(expenses, id));
-        else if (btn.classList.contains('finance-expense-receipt')) downloadReceipt('expense', id).catch(function (err) { setStatus(err.message); });
+        else if (btn.classList.contains('finance-expense-receipt')) viewReceipt('expense', id).catch(function (err) { setStatus(err.message); });
         else if (btn.classList.contains('finance-expense-delete')) {
           confirmDelete('Delete this expense?', function () { return api('/admin/finance/expenses/' + id, { method: 'DELETE' }); });
         } else if (btn.classList.contains('finance-owner-edit')) openOwnerForm(findById(ownerMovements, id));
         else if (btn.classList.contains('finance-owner-delete')) {
           confirmDelete('Delete this owner money entry?', function () { return api('/admin/finance/owner-movements/' + id, { method: 'DELETE' }); });
         } else if (btn.classList.contains('finance-session-open')) openSession(id);
-        else if (btn.classList.contains('finance-session-receipt')) downloadReceipt('import', id).catch(function (err) { setStatus(err.message); });
+        else if (btn.classList.contains('finance-session-receipt')) viewReceipt('import', id).catch(function (err) { setStatus(err.message); });
         else if (btn.classList.contains('finance-session-line-remove')) {
           confirmDelete('Remove this item from the receipt and from stock?', function () {
             return api('/admin/finance/import-sessions/' + openSessionId + '/lines/' + id, { method: 'DELETE' });

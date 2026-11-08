@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   allocateSettlementToLines,
   cleanReceiptKey,
+  receiptKeyFromStoredUrl,
   normalizeInvoiceCurrency,
   isForeignInvoiceCurrency,
   importLineProblem
 } from './shop-ledger.js'
 import { unzipStore, zipStore } from './zip-store.js'
+import { accountsPdfLines, buildAccountsPdf, classifyProductCategory, summariseEvents } from './accounts-summary.js'
 
 describe('importLineProblem', () => {
   it('flags a foreign line without a unit cost', () => {
@@ -91,5 +93,96 @@ describe('zipStore', () => {
     expect(files.map(file => file.name)).toEqual(['profit-and-loss.csv', 'receipts/import-4.pdf'])
     expect(new TextDecoder().decode(files[0].data)).toBe('Line,GBP\n')
     expect(Array.from(files[1].data)).toEqual([1, 2, 3, 4])
+  })
+})
+
+describe('receiptKeyFromStoredUrl', () => {
+  it('copies the storage path out of a public receipt link', () => {
+    expect(receiptKeyFromStoredUrl(
+      'https://pub-631ca6f207ca4661ac9cb2ba9371ba31.r2.dev/receipts/1793546515512-Dice-Bastion-Invoice.pdf.pdf'
+    )).toBe('receipts/1793546515512-Dice-Bastion-Invoice.pdf.pdf')
+    expect(receiptKeyFromStoredUrl('https://example.com/other/file.pdf')).toBe(null)
+  })
+})
+
+describe('sale categories and event attendance', () => {
+  it('counts board games and TCG packs, and leaves accessories out', () => {
+    expect(classifyProductCategory('Board Games, Allplay')).toBe('game')
+    expect(classifyProductCategory('Board Game Accessories, Level 99 Games')).toBe('other')
+    expect(classifyProductCategory('Card Games, Magic: The Gathering')).toBe('tcg')
+    expect(classifyProductCategory('Riftbound, Card Games')).toBe('tcg')
+    expect(classifyProductCategory('Accessories, Card Sleeves, Magic: The Gathering')).toBe('other')
+    expect(classifyProductCategory('Rpg, Free League Publishing')).toBe('other')
+    expect(classifyProductCategory('Dice, Chessex')).toBe('other')
+  })
+
+  it('lists an event under half the average attendance', () => {
+    const summary = summariseEvents([
+      { name: 'Full house', tickets: 10, people: 10, profit_pence: 5000 },
+      { name: 'Quiet night', tickets: 2, people: 2, profit_pence: 0 }
+    ])
+    expect(summary.averageAttendance).toBe(6)
+    expect(summary.low.map(event => event.name)).toEqual(['Quiet night'])
+    expect(summary.best.name).toBe('Full house')
+  })
+
+  it('names no unsuccessful event when attendance is similar', () => {
+    const summary = summariseEvents([
+      { name: 'Friday', tickets: 8, people: 8, profit_pence: 100 },
+      { name: 'Saturday', tickets: 6, people: 6, profit_pence: 50 }
+    ])
+    expect(summary.low).toEqual([])
+  })
+})
+
+describe('accounts summary PDF', () => {
+  const model = {
+    pnl: {
+      from: '2026-11-01',
+      to: '2026-11-30',
+      revenue: { product_sales_pence: 10000, shipping_pence: 500, event_tickets_pence: 2000, total_pence: 12500 },
+      cost_of_goods_sold_pence: 4000,
+      gross_profit_pence: 8500,
+      expenses: { total_pence: 1500, card_buyback_credit_pence: 300 },
+      net_profit_pence: 7000,
+      excluded_untracked: { lines: 2, pence: 800 }
+    },
+    sheet: {
+      as_of: '2026-11-30',
+      assets: { stock_at_cost_pence: 20000, bank_and_sumup_pence: 9000, cash_pence: 1000 },
+      liabilities: {
+        store_credit_owed_pence: 400,
+        store_credit_customer_balances_pence: 450,
+        unpaid_supplier_bills_pence: 0,
+        unpaid_expenses_pence: 0
+      },
+      net_assets_pence: 29600
+    },
+    activity: {
+      games: 4,
+      tcgPacks: 9,
+      untrackedUnits: 1,
+      people: 7,
+      events: summariseEvents([
+        { name: 'Star Trek prerelease', date: '2026-11-08', tickets: 12, people: 12, profit_pence: 2400 }
+      ])
+    },
+    notes: { finances: '', events: '', sales: 'Restocked sleeves.' },
+    reinvestment_pence: 6000,
+    receipts: [{ date: '2026-11-01', label: 'CubeGolem DE', amount_pence: 6000, file: 'import-4.pdf' }]
+  }
+
+  it('includes the statements and the internal breakdown, without an owed-to-owners line', () => {
+    const text = accountsPdfLines(model).map(line => line.text).join('\n')
+    expect(text).toContain('Profit and loss')
+    expect(text).toContain('Balance sheet')
+    expect(text).toContain('Internal breakdown')
+    expect(text).toContain('Reinvestment')
+    expect(text).toContain('Most successful event: Star Trek prerelease')
+    expect(text).toContain('Games sold: 4')
+    expect(text).toContain('TCG packs sold: 9')
+    expect(text).not.toContain('Owed to')
+    const pdf = buildAccountsPdf(model)
+    expect(new TextDecoder().decode(pdf.slice(0, 8))).toBe('%PDF-1.4')
   })
 })
