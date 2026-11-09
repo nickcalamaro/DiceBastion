@@ -3,6 +3,7 @@
  */
 
 import { buildTextPdf, pushWrapped } from './text-pdf.js'
+import { paidTicketEventSql } from './shop-ledger.js'
 
 export function formatGbp(pence) {
   const n = (Number(pence) || 0) / 100
@@ -110,6 +111,7 @@ export async function collectPeriodActivity(db, from, to, booksStart, pnlEvents)
     SELECT event_id, event_name, event_datetime
     FROM events
     WHERE event_datetime IS NOT NULL
+      AND ${paidTicketEventSql()}
       AND substr(event_datetime, 1, 10) >= ?
       AND substr(event_datetime, 1, 10) <= ?
     ORDER BY event_datetime, event_id
@@ -120,6 +122,7 @@ export async function collectPeriodActivity(db, from, to, booksStart, pnlEvents)
     FROM tickets t
     JOIN events e ON e.event_id = t.event_id
     WHERE t.status = 'active'
+      AND ${paidTicketEventSql('e')}
       AND substr(e.event_datetime, 1, 10) >= ?
       AND substr(e.event_datetime, 1, 10) <= ?
   `).bind(from, to).all()

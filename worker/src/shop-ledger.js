@@ -1028,6 +1028,17 @@ export async function loadSumUpFeeContext(db, codes) {
 // Income: shop sales with recorded cost, and event tickets
 // ---------------------------------------------------------------------------
 
+/** Event charges a ticket. The member price may be zero. */
+export function paidTicketEventSql(alias = '') {
+  const p = alias ? `${alias}.` : ''
+  return `(IFNULL(${p}membership_price, 0) > 0 OR IFNULL(${p}non_membership_price, 0) > 0)`
+}
+
+function isPaidTicketEvent(event) {
+  if (!event) return false
+  return Number(event.membership_price) > 0 || Number(event.non_membership_price) > 0
+}
+
 function poundsToPence(value) {
   const n = Number(value)
   return Number.isFinite(n) ? Math.round(n * 100) : 0
@@ -1104,6 +1115,11 @@ async function collectIncome(db, from, to, booksStart) {
     })
   }
 
+  const { results: paidEventRows } = await db.prepare(
+    `SELECT event_id FROM events WHERE ${paidTicketEventSql()}`
+  ).all()
+  const paidEventIds = new Set((paidEventRows || []).map(r => Number(r.event_id)))
+
   const { results: txRows } = await db.prepare(`
     SELECT tr.id, tr.transaction_type, tr.order_ref, tr.amount, tr.created_at, tr.sumup_transaction_code,
            tr.payment_method, m.plan,
@@ -1118,16 +1134,19 @@ async function collectIncome(db, from, to, booksStart) {
 
   const tickets = []
   for (const t of txRows || []) {
+    const eventId = eventIdFromOrderRef(t.order_ref)
+    if (!paidEventIds.has(eventId)) continue
     const charged = poundsToPence(t.amount)
     let ticketPence = charged
     if (t.transaction_type === 'event_membership_bundle') {
       ticketPence = Math.max(0, charged - (BUNDLE_MEMBERSHIP_PENCE[t.plan] ?? 0))
     }
-    if (ticketPence <= 0) continue
+    if (ticketPence < 0) continue
+    if (ticketPence === 0 && t.transaction_type !== 'ticket') continue
     tickets.push({
       id: t.id,
       kind: t.transaction_type === 'ticket' ? 'ticket' : 'bundle',
-      event_id: eventIdFromOrderRef(t.order_ref),
+      event_id: eventId,
       sold_at: t.created_at,
       charged_pence: charged,
       ticket_pence: ticketPence,
@@ -1256,7 +1275,7 @@ async function eventNames(db, ids) {
   for (let i = 0; i < unique.length; i += 90) {
     const batch = unique.slice(i, i + 90)
     const { results } = await db.prepare(
-      `SELECT event_id, event_name, event_datetime FROM events WHERE event_id IN (${batch.map(() => '?').join(',')})`
+      `SELECT event_id, event_name, event_datetime, membership_price, non_membership_price FROM events WHERE event_id IN (${batch.map(() => '?').join(',')})`
     ).bind(...batch).all()
     for (const r of results || []) map.set(Number(r.event_id), r)
   }
@@ -1358,7 +1377,7 @@ export async function buildPnl(db, from, to) {
   for (const e of expenses) {
     const amt = Number(e.amount_pence) || 0
     expenseByCategory.set(e.category, (expenseByCategory.get(e.category) || 0) + amt)
-    if (e.event_id) eventRow(e.event_id).cost_pence += amt
+    if (e.event_id && isPaidTicketEvent(names.get(Number(e.event_id)))) eventRow(e.event_id).cost_pence += amt
   }
   const expensesPence = expenses.reduce((s, e) => s + (Number(e.amount_pence) || 0), 0)
   const billExtrasPence = billExtras.reduce((s, b) => s + b.extra_pence, 0)

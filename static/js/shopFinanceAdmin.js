@@ -626,7 +626,11 @@
     const categoryOptions = Object.keys(EXPENSE_LABELS).map(function (k) {
       return '<option value="' + k + '"' + (x.category === k ? ' selected' : '') + '>' + esc(EXPENSE_LABELS[k]) + '</option>';
     }).join('');
-    const eventOptions = '<option value="">Not linked to an event</option>' + events.map(function (e) {
+    const eventChoices = events.slice();
+    if (x.event_id && !eventChoices.some(function (e) { return Number(e.event_id) === Number(x.event_id); })) {
+      eventChoices.unshift({ event_id: x.event_id, event_name: x.event_name || 'Linked event', event_datetime: '' });
+    }
+    const eventOptions = '<option value="">Not linked to an event</option>' + eventChoices.map(function (e) {
       return '<option value="' + e.event_id + '"' + (Number(x.event_id) === Number(e.event_id) ? ' selected' : '') + '>' +
         esc(e.event_name) + ' (' + esc(formatDate(e.event_datetime)) + ')</option>';
     }).join('');

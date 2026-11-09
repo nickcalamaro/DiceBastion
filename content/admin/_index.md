@@ -16,7 +16,7 @@ showDate: false
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261109b"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261109c"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261107a"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
@@ -1065,7 +1065,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <p id="pos-status" class="admin-text-small admin-mb-0" style="margin-top: 0.75rem;"></p>
 </div>
 <h3 class="admin-section-heading">Event ticket</h3>
-<p class="admin-text-muted admin-mb-1">Door sales for an open event, or one from the past month. Tick existing member to use the member price and pick them from the list. Otherwise type their name. The ticket is marked paid.</p>
+<p class="admin-text-muted admin-mb-1">Door sales for a paid ticket event that is open, or from the past month. Free events are left out. Member entry can still be free. Tick existing member to use the member price and pick them from the list. Otherwise type their name. The ticket is marked paid.</p>
 <div class="admin-mb-2" style="padding: 1rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px;">
 <div class="admin-mb-1">
 <label class="form-label" for="event-pos-event">Event</label>

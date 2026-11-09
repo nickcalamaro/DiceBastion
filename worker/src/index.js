@@ -58,6 +58,7 @@ import {
   receiveStock,
   writeOffStock,
   loadSumUpFeeContext,
+  paidTicketEventSql,
   buildPnl,
   buildBalanceSheet,
   createImportSession,
@@ -7486,6 +7487,7 @@ app.get('/admin/finance/expenses', requireAdmin, requireAccountsOwner, async c =
       SELECT event_id, event_name, event_datetime
       FROM events
       WHERE event_datetime >= date('now', '-400 days')
+        AND ${paidTicketEventSql()}
       ORDER BY event_datetime DESC
       LIMIT 300
     `).all()
@@ -10923,6 +10925,7 @@ const DOOR_TICKET_EMAIL = 'walk-in@dicebastion.local'
 const MANUAL_EVENT_SALE_SQL = `
   datetime(e.event_datetime) >= datetime('now', '-1 month')
   AND (IFNULL(e.is_active, 0) = 1 OR datetime(e.event_datetime) < datetime('now'))
+  AND ${paidTicketEventSql('e')}
   AND NOT (
     IFNULL(e.is_recurring, 0) = 1
     AND (e.series_id IS NULL OR e.series_id = '')
@@ -10946,7 +10949,8 @@ async function ensureTransactionPaymentMethod(db) {
 }
 
 /**
- * Events an admin can sell a door ticket for: still open, or held in the past month.
+ * Paid ticket events an admin can sell a door ticket for: still open, or held in the past month.
+ * Member price may be zero. Events with no ticket price are left out.
  * GET /admin/shop/event-sale-options
  */
 app.get('/admin/shop/event-sale-options', requireAdmin, async (c) => {
@@ -11018,7 +11022,7 @@ app.post('/admin/shop/event-sale', requireAdmin, async (c) => {
         AND ${MANUAL_EVENT_SALE_SQL}
     `).bind(eventId).first()
     if (!ev) {
-      return c.json({ error: 'event_not_eligible', message: 'Choose an open event, or one from the past month.' }, 400)
+      return c.json({ error: 'event_not_eligible', message: 'Choose a paid ticket event that is open, or from the past month.' }, 400)
     }
     const bookable = await assertBookableEventRow(c.env.DB, ev)
     if (!bookable.ok) {
