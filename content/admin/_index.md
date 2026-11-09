@@ -5344,41 +5344,46 @@ const res = await fetch(`${API_BASE}/admin/events`, {
 const payload = await res.json();
 const events = payload.events || [];
 const list = document.getElementById('events-list');
+const now = Date.now();
+const upcoming = [];
+const undated = [];
+events.forEach(event => {
+  const when = adminListEventTime(event);
+  if (when === null) return;
+  if (when === undefined) undated.push(event);
+  else if (when >= now) upcoming.push(event);
+});
+upcoming.sort((a, b) => adminListEventTime(a) - adminListEventTime(b));
 
-if (events.length === 0) {
-list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No events yet</p>';
+if (!upcoming.length && !undated.length) {
+list.innerHTML = '<p style="color: rgb(var(--color-neutral-500));">No upcoming events</p>';
 return;
 }
 
-list.innerHTML = events.map(e => {
-const requiresPurchase = e.requires_purchase === 1;
-const isSeries = e.type === 'series';
-const nextDt = e.next_session?.event_datetime || e.event_datetime;
-const eventDate = nextDt ? new Date(nextDt).toLocaleDateString() : 'No date';
-const eventTime = nextDt ? new Date(nextDt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-const eventId = e.id || e.event_id;
-const seriesBadge = isSeries ? '<span style="color: rgb(var(--color-primary-600)); font-size: 0.875rem; font-weight: 600;">Recurring series</span>' : '';
-const sessionCount = isSeries && e.sessions ? e.sessions.filter(s => s.is_active === 1).length : 0;
-return `
-<div class="item-card">
-<div style="display: flex; gap: 1rem;">
-${e.image_url ? `<img src="${e.image_url_card || e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
-<div style="flex: 1;">
-<h3>${e.title} ${e.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'} ${requiresPurchase ? '' : '<span style="color: #2563eb; font-size: 0.875rem;">(Free Event)</span>'}</h3>
-<p style="margin: 0.25rem 0;">${seriesBadge}${isSeries ? ` · ${sessionCount} upcoming session${sessionCount === 1 ? '' : 's'}` : ''}</p>
-<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${e.description || ''}</p>
-<p style="margin: 0.5rem 0;"><strong>${isSeries ? 'Next: ' : ''}${eventDate}</strong> ${eventTime} ${e.location ? `| ${e.location}` : ''}</p>
-${requiresPurchase ? `<p style="margin: 0.5rem 0;">Member: £${(e.membership_price / 100).toFixed(2)} | Non-member: £${(e.non_membership_price / 100).toFixed(2)}${e.capacity ? ` | Max: ${e.capacity}` : ''}</p>` : ''}
-</div>
-</div>
-<div class="item-actions">
-<button class="btn-edit" onclick="editEvent(${eventId})">Edit</button>
-<button class="btn-delete" onclick="deleteEvent(${eventId}, '${String(e.title).replace(/'/g, "\\'")}')">Delete</button>
-${e.slug ? `<button class="btn-index" onclick="requestIndexing('event', '${e.slug}', this)">Index</button>` : ''}
-</div>
-</div>
-`;
+const months = [];
+const byMonth = new Map();
+upcoming.forEach(event => {
+  const when = new Date(adminListEventTime(event));
+  const key = when.getFullYear() + '-' + String(when.getMonth() + 1).padStart(2, '0');
+  if (!byMonth.has(key)) {
+    byMonth.set(key, {
+      label: when.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+      events: []
+    });
+    months.push(key);
+  }
+  byMonth.get(key).events.push(event);
+});
+
+let html = months.map((key, index) => {
+  const group = byMonth.get(key);
+  return '<h3 class="' + (index === 0 ? 'admin-mt-0' : 'admin-mt-3') + '">' + group.label + '</h3>' +
+    group.events.map(renderAdminEventCard).join('');
 }).join('');
+if (undated.length) {
+  html += '<h3 class="admin-mt-3">Date not set</h3>' + undated.map(renderAdminEventCard).join('');
+}
+list.innerHTML = html;
 } catch (err) {
 console.error('Load events error:', err);
 }
@@ -5963,21 +5968,29 @@ async function loadRegistrations() {
       return;
     }
 
-    // Group events by type
-    const freeEvents = data.events.filter(e => e.requires_purchase === 0);
-    const paidEvents = data.events.filter(e => e.requires_purchase === 1);
+    const events = data.events.slice().sort((a, b) => eventSortTime(a) - eventSortTime(b));
+    const months = [];
+    const byMonth = new Map();
+    events.forEach(event => {
+      const when = new Date(event.event_datetime);
+      const known = !Number.isNaN(when.getTime());
+      const key = known ? when.getFullYear() + '-' + String(when.getMonth() + 1).padStart(2, '0') : 'unknown';
+      if (!byMonth.has(key)) {
+        byMonth.set(key, {
+          label: known ? when.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'Date not set',
+          events: []
+        });
+        months.push(key);
+      }
+      byMonth.get(key).events.push(event);
+    });
 
     let html = '';
-    
-    if (freeEvents.length > 0) {
-      html += '<h3 class="admin-mt-0">Free Events (Registrations)</h3>';
-      html += renderEventRegistrations(freeEvents, true);
-    }
-    
-    if (paidEvents.length > 0) {
-      html += '<h3 class="admin-mt-3">Paid Events (Ticket Sales)</h3>';
-      html += renderEventRegistrations(paidEvents, false);
-    }
+    months.forEach((key, index) => {
+      const group = byMonth.get(key);
+      html += '<h3 class="' + (index === 0 ? 'admin-mt-0' : 'admin-mt-3') + '">' + group.label + '</h3>';
+      html += renderEventRegistrations(group.events);
+    });
 
     list.innerHTML = html;
     
@@ -5995,8 +6008,55 @@ async function loadRegistrations() {
   }
 }
 
-function renderEventRegistrations(events, isFree) {
+function adminListEventTime(event) {
+  if (event.type === 'series') {
+    const raw = event.next_session && event.next_session.event_datetime;
+    const t = Date.parse(raw || '');
+    return Number.isNaN(t) ? null : t;
+  }
+  if (!event.event_datetime) return undefined;
+  const t = Date.parse(event.event_datetime);
+  return Number.isNaN(t) ? undefined : t;
+}
+
+function renderAdminEventCard(e) {
+  const requiresPurchase = e.requires_purchase === 1;
+  const isSeries = e.type === 'series';
+  const nextDt = isSeries ? e.next_session?.event_datetime : e.event_datetime;
+  const eventDate = nextDt ? new Date(nextDt).toLocaleDateString() : 'No date';
+  const eventTime = nextDt ? new Date(nextDt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+  const eventId = e.id || e.event_id;
+  const seriesBadge = isSeries ? '<span style="color: rgb(var(--color-primary-600)); font-size: 0.875rem; font-weight: 600;">Recurring series</span>' : '';
+  const sessionCount = isSeries && e.sessions ? e.sessions.filter(s => s.is_active === 1 && Date.parse(s.event_datetime) >= Date.now()).length : 0;
+  return `
+<div class="item-card">
+<div style="display: flex; gap: 1rem;">
+${e.image_url ? `<img src="${e.image_url_card || e.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;">` : ''}
+<div style="flex: 1;">
+<h3>${e.title} ${e.is_active === 1 ? '' : '<span style="color: #999;">(Inactive)</span>'} ${requiresPurchase ? '' : '<span style="color: #2563eb; font-size: 0.875rem;">(Free Event)</span>'}</h3>
+<p style="margin: 0.25rem 0;">${seriesBadge}${isSeries ? ` · ${sessionCount} upcoming session${sessionCount === 1 ? '' : 's'}` : ''}</p>
+<p style="margin: 0.25rem 0; color: rgb(var(--color-neutral-600));">${e.description || ''}</p>
+<p style="margin: 0.5rem 0;"><strong>${isSeries ? 'Next: ' : ''}${eventDate}</strong> ${eventTime} ${e.location ? `| ${e.location}` : ''}</p>
+${requiresPurchase ? `<p style="margin: 0.5rem 0;">Member: £${(e.membership_price / 100).toFixed(2)} | Non-member: £${(e.non_membership_price / 100).toFixed(2)}${e.capacity ? ` | Max: ${e.capacity}` : ''}</p>` : ''}
+</div>
+</div>
+<div class="item-actions">
+<button class="btn-edit" onclick="editEvent(${eventId})">Edit</button>
+<button class="btn-delete" onclick="deleteEvent(${eventId}, '${String(e.title).replace(/'/g, "\\'")}')">Delete</button>
+${e.slug ? `<button class="btn-index" onclick="requestIndexing('event', '${e.slug}', this)">Index</button>` : ''}
+</div>
+</div>
+`;
+}
+
+function eventSortTime(event) {
+  const t = Date.parse(event.event_datetime);
+  return Number.isNaN(t) ? Infinity : t;
+}
+
+function renderEventRegistrations(events) {
   return events.map(event => {
+    const isFree = event.requires_purchase === 0;
     const eventDate = new Date(event.event_datetime);
     // Don't mark recurring events as past (they continue indefinitely)
     const isPast = event.is_recurring !== 1 && eventDate < new Date();

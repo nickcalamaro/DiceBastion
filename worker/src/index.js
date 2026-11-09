@@ -8319,6 +8319,12 @@ app.get('/admin/registrations', requireAdmin, async c => {
       }
       return event
     })
+
+    processedEvents.sort((a, b) => {
+      const ta = Date.parse(a.event_datetime)
+      const tb = Date.parse(b.event_datetime)
+      return (Number.isNaN(ta) ? Infinity : ta) - (Number.isNaN(tb) ? Infinity : tb)
+    })
     
     return c.json({ 
       success: true,
