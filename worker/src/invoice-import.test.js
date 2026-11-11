@@ -48,8 +48,145 @@ import {
   normalizeItemCode,
   leadingItemCode,
   textHasItemCode,
-  pageShowsItemCode
+  pageShowsItemCode,
+  isValidGtin,
+  ocrLineCodes,
+  identifiedBy,
+  brandAppears,
+  textShowsGtin,
+  buildCodeLookupUserPrompt,
+  buildCodeLookupSchema,
+  identifiedByCodeLines,
+  dedupeFamilyLines,
+  relatesToLines,
+  isRangePageForFamily
 } from './invoice-import.js'
+
+describe('relatesToLines', () => {
+  const lines = [
+    { name: 'Matte Sleeves Purple 66x91 (100)', ean: '4251715419540', itemCode: null },
+    { name: 'Sleeves Red 66x91 (100)', ean: '4251715419397', itemCode: null }
+  ]
+  it('keeps results showing a code or two invoice name words', () => {
+    expect(relatesToLines({ url: 'https://a.example/x', title: 'Item', description: 'EAN 4251715419397' }, lines)).toBe(true)
+    expect(relatesToLines({ url: 'https://b.example/y', title: 'Sleeves Purple 66x91', description: '' }, lines)).toBe(true)
+  })
+  it('drops phone directories and pages sharing one generic word', () => {
+    expect(relatesToLines({ url: 'https://c.example', title: '425 Area Code - Location, Map', description: 'Prefixes 425-171' }, lines)).toBe(false)
+    expect(relatesToLines({ url: 'https://d.example', title: 'Water sleeves', description: 'An article.' }, lines)).toBe(false)
+  })
+})
+
+describe('isRangePageForFamily', () => {
+  it('counts a barcode listed twice in the family once', () => {
+    expect(isRangePageForFamily('<p>4251715419502</p>', ['4251715419502', '4251715419502'])).toBe(false)
+    expect(isRangePageForFamily('<p>4251715419502 4251715419540</p>', ['4251715419502', '4251715419540'])).toBe(true)
+  })
+})
+
+describe('dedupeFamilyLines', () => {
+  it('treats lines with the same barcode or item no. as one product', () => {
+    const { unique, sourceOf } = dedupeFamilyLines([
+      { name: 'Sleeves Red', ean: '4251715419502', itemCode: null },
+      { name: 'Sleeves Blue', ean: '4251715419540', itemCode: null },
+      { name: 'Sleeves Red', ean: '4251715419502', itemCode: null },
+      { name: 'Box A', ean: null, itemCode: 'GG1001' },
+      { name: 'Box A again', ean: null, itemCode: 'gg1001' },
+      { name: 'No code', ean: null, itemCode: null },
+      { name: 'No code', ean: null, itemCode: null }
+    ])
+    expect(unique.map((l) => l.name)).toEqual(['Sleeves Red', 'Sleeves Blue', 'Box A', 'No code', 'No code'])
+    expect(sourceOf).toEqual([0, 1, 0, 2, 2, 3, 4])
+  })
+})
+
+describe('family code lookup', () => {
+  it('asks for one search per line with the code on its own', () => {
+    const prompt = buildCodeLookupUserPrompt('ean', [
+      { key: 'L1', code: '4251715419540' },
+      { key: 'L2', code: '4251715419502' }
+    ])
+    expect(prompt).toContain('one search per line')
+    expect(prompt).toContain('- L1 · barcode "4251715419540"')
+    expect(buildCodeLookupUserPrompt('sku', [{ key: 'L3', code: 'GGS10120' }])).toContain('- L3 · item no. "GGS10120"')
+    expect(buildCodeLookupSchema(['L1', 'L2']).properties.lines.required).toEqual(['L1', 'L2'])
+  })
+
+  it('matches a barcode only as a whole number, including the EAN-13 form of a UPC', () => {
+    expect(textShowsGtin('EAN: 0195166336343', '195166336343')).toBe(true)
+    expect(textShowsGtin('ref 42517154195401', '4251715419540')).toBe(false)
+  })
+
+  it('lists the lines found by code for the research step', () => {
+    const lines = identifiedByCodeLines([
+      { by: 'ean', title: 'Matte Prime Sleeves Purple', url: 'https://shop.example/p/purple' },
+      null,
+      { by: 'sku', title: 'Prime Sleeves Red', url: 'https://shop.example/p/red' }
+    ])
+    expect(lines).toEqual([
+      '- L1 · by EAN · Matte Prime Sleeves Purple · https://shop.example/p/purple',
+      '- L3 · by item no. · Prime Sleeves Red · https://shop.example/p/red'
+    ])
+  })
+})
+
+describe('invoice barcodes', () => {
+  it('checks the check digit of UPC-A and EAN-13 barcodes', () => {
+    expect(isValidGtin('195166336343')).toBe(true)
+    expect(isValidGtin('4251715419540')).toBe(true)
+    expect(isValidGtin('4251715419541')).toBe(false)
+    expect(isValidGtin('12345')).toBe(false)
+  })
+
+  it('moves a barcode printed in the reference column into ean', () => {
+    expect(ocrLineCodes({ name: 'Matte Prime Sleeves Purple 66x91 (100)', ean: null, sku: '4251715419540' })).toEqual({
+      name: 'Matte Prime Sleeves Purple 66x91 (100)',
+      ean: '4251715419540',
+      sku: null
+    })
+    expect(ocrLineCodes({ name: '195166336343 Magic The Gathering TCG Star Trek Pack de Presentacion', ean: null, sku: null })).toEqual({
+      name: 'Magic The Gathering TCG Star Trek Pack de Presentacion',
+      ean: '195166336343',
+      sku: null
+    })
+  })
+
+  it('keeps a supplier code that is not a barcode as the item code', () => {
+    expect(ocrLineCodes({ name: 'Dice block', ean: null, sku: 'D07800009' })).toEqual({ name: 'Dice block', ean: null, sku: 'D07800009' })
+  })
+})
+
+describe('identifiedBy', () => {
+  const ref = (title, description = '', url = 'https://shop.example/p/1') => ({ url, title, description })
+
+  it('prefers the barcode, then the item code, then the name', () => {
+    expect(identifiedBy([ref('Prime Sleeves', 'EAN 4251715419540')], { ean: '4251715419540', itemCode: 'GGS10120', name: 'x' })).toBe('ean')
+    expect(identifiedBy([ref('Sleeves GGS10120')], { ean: '4251715419540', itemCode: 'GGS10120', name: 'x' })).toBe('sku')
+    expect(identifiedBy([ref('Matte Prime Sleeves Purple 100 pack')], { ean: null, itemCode: null, name: 'Matte Prime Sleeves Purple 66x91 (100)' })).toBe('name')
+  })
+
+  it('finds a 12-digit UPC written as a 13-digit EAN', () => {
+    expect(identifiedBy([ref('Pack', 'EAN 0195166336343')], { ean: '195166336343', itemCode: null, name: 'x' })).toBe('ean')
+  })
+
+  it('does not count a similar product from another range as a match', () => {
+    expect(
+      identifiedBy([ref('Purple - Matte Sleeves', '', 'https://www.example.com/products/purple-matte-sleeves')], {
+        ean: '4251715419540',
+        itemCode: null,
+        name: 'Matte Prime Sleeves Purple 66x91 (100)'
+      })
+    ).toBe(null)
+  })
+})
+
+describe('brandAppears', () => {
+  it('only accepts a brand that a search result or the invoice shows', () => {
+    const refs = [{ url: 'https://shop.example/p', title: 'Matte Prime Sleeves Purple', description: 'Gamegenic sleeves' }]
+    expect(brandAppears('Gamegenic', refs, [])).toBe(true)
+    expect(brandAppears('Other Brand', refs, [{ name: 'Matte Prime Sleeves Purple' }])).toBe(false)
+  })
+})
 
 describe('item numbers', () => {
   it('keeps codes that are distinctive enough to match on', () => {

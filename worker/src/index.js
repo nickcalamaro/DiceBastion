@@ -68,6 +68,7 @@ import {
   addImportLine,
   addImportLinesBatch,
   removeImportLine,
+  setImportLinesBundle,
   parseLedgerDate,
   parsePence,
   getBooksStartDate,
@@ -7736,6 +7737,19 @@ app.post('/admin/finance/import-sessions/:id/lines/batch', requireAdmin, require
     return c.json({ success: true, ...result })
   } catch (e) {
     console.error('[finance/import-sessions lines batch POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/finance/import-sessions/:id/bundle', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    const body = await c.req.json().catch(() => ({}))
+    const result = await setImportLinesBundle(c.env.DB, id, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    return c.json(result)
+  } catch (e) {
+    console.error('[finance/import-sessions bundle PUT] ERROR:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })

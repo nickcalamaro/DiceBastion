@@ -1562,8 +1562,17 @@ function syncShopUrl() {
   history.replaceState(null, '', listUrl());
 }
 
+function clearShopSearch() {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = null;
+  currentSearchTerm = '';
+  const input = document.getElementById('search-input');
+  if (input) input.value = '';
+}
+
 function filterByCategory(category, btnElement, { syncUrl = true } = {}) {
   currentFilter = category ? categoryDisplay(category) : null;
+  clearShopSearch();
   if (btnElement) {
     document.querySelectorAll('.category-btn').forEach(btn => btn.classList.remove('active'));
     btnElement.classList.add('active');

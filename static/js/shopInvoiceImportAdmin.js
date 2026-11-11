@@ -110,8 +110,22 @@
     return String(e || '').replace(/\D/g, '');
   }
 
-  function getMistralKey() {
-    return String(sessionStorage.getItem(MISTRAL_KEY_STORAGE) || '').trim();
+  /** Sets a row's EAN and re-matches it to a product already in the shop with that EAN. */
+  function setRowEan(row, raw) {
+    const ean = normalizeEan(raw);
+    if (ean === normalizeEan(row.ean)) return;
+    row.ean = ean;
+    const existing = ean ? productByEan[ean] : null;
+    row.existing_listed = !!(existing && (existing.catalog_status || 'listed') === 'listed' && Number(existing.is_active) === 1);
+    row.existing_product_id = existing ? existing.id : null;
+    row.override_listing = false;
+    if (ean && ean.length !== 8 && ean.length < 12) {
+      row.notes = ['EAN ' + ean + ' looks too short; barcodes have 8, 12, 13 or 14 digits'];
+    } else if (existing) {
+      row.notes = ['EAN matches ' + existing.name + ' in the shop'];
+    } else {
+      row.notes = [];
+    }
   }
 
   async function api(path, options) {
@@ -444,6 +458,7 @@
 
   const IMAGE_SOURCE_LABELS = {
     isbn_cover: 'book cover by EAN (Open Library)',
+    code_page: 'page showing this EAN or item no.',
     mistral_url: 'image URL from search results',
     source_page: 'cited product page',
     cited_page: 'cited page with this barcode',
@@ -484,7 +499,7 @@
     }
   }
 
-  async function enrichFamilySetInternal(set, mistralKey, quiet, onSearchLimit) {
+  async function enrichFamilySetInternal(set, quiet, onSearchLimit) {
     const setRows = set.rows;
     setRows.forEach(function (r) { r.copy_pending = true; });
     renderPreview();
@@ -507,8 +522,7 @@
           }),
           family_hint: set.familyHint || familyHintForSet(setRows),
           product_family: familyId,
-          bundle: bundleForSet(setRows),
-          mistral_api_key: mistralKey
+          bundle: bundleForSet(setRows)
         })
       }, function (message) { appendLog(message); });
       const resultByEan = {};
@@ -613,8 +627,9 @@
   }
 
   function removeSplitChildren(parentId) {
-    rows = rows.filter(function (r) { return r.parent_id !== parentId; });
-    const parent = rowById(parentId);
+    const id = Number(parentId);
+    rows = rows.filter(function (r) { return Number(r.parent_id) !== id; });
+    const parent = rowById(id);
     if (parent) parent.include = true;
     setStatus('Split lines removed. You can expand again or change disposition.', 'info');
     renderPreview();
@@ -760,6 +775,10 @@
   function syncRowFieldsFromDom() {
     const host = el('invoice-import-preview');
     if (!host) return;
+    host.querySelectorAll('.invoice-import-ean').forEach(function (node) {
+      const row = rowById(node.getAttribute('data-id'));
+      if (row) setRowEan(row, node.value);
+    });
     host.querySelectorAll('.invoice-import-price').forEach(function (node) {
       const row = rowById(node.getAttribute('data-id'));
       if (!row) return;
@@ -820,6 +839,7 @@
       }
       if (tr.hasAttribute('data-row')) {
         pick('.invoice-import-name');
+        pick('.invoice-import-ean');
         pick('.invoice-import-qty');
         pick('.invoice-import-cost');
         pick('.invoice-import-cost-foreign');
@@ -1114,7 +1134,7 @@
       const offerEnrich = rowCanOfferEnrichment(r);
       if (isChild && !r.ean && offerEnrich) {
         nameCell +=
-          '<p class="admin-text-small admin-text-muted" style="margin:0.35rem 0 0;">No EAN — enrichment searches by this name; make it accurate before ticking Enrich.</p>';
+          '<p class="admin-text-small admin-text-muted" style="margin:0.35rem 0 0;">No EAN, so enrichment searches by this name. Enter the EAN below if you have it, or make the name accurate before ticking Enrich.</p>';
       }
       if (offerEnrich && parseProductFamily(r.product_family) != null) {
         nameCell +=
@@ -1162,9 +1182,7 @@
         : '';
       let splitHint = '';
       if (isParentWithKids) {
-        splitHint =
-          '<span class="admin-text-small invoice-import-parent-badge">Bundle parent (not imported)</span>' +
-          '<button type="button" class="btn btn-secondary btn-sm invoice-import-split-remove" data-id="' + r.id + '" style="margin-top:0.35rem;">Remove split lines</button>';
+        splitHint = '<span class="admin-text-small invoice-import-parent-badge">Bundle parent (not imported)</span>';
       }
       const categoryCell = rowShowsCategoryPicker(r)
         ? '<div class="invoice-import-category-mount" data-row-id="' + r.id + '" style="min-width:11rem;"></div>'
@@ -1186,7 +1204,7 @@
         '<td style="padding:0.35rem;vertical-align:top;">' + dispositionOptions(r) + splitHint + '</td>' +
         '<td style="padding:0.35rem;vertical-align:top;">' + thumb + '</td>' +
         '<td style="padding:0.35rem;vertical-align:top;"' + (isChild ? ' class="invoice-import-child-product"' : '') + '>' + nameCell +
-          '<div class="admin-text-small">EAN ' + esc(r.ean || '—') + ' · SKU ' + esc(r.sku || '—') + '</div>' +
+          '<div class="admin-text-small" style="margin-top:0.25rem;"><label>EAN <input type="text" inputmode="numeric" class="form-input invoice-import-ean" data-id="' + r.id + '" value="' + esc(r.ean || '') + '" placeholder="Enter EAN" aria-label="EAN for ' + esc(r.name) + '" style="width:9.5rem;display:inline-block;padding:0.2rem 0.4rem;"></label> · SKU ' + esc(r.sku || '—') + '</div>' +
           (shop && r.existing_listed ? '<label class="admin-text-small"><input type="checkbox" class="invoice-import-override" data-id="' + r.id + '"' + (r.override_listing ? ' checked' : '') + '> Override listing fields</label>' : '') +
           shopExtras +
         '</td>' +
@@ -1324,7 +1342,17 @@
       const splitRemoveBtn = e.target.closest('.invoice-import-split-remove');
       if (splitRemoveBtn) {
         const pid = splitRemoveBtn.getAttribute('data-id');
-        if (window.confirm('Remove all split lines for this bundle?')) removeSplitChildren(pid);
+        if (global.Modal && typeof Modal.confirm === 'function') {
+          Modal.confirm({
+            title: 'Remove split lines',
+            message: 'Remove all split lines for this bundle? You can expand it again afterwards.',
+            confirmText: 'Remove',
+            confirmStyle: 'danger',
+            onConfirm: function () { removeSplitChildren(pid); }
+          });
+        } else if (window.confirm('Remove all split lines for this bundle?')) {
+          removeSplitChildren(pid);
+        }
         return;
       }
       const genBtn = e.target.closest('.invoice-import-gen-copy');
@@ -1343,6 +1371,11 @@
       if (!row) return;
       if (t.classList.contains('invoice-import-include')) {
         row.include = t.checked;
+        renderPreview();
+        return;
+      }
+      if (t.classList.contains('invoice-import-ean')) {
+        setRowEan(row, t.value);
         renderPreview();
         return;
       }
@@ -1641,7 +1674,7 @@
     return { secs: secs, srcLabel: srcLabel };
   }
 
-  async function generateCopyForRowInternal(row, mistralKey, quiet, batchMeta, onSearchLimit) {
+  async function generateCopyForRowInternal(row, quiet, batchMeta, onSearchLimit) {
     if (!row || row.copy_pending) return false;
     row.copy_pending = true;
     renderPreview();
@@ -1663,8 +1696,7 @@
           name: row.name,
           ean: row.ean || null,
           sku: row.sku || null,
-          category: row.category || null,
-          mistral_api_key: mistralKey
+          category: row.category || null
         })
       }, function (message) { appendLog(message); });
       const meta = applyEnrichmentApiResult(row, data);
@@ -1724,11 +1756,6 @@
   }
 
   async function enrichSelectedRows() {
-    const mistralKey = getMistralKey();
-    if (!mistralKey) {
-      setStatus('Save your Mistral API key first (required for listing enrichment).', 'warn');
-      return;
-    }
     const targets = rows.filter(rowEligibleForEnrichment);
     if (!targets.length) {
       setStatus('No lines selected for enrichment. Tick Enrich on shop lines first.', 'warn');
@@ -1762,7 +1789,7 @@
             'Harmonised family set (' + (si + 1) + ' of ' + sets.length + '): ' + set.rows.length + ' lines…',
             'info'
           );
-          ok += await enrichFamilySetInternal(set, mistralKey, true, noteSearchLimit);
+          ok += await enrichFamilySetInternal(set, true, noteSearchLimit);
         } else {
           const r = set.rows[0];
           appendLog('Single-line enrich (not harmonised): ' + r.name);
@@ -1771,7 +1798,7 @@
             'info'
           );
           logProgress('Single-line enrich started', { name: r.name, ean: r.ean || null, set: set.setId });
-          const success = await generateCopyForRowInternal(r, mistralKey, true, {
+          const success = await generateCopyForRowInternal(r, true, {
             index: si + 1,
             total: sets.length
           }, noteSearchLimit);
@@ -1800,12 +1827,7 @@
       setStatus('This line is not eligible for listing enrichment.', 'warn');
       return;
     }
-    const mistralKey = getMistralKey();
-    if (!mistralKey) {
-      setStatus('Save your Mistral API key first (required for listing enrichment).', 'warn');
-      return;
-    }
-    await generateCopyForRowInternal(row, mistralKey, false);
+    await generateCopyForRowInternal(row, false);
   }
 
   async function expandSplitForRow(parentId) {
@@ -1824,11 +1846,6 @@
       setStatus('Paste bundle line text in the split panel for this row first.', 'warn');
       return;
     }
-    const mistralKey = getMistralKey();
-    if (!mistralKey) {
-      setStatus('Save your Mistral API key first (required for split expansion).', 'warn');
-      return;
-    }
     busy = true;
     setStatus('Expanding bundle lines for: ' + parent.name + '…', 'info');
     renderPreview();
@@ -1837,8 +1854,7 @@
         method: 'POST',
         body: JSON.stringify({
           text: text,
-          default_quantity: defaultQty,
-          mistral_api_key: mistralKey
+          default_quantity: defaultQty
         })
       });
       const childLines = data.lines || [];
@@ -1936,11 +1952,6 @@
       setStatus('Choose a PDF invoice first.', 'warn');
       return;
     }
-    const mistralKey = getMistralKey();
-    if (!mistralKey) {
-      setStatus('Save your Mistral API key first (required for OCR).', 'warn');
-      return;
-    }
     busy = true;
     setStatus('Running Mistral OCR…', 'info');
     el('invoice-import-log').innerHTML = '';
@@ -1952,7 +1963,7 @@
       const ocrStarted = Date.now();
       const data = await api('/admin/invoice-import/parse', {
         method: 'POST',
-        body: JSON.stringify({ pdf_base64: dataUrl, mistral_api_key: mistralKey })
+        body: JSON.stringify({ pdf_base64: dataUrl })
       });
       logProgress('OCR finished', {
         ms: Date.now() - ocrStarted,
@@ -2003,7 +2014,21 @@
     return data;
   }
 
+  function withBundle(payload, r) {
+    const parent = r.disposition === 'split_child' ? rowById(r.parent_id) : null;
+    if (parent) {
+      payload.bundle_name = parent.name;
+      payload.bundle_ean = parent.ean || null;
+      payload.bundle_quantity = parent.quantity || null;
+    }
+    return payload;
+  }
+
   function buildLinePayload(r) {
+    return withBundle(buildLinePayloadBase(r), r);
+  }
+
+  function buildLinePayloadBase(r) {
     if (global.ShopImportLinePayload) {
       return ShopImportLinePayload.fromInvoiceRow(r, {
         isEventLine: isEventLine,
@@ -2139,19 +2164,6 @@
     }
   }
 
-  function saveMistralKey() {
-    const input = el('invoice-import-mistral-key');
-    const val = input ? String(input.value || '').trim() : '';
-    if (!val) {
-      sessionStorage.removeItem(MISTRAL_KEY_STORAGE);
-      setStatus('Mistral key cleared from this browser session.', 'info');
-      return;
-    }
-    sessionStorage.setItem(MISTRAL_KEY_STORAGE, val);
-    if (input) input.value = '';
-    setStatus('Mistral key saved for this browser session only.', 'ok');
-  }
-
   function bind() {
     if (bind._done) return;
     bind._done = true;
@@ -2161,7 +2173,6 @@
       const node = el(id);
       if (node) node.addEventListener(evt, fn);
     };
-    on('invoice-import-save-key', 'click', saveMistralKey);
     on('invoice-import-parse', 'click', parseInvoice);
     on('invoice-import-enrich-selected', 'click', enrichSelectedRows);
     on('invoice-import-multiplier', 'change', renderPreview);
@@ -2174,8 +2185,7 @@
   function init() {
     if (!el('invoice-import-card')) return;
     bind();
-    const saved = getMistralKey();
-    if (saved) setStatus('Mistral API key loaded from this browser session.', 'info');
+    sessionStorage.removeItem(MISTRAL_KEY_STORAGE);
     if (el('invoice-import-multiplier') && !el('invoice-import-multiplier').value) {
       el('invoice-import-multiplier').value = String(DEFAULT_MULTIPLIER);
     }

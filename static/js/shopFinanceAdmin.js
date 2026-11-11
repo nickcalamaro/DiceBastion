@@ -56,6 +56,7 @@
   let events = [];
   let sessions = [];
   let openSessionId = null;
+  let sessionLines = [];
   let productChoices = null;
 
   // -------------------------------------------------------------------------
@@ -467,7 +468,11 @@
     el('finance-bs-csv').disabled = false;
     let rows = '';
     rows += statementHeading('Assets');
-    rows += statementRow('Stock at cost', d.assets.stock_at_cost_pence, { indent: true });
+    const bundles = d.stock_bundles || [];
+    rows += statementRow('Stock at cost', d.assets.stock_at_cost_pence, {
+      indent: true,
+      note: bundles.length ? 'includes ' + gbp(d.assets.stock_from_bundles_pence || 0) + ' from split bundles, listed below' : ''
+    });
     rows += statementRow('Money generated', d.assets.money_generated_pence, { indent: true });
     rows += statementRow('Total assets', d.assets.total_pence, { total: true });
     rows += statementHeading('Liabilities');
@@ -485,17 +490,48 @@
     el('finance-bs-body').innerHTML =
       '<p class="admin-text-small admin-text-muted">As of ' + esc(formatDate(d.as_of)) + '.</p>' +
       '<div class="table-wrapper admin-mb-1"><div style="overflow-x: auto;"><table><tbody>' + rows + '</tbody></table></div></div>' +
-      '<p class="admin-text-small admin-text-muted">Money generated is sales and ticket money received, after fees and store credit, less every bill and expense that has been paid. It can be negative. Net assets is stock plus that figure, less unpaid bills, unpaid expenses and store credit.</p>';
+      '<p class="admin-text-small admin-text-muted">Money generated is sales and ticket money received, after fees and store credit, less every bill and expense that has been paid. It can be negative. Net assets is stock plus that figure, less unpaid bills, unpaid expenses and store credit.</p>' +
+      bundleStockHtml(bundles);
+  }
+
+  function bundleLabel(b) {
+    return (b.quantity ? b.quantity + ' x ' : '') + b.name + (b.ean ? ' (EAN ' + b.ean + ')' : '');
+  }
+
+  function bundleStockHtml(bundles) {
+    if (!bundles.length) return '';
+    return '<h4 class="admin-section-heading" style="font-size: 1rem;">Stock from split bundles</h4>' +
+      '<p class="admin-text-small admin-text-muted">Bundles bought on one invoice line and split into the products sold in the shop. Their cost is spread across the products below, and the products on hand are part of stock at cost.</p>' +
+      bundles.map(function (b) {
+        return '<p class="admin-text-small" style="margin: 1rem 0 0.5rem;"><strong>' + esc(bundleLabel(b)) + '</strong><br>' +
+          esc(b.supplier + ', ' + formatDate(b.received_date)) + ' · bought for ' + esc(gbp(b.cost_pence)) +
+          ' · ' + esc(gbp(b.on_hand_pence)) + ' on hand</p>' +
+          table(
+            [{ label: 'Product' }, { label: 'Bought', num: true }, { label: 'Sold', num: true }, { label: 'Written off', num: true },
+              { label: 'On hand', num: true }, { label: 'Cost each', num: true }, { label: 'On hand at cost', num: true }],
+            b.contents.map(function (c) {
+              return '<tr><td>' + esc(c.name) + (c.ean ? ' <span class="admin-text-small admin-text-muted">' + esc(c.ean) + '</span>' : '') + '</td>' +
+                '<td style="' + NUM + '">' + c.quantity + '</td>' +
+                '<td style="' + NUM + '">' + c.sold + '</td>' +
+                '<td style="' + NUM + '">' + c.written_off + '</td>' +
+                '<td style="' + NUM + '">' + c.on_hand + '</td>' +
+                '<td style="' + NUM + '">' + esc(gbp(c.unit_cost_pence)) + '</td>' +
+                '<td style="' + NUM + '">' + esc(gbp(c.on_hand_pence)) + '</td></tr>';
+            }).join(''),
+            'No products recorded.'
+          );
+      }).join('');
   }
 
   function downloadBsCsv() {
     const d = bsData;
     if (!d) return;
-    downloadCsv('dicebastion-shop-events-balance-sheet-' + d.as_of + '.csv', [
+    const rows = [
       ['Balance sheet as of', d.as_of],
       [],
       ['Line', 'GBP'],
       ['Stock at cost', poundsCsv(d.assets.stock_at_cost_pence)],
+      ['Of which from split bundles', poundsCsv(d.assets.stock_from_bundles_pence || 0)],
       ['Money generated', poundsCsv(d.assets.money_generated_pence)],
       ['Total assets', poundsCsv(d.assets.total_pence)],
       ['Unpaid supplier bills', poundsCsv(d.liabilities.unpaid_supplier_bills_pence)],
@@ -503,7 +539,18 @@
       ['Store credit owed to customers', poundsCsv(d.liabilities.store_credit_owed_pence || 0)],
       ['Total liabilities', poundsCsv(d.liabilities.total_pence)],
       ['Net assets', poundsCsv(d.net_assets_pence)]
-    ]);
+    ];
+    const bundles = d.stock_bundles || [];
+    if (bundles.length) {
+      rows.push([], ['Stock from split bundles'], ['Bundle', 'Supplier', 'Date', 'Product', 'EAN', 'Bought', 'Sold', 'Written off', 'On hand', 'Cost each GBP', 'On hand at cost GBP']);
+      bundles.forEach(function (b) {
+        b.contents.forEach(function (c) {
+          rows.push([bundleLabel(b), b.supplier, b.received_date, c.name, c.ean || '', c.quantity, c.sold, c.written_off, c.on_hand,
+            poundsCsv(c.unit_cost_pence), poundsCsv(c.on_hand_pence)]);
+        });
+      });
+    }
+    downloadCsv('dicebastion-shop-events-balance-sheet-' + d.as_of + '.csv', rows);
   }
 
   // -------------------------------------------------------------------------
@@ -1018,9 +1065,10 @@
         '.</p>'
       : '';
     const costEachLabel = foreignSession ? ('Cost (' + currency + ')') : 'Cost each';
+    sessionLines = lines;
     const tableHeaders = foreignSession
-      ? [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: costEachLabel, num: true }, { label: 'Cost each (GBP)', num: true }, { label: 'Line cost (GBP)', num: true }, { label: '' }]
-      : [{ label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: 'Cost each', num: true }, { label: 'Line cost', num: true }, { label: '' }];
+      ? [{ label: 'Pick' }, { label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: costEachLabel, num: true }, { label: 'Cost each (GBP)', num: true }, { label: 'Line cost (GBP)', num: true }, { label: '' }]
+      : [{ label: 'Pick' }, { label: 'Item' }, { label: 'How' }, { label: 'Qty', num: true }, { label: 'Cost each', num: true }, { label: 'Line cost', num: true }, { label: '' }];
     const receipt = session.receipt_key
       ? '<p class="admin-text-small"><button type="button" class="btn btn-secondary btn-sm" id="finance-session-receipt-open">View receipt</button></p>'
       : (session.receipt_url
@@ -1053,7 +1101,9 @@
       '</form>' +
       '<div class="admin-flex admin-mb-1">' +
         '<button type="button" id="finance-session-add-manual" class="btn btn-primary">Add item</button>' +
+        '<button type="button" id="finance-session-bundle" class="btn btn-secondary">Record picked items as a bundle</button>' +
       '</div>' +
+      '<p class="admin-text-small admin-text-muted">When one invoice line was a bundle split into several products, pick those products and record the bundle. The balance sheet then lists them under that bundle.</p>' +
       settlementNote +
       '<p class="admin-text-small admin-mb-1">' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', ' + esc(gbp(total)) + ' at cost (GBP).</p>' +
       table(
@@ -1068,7 +1118,10 @@
               '<td style="' + NUM + '">' + esc(gbp((Number(line.quantity) || 0) * (Number(line.unit_cost_pence) || 0))) + '</td>'
             : '<td style="' + NUM + '">' + esc(gbp(line.unit_cost_pence)) + '</td>' +
               '<td style="' + NUM + '">' + esc(gbp((Number(line.quantity) || 0) * (Number(line.unit_cost_pence) || 0))) + '</td>';
-          return '<tr><td>' + esc(line.product_name || line.name) + (line.ean ? ' <span class="admin-text-small admin-text-muted">' + esc(line.ean) + '</span>' : '') + '</td>' +
+          return '<tr><td><input type="checkbox" class="checkbox-input finance-session-line-pick" value="' + line.id + '" aria-label="Pick ' + esc(line.product_name || line.name) + '"></td>' +
+            '<td>' + esc(line.product_name || line.name) + (line.ean ? ' <span class="admin-text-small admin-text-muted">' + esc(line.ean) + '</span>' : '') +
+            (line.bundle_name ? '<br><span class="admin-text-small admin-text-muted">From bundle: ' + esc(bundleLabel({ name: line.bundle_name, ean: line.bundle_ean, quantity: line.bundle_quantity })) + '</span>' : '') +
+            '</td>' +
             '<td>' + how + '</td>' +
             '<td style="' + NUM + '">' + (Number(line.quantity) || 0) + '</td>' +
             foreignCell +
@@ -1108,6 +1161,43 @@
       } catch (err) {
         setStatus(err.message);
         submit.disabled = false;
+      }
+    });
+  }
+
+  function openBundleForm() {
+    const picked = Array.prototype.map.call(
+      document.querySelectorAll('.finance-session-line-pick:checked'),
+      function (box) { return parseInt(box.value, 10); }
+    );
+    if (!picked.length) {
+      setStatus('Pick the products that came in the bundle first.');
+      return;
+    }
+    const first = (sessionLines || []).find(function (line) { return Number(line.id) === picked[0]; }) || {};
+    Modal.form({
+      title: 'Record bundle',
+      submitText: 'Save bundle',
+      size: 'sm',
+      formContent:
+        '<p class="admin-text-small" style="margin-top: 0;">' + picked.length + ' product' + (picked.length === 1 ? '' : 's') + ' picked.</p>' +
+        field('Bundle name', '<input name="bundle_name" class="modal-form-input" value="' + esc(first.bundle_name || '') + '">',
+          'As written on the invoice. Leave blank to remove these products from their bundle.') +
+        field('Bundle EAN', '<input name="bundle_ean" class="modal-form-input" inputmode="numeric" value="' + esc(first.bundle_ean || '') + '">', 'Optional.') +
+        field('Bundles bought', '<input type="number" name="bundle_quantity" min="1" step="1" class="modal-form-input" value="' + esc(first.bundle_quantity || '') + '">', 'Optional.'),
+      onSubmit: async function (fd, modal) {
+        await api('/admin/finance/import-sessions/' + openSessionId + '/bundle', {
+          method: 'PUT',
+          body: {
+            line_ids: picked,
+            bundle_name: fd.get('bundle_name'),
+            bundle_ean: fd.get('bundle_ean'),
+            bundle_quantity: fd.get('bundle_quantity')
+          }
+        });
+        modal.close();
+        setStatus(String(fd.get('bundle_name') || '').trim() ? 'Bundle saved.' : 'Products removed from their bundle.');
+        refreshAfterChange();
       }
     });
   }
@@ -1314,6 +1404,7 @@
         if (!btn || !tab.contains(btn)) return;
         if (btn.id === 'finance-session-back') { closeSessionPanel(); return; }
         if (btn.id === 'finance-session-add-manual') { openSessionLine(); return; }
+        if (btn.id === 'finance-session-bundle') { openBundleForm(); return; }
         if (btn.id === 'finance-session-receipt-open') {
           viewReceipt('import', openSessionId).catch(function (err) { setStatus(err.message); });
           return;

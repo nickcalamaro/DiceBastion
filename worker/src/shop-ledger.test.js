@@ -5,7 +5,8 @@ import {
   receiptKeyFromStoredUrl,
   normalizeInvoiceCurrency,
   isForeignInvoiceCurrency,
-  importLineProblem
+  importLineProblem,
+  cleanBundle
 } from './shop-ledger.js'
 import { unzipStore, zipStore } from './zip-store.js'
 import { accountsPdfLines, buildAccountsPdf, classifyProductCategory, summariseEvents } from './accounts-summary.js'
@@ -71,6 +72,29 @@ describe('allocateSettlementToLines', () => {
     })
     const total = result.unit_cost_pence.reduce((s, u, i) => s + [1, 1, 1][i] * u, 0)
     expect(total).toBe(101)
+  })
+
+  it('does not fail when no line has a quantity of 1', () => {
+    const lines = [
+      { quantity: 3, foreignMinorPerUnit: 403 },
+      { quantity: 2, foreignMinorPerUnit: 868 },
+      { quantity: 4, foreignMinorPerUnit: 441 }
+    ]
+    const result = allocateSettlementToLines({ settlementGbpPence: 72583, lines })
+    expect(result.error).toBeUndefined()
+    const total = result.unit_cost_pence.reduce((s, u, i) => s + lines[i].quantity * u, 0)
+    expect(total + result.remainder_pence).toBe(72583)
+    expect(result.remainder_pence).toBeGreaterThanOrEqual(0)
+    expect(result.remainder_pence).toBeLessThan(2)
+  })
+
+  it('leaves a remainder only when whole-penny unit prices cannot reach the total', () => {
+    const result = allocateSettlementToLines({
+      settlementGbpPence: 1001,
+      lines: [{ quantity: 2, foreignMinorPerUnit: 100 }, { quantity: 4, foreignMinorPerUnit: 100 }]
+    })
+    expect(2 * result.unit_cost_pence[0] + 4 * result.unit_cost_pence[1]).toBe(1000)
+    expect(result.remainder_pence).toBe(1)
   })
 })
 
@@ -205,5 +229,44 @@ describe('accounts summary PDF', () => {
     expect(new TextDecoder().decode(pdf.slice(0, 8))).toBe('%PDF-1.4')
     const pages = new TextDecoder().decode(pdf).match(/\/Type \/Page /g) || []
     expect(pages.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('lists split bundles and their products under the balance sheet', () => {
+    const withBundle = {
+      ...model,
+      sheet: {
+        ...model.sheet,
+        assets: { ...model.sheet.assets, stock_from_bundles_pence: 882 },
+        stock_bundles: [{
+          session_id: 5,
+          supplier: 'Supplier A',
+          received_date: '2026-10-28',
+          name: 'Dice block assortment',
+          ean: null,
+          quantity: 1,
+          cost_pence: 1323,
+          on_hand_pence: 882,
+          contents: [
+            { name: 'Dice block red', quantity: 1, sold: 1, written_off: 0, on_hand: 0, unit_cost_pence: 441, on_hand_pence: 0 },
+            { name: 'Dice block teal', quantity: 2, sold: 0, written_off: 0, on_hand: 2, unit_cost_pence: 441, on_hand_pence: 882 }
+          ]
+        }]
+      }
+    }
+    const text = accountsPdfLines(withBundle).map(line => line.text).join('\n')
+    expect(text).toContain('Stock from split bundles')
+    expect(text).toContain('1 x Dice block assortment, Supplier A, 28 October 2026')
+    expect(text).toContain('2 of 2 on hand: Dice block teal')
+    expect(text).toContain('0 of 1 on hand: Dice block red')
+    expect(accountsPdfLines(model).map(line => line.text).join('\n')).not.toContain('split bundles')
+  })
+})
+
+describe('cleanBundle', () => {
+  it('keeps the bundle name, a valid EAN and a positive quantity', () => {
+    expect(cleanBundle({ bundle_name: '  Dice assortment ', bundle_ean: '0850505008113', bundle_quantity: '2' }))
+      .toEqual({ name: 'Dice assortment', ean: '0850505008113', quantity: 2 })
+    expect(cleanBundle({ bundle_name: 'Box', bundle_ean: '12', bundle_quantity: 0 })).toEqual({ name: 'Box', ean: null, quantity: null })
+    expect(cleanBundle({ bundle_name: ' ' })).toBe(null)
   })
 })

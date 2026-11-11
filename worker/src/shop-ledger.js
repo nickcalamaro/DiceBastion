@@ -55,30 +55,34 @@ export function allocateSettlementToLines({ settlementGbpPence, lines }) {
   })
   lineGbp[lineGbp.length - 1] = settlement - lineGbp.slice(0, -1).reduce((a, b) => a + b, 0)
 
-  const unitCosts = lineGbp.map((gbp, i) => {
-    const q = normalized[i].quantity
-    return Math.max(0, Math.round(gbp / q))
-  })
+  const unitCosts = lineGbp.map((gbp, i) => Math.max(0, Math.floor(gbp / normalized[i].quantity)))
 
-  let drift = settlement - normalized.reduce((s, l, i) => s + l.quantity * unitCosts[i], 0)
-  let guard = 0
-  while (drift !== 0 && guard < 100000) {
-    guard += 1
-    let idx = 0
-    for (let i = 1; i < normalized.length; i++) {
-      if (normalized[i].quantity > normalized[idx].quantity) idx = i
+  // Pence left after rounding down go one unit price step at a time to the line furthest below its
+  // share, among lines whose quantity still fits. When every quantity is above 1 a few pence can be
+  // left over, because whole-penny unit prices cannot always add up exactly.
+  let remainder = settlement - normalized.reduce((s, l, i) => s + l.quantity * unitCosts[i], 0)
+  while (remainder > 0) {
+    let idx = -1
+    let bestShort = -Infinity
+    for (let i = 0; i < normalized.length; i++) {
+      const q = normalized[i].quantity
+      if (q > remainder) continue
+      const short = lineGbp[i] - q * unitCosts[i]
+      if (short > bestShort) {
+        bestShort = short
+        idx = i
+      }
     }
-    const step = drift > 0 ? 1 : -1
-    if (unitCosts[idx] + step < 0) return { error: 'allocation_underflow' }
-    unitCosts[idx] += step
-    drift -= normalized[idx].quantity * step
+    if (idx < 0) break
+    unitCosts[idx] += 1
+    remainder -= normalized[idx].quantity
   }
-  if (drift !== 0) return { error: 'allocation_failed' }
 
   return {
     unit_cost_pence: unitCosts,
     foreign_goods_total_minor: sumForeign,
-    line_gbp_pence: lineGbp
+    line_gbp_pence: lineGbp,
+    remainder_pence: remainder
   }
 }
 
@@ -193,6 +197,9 @@ export async function ensureLedgerSchema(db) {
     ['stock_import_sessions', 'settlement_amount_pence', 'INTEGER'],
     ['stock_import_sessions', 'foreign_goods_total_minor', 'INTEGER'],
     ['stock_import_lines', 'unit_foreign_minor', 'INTEGER'],
+    ['stock_import_lines', 'bundle_name', 'TEXT'],
+    ['stock_import_lines', 'bundle_ean', 'TEXT'],
+    ['stock_import_lines', 'bundle_quantity', 'INTEGER'],
     ['stock_lots', 'unit_foreign_minor', 'INTEGER'],
     ['stock_import_sessions', 'receipt_key', 'TEXT'],
     ['business_expenses', 'receipt_key', 'TEXT'],
@@ -442,6 +449,86 @@ function cleanEan(raw) {
   const digits = String(raw || '').replace(/\D/g, '')
   if (digits.length < 8 || digits.length > 14) return null
   return digits
+}
+
+/** The supplier bundle an import line was split from: its invoice name, EAN and how many were bought. */
+export function cleanBundle(input) {
+  const name = String(input?.bundle_name || '').trim().slice(0, 200)
+  if (!name) return null
+  const quantity = parseInt(input.bundle_quantity, 10)
+  return { name, ean: cleanEan(input.bundle_ean), quantity: quantity > 0 && quantity <= 100000 ? quantity : null }
+}
+
+/** Records lines of a session as the contents of one bundle, or clears it when no bundle name is given. */
+export async function setImportLinesBundle(db, sessionId, input) {
+  await ensureLedgerSchema(db)
+  const ids = [...new Set((Array.isArray(input?.line_ids) ? input.line_ids : []).map(id => parseInt(id, 10)).filter(id => id > 0))]
+  if (!ids.length) return { error: 'no_lines' }
+  const bundle = cleanBundle(input)
+  const result = await db.prepare(`
+    UPDATE stock_import_lines SET bundle_name = ?, bundle_ean = ?, bundle_quantity = ?
+    WHERE session_id = ? AND id IN (${ids.map(() => '?').join(', ')})
+  `).bind(bundle ? bundle.name : null, bundle ? bundle.ean : null, bundle ? bundle.quantity : null, sessionId, ...ids).run()
+  return { success: true, updated: Number(result.meta?.changes ?? 0), bundle }
+}
+
+/**
+ * Stock bought as a bundle and split into products, as of a date: each bundle with its products,
+ * what was bought, sold, written off and is still on hand at cost. Values match stockAtCost line by line.
+ */
+export async function stockBundles(db, asOf) {
+  await ensureLedgerSchema(db)
+  const { results } = await db.prepare(`
+    SELECT il.session_id, s.supplier, s.received_date, il.bundle_name, il.bundle_ean, il.bundle_quantity,
+           COALESCE(p.name, il.name) AS item_name, il.ean, il.quantity, il.unit_cost_pence,
+           COALESCE((SELECT SUM(m.quantity) FROM stock_movements m
+                     WHERE m.lot_id = il.lot_id AND m.movement_type = 'sale' AND substr(m.occurred_at, 1, 10) <= ?), 0) AS sold,
+           COALESCE((SELECT SUM(m.quantity) FROM stock_movements m
+                     WHERE m.lot_id = il.lot_id AND m.movement_type <> 'sale' AND substr(m.occurred_at, 1, 10) <= ?), 0) AS written_off
+    FROM stock_import_lines il
+    JOIN stock_import_sessions s ON s.id = il.session_id
+    JOIN stock_lots lot ON lot.id = il.lot_id
+    JOIN supplier_bills b ON b.id = lot.supplier_bill_id
+    LEFT JOIN products p ON p.id = il.product_id
+    WHERE il.bundle_name IS NOT NULL AND il.bundle_name <> '' AND b.bill_date <= ?
+    ORDER BY s.received_date, s.id, il.id
+  `).bind(asOf, asOf, asOf).all()
+  const bundles = []
+  for (const row of results || []) {
+    let bundle = bundles.find(x => x.session_id === row.session_id && x.name === row.bundle_name && x.ean === (row.bundle_ean || null))
+    if (!bundle) {
+      bundle = {
+        session_id: row.session_id,
+        supplier: row.supplier,
+        received_date: row.received_date,
+        name: row.bundle_name,
+        ean: row.bundle_ean || null,
+        quantity: row.bundle_quantity || null,
+        cost_pence: 0,
+        on_hand_pence: 0,
+        contents: []
+      }
+      bundles.push(bundle)
+    }
+    const quantity = Number(row.quantity) || 0
+    const unitCost = Number(row.unit_cost_pence) || 0
+    const sold = Number(row.sold) || 0
+    const writtenOff = Number(row.written_off) || 0
+    const onHand = Math.max(0, quantity - sold - writtenOff)
+    bundle.cost_pence += quantity * unitCost
+    bundle.on_hand_pence += onHand * unitCost
+    bundle.contents.push({
+      name: row.item_name,
+      ean: row.ean || null,
+      quantity,
+      sold,
+      written_off: writtenOff,
+      on_hand: onHand,
+      unit_cost_pence: unitCost,
+      on_hand_pence: onHand * unitCost
+    })
+  }
+  return { bundles, on_hand_pence: bundles.reduce((sum, b) => sum + b.on_hand_pence, 0) }
 }
 
 function escapeHtml(text) {
@@ -821,9 +908,10 @@ export async function addImportLine(db, sessionId, input) {
   await db.prepare('UPDATE supplier_bills SET total_pence = total_pence + ? WHERE id = ?')
     .bind(quantity * unitCost, session.supplier_bill_id).run()
 
+  const bundle = cleanBundle(input)
   const line = await db.prepare(`
-    INSERT INTO stock_import_lines (session_id, product_id, ean, name, quantity, unit_cost_pence, entry_method, lot_id, unit_foreign_minor)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    INSERT INTO stock_import_lines (session_id, product_id, ean, name, quantity, unit_cost_pence, entry_method, lot_id, unit_foreign_minor, bundle_name, bundle_ean, bundle_quantity)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
   `).bind(
     session.id,
     product.id,
@@ -833,7 +921,10 @@ export async function addImportLine(db, sessionId, input) {
     unitCost,
     entryMethod,
     received.lot_id,
-    unitForeignMinor
+    unitForeignMinor,
+    bundle ? bundle.name : null,
+    bundle ? bundle.ean : null,
+    bundle ? bundle.quantity : null
   ).first()
 
   let writeOff = null
@@ -908,6 +999,7 @@ export async function addImportLinesBatch(db, sessionId, input) {
   const foreign = isForeignInvoiceCurrency(invoiceCurrency)
   let unitCosts = null
   let foreignTotal = null
+  let remainderPence = 0
 
   for (let i = 0; i < rawLines.length; i++) {
     const problem = importLineProblem(rawLines[i], foreign, invoiceCurrency)
@@ -927,6 +1019,7 @@ export async function addImportLinesBatch(db, sessionId, input) {
     if (alloc.error) return alloc
     unitCosts = alloc.unit_cost_pence
     foreignTotal = alloc.foreign_goods_total_minor
+    remainderPence = alloc.remainder_pence || 0
   }
 
   const results = []
@@ -946,8 +1039,13 @@ export async function addImportLinesBatch(db, sessionId, input) {
     await db.prepare('UPDATE stock_import_sessions SET foreign_goods_total_minor = ? WHERE id = ?')
       .bind(foreignTotal, sessionId).run()
   }
+  // Pence the per-unit costs could not carry stay on the bill, so it still matches what was paid.
+  if (remainderPence > 0) {
+    await db.prepare('UPDATE supplier_bills SET total_pence = total_pence + ? WHERE id = ?')
+      .bind(remainderPence, session.supplier_bill_id).run()
+  }
 
-  return { success: true, lines: results, foreign_goods_total_minor: foreignTotal }
+  return { success: true, lines: results, foreign_goods_total_minor: foreignTotal, remainder_pence: remainderPence }
 }
 
 /** Removes a line and its stock batch when none of that batch has been sold or written off. */
@@ -1542,6 +1640,7 @@ export async function buildBalanceSheet(db, asOf) {
   const moneyOut = (await paidTotal('supplier_bills', 'bill_date')) + (await paidTotal('business_expenses', 'expense_date'))
   const moneyGenerated = moneyIn - moneyOut
   const stockPence = await stockAtCost(db, asOf)
+  const bundled = await stockBundles(db, asOf)
 
   const billsUnpaid = await unpaid('supplier_bills', 'bill_date')
   const expensesUnpaid = await unpaid('business_expenses', 'expense_date')
@@ -1554,9 +1653,11 @@ export async function buildBalanceSheet(db, asOf) {
     books_start_date: booksStart,
     assets: {
       stock_at_cost_pence: stockPence,
+      stock_from_bundles_pence: bundled.on_hand_pence,
       money_generated_pence: moneyGenerated,
       total_pence: assetsPence
     },
+    stock_bundles: bundled.bundles,
     liabilities: {
       unpaid_supplier_bills_pence: billsUnpaid,
       unpaid_expenses_pence: expensesUnpaid,

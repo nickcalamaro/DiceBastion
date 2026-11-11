@@ -301,6 +301,23 @@ function balanceSheetPage(items, model) {
   amountRow(items, 'Total owed', liabilities.total_pence, { bold: true, rule: true })
   amountRow(items, 'Net assets', sheet.net_assets_pence, { bold: true, size: 12, gap: 18 })
   line(items, 'Net assets is what the business holds less what it owes.', { size: 9, gap: 14 })
+  bundleStockLines(items, sheet.stock_bundles || [], assets.stock_from_bundles_pence)
+}
+
+/** Bundles split into products on import, under the balance sheet, so stock shows what is actually sold. */
+function bundleStockLines(items, bundles, onHandPence) {
+  if (!bundles.length) return
+  heading(items, 'Stock from split bundles', 12, 18)
+  line(items, `Stock includes ${formatStatementAmount(onHandPence)} of products split from bundles bought on one invoice line. Each bundle's cost is spread across its products.`, { size: 9, gap: 14 })
+  for (const b of bundles) {
+    const label = `${b.quantity ? `${b.quantity} x ` : ''}${b.name}${b.ean ? ` (EAN ${b.ean})` : ''}`
+    line(items, `${label}, ${b.supplier}, ${longDate(b.received_date)}`, { bold: true, gap: 16, indent: 12 })
+    amountRow(items, 'Bought for', b.cost_pence, { indent: 24 })
+    for (const c of b.contents) {
+      amountRow(items, `${c.on_hand} of ${c.quantity} on hand: ${c.name}`, c.on_hand_pence, { indent: 24, size: 9 })
+    }
+    amountRow(items, 'On hand at cost', b.on_hand_pence, { indent: 24, bold: true, rule: true })
+  }
 }
 
 function internalPage(items, model) {

@@ -224,8 +224,12 @@ CREATE TABLE stock_import_lines (
   lot_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   , unit_foreign_minor INTEGER
+  , bundle_name TEXT
+  , bundle_ean TEXT
+  , bundle_quantity INTEGER
 );
 -- entry_method: 'barcode' | 'manual'. lot_id is the stock batch created for the line.
+-- bundle_*: the invoice line this product was split from (name, EAN, bundles bought). NULL when not split.
 CREATE TABLE orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_number TEXT UNIQUE NOT NULL,

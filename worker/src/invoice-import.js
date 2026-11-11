@@ -88,6 +88,9 @@ const LINE_LOOKUP_RETRY_BATCH = 4
 /** Below this many labels, words shared by every label are as likely to be colours as the product line. */
 const FAMILY_COMMON_WORDS_MIN_LABELS = 3
 const LINE_LOOKUP_BATCH_CONCURRENCY = 2
+/** Family lines searched by their own barcode or item no.: lines per Mistral call (one search each), calls at once. */
+const CODE_LOOKUP_BATCH = 4
+const CODE_LOOKUP_CONCURRENCY = 2
 /**
  * Mistral starts searches in parallel. Past the cap, searches already running still return their results;
  * more than cap times this many starts stops the stream regardless.
@@ -119,8 +122,8 @@ const SOURCE_COPY_GUIDE =
 
 const PRODUCT_TYPE_GUIDE =
   'Product-type guidance:\n' +
-  '- Gaming dice (Chessex blocks, polyhedral RPG sets, speckled or gemini d6, and similar): name the brand and line, what is in the box (die types, count, colours), and typical use when sources say it (RPG, board game, wargame). Stay factual; do not call dice "essential" or "premium".\n' +
-  '- Card sleeves (Ultra Pro, Dragon Shield, and similar): lead with brand, line, finish, and pack count from sources. When sources say standard size or list compatible card games, you may mention Magic: The Gathering, Riftbound and other standard TCGs once in plain language. Never claim a fit the source does not state.\n' +
+  '- Gaming dice (blocks, polyhedral sets and similar): name the brand and line the sources give, what is in the box (die types, count, colours), and typical use when sources say it (RPG, board game, wargame). Stay factual; do not call dice "essential" or "premium".\n' +
+  '- Card sleeves: lead with the brand, line, finish, size and pack count the sources give. Name a card game only when the source lists it as a fit for this exact product. Never claim a fit the source does not state.\n' +
   '- Other deck boxes, binders, playmats: state size or fit when a source states it. A size word alone does not authorise naming games.\n' +
   '- Name a game, card size or product as compatible only when a source says this exact product fits it. Sources often also list what a product does not fit, or compare sizes; never turn those into a fit claim. When unsure, name no games.\n' +
   '- TCG sealed product (boosters, decks, tins): use official set or product name from the EAN; do not invent card lists or pull rates.\n' +
@@ -129,14 +132,20 @@ const PRODUCT_TYPE_GUIDE =
   '- Expansions: name the base game required when publisher listings do.\n\n'
 
 const IDENTIFY_GUIDE =
-  'When an EAN/GTIN is provided, search by barcode first to identify the exact product, brand, and range.\n' +
-  'Use that identification to expand distributor abbreviations and acronyms in the invoice line into full names customers recognise (e.g. invoice text "DS Matte Std" with EAN for Dragon Shield becomes "Dragon Shield"). ' +
-  'Only expand abbreviations when the EAN or authoritative listings confirm the match; if unsure, keep the invoice wording and do not guess.\n\n'
+  'Identify the product with web search before writing anything, in this order:\n' +
+  '1. EAN/GTIN given: search the barcode digits on their own. A result identifies the product only when it shows that barcode.\n' +
+  '2. Not identified and a supplier item no. is given: search the item no. on its own. A result identifies the product only when it shows that code.\n' +
+  '3. Still not identified: search the product name exactly as the invoice writes it.\n' +
+  'Stop searching once a step identifies the product.\n' +
+  'No assumptions: take the brand, product name, range and every spec only from results that matched in one of those steps. ' +
+  'Never infer a brand from an abbreviation, the product type, the supplier, or what similar products usually are. ' +
+  'Expand an abbreviation only when a matching result spells it out. ' +
+  'When nothing matched, set product_verified false, keep the invoice wording, and name no brand that is not printed on the invoice line.\n\n'
 
 const SUMMARY_GUIDE =
   'Summary (SEO-aware, same field as manual product add; max 500 characters, aim 140–160, shown as the shop card blurb and Google meta description):\n' +
   '- One or two sentences: brand and product line, plus the detail shoppers choose by (finish, pack count, die types, size). Draw wording from sources; include game names only when sources support compatibility.\n' +
-  '- Natural British English keywords (e.g. Chessex, Ultra Pro, MTG, Riftbound) where they describe this product; no hype, no stuffing, no emojis.\n' +
+  '- Natural British English keywords: the brand, line and game names the sources give for this product; no hype, no stuffing, no emojis.\n' +
   '- Description: 2-4 short plain-text paragraphs for the product page body, no HTML. Open with what the product is; practical specs and compatibility after.\n\n'
 
 const SOURCES_GUIDE =
@@ -156,7 +165,7 @@ const LISTING_ENRICHMENT_INSTRUCTIONS =
   'Return JSON with display_name (shop product title with expanded brand/name, max 200 characters), summary, and description.\n\n' +
   SUMMARY_GUIDE +
   SOURCES_GUIDE +
-  'Always use the web_search tool once per request. Respond with JSON matching the listing_enrichment schema only.'
+  `Use at most ${MISTRAL_MAX_SINGLE_WEB_SEARCHES} web searches, in the order above. Respond with JSON matching the listing_enrichment schema only.`
 
 /** Family step 1: web search for facts and pages only. Copy is written afterwards from this research. */
 const FAMILY_RESEARCH_INSTRUCTIONS =
@@ -164,12 +173,16 @@ const FAMILY_RESEARCH_INSTRUCTIONS =
   'You collect facts and source pages. You do not write marketing copy.\n\n' +
   IDENTIFY_GUIDE +
   'Search budget:\n' +
-  `- At most ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} web searches in total. First search the product line (or the bundle EAN when one is given). Search again only to find the official range page when the first results lack it.\n` +
-  '- Never search individual barcodes or individual variants. The shop finds each variant page itself from range_pages.\n' +
+  `- At most ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} web searches in total.\n` +
+  '- The shop has already searched each line\'s barcode, then its item no. Lines listed under "Identified by code" have a page that shows that code. ' +
+  'Take the brand and product line from those pages, then use your searches for the product line name as those pages write it and for the official range page.\n' +
+  '- When no line is identified by code, apply the order above to the family: the bundle EAN when one is given, otherwise one line\'s name as written.\n' +
+  '- Do not search lines one at a time, and never search a barcode or item no. again; that has been done. The shop finds each variant page itself from range_pages.\n' +
+  '- Every query names the brand and product line as the identified pages write them. Never search a generic word such as the product type on its own.\n' +
   '- After your searches, stop and return family_research JSON.\n\n' +
   'Research rules:\n' +
   '- The barcodes decide the manufacturer. Do not substitute a similar product from another brand.\n' +
-  '- brand: the brand name printed on the product (for example Dragon Shield, even when the publisher is Arcane Tinmen).\n' +
+  '- brand: the brand name printed on the product, as the matching results give it. Empty when no result matched.\n' +
   '- product_line_name: the official line name including the brand, as sources name it.\n' +
   '- product_type: a short noun phrase (for example "card sleeves", "d6 dice block").\n' +
   '- line_facts: every spec the sources state that applies to all lines: size, count, dimensions, material, finish, contents, compatibility. One short factual phrase each, copied from sources. Include every one you found; do not infer or generalise. ' +
@@ -287,6 +300,185 @@ async function callMistralPatternLookup(apiKey, { host, brand, productLineName, 
   return { lines: null, references: out.references, searches: out.searches }
 }
 
+const CODE_LOOKUP_INSTRUCTIONS =
+  'You look up products by code for a shop. For each line, run exactly one web search whose query is that line\'s code on its own ' +
+  'in double quotes, for example "5012345678900", so it is searched as one exact code and not as a phone number. Add no other words. Run no other searches.\n' +
+  '- page_url per line: a product page from that line\'s results that shows this exact code, copied exactly from your results. ' +
+  'null when no result shows it. Never construct or guess a URL, and never give a page for a different code.\n' +
+  '- product_name per line: the product name exactly as that page gives it, or null.\n' +
+  '- After the searches, stop and return code_lookup JSON only.'
+
+export function buildCodeLookupSchema(keys) {
+  const line = {
+    type: 'object',
+    additionalProperties: false,
+    properties: { page_url: { type: ['string', 'null'] }, product_name: { type: ['string', 'null'] } },
+    required: ['page_url', 'product_name']
+  }
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      lines: { type: 'object', additionalProperties: false, properties: Object.fromEntries(keys.map((k) => [k, line])), required: keys }
+    },
+    required: ['lines']
+  }
+}
+
+export function buildCodeLookupUserPrompt(mode, batch) {
+  return [
+    `Search each line's ${mode === 'sku' ? 'item no.' : 'barcode'} in double quotes, one search per line (answer each key in lines{}):`,
+    ...batch.map((g) => `- ${g.key} · ${mode === 'sku' ? `item no. "${g.code}"` : `barcode "${g.code}"`}`)
+  ].join('\n')
+}
+
+/**
+ * A search result belongs to this purchase when it shows a line's barcode or item no., or at least two words
+ * of one line's invoice name. Code searches also return phone directories and unrelated pages.
+ */
+export function relatesToLines(ref, lines) {
+  const text = `${ref?.url || ''} ${ref?.title || ''} ${ref?.description || ''}`
+  const words = new Set(nameMatchTokens(text))
+  return (lines || []).some((l) => {
+    if (l.ean && textShowsGtin(text, l.ean)) return true
+    if (l.itemCode && textHasItemCode(text, l.itemCode)) return true
+    const tokens = [...new Set(nameMatchTokens(l.name))]
+    return tokens.filter((t) => words.has(t)).length >= Math.min(2, tokens.length)
+  })
+}
+
+async function callMistralCodeLookup(apiKey, { mode, batch, onProgress }) {
+  const keys = batch.map((g) => g.key)
+  const out = await streamMistralConversation(
+    apiKey,
+    {
+      model: LISTING_SEARCH_MODEL,
+      store: false,
+      tools: [{ type: 'web_search' }],
+      instructions: CODE_LOOKUP_INSTRUCTIONS,
+      inputs: buildCodeLookupUserPrompt(mode, batch),
+      completion_args: {
+        temperature: 0.1,
+        reasoning_effort: 'none',
+        response_format: { type: 'json_schema', json_schema: { name: 'code_lookup', strict: true, schema: buildCodeLookupSchema(keys) } }
+      }
+    },
+    { onProgress, maxMs: MISTRAL_SINGLE_MAX_MS, maxSearches: batch.length }
+  )
+  if (out.error) return out
+  const parsed = out.capped ? null : parseChatJsonContent(out.text)
+  return {
+    lines: parsed?.lines && typeof parsed.lines === 'object' ? parsed.lines : null,
+    references: out.references,
+    searches: out.searches
+  }
+}
+
+/** Barcode digits as pages may print them: as given, without leading zeros, and a UPC-A with its EAN-13 zero. */
+function gtinForms(gtin) {
+  const forms = new Set([gtin, gtin.replace(/^0+/, '')])
+  if (gtin.length === 12) forms.add(`0${gtin}`)
+  return [...forms].filter((f) => f.length >= 8)
+}
+
+export function textShowsGtin(text, gtin) {
+  const g = normalizeGtin(gtin)
+  if (!g || !text) return false
+  return gtinForms(g).some((f) => new RegExp(`(^|\\D)${f}(\\D|$)`).test(String(text)))
+}
+
+/**
+ * Searches each family line by its own code: barcode first, then item no. for lines still unmatched.
+ * A line counts as found only when a search result or the fetched page shows its code.
+ * Results already gathered are checked before searching, and each wave's results before the next wave,
+ * because one barcode search often lists sibling products too.
+ */
+async function lookupFamilyCodes(apiKey, { inputLines, pageCache, onProgress, progress }) {
+  const found = inputLines.map(() => null)
+  const pool = []
+  let searches = 0
+  let calls = 0
+  const codeOf = (line, mode) => (mode === 'ean' ? normalizeGtin(line.ean) : normalizeItemCode(line.itemCode))
+  const refShows = (r, mode, code) => {
+    const text = `${r?.url || ''} ${r?.title || ''} ${r?.description || ''}`
+    return mode === 'ean' ? textShowsGtin(text, code) : textHasItemCode(text, code)
+  }
+  const fromPool = (indices, mode) => {
+    for (const i of indices) {
+      if (found[i]) continue
+      const code = codeOf(inputLines[i], mode)
+      const r = pool.find((x) => refShows(x, mode, code))
+      if (r) found[i] = { by: mode, url: r.url, title: r.title || '', description: r.description || '', thumbnail: r.thumbnail || null }
+    }
+  }
+
+  for (const mode of ['ean', 'sku']) {
+    let todo = inputLines.map((_, i) => i).filter((i) => !found[i] && codeOf(inputLines[i], mode))
+    if (!todo.length) continue
+    const label = mode === 'ean' ? 'Barcode lookup' : 'Item no. lookup'
+    await progress(`${label} · ${todo.length} line(s) · one search each, ${CODE_LOOKUP_BATCH} lines per request`)
+    while (todo.length) {
+      if (fetchLimitHit()) {
+        await progress(`${label} · stopped · ${fetchLimitNote()}`)
+        break
+      }
+      const wave = todo.slice(0, CODE_LOOKUP_BATCH * CODE_LOOKUP_CONCURRENCY)
+      const batches = []
+      for (let b = 0; b < wave.length; b += CODE_LOOKUP_BATCH) {
+        batches.push(wave.slice(b, b + CODE_LOOKUP_BATCH).map((i) => ({ i, key: familyLineKey(i), code: codeOf(inputLines[i], mode) })))
+      }
+      await mapWithConcurrency(batches, CODE_LOOKUP_CONCURRENCY, async (batch) => {
+        const looked = await callMistralCodeLookup(apiKey, { mode, batch, onProgress })
+        calls += 1
+        if (looked.error) {
+          await progress(`${label} · ${batch.map((g) => g.key).join(', ')} failed · ${looked.message || looked.error}`)
+          return
+        }
+        searches += looked.searches || 0
+        for (const r of looked.references || []) if (!pool.some((p) => p.url === r.url)) pool.push(r)
+        for (const g of batch) {
+          const r = (looked.references || []).find((x) => refShows(x, mode, g.code))
+          if (r) {
+            found[g.i] = { by: mode, url: r.url, title: r.title || '', description: r.description || '', thumbnail: r.thumbnail || null }
+            continue
+          }
+          const named = normalizeEnrichmentImageUrl(looked.lines?.[g.key]?.page_url)
+          if (!named || !(looked.references || []).some((x) => normalizeEnrichmentImageUrl(x.url) === named)) continue
+          const page = await fetchPageHtml(named, pageCache)
+          if (page.error) continue
+          const title = pageTitle(page.html)
+          const shows =
+            mode === 'ean'
+              ? textShowsGtin(page.html, g.code)
+              : pageShowsItemCode({ html: page.html, title, pageUrl: page.url, itemCode: g.code })
+          if (shows) {
+            found[g.i] = {
+              by: mode,
+              url: named,
+              title: String(looked.lines[g.key].product_name || title || '').trim().slice(0, 200),
+              description: '',
+              thumbnail: null
+            }
+          }
+        }
+      })
+      for (const i of wave) {
+        const hit = found[i]
+        await progress(
+          `${familyLineKey(i)} · ${mode === 'ean' ? 'EAN' : 'item no.'} ${codeOf(inputLines[i], mode)} · ` +
+            (hit && hit.by === mode ? `found · ${String(hit.title || '').slice(0, 80)} · ${hostOf(hit.url)}` : 'no result shows this code')
+        )
+      }
+      const rest = todo.slice(wave.length)
+      fromPool(rest, mode)
+      const skipped = rest.filter((i) => found[i]).length
+      if (skipped) await progress(`${label} · ${skipped} line(s) already shown by earlier results, not searched`)
+      todo = rest.filter((i) => !found[i])
+    }
+  }
+  return { found, references: pool, searches, calls }
+}
+
 const INVOICE_ANNOTATION_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -302,9 +494,13 @@ const INVOICE_ANNOTATION_SCHEMA = {
         type: 'object',
         additionalProperties: false,
         properties: {
-          name: { type: 'string' },
-          ean: { type: ['string', 'null'] },
-          sku: { type: ['string', 'null'] },
+          name: { type: 'string', description: 'Product description as printed, without any code or barcode in front of it' },
+          ean: {
+            type: ['string', 'null'],
+            description:
+              'Barcode digits (EAN-13, UPC-A 12 digits, EAN-8 or GTIN-14). Suppliers often print it in a column headed Reference, Referencia, Ref., Code, Codigo, Artikel or EAN. Any 8, 12, 13 or 14 digit number in that column is the barcode.'
+          },
+          sku: { type: ['string', 'null'], description: 'Supplier item code only when it is not a barcode' },
           quantity: { type: 'number' },
           unit_net_price: { type: 'number' },
           vat_rate: { type: ['string', 'null'] }
@@ -442,6 +638,27 @@ function normalizeFamilyInputLines(rawLines) {
 }
 
 /**
+ * Lines with the same barcode, or the same item no. when there is no barcode, are one product.
+ * Returns the distinct lines and, for each input line, the index of its distinct line.
+ */
+export function dedupeFamilyLines(lines) {
+  const unique = []
+  const sourceOf = []
+  const indexByCode = new Map()
+  for (const line of lines) {
+    const code = line.ean ? `ean:${line.ean}` : line.itemCode ? `sku:${line.itemCode.toLowerCase()}` : null
+    if (code && indexByCode.has(code)) {
+      sourceOf.push(indexByCode.get(code))
+      continue
+    }
+    if (code) indexByCode.set(code, unique.length)
+    sourceOf.push(unique.length)
+    unique.push(line)
+  }
+  return { unique, sourceOf }
+}
+
+/**
  * A code written before the product name, as split bundle lines often are ("1x 27830 Vortex ...").
  * At least 5 characters, so a leading year or size is not taken for a code.
  */
@@ -460,7 +677,16 @@ export function normalizeBundle(raw) {
   return { name, ean, sku }
 }
 
-export function buildFamilyResearchUserPrompt(inputLines, familyHint, productFamily, bundle) {
+/** One line per family line found by its own code: the page that showed the code and the name it gives. */
+export function identifiedByCodeLines(identified) {
+  return (identified || [])
+    .map((hit, i) =>
+      hit ? `- ${familyLineKey(i)} · by ${hit.by === 'sku' ? 'item no.' : 'EAN'} · ${String(hit.title || '').trim() || 'untitled page'} · ${hit.url}` : null
+    )
+    .filter(Boolean)
+}
+
+export function buildFamilyResearchUserPrompt(inputLines, familyHint, productFamily, bundle, identified = []) {
   const hint = String(familyHint || '').trim()
   const fam =
     productFamily != null && Number.isFinite(Number(productFamily)) && Number(productFamily) > 0
@@ -477,17 +703,20 @@ export function buildFamilyResearchUserPrompt(inputLines, familyHint, productFam
     fam != null ? `User-assigned Family #: ${fam}. Every line belongs to this one set.` : '',
     hint ? `Product line hint: ${hint}` : '',
     bundleLine,
-    `Search the product line, at most ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} searches in total. Collect every spec the sources state, their product descriptions of the line, and the official range page.`,
+    `At most ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} searches in total. Collect every spec the matching sources state, their product descriptions of the line, and the official range page.`,
     '',
     'Lines (answer each key in lines{}):',
-    ...bullets
+    ...bullets,
+    ...(identifiedByCodeLines(identified).length
+      ? ['', 'Identified by code (use these pages for the brand, line and each variant_label):', ...identifiedByCodeLines(identified)]
+      : ['', 'Identified by code: none. Identify the line from the bundle EAN or a line name.'])
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-async function callMistralFamilyResearch(apiKey, { inputLines, familyHint, productFamily, bundle, onProgress }) {
-  const userPrompt = buildFamilyResearchUserPrompt(inputLines, familyHint, productFamily, bundle)
+async function callMistralFamilyResearch(apiKey, { inputLines, familyHint, productFamily, bundle, identified, onProgress }) {
+  const userPrompt = buildFamilyResearchUserPrompt(inputLines, familyHint, productFamily, bundle, identified)
   const out = await streamMistralConversation(
     apiKey,
     {
@@ -598,30 +827,51 @@ export function enrichProductFamily(apiKey, body, onProgress) {
 
 async function runProductFamily(apiKey, { lines, family_hint, product_family, bundle: rawBundle }, onProgress) {
   if (!apiKey) {
-    return { error: 'missing_mistral_key', message: 'Mistral API key is required.' }
+    return { error: 'missing_mistral_key', message: 'No Mistral API key. Set the MISTRAL_API_KEY secret on the worker.' }
   }
-  const inputLines = normalizeFamilyInputLines(lines)
-  if (inputLines.length < 2) {
+  const allLines = normalizeFamilyInputLines(lines)
+  if (allLines.length < 2) {
     return { error: 'too_few_lines', message: 'Family enrichment requires at least 2 lines.' }
   }
-  if (inputLines.length > FAMILY_ENRICHMENT_MAX_LINES) {
+  if (allLines.length > FAMILY_ENRICHMENT_MAX_LINES) {
     return {
       error: 'too_many_lines',
       message: `Family enrichment supports at most ${FAMILY_ENRICHMENT_MAX_LINES} lines per call.`
     }
   }
+  const { unique: inputLines, sourceOf } = dedupeFamilyLines(allLines)
+  if (inputLines.length < 2) {
+    return { error: 'too_few_lines', message: 'These lines are all the same product, so enrich one of them on its own.' }
+  }
 
   const started = Date.now()
-  console.log(`[invoice-import/enrich-family] start lines=${inputLines.length}`)
+  console.log(`[invoice-import/enrich-family] start lines=${allLines.length} distinct=${inputLines.length}`)
 
   const progress = async (message) => {
     if (typeof onProgress === 'function') await onProgress(message)
   }
+  if (inputLines.length < allLines.length) {
+    const repeats = allLines
+      .map((l, i) => ({ l, i }))
+      .filter(({ i }) => sourceOf.indexOf(sourceOf[i]) !== i)
+      .map(({ l }) => (l.ean ? `EAN ${l.ean}` : `item no. ${l.itemCode}`))
+    await progress(`Repeated lines · ${repeats.join(', ')} · treated as one product and searched once`)
+  }
 
   const bundle = normalizeBundle(rawBundle)
+  const pageCache = new Map()
+  const codesStarted = Date.now()
+  await progress(`Step 1 codes · Family #${product_family || '?'} · ${inputLines.length} lines · searching each line's barcode, then item no.`)
+  const codes = await lookupFamilyCodes(apiKey, { inputLines, pageCache, onProgress, progress })
+  const codesFound = codes.found.filter(Boolean).length
+  const codesMs = Date.now() - codesStarted
+  await progress(
+    `Codes · ${codesFound} of ${inputLines.length} lines found by EAN or item no. · ${codes.searches} search(es) in ${codes.calls} request(s) · ${Math.round(codesMs / 1000)}s`
+  )
+
   const webStarted = Date.now()
   await progress(
-    `Step 1 research · Family #${product_family || '?'} · ${inputLines.length} lines · up to ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} web searches` +
+    `Step 2 research · up to ${MISTRAL_MAX_FAMILY_WEB_SEARCHES} web searches for the line and its range page` +
       (bundle ? ` · from bundle ${bundle.name || ''} EAN ${bundle.ean || 'none'}` : '')
   )
   const researched = await callMistralFamilyResearch(apiKey, {
@@ -629,19 +879,52 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
     familyHint: family_hint,
     productFamily: product_family,
     bundle,
+    identified: codes.found,
     onProgress
   })
-  const webMs = Date.now() - webStarted
+  const webMs = Date.now() - webStarted + codesMs
 
   const research = researched.parsed
   if (!research) {
     console.log(`[invoice-import/enrich-family] research failed ms=${webMs} error=${researched.error}`)
     return { ...researched, duration_ms: Date.now() - started }
   }
+  const relevanceLines = bundle ? [...inputLines, { name: bundle.name || '', ean: normalizeGtin(bundle.ean), itemCode: normalizeItemCode(bundle.sku) }] : inputLines
+  const references = []
+  let unrelated = 0
+  for (const r of [...codes.references, ...(researched.references || [])]) {
+    if (references.some((x) => x.url === r.url)) continue
+    if (relatesToLines(r, relevanceLines)) references.push(r)
+    else unrelated += 1
+  }
+  if (unrelated) await progress(`Search results · ${unrelated} dropped that show no code or invoice name words from these lines`)
+  const lineMatchedBy = inputLines.map(
+    (l, i) => (codes.found[i] && codes.found[i].by) || identifiedBy(references, { ean: l.ean, itemCode: l.itemCode, name: l.name })
+  )
+  const familyMatches = [...lineMatchedBy, bundle ? identifiedBy(references, { ean: bundle.ean, itemCode: bundle.sku, name: bundle.name }) : null]
+  const familyMatchedBy = ['ean', 'sku', 'name'].find((by) => familyMatches.includes(by)) || null
+  if (!familyMatchedBy) {
+    console.log(`[invoice-import/enrich-family] not identified lines=${inputLines.length} results=${references.length}`)
+    return {
+      error: 'not_identified',
+      message: 'No search result showed any of these barcodes, item numbers or invoice names, so the invoice wording was kept.',
+      duration_ms: Date.now() - started
+    }
+  }
+  await progress(`Identified by ${familyMatchedBy === 'sku' ? 'item no.' : familyMatchedBy === 'ean' ? 'EAN' : 'name'} in the search results`)
+  const brand = String(research.brand || '').trim()
+  if (brand && !brandAppears(brand, [...references, ...codes.found.filter(Boolean)], inputLines)) {
+    console.log(`[invoice-import/enrich-family] brand not in sources brand=${logCopyLabel(brand)}`)
+    return {
+      error: 'brand_not_in_sources',
+      message: `The research named the brand "${brand}", but no search result or invoice line shows it, so the invoice wording was kept.`,
+      duration_ms: Date.now() - started
+    }
+  }
   const lineFacts = (research.line_facts || []).map((f) => String(f || '').trim()).filter(Boolean)
   console.log(`[invoice-import/enrich-family] research ok ms=${webMs} searches=${researched.searches} facts=${lineFacts.length}`)
   await progress(
-    `Research returned in ${Math.round(webMs / 1000)}s · ${String(research.brand || '').trim() || 'brand unknown'} · ${String(research.product_line_name).trim()} · ${String(research.product_type || '').trim()} · ${researched.references.length} search results`
+    `Research returned in ${Math.round(webMs / 1000)}s · ${String(research.brand || '').trim() || 'brand unknown'} · ${String(research.product_line_name).trim()} · ${String(research.product_type || '').trim()} · ${references.length} search results`
   )
   await progress(`Facts for the whole line (${lineFacts.length}): ${lineFacts.join(' | ') || 'none stated by sources'}`)
   const sourceDescriptions = (research.source_descriptions || []).map((s) => String(s || '').trim()).filter(Boolean)
@@ -650,8 +933,8 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
   )
 
   const copyStarted = Date.now()
-  await progress(`Step 2 copy · writing one template from the research · ${FAMILY_COPY_MODEL}`)
-  const copy = await callMistralFamilyCopy(apiKey, research, inputLines, researched.references, onProgress)
+  await progress(`Step 3 copy · writing one template from the research · ${FAMILY_COPY_MODEL}`)
+  const copy = await callMistralFamilyCopy(apiKey, research, inputLines, references, onProgress)
   const copyMs = Date.now() - copyStarted
   if (copy.error) {
     console.log(`[invoice-import/enrich-family] copy failed ms=${copyMs} error=${copy.error}`)
@@ -672,9 +955,8 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
     return { error: 'invalid_family_copy', message: 'Mistral returned an incomplete family template.', duration_ms: Date.now() - started }
   }
 
-  const pageCache = new Map()
   const imagesStarted = Date.now()
-  await progress('Step 3 images · reading range pages and each variant page before choosing')
+  await progress('Step 4 images · pages that showed each code first, then range pages and other variant pages')
   const variantLabels = inputLines.map((_, i) => {
     const row = research.lines[familyLineKey(i)]
     return row && typeof row === 'object' ? String(row.variant_label || '').trim() : ''
@@ -682,7 +964,7 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
   const familyGtins = inputLines.map((l) => normalizeGtin(l.ean)).filter(Boolean)
   const linked = await linkFamilyVariants({
     research,
-    references: researched.references,
+    references,
     inputLines,
     variantLabels,
     pageCache
@@ -706,9 +988,9 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
     inputLines.map((l, i) => ({ gtin: normalizeGtin(l.ean), itemCode: l.itemCode, variantLabel: variantLabels[i] }))
   )
   const commonWords = matchLines[0].commonWords
-  const searchMatches = matchSearchResults(researched.references, matchLines)
+  const searchMatches = matchSearchResults(references, matchLines)
   const resultsMatched = searchMatches.filter((m) => m.length).length
-  await progress(`Search results · ${researched.references.length} gathered · ${resultsMatched} of ${inputLines.length} lines matched`)
+  await progress(`Search results · ${references.length} gathered · ${resultsMatched} of ${inputLines.length} lines matched`)
   for (let i = 0; i < inputLines.length; i++) {
     const m = searchMatches[i][0]
     if (m) {
@@ -745,7 +1027,7 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       ean: input.ean,
       imageUrl: row.image_url,
       sourceUrls: row.source_urls,
-      citedRefs: researched.references,
+      citedRefs: references,
       variantLabel: variantLabels[i],
       pageCache,
       linkedUrl: linked.assigned[i] ? linked.assigned[i].url : null,
@@ -754,7 +1036,8 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       catalogue: catalogue.perLine[i],
       searchMatches: searchMatches[i],
       commonWords,
-      itemCode: input.itemCode
+      itemCode: input.itemCode,
+      codePage: codes.found[i] ? codes.found[i].url : null
     })
   })
   const sharedDropped = dropSharedImageCandidates(collected)
@@ -775,7 +1058,7 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
     officialHost: linked.rangeHosts[0] || null,
     collected,
     research,
-    references: researched.references,
+    references,
     inputLines,
     variantLabels,
     commonWords,
@@ -807,6 +1090,15 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       outLines.push({ ean: input.ean, name: input.name, error: `Mistral returned no entry for ${key}` })
       continue
     }
+    if (!lineMatchedBy[i]) {
+      await progress(`${key} · EAN ${input.ean || 'none'} · not identified · invoice wording kept`)
+      outLines.push({
+        ean: input.ean,
+        name: input.name,
+        error: 'not identified: no search result showed its EAN, item no. or name, so the invoice wording was kept'
+      })
+      continue
+    }
     const variantLabel = variantLabels[i]
     const applied = applyFamilyTemplate(template, variantLabel, template.product_line_name)
     const image = await pickListingImage(collected[i], pattern, usedImageUrls)
@@ -824,27 +1116,31 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       confidence: Number.isFinite(Number(row.confidence)) ? Number(row.confidence) : undefined,
       product_verified: row.product_verified === true,
       reason: row.reason ? String(row.reason).trim().slice(0, 500) : undefined,
-      variant_label: variantLabel
+      variant_label: variantLabel,
+      identified_by: lineMatchedBy[i]
     })
   }
   const imagesMs = Date.now() - imagesStarted
   const fetchRun = fetchCounter.getStore()
   await progress(`Outbound requests · ${fetchRun.fetches}${fetchRun.limitHitAt ? ` · ${fetchLimitNote()}` : ''}`)
 
+  const allOut = allLines.map((l, i) => ({ ...outLines[sourceOf[i]], ean: l.ean, name: l.name }))
   const durationMs = Date.now() - started
-  const imagesOk = outLines.filter((l) => l.image_url).length
+  const imagesOk = allOut.filter((l) => l.image_url).length
   console.log(
-    `[invoice-import/enrich-family] done ms=${durationMs} lines=${outLines.length} images=${imagesOk} fetches=${fetchRun.fetches} limit_hit_at=${fetchRun.limitHitAt}`
+    `[invoice-import/enrich-family] done ms=${durationMs} lines=${allOut.length} images=${imagesOk} fetches=${fetchRun.fetches} limit_hit_at=${fetchRun.limitHitAt}`
   )
   return {
     success: true,
     product_line_name: template.product_line_name,
-    lines: outLines,
+    lines: allOut,
     duration_ms: durationMs,
     web_search_ms: webMs,
     debug: {
       web_searches: researched.searches,
-      cited_pages: researched.references.length,
+      cited_pages: references.length,
+      code_searches: codes.searches,
+      lines_found_by_code: codesFound,
       line_facts: lineFacts.length,
       copy_ms: copyMs,
       image_pattern: pattern ? `${pattern.host} ${pattern.slot}` : null,
@@ -858,7 +1154,7 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       images_ms: imagesMs,
       outbound_requests: fetchRun.fetches,
       fetch_limit_hit_at: fetchRun.limitHitAt || undefined,
-      lines: outLines.map((l) => ({
+      lines: allOut.map((l) => ({
         name: l.display_name || l.name,
         ean: l.ean,
         has_image: !!l.image_url,
@@ -871,12 +1167,8 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
   }
 }
 
-export function getMistralApiKey(c, body) {
-  if (body && body.mistral_api_key != null) {
-    const fromBody = String(body.mistral_api_key).trim()
-    if (fromBody) return fromBody
-  }
-  return String(c.req.header('X-Mistral-Api-Key') || '').trim() || null
+export function getMistralApiKey(c) {
+  return String(c.env?.MISTRAL_API_KEY || '').trim() || null
 }
 
 export function parseEuAmount(raw) {
@@ -901,21 +1193,51 @@ function normalizeIsoDate(raw) {
   return null
 }
 
+/** True for EAN-8, UPC-A, EAN-13 and GTIN-14 digits with a correct check digit. */
+export function isValidGtin(raw) {
+  const d = String(raw || '').trim()
+  if (!/^\d+$/.test(d) || ![8, 12, 13, 14].includes(d.length)) return false
+  let sum = 0
+  for (let i = d.length - 2, weight = 3; i >= 0; i--, weight = 4 - weight) sum += Number(d[i]) * weight
+  return (10 - (sum % 10)) % 10 === Number(d[d.length - 1])
+}
+
+/**
+ * The barcode for an OCR line. Suppliers print barcodes in a reference column, so OCR often returns them
+ * as the item code or in front of the name; a valid barcode there is moved to ean.
+ */
+export function ocrLineCodes({ name, ean, sku }) {
+  let outName = String(name || '').trim()
+  let outEan = String(ean || '').replace(/\D/g, '') || null
+  let outSku = sku != null && String(sku).trim() ? String(sku).trim() : null
+  if (!outEan && outSku && isValidGtin(outSku.replace(/[\s-]/g, ''))) {
+    outEan = outSku.replace(/[\s-]/g, '')
+    outSku = null
+  }
+  const leading = outName.match(/^(\d{8,14})\s+(\S.*)$/)
+  if (leading && isValidGtin(leading[1])) {
+    if (!outEan) outEan = leading[1]
+    if (outEan === leading[1]) outName = leading[2].trim()
+  }
+  if (outSku && outEan && outSku.replace(/\D/g, '') === outEan) outSku = null
+  return { name: outName, ean: outEan, sku: outSku }
+}
+
 function normalizeOcrLines(lines) {
   if (!Array.isArray(lines)) return []
   const out = []
   for (const line of lines) {
     if (!line || typeof line !== 'object') continue
-    const name = String(line.name || '').trim()
+    const codes = ocrLineCodes(line)
+    const name = codes.name
     const qty = Number(line.quantity)
     let unit = line.unit_net_price
     if (typeof unit !== 'number' || !Number.isFinite(unit)) unit = parseEuAmount(unit)
     if (!name || !Number.isFinite(qty) || qty <= 0 || unit == null) continue
-    const eanRaw = line.ean != null ? String(line.ean).trim() : ''
     out.push({
       name,
-      ean: eanRaw ? eanRaw.replace(/[^\dX]/gi, '') : null,
-      sku: line.sku != null ? String(line.sku).trim() : null,
+      ean: codes.ean,
+      sku: codes.sku,
       quantity: Math.round(qty),
       unit_net_price: unit,
       vat_rate: line.vat_rate != null ? String(line.vat_rate) : null
@@ -1018,7 +1340,9 @@ async function callMistralOcr(apiKey, pdfBase64) {
       document_annotation_prompt:
         'Extract supplier invoice metadata and every product line item only. ' +
         'Ignore addresses, payment instructions, bank details, and page footers. ' +
-        'Use unit net price per line (before VAT). Quantity must be a whole number.'
+        'Use unit net price per line (before VAT). Quantity must be a whole number. ' +
+        'Copy each line\'s barcode digits exactly into ean, including when the column is headed Reference or Referencia rather than EAN. ' +
+        'Keep codes out of the name.'
     })
   })
 
@@ -1482,10 +1806,10 @@ function buildListingCopyUserPrompt({ name, ean, category, sku }) {
   if (eanNorm) lines.push(`EAN: ${eanNorm}`)
   else lines.push('EAN: none')
   const itemCode = normalizeItemCode(sku)
-  if (itemCode) lines.push(`Supplier item no.: ${itemCode} (often the manufacturer's part number; search it with the brand when the EAN finds nothing)`)
+  lines.push(itemCode ? `Supplier item no.: ${itemCode}` : 'Supplier item no.: none')
   const cat = category ? String(category).trim() : ''
   if (cat) lines.push(`Categories: ${cat}`)
-  lines.push('', 'Web search once, then return listing_enrichment JSON for this product.')
+  lines.push('', 'Search the EAN, then the item no., then the name, stopping once the product is identified. Then return listing_enrichment JSON for this product.')
   return lines.join('\n')
 }
 
@@ -1542,7 +1866,7 @@ async function callMistralWebSearchListingCopy(apiKey, { name, ean, category, sk
 
 export async function parseInvoiceDocument(apiKey, { pdf_base64 }) {
   if (!apiKey) {
-    return { error: 'missing_mistral_key', message: 'Mistral API key is required for invoice OCR.' }
+    return { error: 'missing_mistral_key', message: 'No Mistral API key. Set the MISTRAL_API_KEY secret on the worker.' }
   }
   if (!pdf_base64) return { error: 'missing_pdf', message: 'No PDF was uploaded.' }
 
@@ -1587,7 +1911,7 @@ function logCopyLabel(name) {
   return String(name || '').trim().slice(0, 80)
 }
 
-/** Strip colour/edition tokens so sibling variants (e.g. Dragon Shield matte colours) share a family key. */
+/** Strip colour/edition tokens so sibling variants (e.g. one sleeve range in several colours) share a family key. */
 const VARIANT_FAMILY_STRIP_WORDS = [
   'black', 'white', 'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'grey', 'gray',
   'silver', 'gold', 'brown', 'teal', 'cyan', 'magenta', 'ivory', 'crimson', 'navy', 'lime', 'amber',
@@ -1602,7 +1926,6 @@ const VARIANT_FAMILY_STRIP_WORDS = [
 
 export function normalizeVariantFamilyKey(name) {
   let s = String(name || '').toLowerCase()
-  s = s.replace(/^\s*ds\b\s*[-:]\s*/i, 'dragon shield ')
   s = s.replace(/\[[^\]]*\]/g, ' ')
   s = s.replace(/\(\s*\d+\s*sleeves?\s*\)/gi, ' ')
   s = s.replace(/\b\d+\s*sleeves?\b/gi, ' ')
@@ -1785,6 +2108,46 @@ export function textHasItemCode(text, code) {
   return new RegExp(`(^|[^A-Za-z0-9])${escaped}([^A-Za-z0-9]|$)`, 'i').test(String(text))
 }
 
+function nameMatchTokens(text) {
+  return String(text || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3 || /\d/.test(t))
+}
+
+/**
+ * How the search results identify a line, checked in order: 'ean' when a result shows the barcode, 'sku' when one
+ * shows the item code, 'name' when one result's title and text contain at least two thirds of the invoice name's words.
+ * null when none does; copy written from those results would be a guess.
+ */
+export function identifiedBy(references, { ean, itemCode, name }) {
+  const texts = (references || []).map((r) => `${r?.url || ''} ${r?.title || ''} ${r?.description || ''}`)
+  if (normalizeGtin(ean) && texts.some((t) => textShowsGtin(t, ean))) return 'ean'
+  const code = normalizeItemCode(itemCode)
+  if (code && texts.some((t) => textHasItemCode(t, code))) return 'sku'
+  const wanted = [...new Set(nameMatchTokens(name))]
+  if (wanted.length >= 2) {
+    const needed = Math.ceil((wanted.length * 2) / 3)
+    for (const t of texts) {
+      const have = new Set(nameMatchTokens(t))
+      if (wanted.filter((w) => have.has(w)).length >= needed) return 'name'
+    }
+  }
+  return null
+}
+
+/** The brand is written in a search result or on an invoice line, ignoring case, spaces and punctuation. */
+export function brandAppears(brand, references, inputLines) {
+  const squash = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const b = squash(brand)
+  if (!b) return true
+  const texts = [
+    ...(references || []).map((r) => `${r?.url || ''} ${r?.title || ''} ${r?.description || ''}`),
+    ...(inputLines || []).map((l) => l?.name || '')
+  ]
+  return texts.some((t) => squash(t).includes(b))
+}
+
 /**
  * The page is this item's own page: its code is in the page URL, title, product data (sku/mpn), or the
  * page's own product image file. Codes elsewhere in the body may belong to related products.
@@ -1804,7 +2167,7 @@ export function pageShowsItemCode({ html, title, pageUrl, itemCode }) {
 /** A page listing two or more of the family's barcodes describes the range, so its own photo fits no single variant. */
 export function isRangePageForFamily(html, familyGtins) {
   let found = 0
-  for (const g of familyGtins || []) {
+  for (const g of new Set(familyGtins || [])) {
     if (g && html.includes(g)) found += 1
     if (found >= 2) return true
   }
@@ -1967,6 +2330,14 @@ async function lookupLinePages(
     for (const r of refs || []) if (onHost(r) && !sharedPool.some((p) => p.url === r.url)) sharedPool.push(r)
   }
   addToPool(references)
+  const resultUrls = new Set()
+  const addResultUrls = (refs) => {
+    for (const r of refs || []) {
+      const n = normalizeEnrichmentImageUrl(r?.url)
+      if (n) resultUrls.add(n)
+    }
+  }
+  addResultUrls(references)
   const state = new Map(gaps.map((g) => [g.key, { tried: new Set(), thumbs: new Set(), problems: [] }]))
   const matchFor = (pool, lines) =>
     matchSearchResults(
@@ -1992,6 +2363,10 @@ async function lookupLinePages(
     }
     for (const url of urls) {
       s.tried.add(url)
+      if (!resultUrls.has(url)) {
+        s.problems.push(`${hostOf(url)} page named but not in any search result, not fetched`)
+        continue
+      }
       if ((host && !sameSite(hostOf(url), host)) || familyPages.has(url)) {
         s.problems.push(`page rejected ${hostOf(url)}`)
         continue
@@ -2032,6 +2407,9 @@ async function lookupLinePages(
     return false
   }
 
+  /** Lines whose request failed or ended without an answer; only these are worth asking again. */
+  const unanswered = new Set()
+
   /** One Mistral lookup per batch; returns the lines still without a page. */
   const lookupRound = async (lines, batchSize, label) => {
     const roundBatches = []
@@ -2050,11 +2428,14 @@ async function lookupLinePages(
       if (looked.error) {
         errors.push(looked.message || looked.error)
         await progress(`${tag} failed · ${looked.message || looked.error}`)
+        for (const g of batch) unanswered.add(g.key)
         left.push(...batch)
         return
       }
+      if (looked.capped || !looked.lines) for (const g of batch) unanswered.add(g.key)
       const pool = (looked.references || []).filter(onHost)
       addToPool(pool)
+      addResultUrls(looked.references)
       const named = looked.lines ? batch.filter((g) => looked.lines[g.key] && looked.lines[g.key].page_url).length : 0
       await progress(
         `${tag} · ${looked.searches} search(es), ${pool.length} result(s) on ${where} · pages named for ${named} of ${batch.length}` +
@@ -2080,9 +2461,15 @@ async function lookupLinePages(
     })
     left = still
   }
-  if (left.length && !fetchLimitHit()) {
-    await progress(`Line lookup retry · ${left.length} line(s) still without a page · asking again in smaller batches`)
-    left = await lookupRound(left, LINE_LOOKUP_RETRY_BATCH, 'Line lookup retry')
+  const retry = left.filter((g) => unanswered.has(g.key))
+  if (left.length > retry.length) {
+    await progress(`Line lookup · ${left.length - retry.length} line(s) answered without a usable page · not asked again, the same search would return the same results`)
+  }
+  if (retry.length && !fetchLimitHit()) {
+    const settled = left.filter((g) => !unanswered.has(g.key))
+    unanswered.clear()
+    await progress(`Line lookup retry · ${retry.length} line(s) whose request ended without an answer · asking again in smaller batches`)
+    left = [...settled, ...(await lookupRound(retry, LINE_LOOKUP_RETRY_BATCH, 'Line lookup retry'))]
     if (left.length) {
       const pooled = matchFor(sharedPool, left)
       const still = []
@@ -2492,13 +2879,26 @@ async function collectImageCandidates({
   catalogue = null,
   searchMatches = [],
   commonWords = null,
-  itemCode = null
+  itemCode = null,
+  codePage = null
 }) {
   const tried = []
   const candidates = []
   const gtin = normalizeGtin(ean)
 
   const isRange = (url, html) => rangeUrls.includes(url) || isRangePageForFamily(html, familyGtins)
+
+  const codeUrl = normalizeEnrichmentImageUrl(codePage)
+  if (codeUrl) {
+    const page = await fetchPageHtml(codeUrl, pageCache)
+    if (page.error) tried.push(`${hostOf(codeUrl)} code page ${page.error}`)
+    else if (isRange(codeUrl, page.html)) tried.push(`${hostOf(codeUrl)} code page lists several products, not used for images`)
+    else {
+      const slots = extractPageImageSlots(page.html, page.url)
+      if (!slots.length) tried.push(`${hostOf(codeUrl)} code page no_image`)
+      for (const s of slots) candidates.push({ ...s, host: hostOf(codeUrl), page: codeUrl, origin: 'code_page' })
+    }
+  }
 
   if (catalogue) {
     for (const url of catalogue.images) {
@@ -2593,6 +2993,7 @@ export function familyImagePattern(candidateLists) {
 }
 
 const IMAGE_ORIGIN_RANK = {
+  code_page: -1,
   shop_catalogue: 0,
   range_link: 1,
   pattern_lookup: 2,
@@ -2618,7 +3019,7 @@ export function officialSiteImagePattern(collectedList, rangeHosts) {
 
 export function orderImageCandidates(candidates, pattern) {
   const rank = (c) => {
-    if (c.origin === 'shop_catalogue') return -1
+    if (c.origin === 'code_page' || c.origin === 'shop_catalogue') return -1
     if (pattern && c.host === pattern.host && c.slot === pattern.slot) return 0
     if (pattern && c.host === pattern.host) return 1
     return 2
@@ -2886,7 +3287,7 @@ export function normalizeSplitLines(rawLines, defaultQuantity) {
 
 export async function expandSplitFromText(apiKey, { text, default_quantity }) {
   if (!apiKey) {
-    return { error: 'missing_mistral_key', message: 'Mistral API key is required.' }
+    return { error: 'missing_mistral_key', message: 'No Mistral API key. Set the MISTRAL_API_KEY secret on the worker.' }
   }
   const blob = String(text || '').trim()
   if (!blob) return { error: 'missing_text', message: 'Paste distributor line text to expand.' }
@@ -2913,7 +3314,7 @@ export async function expandSplitFromText(apiKey, { text, default_quantity }) {
 
 export async function generateListingCopy(apiKey, { name, ean, category, sku }, onProgress) {
   if (!apiKey) {
-    return { error: 'missing_mistral_key', message: 'Mistral API key is required.' }
+    return { error: 'missing_mistral_key', message: 'No Mistral API key. Set the MISTRAL_API_KEY secret on the worker.' }
   }
   const title = String(name || '').trim()
   if (!title) return { error: 'missing_name', message: 'Product name is required.' }
@@ -2939,6 +3340,17 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
   }
   const parsed = researched.parsed
   console.log(`[invoice-import/generate-copy] web_search ok ms=${webMs} searches=${researched.searches}`)
+
+  const matchedBy = identifiedBy(researched.references, { ean: eanNorm, itemCode: normalizeItemCode(sku), name: title })
+  if (!matchedBy) {
+    console.log(`[invoice-import/generate-copy] not identified name=${logCopyLabel(title)} results=${researched.references.length}`)
+    return {
+      error: 'not_identified',
+      message: `No search result showed EAN ${eanNorm || 'none'}, item no. ${normalizeItemCode(sku) || 'none'} or the invoice name, so the invoice wording was kept.`,
+      duration_ms: Date.now() - started
+    }
+  }
+  if (typeof onProgress === 'function') await onProgress(`Identified by ${matchedBy === 'sku' ? 'item no.' : matchedBy === 'ean' ? 'EAN' : 'name'} in the search results`)
 
   const summary = String(parsed.summary || '').trim().slice(0, 500)
   const description = String(parsed.description || '').trim().slice(0, 4000)
@@ -2985,6 +3397,7 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
     confidence: Number.isFinite(confidence) ? confidence : undefined,
     reason: parsed.reason ? String(parsed.reason).trim().slice(0, 500) : undefined,
     product_verified: parsed.product_verified === true,
+    identified_by: matchedBy,
     copy_source: 'web_search',
     duration_ms: durationMs,
     web_search_ms: webMs
@@ -3028,7 +3441,7 @@ export function registerInvoiceImportRoutes(app, { requireAdmin, requireAccounts
   app.post('/admin/invoice-import/parse', requireAdmin, requireAccountsOwner, async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}))
-      const apiKey = getMistralApiKey(c, body)
+      const apiKey = getMistralApiKey(c)
       const result = await parseInvoiceDocument(apiKey, body)
       if (result.error) {
         const status =
@@ -3055,7 +3468,7 @@ export function registerInvoiceImportRoutes(app, { requireAdmin, requireAccounts
   app.post('/admin/invoice-import/expand-split', requireAdmin, requireAccountsOwner, async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}))
-      const apiKey = getMistralApiKey(c, body)
+      const apiKey = getMistralApiKey(c)
       const result = await expandSplitFromText(apiKey, body)
       if (result.error) {
         const status =
@@ -3076,7 +3489,7 @@ export function registerInvoiceImportRoutes(app, { requireAdmin, requireAccounts
   app.post('/admin/invoice-import/generate-copy', requireAdmin, requireAccountsOwner, async (c) => {
     const body = await c.req.json().catch(() => null)
     if (!body) return c.json({ error: 'invalid_json' }, 400)
-    const apiKey = getMistralApiKey(c, body)
+    const apiKey = getMistralApiKey(c)
     return streamEnrichment(async (send) => {
       const result = await generateListingCopy(apiKey, body, (message) => send({ type: 'progress', message }))
       if (result.error) await send({ type: 'error', error: result.error, message: result.message || result.error })
@@ -3087,7 +3500,7 @@ export function registerInvoiceImportRoutes(app, { requireAdmin, requireAccounts
   app.post('/admin/invoice-import/enrich-family', requireAdmin, requireAccountsOwner, async (c) => {
     const body = await c.req.json().catch(() => null)
     if (!body) return c.json({ error: 'invalid_json' }, 400)
-    const apiKey = getMistralApiKey(c, body)
+    const apiKey = getMistralApiKey(c)
     return streamEnrichment(async (send) => {
       const result = await enrichProductFamily(apiKey, body, (message) => send({ type: 'progress', message }))
       if (result.error) await send({ type: 'error', error: result.error, message: result.message || result.error })

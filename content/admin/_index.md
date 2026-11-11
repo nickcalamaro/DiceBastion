@@ -16,8 +16,8 @@ showDate: false
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261109c"></script>
-<script src="/js/shopInvoiceImportAdmin.js?v=20261107a"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261111a"></script>
+<script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
 
@@ -1228,16 +1228,6 @@ Show delivered
 <p class="admin-text-muted admin-mb-1" style="max-width: 52rem;">
 Upload a supplier invoice PDF. Mistral OCR parses line items into an editable preview. Workflow: set disposition (split bundles or event use first), tick <strong>Enrich</strong> on shop lines you want, then run <strong>Enrich selected</strong> once. Similar product lines are enriched as one harmonised set; unique SKUs use a single line each. For invoices in euros (or other non-GBP currency), costs are shown in invoice currency; enter <strong>Amount paid (GBP)</strong> before import so stock and COGS use your actual bank settlement, allocated across lines by foreign value. Sell prices still use the multiplier on invoice unit net (unchanged). Suggested images are preview-only until you use Review and crop or Upload image.
 </p>
-<div class="admin-grid-2 admin-mb-1" style="align-items: end;">
-<div>
-<label class="form-label" for="invoice-import-mistral-key">Mistral API key *</label>
-<input type="password" id="invoice-import-mistral-key" class="form-input" autocomplete="off" placeholder="Required for invoice OCR">
-<small class="admin-text-small">Required for OCR, split expansion, and listing enrichment when you run Enrich selected. Stored in this browser session only.</small>
-</div>
-<div>
-<button type="button" id="invoice-import-save-key" class="btn btn-secondary">Save key for session</button>
-</div>
-</div>
 <div class="admin-grid-2 admin-mb-1" style="align-items: end;">
 <div>
 <label class="form-label" for="invoice-import-multiplier">Shop price multiplier</label>

@@ -80,6 +80,7 @@ function balanceCsv(sheet) {
     [],
     ['Line', 'GBP'],
     ['Stock at cost', pounds(sheet.assets.stock_at_cost_pence)],
+    ['Of which from split bundles', pounds(sheet.assets.stock_from_bundles_pence)],
     ['Money generated', pounds(sheet.assets.money_generated_pence)],
     ['Total assets', pounds(sheet.assets.total_pence)],
     ['Unpaid supplier bills', pounds(sheet.liabilities.unpaid_supplier_bills_pence)],
@@ -88,6 +89,17 @@ function balanceCsv(sheet) {
     ['Total liabilities', pounds(sheet.liabilities.total_pence)],
     ['Net assets', pounds(sheet.net_assets_pence)]
   ]
+  return csv(rows)
+}
+
+function bundleCsv(sheet) {
+  const rows = [['Bundle', 'Bundle EAN', 'Bundles bought', 'Supplier', 'Date', 'Product', 'EAN', 'Bought', 'Sold', 'Written off', 'On hand', 'Cost each GBP', 'On hand at cost GBP']]
+  for (const b of sheet.stock_bundles || []) {
+    for (const c of b.contents) {
+      rows.push([b.name, b.ean || '', b.quantity || '', b.supplier, b.received_date, c.name, c.ean || '', c.quantity, c.sold, c.written_off, c.on_hand,
+        pounds(c.unit_cost_pence), pounds(c.on_hand_pence)])
+    }
+  }
   return csv(rows)
 }
 
@@ -101,7 +113,8 @@ function readme(from, to, omitted) {
     'Each import line names the receipt file in the receipts folder.',
     'Each expense names its receipt file when one was saved.',
     'accounts.pdf is the profit and loss account, the balance sheet, and an internal breakdown.',
-    'Invoices are a business cost whichever account paid them. Goods bought for events and written off are included in expenses.'
+    'Invoices are a business cost whichever account paid them. Goods bought for events and written off are included in expenses.',
+    'stock-from-bundles.csv lists bundles bought on one invoice line and split into the products sold, with what is still on hand at cost.'
   ]
   if (omitted.length) {
     lines.push('', 'Some receipt files were not included in this zip. Download each one from the finance page.')
@@ -125,7 +138,7 @@ export async function buildAccountsPack(db, bucket, from, to, notes) {
   const { results: importRows } = await db.prepare(`
     SELECT s.id AS session_id, s.supplier, s.received_date, s.reference, s.receipt_key,
            s.invoice_currency, s.settlement_amount_pence,
-           COALESCE(p.name, l.name) AS item_name, l.ean, l.quantity, l.unit_cost_pence, l.unit_foreign_minor
+           COALESCE(p.name, l.name) AS item_name, l.ean, l.quantity, l.unit_cost_pence, l.unit_foreign_minor, l.bundle_name
     FROM stock_import_sessions s
     JOIN stock_import_lines l ON l.session_id = s.id
     LEFT JOIN products p ON p.id = l.product_id
@@ -154,7 +167,7 @@ export async function buildAccountsPack(db, bucket, from, to, notes) {
   }
 
   const importCsv = csv([
-    ['Session', 'Date', 'Supplier', 'Reference', 'Item', 'EAN', 'Quantity', 'Unit cost GBP', 'Invoice currency', 'Unit cost in invoice currency', 'GBP settlement for the invoice', 'Receipt file'],
+    ['Session', 'Date', 'Supplier', 'Reference', 'Item', 'EAN', 'From bundle', 'Quantity', 'Unit cost GBP', 'Invoice currency', 'Unit cost in invoice currency', 'GBP settlement for the invoice', 'Receipt file'],
     ...(importRows || []).map(row => [
       row.session_id,
       row.received_date,
@@ -162,6 +175,7 @@ export async function buildAccountsPack(db, bucket, from, to, notes) {
       row.reference || '',
       row.item_name || '',
       row.ean || '',
+      row.bundle_name || '',
       row.quantity,
       pounds(row.unit_cost_pence),
       row.invoice_currency || 'GBP',
@@ -201,6 +215,7 @@ export async function buildAccountsPack(db, bucket, from, to, notes) {
     { name: 'accounts.pdf', data: new Uint8Array() },
     { name: 'profit-and-loss.csv', data: encode(pnlCsv(pnl)) },
     { name: 'balance-sheet.csv', data: encode(balanceCsv(sheet)) },
+    { name: 'stock-from-bundles.csv', data: encode(bundleCsv(sheet)) },
     { name: 'stock-imports.csv', data: encode(importCsv) },
     { name: 'expenses.csv', data: encode(expenseCsv) },
     { name: 'events.csv', data: encode(eventCsv) }
