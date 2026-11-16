@@ -7519,6 +7519,9 @@ app.put('/admin/finance/expenses/:id', requireAdmin, requireAccountsOwner, async
   try {
     await ensureLedgerSchema(c.env.DB)
     const id = parseInt(c.req.param('id'), 10)
+    const existing = await c.env.DB.prepare('SELECT import_line_id FROM business_expenses WHERE id = ?').bind(id).first()
+    if (!existing) return c.json({ error: 'expense_not_found' }, 404)
+    if (existing.import_line_id) return c.json({ error: 'expense_from_import', message: 'This expense comes from goods for events on an import. Remove that import line to change it.' }, 400)
     const parsed = parseExpenseBody(await c.req.json().catch(() => ({})), true)
     if (parsed.error) return c.json(parsed, 400)
     const cols = Object.keys(parsed)
@@ -7537,7 +7540,12 @@ app.put('/admin/finance/expenses/:id', requireAdmin, requireAccountsOwner, async
 app.delete('/admin/finance/expenses/:id', requireAdmin, requireAccountsOwner, async c => {
   try {
     await ensureLedgerSchema(c.env.DB)
-    await c.env.DB.prepare('DELETE FROM business_expenses WHERE id = ?').bind(parseInt(c.req.param('id'), 10)).run()
+    const id = parseInt(c.req.param('id'), 10)
+    const existing = await c.env.DB.prepare('SELECT import_line_id FROM business_expenses WHERE id = ?').bind(id).first()
+    if (existing && existing.import_line_id) {
+      return c.json({ error: 'expense_from_import', message: 'This expense comes from goods for events on an import. Remove that import line to change it.' }, 400)
+    }
+    await c.env.DB.prepare('DELETE FROM business_expenses WHERE id = ?').bind(id).run()
     return c.json({ success: true })
   } catch (e) {
     console.error('[finance/expenses DELETE] ERROR:', e)

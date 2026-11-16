@@ -16,7 +16,7 @@ showDate: false
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261111a"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261116b"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>

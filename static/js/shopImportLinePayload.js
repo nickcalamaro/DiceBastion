@@ -25,6 +25,7 @@
       description: body.description ? String(body.description) : null,
       image_url: body.image_url || null
     };
+    if (body.disposition === 'event_write_off') payload.disposition = 'event_write_off';
     if (payload.product_id != null && !payload.product_id) payload.product_id = null;
     return payload;
   }

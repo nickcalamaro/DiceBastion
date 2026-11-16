@@ -222,11 +222,12 @@ function blank(items, gap) {
 function expenseRows(pnl) {
   const rows = []
   const eventGoods = Number(pnl.expenses.event_goods_pence) || 0
-  const otherWriteOff = (Number(pnl.expenses.stock_write_offs_pence) || 0) - eventGoods
+  const otherWriteOff = Number(pnl.expenses.stock_write_offs_pence) || 0
   if (eventGoods) rows.push(['Goods for events', eventGoods])
   if (otherWriteOff) rows.push(['Stock written off', otherWriteOff])
   rows.push(['Card processing fees', pnl.expenses.sumup_fees_pence])
   for (const category of pnl.expenses.by_category || []) {
+    if (category.category === 'event_goods') continue
     rows.push([EXPENSE_LABELS[category.category] || category.category, category.amount_pence])
   }
   if (pnl.expenses.supplier_bill_extras_pence) rows.push(['Carriage and other invoice costs', pnl.expenses.supplier_bill_extras_pence])
@@ -259,7 +260,7 @@ function profitAndLossPage(items, model) {
   }
   amountRow(items, 'Closing stock', -stock.closing_pence, { indent: 12 })
   const eventGoods = Number(pnl.expenses.event_goods_pence) || 0
-  const otherWriteOff = (Number(pnl.expenses.stock_write_offs_pence) || 0) - eventGoods
+  const otherWriteOff = Number(pnl.expenses.stock_write_offs_pence) || 0
   if (eventGoods) amountRow(items, 'Goods for events, charged in expenses', -eventGoods, { indent: 12 })
   if (otherWriteOff) amountRow(items, 'Other stock written off, charged in expenses', -otherWriteOff, { indent: 12 })
   const bridge = (Number(stock.opening_pence) || 0) + (Number(stock.amount_pence) || 0) - (Number(stock.closing_pence) || 0) - eventGoods - otherWriteOff

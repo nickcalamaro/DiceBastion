@@ -178,8 +178,11 @@ CREATE TABLE business_expenses (
   paid_date TEXT,
   paid_from TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  , receipt_key TEXT
+  , import_line_id INTEGER
 );
--- category: 'event_costs' | 'postage' | 'packaging' | 'supplies' | 'software' | 'other'
+-- category: 'event_costs' | 'postage' | 'packaging' | 'supplies' | 'software' | 'other' | 'event_goods'
+-- import_line_id: set when the expense is goods for events from an import line. The supplier bill already carries the payment, so this row is not paid or owed again.
 CREATE TABLE owner_movements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   movement_date TEXT NOT NULL,

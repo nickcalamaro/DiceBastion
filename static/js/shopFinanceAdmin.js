@@ -7,6 +7,7 @@
 (function (global) {
   const EXPENSE_LABELS = {
     event_costs: 'Event costs',
+    event_goods: 'Goods for events',
     postage: 'Postage and delivery',
     packaging: 'Packaging',
     supplies: 'Supplies',
@@ -193,8 +194,8 @@
     return esc((PAID_FROM_LABELS[paidFrom] || 'Paid') + ', ' + formatDate(paidDate));
   }
 
-  function smallBtn(cls, id, label) {
-    return '<button type="button" class="btn btn-secondary ' + cls + '" data-id="' + id + '" style="padding: 0.25rem 0.6rem; font-size: 0.8125rem; margin: 0 0.25rem 0.25rem 0;">' + esc(label) + '</button>';
+  function smallBtn(cls, id, label, extra) {
+    return '<button type="button" class="btn btn-secondary ' + cls + '" data-id="' + id + '"' + (extra ? ' ' + extra : '') + ' style="padding: 0.25rem 0.6rem; font-size: 0.8125rem; margin: 0 0.25rem 0.25rem 0;">' + esc(label) + '</button>';
   }
 
   // -------------------------------------------------------------------------
@@ -238,8 +239,12 @@
     rows += statementRow('Gross profit', d.gross_profit_pence, { total: true, note: 'margin ' + pct(d.gross_margin) });
     rows += statementHeading('Expenses');
     rows += statementRow('SumUp fees', -d.expenses.sumup_fees_pence, { indent: true, note: feeNote });
-    rows += statementRow('Stock written off', -d.expenses.stock_write_offs_pence, { indent: true });
+    const eventGoods = d.expenses.event_goods_pence || 0;
+    const discarded = d.expenses.stock_write_offs_pence || 0;
+    if (eventGoods) rows += statementRow('Goods for events', -eventGoods, { indent: true });
+    if (discarded) rows += statementRow('Stock written off', -discarded, { indent: true });
     d.expenses.by_category.forEach(function (c) {
+      if (c.category === 'event_goods') return;
       rows += statementRow(EXPENSE_LABELS[c.category] || c.category, -c.amount_pence, { indent: true });
     });
     if (d.expenses.supplier_bill_extras_pence) {
@@ -315,8 +320,12 @@
     rows.push(['Cost of goods sold', poundsCsv(-d.cost_of_goods_sold_pence)]);
     rows.push(['Gross profit', poundsCsv(d.gross_profit_pence)]);
     rows.push(['SumUp fees', poundsCsv(-d.expenses.sumup_fees_pence)]);
-    rows.push(['Stock written off', poundsCsv(-d.expenses.stock_write_offs_pence)]);
+    const eventGoods = d.expenses.event_goods_pence || 0;
+    const discarded = d.expenses.stock_write_offs_pence || 0;
+    if (eventGoods) rows.push(['Goods for events', poundsCsv(-eventGoods)]);
+    if (discarded) rows.push(['Stock written off', poundsCsv(-discarded)]);
     d.expenses.by_category.forEach(function (c) {
+      if (c.category === 'event_goods') return;
       rows.push([EXPENSE_LABELS[c.category] || c.category, poundsCsv(-c.amount_pence)]);
     });
     rows.push(['Supplier bill costs not in stock', poundsCsv(-d.expenses.supplier_bill_extras_pence)]);
@@ -659,10 +668,10 @@
           '<td>' + esc(x.description || '') + '</td>' +
           '<td>' + esc(x.event_name || '') + '</td>' +
           '<td style="' + NUM + '">' + esc(gbp(x.amount_pence)) + '</td>' +
-          '<td>' + statusText(x.paid_date, x.paid_from) + '</td>' +
-          '<td style="white-space: nowrap;">' + (x.paid_date ? '' : smallBtn('finance-expense-pay', x.id, 'Mark paid')) +
+          '<td>' + (x.import_line_id ? 'Included in the supplier bill' : statusText(x.paid_date, x.paid_from)) + '</td>' +
+          '<td style="white-space: nowrap;">' + (x.import_line_id ? '' : (x.paid_date ? '' : smallBtn('finance-expense-pay', x.id, 'Mark paid')) +
           (x.receipt_key ? smallBtn('finance-expense-receipt', x.id, 'View receipt') : '') +
-          smallBtn('finance-expense-edit', x.id, 'Edit') + smallBtn('finance-expense-delete', x.id, 'Delete') + '</td></tr>';
+          smallBtn('finance-expense-edit', x.id, 'Edit') + smallBtn('finance-expense-delete', x.id, 'Delete')) + '</td></tr>';
       }).join(''),
       'No expenses recorded yet.'
     );
@@ -1109,7 +1118,7 @@
       table(
         tableHeaders,
         lines.map(function (line) {
-          const how = line.entry_method === 'barcode' ? 'Barcode' : 'Manual';
+          const how = Number(line.event_use) ? 'For events' : (line.entry_method === 'barcode' ? 'Barcode' : 'Manual');
           const foreignCell = foreignSession && line.unit_foreign_minor != null
             ? '<td style="' + NUM + '">' + (Number(line.unit_foreign_minor) / 100).toFixed(2) + '</td>'
             : '';
@@ -1126,7 +1135,7 @@
             '<td style="' + NUM + '">' + (Number(line.quantity) || 0) + '</td>' +
             foreignCell +
             gbpCells +
-            '<td>' + (Number(line.removable) ? smallBtn('finance-session-line-remove', line.id, 'Remove') : '') + '</td></tr>';
+            '<td>' + (Number(line.removable) ? smallBtn('finance-session-line-remove', line.id, 'Remove', Number(line.event_use) ? 'data-event="1"' : '') : '') + '</td></tr>';
         }).join(''),
         'No items yet. Add each product from this receipt.'
       );
@@ -1281,7 +1290,8 @@
         category: body.category || null,
         summary: body.summary || null,
         description: body.description || null,
-        image_url: body.image_url || null
+        image_url: body.image_url || null,
+        disposition: body.disposition || null
       })
       : {
         entry_method: body.entry_method,
@@ -1294,14 +1304,18 @@
         category: body.category || null,
         summary: body.summary || null,
         description: body.description || null,
-        image_url: body.image_url || null
+        image_url: body.image_url || null,
+        disposition: body.disposition || null
       };
+    if (body.disposition === 'event_write_off') payload.disposition = 'event_write_off';
     if (!payload.product_id && payload.price_pence == null && body.needs_price) throw new Error(ERROR_MESSAGES.missing_price);
     const result = await api('/admin/finance/import-sessions/' + openSessionId + '/lines', { method: 'POST', body: payload });
     modal.close();
     const copy = result.filled_copy || [];
     const filledText = copy.indexOf('summary') !== -1 || copy.indexOf('full_description') !== -1;
-    if (result.created_product) {
+    if (result.event_write_off) {
+      setStatus('Added as an event expense. It is charged at cost and is not in shop stock.');
+    } else if (result.created_product) {
       setStatus(filledText
         ? 'New product added to the shop and to this receipt, including the summary and description.'
         : 'New product added to the shop and to this receipt.');
@@ -1343,12 +1357,16 @@
           field('EAN', '<input name="ean" class="modal-form-input" inputmode="numeric">', 'Optional. Stored on a new product so a later import can match it.') +
           field('Category', '<input name="category" class="modal-form-input">') +
         '</div>' +
-        field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input">', 'The price you will charge in the shop. Filled in for a new product, and updates an existing one when you enter it.') +
-        field('Summary', '<textarea name="summary" rows="2" class="modal-form-input"></textarea>') +
-        field('Description', '<textarea name="description" rows="5" class="modal-form-input"></textarea>') +
+        field('Use', '<select name="use" class="modal-form-input session-line-use"><option value="shop">Shop stock</option><option value="event">Used for events</option></select>', 'Used for events is charged as an expense at cost. It does not stay in shop stock.') +
+        '<div class="session-line-shop">' +
+          field('Selling price (£)', '<input type="number" min="0" step="0.01" name="price" class="modal-form-input">', 'The price you will charge in the shop. Filled in for a new product, and updates an existing one when you enter it.') +
+          field('Summary', '<textarea name="summary" rows="2" class="modal-form-input"></textarea>') +
+          field('Description', '<textarea name="description" rows="5" class="modal-form-input"></textarea>') +
+        '</div>' +
         qtyCostFields(),
       onSubmit: async function (fd, m) {
         const isNew = fd.get('new_product') === 'on';
+        const forEvents = fd.get('use') === 'event';
         if (!isNew && !fd.get('product_id')) throw new Error('Choose a product, or mark this as a new product.');
         if (isNew && !String(fd.get('name') || '').trim()) throw new Error(ERROR_MESSAGES.missing_name);
         await submitSessionLine({
@@ -1358,11 +1376,12 @@
           product_id: isNew ? null : fd.get('product_id'),
           ean: isNew ? fd.get('ean') : null,
           name: isNew ? fd.get('name') : null,
-          price: fd.get('price'),
+          price: forEvents ? null : fd.get('price'),
           category: isNew ? fd.get('category') : null,
-          summary: fd.get('summary'),
-          description: fd.get('description'),
-          needs_price: isNew
+          summary: forEvents ? null : fd.get('summary'),
+          description: forEvents ? null : fd.get('description'),
+          needs_price: isNew && !forEvents,
+          disposition: forEvents ? 'event_write_off' : null
         }, m);
       }
     });
@@ -1374,6 +1393,9 @@
       const showNew = e.target.checked;
       modal.querySelector('.session-line-new').style.display = showNew ? '' : 'none';
       modal.querySelector('.session-line-existing').style.display = showNew ? 'none' : '';
+    });
+    modal.querySelector('.session-line-use').addEventListener('change', function (e) {
+      modal.querySelector('.session-line-shop').style.display = e.target.value === 'event' ? 'none' : '';
     });
   }
 
@@ -1421,7 +1443,10 @@
         } else if (btn.classList.contains('finance-session-open')) openSession(id);
         else if (btn.classList.contains('finance-session-receipt')) viewReceipt('import', id).catch(function (err) { setStatus(err.message); });
         else if (btn.classList.contains('finance-session-line-remove')) {
-          confirmDelete('Remove this item from the receipt and from stock?', function () {
+          const message = btn.getAttribute('data-event') === '1'
+            ? 'Remove this event expense from the receipt? Its cost will leave the accounts.'
+            : 'Remove this item from the receipt and from stock?';
+          confirmDelete(message, function () {
             return api('/admin/finance/import-sessions/' + openSessionId + '/lines/' + id, { method: 'DELETE' });
           });
         }

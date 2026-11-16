@@ -203,6 +203,7 @@ export async function ensureLedgerSchema(db) {
     ['stock_lots', 'unit_foreign_minor', 'INTEGER'],
     ['stock_import_sessions', 'receipt_key', 'TEXT'],
     ['business_expenses', 'receipt_key', 'TEXT'],
+    ['business_expenses', 'import_line_id', 'INTEGER'],
     ['transactions', 'payment_method', 'TEXT']
   ]
   for (const [table, col, type] of ledgerAlters) {
@@ -230,6 +231,20 @@ export async function ensureLedgerSchema(db) {
   } catch (_) {
     // Older databases gain the column on the next request.
   }
+  await db.prepare(`
+    INSERT INTO business_expenses (expense_date, category, description, amount_pence, import_line_id)
+    SELECT s.received_date, 'event_goods', COALESCE(p.name, l.name, 'Goods for events'),
+           l.quantity * l.unit_cost_pence, l.id
+    FROM stock_import_lines l
+    JOIN stock_import_sessions s ON s.id = l.session_id
+    LEFT JOIN products p ON p.id = l.product_id
+    WHERE l.quantity * l.unit_cost_pence > 0
+      AND EXISTS (
+        SELECT 1 FROM stock_movements sm
+        WHERE sm.lot_id = l.lot_id AND sm.movement_type = 'write_off' AND sm.reason LIKE 'Event use%'
+      )
+      AND NOT EXISTS (SELECT 1 FROM business_expenses be WHERE be.import_line_id = l.id)
+  `).run()
   schemaReady = true
 }
 
@@ -773,9 +788,22 @@ export async function getImportSession(db, id) {
   const { results } = await db.prepare(`
     SELECT l.*, p.name AS product_name,
       lot.quantity_remaining,
-      CASE WHEN lot.quantity_remaining = l.quantity
-        AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.lot_id = l.lot_id)
-      THEN 1 ELSE 0 END AS removable
+      CASE
+        WHEN lot.quantity_remaining = l.quantity
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.lot_id = l.lot_id)
+        THEN 1
+        WHEN lot.quantity_remaining = 0
+          AND (SELECT COALESCE(SUM(sm.quantity), 0) FROM stock_movements sm
+               WHERE sm.lot_id = l.lot_id AND sm.movement_type = 'write_off' AND sm.reason LIKE 'Event use%') = l.quantity
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.lot_id = l.lot_id
+                          AND NOT (sm.movement_type = 'write_off' AND sm.reason LIKE 'Event use%'))
+        THEN 1
+        ELSE 0
+      END AS removable,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM stock_movements sm
+        WHERE sm.lot_id = l.lot_id AND sm.movement_type = 'write_off' AND sm.reason LIKE 'Event use%'
+      ) THEN 1 ELSE 0 END AS event_use
     FROM stock_import_lines l
     LEFT JOIN products p ON p.id = l.product_id
     LEFT JOIN stock_lots lot ON lot.id = l.lot_id
@@ -932,10 +960,14 @@ export async function addImportLine(db, sessionId, input) {
     writeOff = await writeOffStock(db, {
       product_id: product.id,
       quantity,
-      reason: 'Event use (invoice import)',
+      reason: 'Event use',
       date: session.received_date
     })
     if (writeOff.error) return writeOff
+    await db.prepare(`
+      INSERT INTO business_expenses (expense_date, category, description, amount_pence, import_line_id)
+      VALUES (?, 'event_goods', ?, ?, ?)
+    `).bind(session.received_date, product.name, quantity * unitCost, line.id).run()
   }
 
   return {
@@ -1048,7 +1080,7 @@ export async function addImportLinesBatch(db, sessionId, input) {
   return { success: true, lines: results, foreign_goods_total_minor: foreignTotal, remainder_pence: remainderPence }
 }
 
-/** Removes a line and its stock batch when none of that batch has been sold or written off. */
+/** Removes a line and its stock batch. A line used for events can be removed while its only movement is that event expense. */
 export async function removeImportLine(db, sessionId, lineId) {
   await ensureLedgerSchema(db)
   const line = await db.prepare(`
@@ -1060,14 +1092,29 @@ export async function removeImportLine(db, sessionId, lineId) {
   if (!line) return { error: 'line_not_found' }
 
   const lot = await db.prepare('SELECT quantity_received, quantity_remaining FROM stock_lots WHERE id = ?').bind(line.lot_id).first()
-  if (!lot || Number(lot.quantity_remaining) !== Number(lot.quantity_received)) return { error: 'line_already_used' }
-  const moved = await db.prepare('SELECT COUNT(*) AS c FROM stock_movements WHERE lot_id = ?').bind(line.lot_id).first()
-  if (Number(moved?.c) > 0) return { error: 'line_already_used' }
-
-  const upd = await db.prepare(`
-    UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ? AND stock_quantity >= ?
-  `).bind(line.quantity, new Date().toISOString(), line.product_id, line.quantity).run()
-  if (!Number(upd.meta?.changes ?? 0)) return { error: 'insufficient_stock' }
+  if (!lot) return { error: 'line_already_used' }
+  const eventUse = await db.prepare(`
+    SELECT COALESCE(SUM(quantity), 0) AS qty FROM stock_movements
+    WHERE lot_id = ? AND movement_type = 'write_off' AND reason LIKE 'Event use%'
+  `).bind(line.lot_id).first()
+  const otherMoves = await db.prepare(`
+    SELECT COUNT(*) AS c FROM stock_movements
+    WHERE lot_id = ? AND NOT (movement_type = 'write_off' AND reason LIKE 'Event use%')
+  `).bind(line.lot_id).first()
+  const eventLine = Number(lot.quantity_remaining) === 0
+    && Number(eventUse?.qty) === Number(line.quantity)
+    && Number(otherMoves?.c) === 0
+  if (!eventLine) {
+    if (Number(lot.quantity_remaining) !== Number(lot.quantity_received)) return { error: 'line_already_used' }
+    if (Number(otherMoves?.c) > 0 || Number(eventUse?.qty) > 0) return { error: 'line_already_used' }
+    const upd = await db.prepare(`
+      UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ? AND stock_quantity >= ?
+    `).bind(line.quantity, new Date().toISOString(), line.product_id, line.quantity).run()
+    if (!Number(upd.meta?.changes ?? 0)) return { error: 'insufficient_stock' }
+  } else {
+    await db.prepare('DELETE FROM stock_movements WHERE lot_id = ?').bind(line.lot_id).run()
+  }
+  await db.prepare('DELETE FROM business_expenses WHERE import_line_id = ?').bind(line.id).run()
 
   const cost = Number(line.quantity) * Number(line.unit_cost_pence)
   await db.prepare('DELETE FROM stock_lots WHERE id = ?').bind(line.lot_id).run()
@@ -1413,7 +1460,6 @@ export async function buildPnl(db, from, to) {
   }
   let cogsPence = 0
   let writeOffPence = 0
-  let eventGoodsPence = 0
   let uncostedUnits = 0
   const writeOffs = new Map()
   for (const m of movements) {
@@ -1427,12 +1473,12 @@ export async function buildPnl(db, from, to) {
       }
       cogsPence += cost
     } else if (m.movement_type === 'write_off') {
-      writeOffPence += cost
-      eventGoodsPence += Number(m.event_cost_pence) || 0
+      const eventCost = Number(m.event_cost_pence) || 0
+      writeOffPence += cost - eventCost
       const prev = writeOffs.get(m.product_id) || { product_id: m.product_id, name: m.product_name, units: 0, cost_pence: 0 }
       prev.units += Number(m.quantity) || 0
-      prev.cost_pence += cost
-      writeOffs.set(m.product_id, prev)
+      prev.cost_pence += cost - eventCost
+      if (prev.cost_pence > 0) writeOffs.set(m.product_id, prev)
     }
   }
 
@@ -1478,6 +1524,7 @@ export async function buildPnl(db, from, to) {
     if (e.event_id && isPaidTicketEvent(names.get(Number(e.event_id)))) eventRow(e.event_id).cost_pence += amt
   }
   const expensesPence = expenses.reduce((s, e) => s + (Number(e.amount_pence) || 0), 0)
+  const eventGoodsPence = expenses.reduce((s, e) => s + (e.category === 'event_goods' ? Number(e.amount_pence) || 0 : 0), 0)
   const billExtrasPence = billExtras.reduce((s, b) => s + b.extra_pence, 0)
 
   const revenuePence = productSalesPence + shippingPence + ticketPence
@@ -1621,18 +1668,20 @@ export async function buildBalanceSheet(db, asOf) {
 
   const paidTotal = async (table, dateCol) => {
     const amountCol = table === 'supplier_bills' ? 'total_pence' : 'amount_pence'
+    const fundedByBill = table === 'business_expenses' ? ' AND import_line_id IS NULL' : ''
     const row = await db.prepare(`
       SELECT COALESCE(SUM(${amountCol}), 0) AS pence
       FROM ${table}
-      WHERE ${dateCol} <= ? AND paid_date IS NOT NULL AND paid_date <= ?
+      WHERE ${dateCol} <= ? AND paid_date IS NOT NULL AND paid_date <= ?${fundedByBill}
     `).bind(asOf, asOf).first()
     return Number(row?.pence) || 0
   }
   const unpaid = async (table, dateCol) => {
+    const fundedByBill = table === 'business_expenses' ? ' AND import_line_id IS NULL' : ''
     const row = await db.prepare(`
       SELECT COALESCE(SUM(${table === 'supplier_bills' ? 'total_pence' : 'amount_pence'}), 0) AS pence
       FROM ${table}
-      WHERE ${dateCol} <= ? AND (paid_date IS NULL OR paid_date > ?)
+      WHERE ${dateCol} <= ? AND (paid_date IS NULL OR paid_date > ?)${fundedByBill}
     `).bind(asOf, asOf).first()
     return Number(row?.pence) || 0
   }

@@ -10,6 +10,7 @@ const RECEIPT_BUDGET = 24 * 1024 * 1024
 
 const EXPENSE_LABELS = {
   event_costs: 'Event costs',
+  event_goods: 'Goods for events',
   postage: 'Postage and delivery',
   packaging: 'Packaging',
   supplies: 'Supplies',
@@ -53,8 +54,12 @@ function pnlCsv(pnl) {
     ['Gross profit', pounds(pnl.gross_profit_pence)]
   ]
   rows.push(['SumUp fees', pounds(-pnl.expenses.sumup_fees_pence)])
-  rows.push(['Stock written off', pounds(-pnl.expenses.stock_write_offs_pence)])
+  const eventGoods = Number(pnl.expenses.event_goods_pence) || 0
+  const otherWriteOff = Number(pnl.expenses.stock_write_offs_pence) || 0
+  if (eventGoods) rows.push(['Goods for events', pounds(-eventGoods)])
+  if (otherWriteOff) rows.push(['Stock written off', pounds(-otherWriteOff)])
   for (const category of pnl.expenses.by_category) {
+    if (category.category === 'event_goods') continue
     rows.push([EXPENSE_LABELS[category.category] || category.category, pounds(-category.amount_pence)])
   }
   rows.push(['Supplier bill costs not in stock', pounds(-pnl.expenses.supplier_bill_extras_pence)])
@@ -113,7 +118,7 @@ function readme(from, to, omitted) {
     'Each import line names the receipt file in the receipts folder.',
     'Each expense names its receipt file when one was saved.',
     'accounts.pdf is the profit and loss account, the balance sheet, and an internal breakdown.',
-    'Invoices are a business cost whichever account paid them. Goods bought for events and written off are included in expenses.',
+    'Invoices are a business cost whichever account paid them. Goods bought for events are charged as an expense, under Goods for events.',
     'stock-from-bundles.csv lists bundles bought on one invoice line and split into the products sold, with what is still on hand at cost.'
   ]
   if (omitted.length) {
