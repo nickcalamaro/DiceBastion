@@ -114,7 +114,7 @@ function readme(from, to, omitted) {
     '',
     'Profit and loss counts product sales only where a cost was recorded through a stock import.',
     'Sales of older stock with no cost are listed as excluded. They are not income and not profit.',
-    'Ticket sales and event costs on or after the books start date are included.',
+    'Ticket income is counted on the day the event takes place. Event costs are counted on the date they were recorded. Both are included from the books start date.',
     'Each import line names the receipt file in the receipts folder.',
     'Each expense names its receipt file when one was saved.',
     'accounts.pdf is the profit and loss account, the balance sheet, and an internal breakdown.',

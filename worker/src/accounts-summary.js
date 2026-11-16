@@ -243,7 +243,7 @@ function profitAndLossPage(items, model) {
   heading(items, 'Dice Bastion', 16, 18)
   line(items, 'Profit and loss account', { size: 13, bold: true, gap: 16 })
   line(items, `For the period ${longDate(pnl.from)} to ${longDate(pnl.to)}`, { gap: 12 })
-  line(items, 'Shop goods and event tickets. Memberships, donations and drinks are not part of these accounts.', { gap: 16 })
+  line(items, 'Shop goods and event tickets. Event ticket income is counted on the day the event takes place. Memberships, donations and drinks are not part of these accounts.', { gap: 16 })
   items.push({ text: '£', label: '', amount: '£', bold: true, size: 10, gap: 16 })
 
   heading(items, 'Turnover', 12, 16)
@@ -293,7 +293,7 @@ function balanceSheetPage(items, model) {
   amountRow(items, 'Stock', assets.stock_at_cost_pence, { indent: 12 })
   amountRow(items, 'Money generated', assets.money_generated_pence, { indent: 12 })
   amountRow(items, 'Total assets', assets.total_pence, { bold: true, rule: true, gap: 18 })
-  line(items, 'Money generated is sales and tickets after fees and store credit, less bills and expenses paid. It can be negative.', { size: 9, gap: 14 })
+  line(items, 'Money generated is shop sales, and event tickets on the day the event takes place, after fees and store credit, less bills and expenses paid. It can be negative.', { size: 9, gap: 14 })
 
   heading(items, 'Amounts owed', 12, 16)
   amountRow(items, 'Unpaid supplier bills', liabilities.unpaid_supplier_bills_pence, { indent: 12 })

@@ -499,7 +499,7 @@
     el('finance-bs-body').innerHTML =
       '<p class="admin-text-small admin-text-muted">As of ' + esc(formatDate(d.as_of)) + '.</p>' +
       '<div class="table-wrapper admin-mb-1"><div style="overflow-x: auto;"><table><tbody>' + rows + '</tbody></table></div></div>' +
-      '<p class="admin-text-small admin-text-muted">Money generated is sales and ticket money received, after fees and store credit, less every bill and expense that has been paid. It can be negative. Net assets is stock plus that figure, less unpaid bills, unpaid expenses and store credit.</p>' +
+      '<p class="admin-text-small admin-text-muted">Money generated is shop sales, and event ticket money on the day the event takes place, after fees and store credit, less every bill and expense that has been paid. It can be negative. Net assets is stock plus that figure, less unpaid bills, unpaid expenses and store credit.</p>' +
       bundleStockHtml(bundles);
   }
 

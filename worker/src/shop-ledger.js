@@ -1189,13 +1189,10 @@ function poundsToPence(value) {
   return Number.isFinite(n) ? Math.round(n * 100) : 0
 }
 
-function eventIdFromOrderRef(ref) {
-  const m = String(ref || '').match(/^(?:EVT|BUNDLE)-(\d+)-/)
-  return m ? Number(m[1]) : null
-}
-
 /**
  * Collects income between from and to (inclusive, YYYY-MM-DD), never earlier than booksStart.
+ * Shop sales use the day they were paid. Event tickets use the day the event takes place,
+ * so a ticket bought in advance is income in the event's month.
  * Returns shop order rows (tracked share only), ticket rows, and untracked-line counts.
  */
 async function collectIncome(db, from, to, booksStart) {
@@ -1260,27 +1257,29 @@ async function collectIncome(db, from, to, booksStart) {
     })
   }
 
-  const { results: paidEventRows } = await db.prepare(
-    `SELECT event_id FROM events WHERE ${paidTicketEventSql()}`
-  ).all()
-  const paidEventIds = new Set((paidEventRows || []).map(r => Number(r.event_id)))
-
   const { results: txRows } = await db.prepare(`
     SELECT tr.id, tr.transaction_type, tr.order_ref, tr.amount, tr.created_at, tr.sumup_transaction_code,
            tr.payment_method, m.plan,
-           IFNULL(tr.credit_applied_pence, 0) AS credit_applied_pence
+           IFNULL(tr.credit_applied_pence, 0) AS credit_applied_pence,
+           e.event_id
     FROM transactions tr
     LEFT JOIN memberships m ON tr.transaction_type = 'event_membership_bundle' AND m.order_ref = tr.order_ref
+    JOIN events e ON e.event_id = CAST(
+      CASE
+        WHEN tr.order_ref GLOB 'EVT-[0-9]*' THEN substr(tr.order_ref, 5, instr(substr(tr.order_ref, 5), '-') - 1)
+        WHEN tr.order_ref GLOB 'BUNDLE-[0-9]*' THEN substr(tr.order_ref, 8, instr(substr(tr.order_ref, 8), '-') - 1)
+      END AS INTEGER
+    )
     WHERE tr.transaction_type IN ('ticket', 'event_membership_bundle')
       AND UPPER(COALESCE(tr.payment_status, '')) = 'PAID'
-      AND strftime('%Y-%m-%d', tr.created_at) >= ?
-      AND strftime('%Y-%m-%d', tr.created_at) <= ?
+      AND ${paidTicketEventSql('e')}
+      AND substr(e.event_datetime, 1, 10) >= ?
+      AND substr(e.event_datetime, 1, 10) <= ?
   `).bind(start, to).all()
 
   const tickets = []
   for (const t of txRows || []) {
-    const eventId = eventIdFromOrderRef(t.order_ref)
-    if (!paidEventIds.has(eventId)) continue
+    const eventId = Number(t.event_id)
     const charged = poundsToPence(t.amount)
     let ticketPence = charged
     if (t.transaction_type === 'event_membership_bundle') {
@@ -1581,9 +1580,9 @@ export async function buildPnl(db, from, to) {
 }
 
 /**
- * Balance sheet as of a date. Money generated is sales and ticket receipts after
- * fees and store credit, less bills and expenses paid. It is not a bank balance,
- * and it can be negative. Capital is left for later.
+ * Balance sheet as of a date. Money generated is sales, and ticket money on the
+ * day the event takes place, after fees and store credit, less bills and expenses
+ * paid. It is not a bank balance, and it can be negative. Capital is left for later.
  * Goods written off for events are a cost in the period they are written off.
  */
 export function dayBefore(iso) {

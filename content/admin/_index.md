@@ -16,7 +16,7 @@ showDate: false
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20260408b"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261116b"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261116c"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
@@ -1212,7 +1212,7 @@ Show delivered
 <div class="admin-flex-between admin-mb-2">
 <h2 id="admin-section-finance" class="admin-section-heading admin-m-0">Shop and events accounts <a href="#finance" class="admin-permalink" aria-label="Link to shop and events accounts">#</a></h2>
 </div>
-<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out and shown as excluded. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first. Download accounts pack uses these dates and includes the statements, each import line, expenses, events, the receipt files, and a summary PDF. Download summary PDF is that report on its own.</p>
+<p class="admin-text-muted admin-mb-1">Profit and loss and balance sheet for shop products and event tickets. Event ticket income is counted on the day the event takes place. Shop sales count only for products with a recorded cost (added with a cost, or restocked with Receive stock); older stock without a cost is left out and shown as excluded. Drinks, memberships and donations stay in Club accounts. Cost of goods sold uses the oldest stock batch first. Download accounts pack uses these dates and includes the statements, each import line, expenses, events, the receipt files, and a summary PDF. Download summary PDF is that report on its own.</p>
 <div class="admin-flex admin-mb-2" style="flex-wrap: wrap; align-items: end;">
 <div>
 <label class="form-label" for="finance-books-start">Books start date</label>
