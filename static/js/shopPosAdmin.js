@@ -212,6 +212,52 @@
     return !!(el && el.checked);
   }
 
+  function payLaterOnlyChecked() {
+    const el = document.getElementById('orders-pay-later-only');
+    return !!(el && el.checked);
+  }
+
+  function usableCustomerName(value) {
+    const name = String(value || '').trim().replace(/\s+/g, ' ');
+    if (name.length < 2 || name.length > 200) return '';
+    if (/^walk[\s-]?in$/i.test(name)) return '';
+    return name;
+  }
+
+  function askCustomerName(prefill) {
+    return new Promise(function (resolve) {
+      let settled = false;
+      const finish = function (value) {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      if (!global.Modal || typeof global.Modal.form !== 'function') {
+        finish(global.prompt('Customer name for this pay later order', prefill || ''));
+        return;
+      }
+      const modal = global.Modal.form({
+        title: 'Customer name',
+        size: 'sm',
+        submitText: 'Mark pay later',
+        formContent:
+          '<p class="admin-text-muted">Pay later orders need the customer\'s name.</p>' +
+          '<label class="form-label" for="pay-later-name">Name</label>' +
+          '<input id="pay-later-name" name="name" class="form-input" autocomplete="name" value="' + escapeHtml(prefill || '') + '">',
+        validate: function (form) {
+          const input = form.querySelector('[name="name"]');
+          if (!usableCustomerName(input && input.value)) return 'Enter the customer\'s name.';
+          return null;
+        },
+        onSubmit: function (formData) {
+          finish(String(formData.get('name') || '').trim());
+          modal.close();
+        }
+      });
+      modal.options.onClose = function () { finish(null); };
+    });
+  }
+
   function deliveryLabel(status) {
     return String(status || 'undelivered').toLowerCase() === 'delivered' ? 'Delivered' : 'Undelivered';
   }
@@ -220,9 +266,11 @@
     const list = document.getElementById('orders-list');
     if (!list) return;
     if (!orders.length) {
-      list.innerHTML = showDeliveredChecked()
-        ? '<p class="admin-text-muted">No shop orders found.</p>'
-        : '<p class="admin-text-muted">No undelivered shop orders.</p>';
+      let empty = 'No undelivered shop orders.';
+      if (payLaterOnlyChecked() && showDeliveredChecked()) empty = 'No pay later shop orders.';
+      else if (payLaterOnlyChecked()) empty = 'No undelivered pay later orders.';
+      else if (showDeliveredChecked()) empty = 'No shop orders found.';
+      list.innerHTML = '<p class="admin-text-muted">' + empty + '</p>';
       return;
     }
     list.innerHTML = (
@@ -235,20 +283,26 @@
           return escapeHtml(it.product_name) + ' ×' + escapeHtml(it.quantity);
         }).join('; ') || '—';
         const isDelivered = String(o.delivery_status || '').toLowerCase() === 'delivered';
-        const action = isDelivered
+        const isPayLater = Number(o.pay_later) === 1;
+        const deliveryAction = isDelivered
           ? '<button type="button" class="btn btn-secondary pos-mark-undelivered" data-order-id="' + o.id + '">Mark undelivered</button>'
           : '<button type="button" class="btn btn-primary pos-mark-delivered" data-order-id="' + o.id + '">Mark delivered</button>';
+        const payLaterAction = isPayLater
+          ? '<button type="button" class="btn btn-secondary pos-clear-pay-later" data-order-id="' + o.id + '">Clear pay later</button>'
+          : '<button type="button" class="btn btn-secondary pos-mark-pay-later" data-order-id="' + o.id + '" data-customer-name="' + escapeHtml(o.name || '') + '">Pay later</button>';
+        const method = escapeHtml(methodLabel(o.payment_method, o.sale_channel)) +
+          (isPayLater ? '<br><span class="admin-text-muted admin-text-small">Pay later</span>' : '');
         return (
           '<tr>' +
           '<td>' + escapeHtml(formatWhen(o.completed_at || o.created_at)) + '</td>' +
           '<td><code>' + escapeHtml(o.order_number) + '</code></td>' +
           '<td>' + escapeHtml(o.name || '') + '<br><span class="admin-text-muted admin-text-small">' + escapeHtml(o.email || '') + '</span></td>' +
           '<td>' + escapeHtml(channelLabel(o.sale_channel)) + '</td>' +
-          '<td>' + escapeHtml(methodLabel(o.payment_method, o.sale_channel)) + '</td>' +
+          '<td>' + method + '</td>' +
           '<td class="admin-text-small">' + items + '</td>' +
           '<td style="text-align:right;">' + formatGbp(o.total) + '</td>' +
           '<td>' + escapeHtml(deliveryLabel(o.delivery_status)) + '</td>' +
-          '<td>' + action + '</td>' +
+          '<td><div class="admin-flex" style="flex-wrap: wrap; gap: 0.4rem;">' + deliveryAction + payLaterAction + '</div></td>' +
           '</tr>'
         );
       }).join('') +
@@ -260,6 +314,13 @@
         const id = btn.getAttribute('data-order-id');
         const next = btn.classList.contains('pos-mark-delivered') ? 'delivered' : 'undelivered';
         markDeliveryStatus(apiBase, sessionToken, id, next);
+      });
+    });
+    list.querySelectorAll('.pos-mark-pay-later, .pos-clear-pay-later').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const id = btn.getAttribute('data-order-id');
+        const enable = btn.classList.contains('pos-mark-pay-later');
+        markPayLater(apiBase, sessionToken, id, enable, btn.getAttribute('data-customer-name') || '');
       });
     });
   }
@@ -288,11 +349,43 @@
     }
   }
 
+  async function markPayLater(apiBase, sessionToken, orderId, enable, currentName) {
+    try {
+      const body = { pay_later: enable };
+      if (enable && !usableCustomerName(currentName)) {
+        const entered = await askCustomerName('');
+        const name = usableCustomerName(entered);
+        if (!name) return;
+        body.name = name;
+      }
+      const res = await fetch(apiBase + '/admin/orders/' + encodeURIComponent(orderId) + '/pay-later', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.message || data.error || res.statusText);
+      await loadOrders(apiBase, sessionToken);
+    } catch (err) {
+      const list = document.getElementById('orders-list');
+      if (list) {
+        const note = document.createElement('p');
+        note.className = 'admin-text-muted';
+        note.textContent = 'Could not update pay later: ' + String(err.message || err);
+        list.prepend(note);
+      }
+    }
+  }
+
   async function loadOrders(apiBase, sessionToken) {
     const list = document.getElementById('orders-list');
     if (list) list.innerHTML = '<p class="admin-text-muted">Loading orders…</p>';
     const qs = new URLSearchParams({ limit: '50' });
     if (showDeliveredChecked()) qs.set('include_delivered', '1');
+    if (payLaterOnlyChecked()) qs.set('pay_later', '1');
     const res = await fetch(apiBase + '/admin/orders?' + qs.toString(), {
       headers: { 'X-Session-Token': sessionToken }
     });
@@ -383,6 +476,7 @@
     const addBtn = document.getElementById('pos-add-line-btn');
     const submitBtn = document.getElementById('pos-submit-btn');
     const showDelivered = document.getElementById('orders-show-delivered');
+    const payLaterOnly = document.getElementById('orders-pay-later-only');
     if (addBtn && !addBtn._posBound) {
       addBtn._posBound = true;
       addBtn.addEventListener('click', function () { addLine(); });
@@ -391,14 +485,19 @@
       submitBtn._posBound = true;
       submitBtn.addEventListener('click', function () { submitSale(apiBase, sessionToken); });
     }
+    function reloadOrders() {
+      loadOrders(apiBase, sessionToken).catch(function () {
+        const list = document.getElementById('orders-list');
+        if (list) list.innerHTML = '<p class="admin-text-muted">Could not load orders.</p>';
+      });
+    }
     if (showDelivered && !showDelivered._posBound) {
       showDelivered._posBound = true;
-      showDelivered.addEventListener('change', function () {
-        loadOrders(apiBase, sessionToken).catch(function () {
-          const list = document.getElementById('orders-list');
-          if (list) list.innerHTML = '<p class="admin-text-muted">Could not load orders.</p>';
-        });
-      });
+      showDelivered.addEventListener('change', reloadOrders);
+    }
+    if (payLaterOnly && !payLaterOnly._posBound) {
+      payLaterOnly._posBound = true;
+      payLaterOnly.addEventListener('change', reloadOrders);
     }
     setStatus('Loading products…');
     try {

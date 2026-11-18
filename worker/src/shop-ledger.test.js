@@ -6,10 +6,24 @@ import {
   normalizeInvoiceCurrency,
   isForeignInvoiceCurrency,
   importLineProblem,
-  cleanBundle
+  cleanBundle,
+  usableCustomerName
 } from './shop-ledger.js'
 import { unzipStore, zipStore } from './zip-store.js'
 import { accountsPdfLines, buildAccountsPdf, classifyProductCategory, summariseEvents } from './accounts-summary.js'
+
+describe('usableCustomerName', () => {
+  it('rejects a blank or walk-in name', () => {
+    expect(usableCustomerName('')).toBe(null)
+    expect(usableCustomerName('  ')).toBe(null)
+    expect(usableCustomerName('Walk-in')).toBe(null)
+    expect(usableCustomerName('walk in')).toBe(null)
+  })
+
+  it('keeps a real customer name', () => {
+    expect(usableCustomerName('  Ada Lovelace  ')).toBe('Ada Lovelace')
+  })
+})
 
 describe('importLineProblem', () => {
   it('flags a foreign line without a unit cost', () => {

@@ -54,6 +54,8 @@ import {
 } from './buyback-cards.js'
 import {
   ensureLedgerSchema,
+  ensureOrderPayLaterColumns,
+  usableCustomerName,
   recordOrderCosts,
   receiveStock,
   writeOffStock,
@@ -10671,10 +10673,13 @@ app.get('/admin/orders', requireAdmin, async (c) => {
   try {
     const limitRaw = parseInt(c.req.query('limit') || '50', 10)
     const limit = Math.min(200, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50))
+    await ensureOrderPayLaterColumns(c.env.DB)
     const includeDelivered = ['1', 'true', 'yes'].includes(String(c.req.query('include_delivered') || '').toLowerCase())
+    const payLaterOnly = ['1', 'true', 'yes'].includes(String(c.req.query('pay_later') || '').toLowerCase())
     const deliveryFilter = includeDelivered
       ? ''
       : `AND LOWER(COALESCE(delivery_status, 'undelivered')) = 'undelivered'`
+    const payLaterFilter = payLaterOnly ? `AND IFNULL(o.pay_later, 0) = 1` : ''
 
     // Exclude /drinks walk-ins (Walk-in + not POS). Include online shop + admin POS.
     const shopOnlySql = `
@@ -10690,17 +10695,19 @@ app.get('/admin/orders', requireAdmin, async (c) => {
       SELECT o.id, o.order_number, o.email, o.name, o.status, o.subtotal, o.tax, o.shipping, o.total, o.currency,
              o.payment_status, o.payment_method, o.sale_channel, o.discount_pence, o.promo_code_applied,
              o.notes, o.created_at, o.updated_at, o.completed_at,
-             COALESCE(o.delivery_status, 'undelivered') AS delivery_status
+             COALESCE(o.delivery_status, 'undelivered') AS delivery_status,
+             IFNULL(o.pay_later, 0) AS pay_later, o.delivered_at
       FROM orders o
       WHERE ${shopOnlySql}
         AND ${paidOnlySql}
         ${deliveryFilter}
+        ${payLaterFilter}
       ORDER BY datetime(COALESCE(o.completed_at, o.created_at)) DESC
       LIMIT ?
     `).bind(limit).all()
     const orders = ordersResult.results || []
     if (!orders.length) {
-      return c.json({ orders: [], include_delivered: includeDelivered })
+      return c.json({ orders: [], include_delivered: includeDelivered, pay_later_only: payLaterOnly })
     }
 
     const ids = orders.map(o => o.id)
@@ -10720,6 +10727,7 @@ app.get('/admin/orders', requireAdmin, async (c) => {
 
     return c.json({
       include_delivered: includeDelivered,
+      pay_later_only: payLaterOnly,
       orders: orders.map(o => ({
         ...o,
         items: byOrder.get(o.id) || []
@@ -10742,6 +10750,7 @@ app.post('/admin/orders/:id/delivery-status', requireAdmin, async (c) => {
       return c.json({ error: 'invalid_delivery_status' }, 400)
     }
 
+    await ensureOrderPayLaterColumns(c.env.DB)
     const order = await c.env.DB.prepare('SELECT id, sale_channel, name, email FROM orders WHERE id = ?').bind(id).first()
     if (!order) return c.json({ error: 'not_found' }, 404)
     const isDrinks =
@@ -10753,8 +10762,12 @@ app.post('/admin/orders/:id/delivery-status', requireAdmin, async (c) => {
 
     const now = toIso(new Date())
     await c.env.DB.prepare(`
-      UPDATE orders SET delivery_status = ?, updated_at = ? WHERE id = ?
-    `).bind(status, now, id).run()
+      UPDATE orders
+      SET delivery_status = ?,
+          delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE NULL END,
+          updated_at = ?
+      WHERE id = ?
+    `).bind(status, status, now, now, id).run()
 
     const updated = await c.env.DB.prepare(`
       SELECT id, order_number, delivery_status, updated_at FROM orders WHERE id = ?
@@ -10762,6 +10775,77 @@ app.post('/admin/orders/:id/delivery-status', requireAdmin, async (c) => {
     return c.json({ success: true, order: updated })
   } catch (e) {
     console.error('[admin/orders/delivery-status] Error:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+/** Mark a paid shop order as pay later, or clear that flag. Stock is unchanged. */
+app.post('/admin/orders/:id/pay-later', requireAdmin, async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10)
+    if (!id) return c.json({ error: 'invalid_id' }, 400)
+    const body = await c.req.json().catch(() => ({}))
+    const enable = body.pay_later === true || body.pay_later === 1 || String(body.pay_later || '').toLowerCase() === 'true'
+    const disable = body.pay_later === false || body.pay_later === 0 || String(body.pay_later || '').toLowerCase() === 'false'
+    if (!enable && !disable) {
+      return c.json({ error: 'invalid_pay_later', message: 'pay_later must be true or false' }, 400)
+    }
+
+    await ensureOrderPayLaterColumns(c.env.DB)
+    const order = await c.env.DB.prepare(`
+      SELECT id, sale_channel, name, email, payment_status, delivery_status, delivered_at, completed_at
+      FROM orders WHERE id = ?
+    `).bind(id).first()
+    if (!order) return c.json({ error: 'not_found' }, 404)
+    const isDrinks =
+      (order.name === 'Walk-in' || String(order.email || '').toLowerCase() === 'walk-in') &&
+      String(order.sale_channel || '') !== 'pos'
+    if (isDrinks) {
+      return c.json({ error: 'not_shop_order', message: 'Drinks orders are not managed here' }, 400)
+    }
+    if (String(order.payment_status || '').toUpperCase() !== 'PAID') {
+      return c.json({ error: 'not_paid', message: 'Only paid orders can be marked pay later' }, 400)
+    }
+
+    const now = toIso(new Date())
+    if (!enable) {
+      await c.env.DB.prepare(`
+        UPDATE orders SET pay_later = 0, updated_at = ? WHERE id = ?
+      `).bind(now, id).run()
+    } else {
+      const sentName = body.name != null && String(body.name).trim() !== ''
+      const provided = sentName ? usableCustomerName(body.name) : null
+      if (sentName && !provided) {
+        return c.json({
+          error: 'invalid_customer_name',
+          message: 'Enter the customer name. Walk-in is not enough for a pay later order.'
+        }, 400)
+      }
+      const name = provided || usableCustomerName(order.name)
+      if (!name) {
+        return c.json({
+          error: 'customer_name_required',
+          message: 'Enter the customer name before marking this order pay later.'
+        }, 400)
+      }
+      const alreadyDelivered = String(order.delivery_status || '').toLowerCase() === 'delivered'
+      const deliveredAt = alreadyDelivered
+        ? (order.delivered_at || order.completed_at || now)
+        : null
+      await c.env.DB.prepare(`
+        UPDATE orders
+        SET pay_later = 1, name = ?, delivered_at = ?, updated_at = ?
+        WHERE id = ?
+      `).bind(name, deliveredAt, now, id).run()
+    }
+
+    const updated = await c.env.DB.prepare(`
+      SELECT id, order_number, name, IFNULL(pay_later, 0) AS pay_later, delivery_status, delivered_at, updated_at
+      FROM orders WHERE id = ?
+    `).bind(id).first()
+    return c.json({ success: true, order: updated })
+  } catch (e) {
+    console.error('[admin/orders/pay-later] Error:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })

@@ -256,11 +256,14 @@ CREATE TABLE orders (
         completed_at TEXT
       , promo_code_id INTEGER, discount_pence INTEGER DEFAULT 0, promo_code_applied TEXT
       , credit_applied_pence INTEGER NOT NULL DEFAULT 0, card_charged_pence INTEGER
-      , payment_method TEXT, sale_channel TEXT, delivery_status TEXT DEFAULT 'undelivered');
+      , payment_method TEXT, sale_channel TEXT, delivery_status TEXT DEFAULT 'undelivered'
+      , pay_later INTEGER DEFAULT 0, delivered_at TEXT);
 -- credit_applied_pence / card_charged_pence: store-credit split for shop orders (pence).
 -- payment_method: 'sumup' | 'cash' | 'bank_transfer' | 'store_credit' (card_charged_pence = 0)
 -- sale_channel: 'online' (shop website) | 'pos' (admin manual sale); drinks walk-ins leave NULL
 -- delivery_status: 'undelivered' (default for new shop orders) | 'delivered'
+-- pay_later: 1 = paid order held out of shop accounts until delivered. Stock is still taken at payment.
+-- delivered_at: set when marked delivered; pay later sales are recognised on this date.
 CREATE TABLE sumup_payouts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sumup_id INTEGER NOT NULL UNIQUE,

@@ -14,7 +14,7 @@ showDate: false
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
-<script src="/js/shopPosAdmin.js?v=20260408b"></script>
+<script src="/js/shopPosAdmin.js?v=20261118a"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261116c"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
@@ -1109,11 +1109,15 @@ Existing member
 <div class="admin-flex-between admin-mb-1" style="flex-wrap: wrap; align-items: center; gap: 0.75rem;">
 <h3 class="admin-section-heading admin-m-0">Shop orders</h3>
 <label class="admin-text-small" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+<input type="checkbox" id="orders-pay-later-only">
+Pay later only
+</label>
+<label class="admin-text-small" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
 <input type="checkbox" id="orders-show-delivered">
 Show delivered
 </label>
 </div>
-<p class="admin-text-muted admin-mb-1">Undelivered, paid shop orders only by default (online + POS). Failed or abandoned checkouts are hidden. Drinks sales are not listed here.</p>
+<p class="admin-text-muted admin-mb-1">Undelivered, paid shop orders only by default (online + POS). Failed or abandoned checkouts are hidden. Drinks sales are not listed here. Pay later still takes the stock when the order is paid, and stays out of the shop accounts until marked delivered. A customer name is required.</p>
 <div id="orders-list"></div>
 </div>
 

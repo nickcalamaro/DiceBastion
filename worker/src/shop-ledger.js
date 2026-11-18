@@ -178,9 +178,48 @@ const SCHEMA_STATEMENTS = [
 ]
 
 let schemaReady = false
+let payLaterColumnsReady = false
+
+/**
+ * Pay later is a fulfilment flag, not a second payment. Stock is already taken.
+ * The sale stays out of the accounts until the order is marked delivered.
+ */
+export async function ensureOrderPayLaterColumns(db) {
+  if (payLaterColumnsReady) return
+  try {
+    await db.prepare('ALTER TABLE orders ADD COLUMN pay_later INTEGER DEFAULT 0').run()
+  } catch (_) {
+    /* column exists */
+  }
+  try {
+    await db.prepare('ALTER TABLE orders ADD COLUMN delivered_at TEXT').run()
+  } catch (_) {
+    /* column exists */
+  }
+  payLaterColumnsReady = true
+}
+
+/** Name we can chase for payment. Walk-in is not enough. */
+export function usableCustomerName(value) {
+  const name = String(value || '').trim().replace(/\s+/g, ' ')
+  if (name.length < 2 || name.length > 200) return null
+  if (/^walk[\s-]?in$/i.test(name)) return null
+  return name
+}
+
+/** When a shop order enters the accounts. Pay later waits for delivery. */
+export function orderRecognisedAtSql(alias = 'o') {
+  return `CASE WHEN IFNULL(${alias}.pay_later, 0) = 1 THEN ${alias}.delivered_at ELSE COALESCE(${alias}.completed_at, ${alias}.created_at) END`
+}
+
+/** When a stock movement enters the accounts. Pay-later sales wait for delivery. */
+export function movementRecognisedAtSql(movementAlias = 'sm', orderAlias = 'o') {
+  return `CASE WHEN ${movementAlias}.order_id IS NOT NULL AND IFNULL(${orderAlias}.pay_later, 0) = 1 THEN ${orderAlias}.delivered_at ELSE ${movementAlias}.occurred_at END`
+}
 
 /** Creates ledger tables if missing (once per isolate) and seeds books_start_date. */
 export async function ensureLedgerSchema(db) {
+  await ensureOrderPayLaterColumns(db)
   if (schemaReady) return
   try {
     await db.prepare('ALTER TABLE products ADD COLUMN cost_tracked INTEGER DEFAULT 0').run()
@@ -497,7 +536,9 @@ export async function stockBundles(db, asOf) {
     SELECT il.session_id, s.supplier, s.received_date, il.bundle_name, il.bundle_ean, il.bundle_quantity,
            COALESCE(p.name, il.name) AS item_name, il.ean, il.quantity, il.unit_cost_pence,
            COALESCE((SELECT SUM(m.quantity) FROM stock_movements m
-                     WHERE m.lot_id = il.lot_id AND m.movement_type = 'sale' AND substr(m.occurred_at, 1, 10) <= ?), 0) AS sold,
+                     LEFT JOIN orders o ON o.id = m.order_id
+                     WHERE m.lot_id = il.lot_id AND m.movement_type = 'sale'
+                       AND substr(${movementRecognisedAtSql('m', 'o')}, 1, 10) <= ?), 0) AS sold,
            COALESCE((SELECT SUM(m.quantity) FROM stock_movements m
                      WHERE m.lot_id = il.lot_id AND m.movement_type <> 'sale' AND substr(m.occurred_at, 1, 10) <= ?), 0) AS written_off
     FROM stock_import_lines il
@@ -1191,7 +1232,8 @@ function poundsToPence(value) {
 
 /**
  * Collects income between from and to (inclusive, YYYY-MM-DD), never earlier than booksStart.
- * Shop sales use the day they were paid. Event tickets use the day the event takes place,
+ * Shop sales use the day they were paid. Pay later sales use the day they are marked
+ * delivered, and are left out until then. Event tickets use the day the event takes place,
  * so a ticket bought in advance is income in the event's month.
  * Returns shop order rows (tracked share only), ticket rows, and untracked-line counts.
  */
@@ -1200,18 +1242,20 @@ async function collectIncome(db, from, to, booksStart) {
   const empty = { shopOrders: [], tickets: [], untracked: { lines: 0, pence: 0 } }
   if (start > to) return empty
 
+  const recognisedAt = orderRecognisedAtSql('o')
   const { results: itemRows } = await db.prepare(`
     SELECT o.id AS order_id, o.order_number, o.total, IFNULL(o.shipping, 0) AS shipping,
            o.payment_method, o.sale_channel, IFNULL(o.credit_applied_pence, 0) AS credit_applied_pence,
-           COALESCE(o.completed_at, o.created_at) AS sold_at,
+           ${recognisedAt} AS sold_at,
            oi.id AS item_id, oi.product_id, oi.product_name, oi.quantity, oi.subtotal,
            EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.order_item_id = oi.id AND sm.movement_type = 'sale') AS tracked
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
     WHERE UPPER(COALESCE(o.payment_status, '')) = 'PAID'
       AND NOT ((o.name = 'Walk-in' OR lower(o.email) = 'walk-in') AND IFNULL(o.sale_channel, '') != 'pos')
-      AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) >= ?
-      AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) <= ?
+      AND ${recognisedAt} IS NOT NULL
+      AND strftime('%Y-%m-%d', ${recognisedAt}) >= ?
+      AND strftime('%Y-%m-%d', ${recognisedAt}) <= ?
     ORDER BY o.id, oi.id
   `).bind(start, to).all()
 
@@ -1363,8 +1407,11 @@ async function collectMovements(db, from, to) {
            SUM(CASE WHEN sm.movement_type = 'write_off' AND sm.reason LIKE 'Event use%' THEN sm.quantity * sm.unit_cost_pence ELSE 0 END) AS event_cost_pence,
            p.name AS product_name
     FROM stock_movements sm
+    LEFT JOIN orders o ON o.id = sm.order_id
     LEFT JOIN products p ON p.id = sm.product_id
-    WHERE substr(sm.occurred_at, 1, 10) >= ? AND substr(sm.occurred_at, 1, 10) <= ?
+    WHERE ${movementRecognisedAtSql('sm', 'o')} IS NOT NULL
+      AND substr(${movementRecognisedAtSql('sm', 'o')}, 1, 10) >= ?
+      AND substr(${movementRecognisedAtSql('sm', 'o')}, 1, 10) <= ?
     GROUP BY sm.product_id, sm.movement_type, sm.lot_id IS NULL
   `).bind(from, to).all()
   return results || []
@@ -1592,7 +1639,7 @@ export function dayBefore(iso) {
   return date.toISOString().slice(0, 10)
 }
 
-/** Stock still on hand at cost, from batches dated up to asOf less movements up to asOf. */
+/** Stock still on hand at cost, from batches dated up to asOf less movements up to asOf. Pay-later sales stay in stock until delivery. */
 export async function stockAtCost(db, asOf) {
   await ensureLedgerSchema(db)
   const lotsRow = await db.prepare(`
@@ -1601,10 +1648,13 @@ export async function stockAtCost(db, asOf) {
     JOIN supplier_bills b ON b.id = l.supplier_bill_id
     WHERE b.bill_date <= ?
   `).bind(asOf).first()
+  const recognisedAt = movementRecognisedAtSql('sm', 'o')
   const movedRow = await db.prepare(`
-    SELECT COALESCE(SUM(quantity * unit_cost_pence), 0) AS pence
-    FROM stock_movements
-    WHERE substr(occurred_at, 1, 10) <= ?
+    SELECT COALESCE(SUM(sm.quantity * sm.unit_cost_pence), 0) AS pence
+    FROM stock_movements sm
+    LEFT JOIN orders o ON o.id = sm.order_id
+    WHERE ${recognisedAt} IS NOT NULL
+      AND substr(${recognisedAt}, 1, 10) <= ?
   `).bind(asOf).first()
   return (Number(lotsRow?.pence) || 0) - (Number(movedRow?.pence) || 0)
 }

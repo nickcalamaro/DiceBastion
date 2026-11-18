@@ -3,7 +3,7 @@
  */
 
 import { buildTextPdf, pushWrapped } from './text-pdf.js'
-import { paidTicketEventSql } from './shop-ledger.js'
+import { orderRecognisedAtSql, paidTicketEventSql } from './shop-ledger.js'
 
 export function formatGbp(pence) {
   const n = (Number(pence) || 0) / 100
@@ -81,6 +81,7 @@ export async function collectPeriodActivity(db, from, to, booksStart, pnlEvents)
   const empty = { games: 0, tcgPacks: 0, untrackedUnits: 0, events: summariseEvents([]), people: 0 }
   if (!start || start > to) return empty
 
+  const recognisedAt = orderRecognisedAtSql('o')
   const { results: saleRows } = await db.prepare(`
     SELECT p.category AS category, oi.quantity AS quantity,
            EXISTS (
@@ -92,8 +93,9 @@ export async function collectPeriodActivity(db, from, to, booksStart, pnlEvents)
     LEFT JOIN products p ON p.id = oi.product_id
     WHERE UPPER(COALESCE(o.payment_status, '')) = 'PAID'
       AND NOT ((o.name = 'Walk-in' OR lower(o.email) = 'walk-in') AND IFNULL(o.sale_channel, '') != 'pos')
-      AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) >= ?
-      AND strftime('%Y-%m-%d', COALESCE(o.completed_at, o.created_at)) <= ?
+      AND ${recognisedAt} IS NOT NULL
+      AND strftime('%Y-%m-%d', ${recognisedAt}) >= ?
+      AND strftime('%Y-%m-%d', ${recognisedAt}) <= ?
   `).bind(start, to).all()
 
   let games = 0
