@@ -14088,8 +14088,8 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
 /** Minimum card charge after discounts (SumUp GBP). */
 const SHOP_MIN_PAYMENT_PENCE = 100
 
-/** SumUp checkout description length (portal display). */
-const SHOP_CHECKOUT_DESC_MAX = 255
+/** SumUp rejects long checkout descriptions with INVALID/description; 255 chars fails. */
+const SHOP_CHECKOUT_DESC_MAX = 150
 
 /**
  * Human-readable SumUp checkout description for shop orders (shown in SumUp portal).
@@ -14098,17 +14098,28 @@ const SHOP_CHECKOUT_DESC_MAX = 255
 function formatShopCheckoutDescription(items, { deliveryMethod, promoCode } = {}) {
   const lines = (items || []).map(item => {
     const qty = Math.max(1, Number(item.quantity) || 1)
-    const name = clampStr(item.product_name || item.name || 'Item', 80).trim() || 'Item'
+    const name = clampStr(item.product_name || item.name || 'Item', 60).trim() || 'Item'
     return `${qty}x ${name}`
   })
-  let desc = lines.length ? `Dice Bastion Shop: ${lines.join(', ')}` : 'Dice Bastion Shop order'
-  if (deliveryMethod === 'delivery') desc += ' · Delivery'
-  else if (deliveryMethod === 'collection') desc += ' · Collection'
-  if (promoCode) desc += ` · Promo: ${clampStr(promoCode, 30)}`
-  if (desc.length > SHOP_CHECKOUT_DESC_MAX) {
-    desc = `${desc.substring(0, SHOP_CHECKOUT_DESC_MAX - 1)}…`
+  let suffix = ''
+  if (deliveryMethod === 'delivery') suffix += ' · Delivery'
+  else if (deliveryMethod === 'collection') suffix += ' · Collection'
+  if (promoCode) suffix += ` · Promo: ${clampStr(promoCode, 30)}`
+
+  const prefix = 'Dice Bastion Shop: '
+  if (!lines.length) return clampStr(`Dice Bastion Shop order${suffix}`, SHOP_CHECKOUT_DESC_MAX)
+
+  const included = []
+  for (let i = 0; i < lines.length; i++) {
+    const remaining = lines.length - i - 1
+    const more = remaining > 0 ? `, +${remaining} more` : ''
+    const candidate = `${prefix}${[...included, lines[i]].join(', ')}${more}${suffix}`
+    if (candidate.length > SHOP_CHECKOUT_DESC_MAX && included.length) break
+    included.push(lines[i])
   }
-  return desc
+  const omitted = lines.length - included.length
+  const desc = `${prefix}${included.join(', ')}${omitted ? `, +${omitted} more` : ''}${suffix}`
+  return clampStr(desc, SHOP_CHECKOUT_DESC_MAX)
 }
 
 /**
