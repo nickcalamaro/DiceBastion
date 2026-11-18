@@ -4,3 +4,20 @@
   X-Frame-Options: SAMEORIGIN
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Checkout/cart must not stick in the browser — stale HTML breaks Place Order.
+/checkout
+  Cache-Control: no-store, no-cache, must-revalidate
+  Pragma: no-cache
+
+/checkout/
+  Cache-Control: no-store, no-cache, must-revalidate
+  Pragma: no-cache
+
+/cart
+  Cache-Control: no-store, no-cache, must-revalidate
+  Pragma: no-cache
+
+/cart/
+  Cache-Control: no-store, no-cache, must-revalidate
+  Pragma: no-cache

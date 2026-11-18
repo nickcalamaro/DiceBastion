@@ -14,6 +14,7 @@ routes = [
   { pattern = "dicebastion.com/posts/*", zone_name = "dicebastion.com" },
   { pattern = "www.dicebastion.com/posts/*", zone_name = "dicebastion.com" },
   { pattern = "shop.dicebastion.com/pages-sitemap.xml", zone_name = "dicebastion.com" },
+  { pattern = "shop.dicebastion.com/api/*", zone_name = "dicebastion.com" },
   { pattern = "shop.dicebastion.com/products/*", zone_name = "dicebastion.com" },
 ]
 

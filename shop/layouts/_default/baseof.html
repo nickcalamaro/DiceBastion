@@ -53,9 +53,35 @@
   <link rel="icon" type="image/png" href="/img/logo.png" />
   <link rel="stylesheet" href="{{ "css/forms.css" | relURL }}" />
 
+  {{/* Bumped on each Hugo build so clients can detect stale HTML without a hard refresh */}}
+  <meta name="db-shop-build" content="{{ now.Format "20060102150405" }}" />
+  <script>
+    (function () {
+      var meta = document.querySelector('meta[name="db-shop-build"]');
+      var build = meta && meta.getAttribute('content');
+      if (!build) return;
+      var KEY = 'db_shop_build';
+      var prev = null;
+      try { prev = localStorage.getItem(KEY); } catch (_) {}
+      var url = new URL(location.href);
+      var alreadyBusted = url.searchParams.get('_dbv') === build;
+      if (prev && prev !== build && !alreadyBusted) {
+        try { localStorage.setItem(KEY, build); } catch (_) {}
+        url.searchParams.set('_dbv', build);
+        location.replace(url.toString());
+        return;
+      }
+      try { localStorage.setItem(KEY, build); } catch (_) {}
+      if (alreadyBusted) {
+        url.searchParams.delete('_dbv');
+        history.replaceState(null, '', url.pathname + url.search + url.hash);
+      }
+    })();
+  </script>
+
   <!-- Cart: shared TTL (cookie + localStorage); must load before page scripts -->
   <script src="{{ "js/shopCartStorage.js" | relURL }}" charset="utf-8"></script>
-  <script src="https://dicebastion.com/js/utils.js"></script>
+  <script src="https://dicebastion.com/js/utils.js?v={{ now.Format "2006010215" }}"></script>
   <script src="{{ "js/loginStatus.js" | relURL }}"></script>
 
   <style>

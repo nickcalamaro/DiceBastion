@@ -11,8 +11,10 @@
     window.__DB_API_BASE = '/api';
     return;
   }
+  // Always use the apex /api Worker route from the shop host. Relative /api on
+  // shop.dicebastion.com intermittently falls through to Bunny origin (405 on POST).
   if (host === 'shop.dicebastion.com') {
-    window.__DB_API_BASE = '/api';
+    window.__DB_API_BASE = 'https://dicebastion.com/api';
     return;
   }
   // Local Hugo only — always hit the deployed Worker via the public /api route

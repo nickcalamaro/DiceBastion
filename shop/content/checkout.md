@@ -486,7 +486,8 @@ grid-template-columns: 1fr;
 <script src="https://gateway.sumup.com/gateway/ecom/card/v2/sdk.js"></script>
 <script src="https://dicebastion.com/js/utils.js"></script>
 <script>
-const API_BASE = (window.utils && window.utils.getApiBase(true)) || 'https://dicebastion.com/api';
+// Apex /api only — shop.dicebastion.com/api can fall through to Bunny (405 on POST).
+const API_BASE = 'https://dicebastion.com/api';
 let cart = [];
 let currentOrderNumber = null;
 let currentCheckoutId = null;
@@ -753,6 +754,22 @@ notes: formData.get('notes') || null,
 consent_at: new Date().toISOString()
 };
 
+try {
+if (window.utils && typeof window.utils.logPaymentEvent === 'function') {
+window.utils.logPaymentEvent({
+flow: 'shop',
+type: 'checkout_submit',
+stage: 'place_order_click',
+message: JSON.stringify({
+item_count: orderData.items.length,
+delivery_method: deliveryMethod,
+has_promo: !!(document.getElementById('promo-code-input')?.value || '').trim(),
+email_domain: String(orderData.email || '').split('@')[1] || null
+})
+});
+}
+} catch (_) {}
+
 const promoInput = document.getElementById('promo-code-input');
 const promoTrim = promoInput && promoInput.value ? promoInput.value.trim() : '';
 if (promoTrim) {
@@ -886,6 +903,16 @@ document.querySelector('.processing-card').style.display = 'none';
 } catch (error) {
 console.error('Checkout error:', error);
 const detail = (error && error.message) ? String(error.message).trim() : '';
+try {
+if (window.utils && typeof window.utils.logPaymentEvent === 'function') {
+window.utils.logPaymentEvent({
+flow: 'shop',
+type: 'checkout_error',
+stage: 'place_order_catch',
+message: detail || 'unknown_error'
+});
+}
+} catch (_) {}
 alert(detail
   ? ('Sorry, there was an error processing your order: ' + detail)
   : 'Sorry, there was an error processing your order. Please try again.');

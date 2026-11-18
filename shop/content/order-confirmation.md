@@ -100,7 +100,13 @@ title: "Order Confirmation"
 </div>
 
 <div class="actions">
-<a href="/checkout/" class="btn btn-primary">Try again</a>
+<a href="/checkout/?_dbv=1" class="btn btn-primary" id="checkout-retry-link">Try again</a>
+<script>
+(function () {
+  var a = document.getElementById('checkout-retry-link');
+  if (a) a.href = '/checkout/?_dbv=' + Date.now();
+})();
+</script>
 <a href="/" class="btn btn-secondary">Back to Shop</a>
 </div>
 </div>
@@ -302,7 +308,7 @@ title: "Order Confirmation"
 </style>
 
 <script>
-const API_BASE = (window.location.hostname === 'shop.dicebastion.com') ? '/api' : 'https://dicebastion.com/api';
+const API_BASE = 'https://dicebastion.com/api';
 
 function getUrlParams() {
 const params = new URLSearchParams(window.location.search);

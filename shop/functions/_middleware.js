@@ -143,6 +143,23 @@ export async function onRequest(context) {
 
   const response = await next();
 
+  // Checkout/cart HTML must always revalidate. Cached Place Order scripts have
+  // already broken real purchases when /api on this host fell through to Bunny.
+  if (path === '/checkout' || path === '/cart') {
+    const headers = new Headers(response.headers);
+    headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    headers.set('Pragma', 'no-cache');
+    // Drop HTTP cache for this origin when the client supports Clear-Site-Data.
+    if (path === '/checkout') {
+      headers.set('Clear-Site-Data', '"cache"');
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+  }
+
   if (path === '/') {
     return injectHomepageCrawlLinks(response);
   }

@@ -411,13 +411,13 @@ const event = new CustomEvent('cartUpdated', { detail: { count: totalItems, cart
 window.dispatchEvent(event);
 }
 
-// Proceed to checkout
+// Proceed to checkout (cache-bust so Place Order always loads current HTML)
 document.getElementById('checkout-btn')?.addEventListener('click', function() {
 if (cart.length === 0) {
 alert('Your cart is empty');
 return;
 }
-window.location.href = '/checkout';
+window.location.href = '/checkout/?_dbv=' + Date.now();
 });
 
 // Initialize
