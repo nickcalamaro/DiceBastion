@@ -885,7 +885,10 @@ document.querySelector('.processing-card').style.display = 'none';
 
 } catch (error) {
 console.error('Checkout error:', error);
-alert('Sorry, there was an error processing your order. Please try again.');
+const detail = (error && error.message) ? String(error.message).trim() : '';
+alert(detail
+  ? ('Sorry, there was an error processing your order: ' + detail)
+  : 'Sorry, there was an error processing your order. Please try again.');
 
 // Re-enable form
 document.getElementById('checkout-form-container').style.display = 'block';
