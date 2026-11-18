@@ -14088,7 +14088,7 @@ async function completePaidShopOrder(db, env, orderRow, paymentId) {
 /** Minimum card charge after discounts (SumUp GBP). */
 const SHOP_MIN_PAYMENT_PENCE = 100
 
-/** SumUp rejects long checkout descriptions with INVALID/description; 255 chars fails. */
+/** SumUp description max is 254 (255+ returns INVALID/description). Keep headroom. */
 const SHOP_CHECKOUT_DESC_MAX = 150
 
 /**
