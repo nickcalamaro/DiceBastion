@@ -14,7 +14,7 @@ showDate: false
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
-<script src="/js/shopPosAdmin.js?v=20261118a"></script>
+<script src="/js/shopPosAdmin.js?v=20261120a"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261116c"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
@@ -1028,7 +1028,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <!-- Orders Tab -->
 <div id="orders-tab" class="tab-content" style="display: none;">
 <h2 id="admin-section-orders" class="admin-section-heading">Record in-person sale <a href="#orders" class="admin-permalink" aria-label="Link to orders">#</a></h2>
-<p class="admin-text-muted admin-mb-1">Cash or bank transfer sales for the shop. Adjust the unit price for discounts. Stock is reduced when the sale is saved.</p>
+<p class="admin-text-muted admin-mb-1">Cash, bank transfer, or pay later sales for the shop. Adjust the unit price for discounts. Stock is reduced when the sale is saved. Pay later needs a customer name and stays out of the shop accounts until the order is marked delivered.</p>
 <div class="admin-mb-2" style="padding: 1rem; border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px;">
 <div class="admin-grid-2 admin-mb-1">
 <div>
@@ -1036,6 +1036,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 <select id="pos-payment-method" class="form-select">
 <option value="cash">Cash</option>
 <option value="bank_transfer">Bank transfer</option>
+<option value="pay_later">Pay later</option>
 </select>
 </div>
 <div>
@@ -1045,7 +1046,7 @@ These codes apply at <strong>shop.dicebastion.com</strong> checkout. Rules live 
 </div>
 <div class="admin-grid-2 admin-mb-1">
 <div>
-<label class="form-label" for="pos-customer-name">Customer name (optional)</label>
+<label class="form-label" for="pos-customer-name" id="pos-customer-name-label">Customer name (optional)</label>
 <input type="text" id="pos-customer-name" class="form-input" placeholder="Walk-in" autocomplete="name">
 </div>
 <div>

@@ -259,7 +259,7 @@ CREATE TABLE orders (
       , payment_method TEXT, sale_channel TEXT, delivery_status TEXT DEFAULT 'undelivered'
       , pay_later INTEGER DEFAULT 0, delivered_at TEXT);
 -- credit_applied_pence / card_charged_pence: store-credit split for shop orders (pence).
--- payment_method: 'sumup' | 'cash' | 'bank_transfer' | 'store_credit' (card_charged_pence = 0)
+-- payment_method: 'sumup' | 'cash' | 'bank_transfer' | 'store_credit' | 'pay_later' (card_charged_pence = 0)
 -- sale_channel: 'online' (shop website) | 'pos' (admin manual sale); drinks walk-ins leave NULL
 -- delivery_status: 'undelivered' (default for new shop orders) | 'delivered'
 -- pay_later: 1 = paid order held out of shop accounts until delivered. Stock is still taken at payment.

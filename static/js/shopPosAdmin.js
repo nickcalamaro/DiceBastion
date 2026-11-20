@@ -39,6 +39,7 @@
     if (m === 'cash') return 'Cash';
     if (m === 'bank_transfer') return 'Bank transfer';
     if (m === 'store_credit') return 'Store credit';
+    if (m === 'pay_later') return 'Pay later';
     if (m === 'sumup') return channel === 'pos' ? 'SumUp (POS)' : 'SumUp';
     return m || '—';
   }
@@ -217,6 +218,14 @@
     return !!(el && el.checked);
   }
 
+  function syncCustomerNameLabel() {
+    const payLater = document.getElementById('pos-payment-method')?.value === 'pay_later';
+    const label = document.getElementById('pos-customer-name-label');
+    const input = document.getElementById('pos-customer-name');
+    if (label) label.textContent = payLater ? 'Customer name' : 'Customer name (optional)';
+    if (input) input.placeholder = payLater ? 'Name' : 'Walk-in';
+  }
+
   function usableCustomerName(value) {
     const name = String(value || '').trim().replace(/\s+/g, ' ');
     if (name.length < 2 || name.length > 200) return '';
@@ -290,8 +299,9 @@
         const payLaterAction = isPayLater
           ? '<button type="button" class="btn btn-secondary pos-clear-pay-later" data-order-id="' + o.id + '">Clear pay later</button>'
           : '<button type="button" class="btn btn-secondary pos-mark-pay-later" data-order-id="' + o.id + '" data-customer-name="' + escapeHtml(o.name || '') + '">Pay later</button>';
+        const methodIsPayLater = String(o.payment_method || '').toLowerCase() === 'pay_later';
         const method = escapeHtml(methodLabel(o.payment_method, o.sale_channel)) +
-          (isPayLater ? '<br><span class="admin-text-muted admin-text-small">Pay later</span>' : '');
+          (isPayLater && !methodIsPayLater ? '<br><span class="admin-text-muted admin-text-small">Pay later</span>' : '');
         return (
           '<tr>' +
           '<td>' + escapeHtml(formatWhen(o.completed_at || o.created_at)) + '</td>' +
@@ -400,8 +410,13 @@
     const email = document.getElementById('pos-customer-email')?.value?.trim() || '';
     const notes = document.getElementById('pos-notes')?.value?.trim() || '';
 
-    if (paymentMethod !== 'cash' && paymentMethod !== 'bank_transfer') {
-      setStatus('Choose cash or bank transfer.', true);
+    const payLater = paymentMethod === 'pay_later';
+    if (paymentMethod !== 'cash' && paymentMethod !== 'bank_transfer' && !payLater) {
+      setStatus('Choose cash, bank transfer, or pay later.', true);
+      return;
+    }
+    if (payLater && !usableCustomerName(name)) {
+      setStatus('Pay later needs the customer\'s name.', true);
       return;
     }
 
@@ -477,6 +492,12 @@
     const submitBtn = document.getElementById('pos-submit-btn');
     const showDelivered = document.getElementById('orders-show-delivered');
     const payLaterOnly = document.getElementById('orders-pay-later-only');
+    const paymentMethod = document.getElementById('pos-payment-method');
+    if (paymentMethod && !paymentMethod._posBound) {
+      paymentMethod._posBound = true;
+      paymentMethod.addEventListener('change', syncCustomerNameLabel);
+    }
+    syncCustomerNameLabel();
     if (addBtn && !addBtn._posBound) {
       addBtn._posBound = true;
       addBtn.addEventListener('click', function () { addLine(); });

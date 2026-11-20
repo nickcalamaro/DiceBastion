@@ -10851,23 +10851,32 @@ app.post('/admin/orders/:id/pay-later', requireAdmin, async (c) => {
 })
 
 /**
- * Record an in-person shop sale (cash or bank transfer).
+ * Record an in-person shop sale (cash, bank transfer, or pay later).
  * POST /admin/shop/pos-sale
  */
 app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
   try {
     const body = await c.req.json()
     const paymentMethod = String(body.payment_method || '').toLowerCase().trim()
-    if (paymentMethod !== 'cash' && paymentMethod !== 'bank_transfer') {
-      return c.json({ error: 'invalid_payment_method', message: 'payment_method must be cash or bank_transfer' }, 400)
+    const payLater = paymentMethod === 'pay_later'
+    if (paymentMethod !== 'cash' && paymentMethod !== 'bank_transfer' && !payLater) {
+      return c.json({ error: 'invalid_payment_method', message: 'Choose cash, bank transfer, or pay later.' }, 400)
     }
     const rawItems = Array.isArray(body.items) ? body.items : []
     if (!rawItems.length) {
       return c.json({ error: 'no_items', message: 'Add at least one product line' }, 400)
     }
 
+    await ensureOrderPayLaterColumns(c.env.DB)
     const now = toIso(new Date())
-    const name = clampStr(body.name || '', 200) || 'Walk-in'
+    const givenName = usableCustomerName(body.name)
+    if (payLater && !givenName) {
+      return c.json({
+        error: 'customer_name_required',
+        message: 'Enter the customer name. Walk-in is not enough for a pay later order.'
+      }, 400)
+    }
+    const name = givenName || clampStr(body.name || '', 200) || 'Walk-in'
     const email = clampStr(String(body.email || '').trim().toLowerCase() || 'walk-in', 320)
     const notes = body.notes ? clampStr(String(body.notes), 1000) : null
 
@@ -10943,9 +10952,9 @@ app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
         order_number, email, name, status,
         subtotal, tax, shipping, total, currency,
         payment_status, payment_method, sale_channel,
-        notes, discount_pence, delivery_status,
+        notes, discount_pence, delivery_status, pay_later,
         created_at, updated_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       orderNumber,
       email,
@@ -10962,6 +10971,7 @@ app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
       notes,
       discountPence,
       'undelivered',
+      payLater ? 1 : 0,
       now,
       now,
       now
@@ -11001,7 +11011,7 @@ app.post('/admin/shop/pos-sale', requireAdmin, async (c) => {
         total: chargedSubtotal / 100,
         discountPence,
         promoCodeApplied: '',
-        deliveryMethod: `POS (${paymentMethod === 'bank_transfer' ? 'bank transfer' : 'cash'})`,
+        deliveryMethod: `POS (${paymentMethod === 'bank_transfer' ? 'bank transfer' : paymentMethod === 'pay_later' ? 'pay later' : 'cash'})`,
         orderNotes: notes || '',
         shippingPlain: '',
         items: orderItemsPayload
