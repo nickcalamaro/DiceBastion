@@ -487,6 +487,57 @@ function resolveSeoImageOnArtworkChange(current, incomingSeoImage, imageUrl, ima
   return finalSeo
 }
 
+const PRODUCT_GALLERY_LIMIT = 8
+
+function parseProductGalleryUrls(raw) {
+  let list = raw
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    try {
+      list = JSON.parse(trimmed)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(list)) return []
+  const seen = new Set()
+  const out = []
+  for (const item of list) {
+    const url = String(item || '').trim()
+    if (!/^https?:\/\//i.test(url) || url.length > 500 || seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+    if (out.length >= PRODUCT_GALLERY_LIMIT) break
+  }
+  return out
+}
+
+function galleryUrlsExcludingPrimary(imageUrl, rawGallery) {
+  const primary = String(imageUrl || '').trim()
+  return parseProductGalleryUrls(rawGallery).filter((url) => url !== primary)
+}
+
+function serializeProductGallery(imageUrl, rawGallery) {
+  const urls = galleryUrlsExcludingPrimary(imageUrl, rawGallery)
+  return urls.length ? JSON.stringify(urls) : null
+}
+
+/** Main image, then admin gallery images. Description photos stay in the body. */
+function productPageImageUrls(product, shopUrl) {
+  const seen = new Set()
+  const out = []
+  const add = (raw) => {
+    const abs = ensureAbsoluteImageUrl(raw, shopUrl)
+    if (!abs || seen.has(abs) || isGenericSeoFallbackImage(abs)) return
+    seen.add(abs)
+    out.push(abs)
+  }
+  add(product?.image_url)
+  for (const src of parseProductGalleryUrls(product?.gallery_urls)) add(src)
+  return out
+}
+
 function collectProductImageUrls(product, shopUrl) {
   const seen = new Set()
   const out = []
@@ -497,10 +548,28 @@ function collectProductImageUrls(product, shopUrl) {
     out.push(abs)
   }
   add(product.image_url)
+  for (const src of parseProductGalleryUrls(product.gallery_urls)) add(src)
   for (const src of extractImgUrlsFromHtml(product.full_description)) add(src)
   for (const src of extractImgUrlsFromHtml(product.summary)) add(src)
   for (const src of extractImgUrlsFromHtml(product.description)) add(src)
   return out
+}
+
+async function deleteUnusedProductImages(env, previousUrls, keepUrls) {
+  const keep = new Set((keepUrls || []).map((url) => String(url || '').trim()).filter(Boolean))
+  const removed = new Set()
+  for (const url of previousUrls || []) {
+    const trimmed = String(url || '').trim()
+    if (!trimmed || keep.has(trimmed) || removed.has(trimmed)) continue
+    removed.add(trimmed)
+    const key = extractImageKey(trimmed)
+    if (!key || !env.IMAGES) continue
+    try {
+      await env.IMAGES.delete(key)
+    } catch (err) {
+      console.error('Failed to delete image:', err)
+    }
+  }
 }
 
 function resolveProductPrimaryImage(product, shopUrl) {
@@ -9022,13 +9091,51 @@ function appendProductGtinSchema(schema, product) {
   else if (gtinDigits.length === 8) schema.gtin8 = gtinDigits
 }
 
+function renderProductPageGallery(images, escapedName) {
+  const e = (s) => String(s || '').replace(/[<>"&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]))
+  if (!images.length) return ''
+  if (images.length === 1) {
+    return `<img src="${e(images[0])}" alt="${escapedName}" loading="eager" decoding="async" fetchpriority="high">`
+  }
+  const slides = images.map((src, i) => {
+    const active = i === 0 ? ' is-active' : ''
+    const loading = i === 0 ? 'eager' : 'lazy'
+    const priority = i === 0 ? ' fetchpriority="high"' : ''
+    return `<img class="gallery-slide${active}" src="${e(src)}" alt="${escapedName}" loading="${loading}" decoding="async"${priority}>`
+  }).join('')
+  return `<div class="gallery" data-gallery>
+<button type="button" class="gallery-nav gallery-prev" aria-label="Previous image"><span class="gallery-chevron"></span></button>
+${slides}
+<button type="button" class="gallery-nav gallery-next" aria-label="Next image"><span class="gallery-chevron"></span></button>
+<span class="gallery-status" aria-live="polite">1 / ${images.length}</span>
+</div>
+<script>
+(function () {
+  var root = document.querySelector('[data-gallery]');
+  if (!root) return;
+  var slides = root.querySelectorAll('.gallery-slide');
+  var status = root.querySelector('.gallery-status');
+  var i = 0;
+  function show(n) {
+    i = (n + slides.length) % slides.length;
+    for (var s = 0; s < slides.length; s++) slides[s].classList.toggle('is-active', s === i);
+    if (status) status.textContent = (i + 1) + ' / ' + slides.length;
+  }
+  root.querySelector('.gallery-prev').addEventListener('click', function () { show(i - 1); });
+  root.querySelector('.gallery-next').addEventListener('click', function () { show(i + 1); });
+})();
+</script>`
+}
+
 function generateProductSeoPage(product, allCategories) {
   const e = s => (s || '').replace(/[<>"&]/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;','&':'&amp;'}[c]));
   const shop = 'https://shop.dicebastion.com';
   const name = e(product.name || 'Product');
   const slug = product.slug || '';
   const productImages = collectProductImageUrls(product, shop);
+  const pageImages = productPageImageUrls(product, shop);
   const img = resolveProductPrimaryImage(product, shop);
+  const galleryHtml = renderProductPageGallery(pageImages, name);
   const plainForMeta = productPlainDescription(product);
   const descTrunc = plainForMeta.length > 160 ? plainForMeta.substring(0, 157) + '...' : plainForMeta;
   const desc = e(descTrunc);
@@ -9165,6 +9272,17 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 .cta{display:inline-block;padding:.75rem 2rem;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:1rem;transition:background .2s}
 .cta:hover{background:#6d28d9}
 .cta-disabled{background:#4a4a5a;cursor:not-allowed}
+.gallery{position:relative;background:#12121f}
+.card .gallery-slide{width:100%;height:auto;display:none;max-height:400px;object-fit:contain;background:#12121f}
+.card .gallery-slide.is-active{display:block}
+.gallery-nav{position:absolute;top:50%;transform:translateY(-50%);width:2.25rem;height:2.25rem;border-radius:999px;border:1px solid #3a3a5a;background:rgba(22,22,42,.9);cursor:pointer;z-index:1;display:flex;align-items:center;justify-content:center;padding:0}
+.gallery-nav:hover{border-color:#a78bfa}
+.gallery-prev{left:.65rem}
+.gallery-next{right:.65rem}
+.gallery-chevron{display:block;width:.45rem;height:.45rem;border-top:2px solid #e0e0e0;border-right:2px solid #e0e0e0}
+.gallery-prev .gallery-chevron{transform:rotate(-135deg);margin-left:.15rem}
+.gallery-next .gallery-chevron{transform:rotate(45deg);margin-right:.15rem}
+.gallery-status{position:absolute;left:50%;bottom:.65rem;transform:translateX(-50%);font-size:.75rem;font-weight:600;color:#e0e0e0;background:rgba(22,22,42,.9);border:1px solid #3a3a5a;border-radius:999px;padding:.12rem .5rem}
 .footer{margin-top:auto;padding:1.5rem;text-align:center;font-size:.85rem;color:#606070}
 .footer a{color:#a78bfa;text-decoration:none}
 </style>
@@ -9174,7 +9292,7 @@ h1{font-size:1.5rem;margin-bottom:.75rem;color:#fff}
 <a href="${shop}">Shop</a>${categories[0] ? ` › <a href="${getShopCategoryUrl(categories[0])}">${e(categories[0])}</a>` : ''} › ${name}
 </div>
 <div class="card">
-${img ? `<img src="${img}" alt="${name}" loading="eager" decoding="async" fetchpriority="high">` : ''}
+${galleryHtml}
 <div class="card-body">
 <h1>${name}</h1>
 ${categories.length > 0 ? `<div class="categories">${categories.map(c => `<a class="cat-tag" href="${getShopCategoryUrl(c)}">${e(c)}</a>`).join('')}</div>` : ''}
@@ -9395,9 +9513,10 @@ app.get('/products/sitemap.xml', async c => {
 
 app.get('/products/sitemap-images.xml', async c => {
   try {
+    await ensureProductImportSchema(c.env.DB)
     const shop = 'https://shop.dicebastion.com'
     const { results } = await c.env.DB.prepare(`
-      SELECT slug, name, image_url, summary, description, full_description, category
+      SELECT slug, name, image_url, gallery_urls, summary, description, full_description, category
       FROM products
       WHERE is_active = 1
         AND slug IS NOT NULL AND TRIM(slug) != ''
@@ -10096,7 +10215,8 @@ async function ensureProductImportSchema(db) {
   for (const sql of [
     'ALTER TABLE products ADD COLUMN import_batch_id INTEGER',
     'ALTER TABLE products ADD COLUMN ean TEXT',
-    "ALTER TABLE products ADD COLUMN catalog_status TEXT DEFAULT 'listed'"
+    "ALTER TABLE products ADD COLUMN catalog_status TEXT DEFAULT 'listed'",
+    'ALTER TABLE products ADD COLUMN gallery_urls TEXT'
   ]) {
     try {
       await db.prepare(sql).run()
@@ -10290,7 +10410,7 @@ app.get('/admin/products', requireAdmin, async (c) => {
     await ensureProductImportSchema(c.env.DB)
     await ensureLedgerSchema(c.env.DB)
     const products = await c.env.DB.prepare(`
-      SELECT p.id, p.name, p.slug, p.description, p.summary, p.full_description, p.price, p.currency, p.stock_quantity, p.image_url, p.category, p.is_active, p.release_date, p.created_at, p.ean, p.catalog_status, p.import_batch_id,
+      SELECT p.id, p.name, p.slug, p.description, p.summary, p.full_description, p.price, p.currency, p.stock_quantity, p.image_url, p.gallery_urls, p.category, p.is_active, p.release_date, p.created_at, p.ean, p.catalog_status, p.import_batch_id,
              IFNULL(p.cost_tracked, 0) AS cost_tracked,
              COALESCE(lots.stock_value_pence, 0) AS stock_value_pence
       FROM products p
@@ -10422,9 +10542,11 @@ app.post('/admin/products', requireAdmin, async (c) => {
       })
     }
 
+    const galleryJson = body.gallery_urls === undefined ? null : serializeProductGallery(image_url, body.gallery_urls)
+
     const result = await c.env.DB.prepare(`
-      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, release_date, import_batch_id, ean, catalog_status, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listed', 1, ?, ?)
+      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, gallery_urls, category, release_date, import_batch_id, ean, catalog_status, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listed', 1, ?, ?)
     `).bind(
       name,
       slug,
@@ -10435,6 +10557,7 @@ app.post('/admin/products', requireAdmin, async (c) => {
       currency || 'GBP',
       openingCost ? 0 : (stock_quantity || 0),
       image_url || null,
+      galleryJson,
       incomingCategory,
       release_date || null,
       Number.isFinite(batchId) ? batchId : null,
@@ -10488,9 +10611,9 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     const id = c.req.param('id')
     await ensureLedgerSchema(c.env.DB)
     const body = await c.req.json()
-    const { name, slug, description, summary, full_description, price, currency, image_url, category, is_active, release_date, ean } = body
+    const { name, slug, description, summary, full_description, price, currency, image_url, category, is_active, release_date, ean, gallery_urls } = body
     let { stock_quantity } = body
-    const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url, cost_tracked FROM products WHERE id = ?')
+    const previousProduct = await c.env.DB.prepare('SELECT slug, category, image_url, gallery_urls, cost_tracked FROM products WHERE id = ?')
       .bind(id).first()
     // Tracked stock only changes through Receive stock / Write off so batches stay in step.
     if (Number(previousProduct?.cost_tracked)) stock_quantity = undefined
@@ -10518,24 +10641,21 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     }
     if (release_date !== undefined) { updates.push('release_date = ?'); binds.push(release_date) }
     if (ean !== undefined) { updates.push('ean = ?'); binds.push(normalizeProductEan(ean)) }
-    
-    // Handle image update - delete old image if new one provided and different
-    if (image_url !== undefined) {
-      // Get current product to find old image
-      const currentProduct = previousProduct
-      
-      if (currentProduct && currentProduct.image_url && currentProduct.image_url !== image_url) {
-        const oldKey = extractImageKey(currentProduct.image_url)
-        if (oldKey && c.env.IMAGES) {
-          try {
-            await c.env.IMAGES.delete(oldKey)
-            console.log('Deleted old image:', oldKey)
-          } catch (err) {
-            console.error('Failed to delete old image:', err)
-          }
-        }
-      }
+    if (gallery_urls !== undefined) {
+      const nextPrimary = image_url !== undefined ? image_url : previousProduct?.image_url
+      updates.push('gallery_urls = ?')
+      binds.push(serializeProductGallery(nextPrimary, gallery_urls))
     }
+
+    const cleanupImages = image_url !== undefined || gallery_urls !== undefined
+    const nextPrimary = cleanupImages
+      ? (image_url !== undefined ? image_url : previousProduct?.image_url)
+      : null
+    const nextGallery = cleanupImages
+      ? (gallery_urls !== undefined
+          ? galleryUrlsExcludingPrimary(nextPrimary, gallery_urls)
+          : galleryUrlsExcludingPrimary(nextPrimary, previousProduct?.gallery_urls))
+      : null
     
     if (updates.length === 0) {
       return c.json({ error: 'no_fields_to_update' }, 400)
@@ -10548,6 +10668,14 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
     await c.env.DB.prepare(`
       UPDATE products SET ${updates.join(', ')} WHERE id = ?
     `).bind(...binds).run()
+
+    if (cleanupImages) {
+      await deleteUnusedProductImages(
+        c.env,
+        [previousProduct?.image_url, ...parseProductGalleryUrls(previousProduct?.gallery_urls)],
+        [nextPrimary, ...nextGallery]
+      )
+    }
 
     const productSlug = slug || previousProduct?.slug || (await c.env.DB.prepare('SELECT slug FROM products WHERE id = ?').bind(id).first())?.slug
     if (productSlug) {
@@ -10573,22 +10701,18 @@ app.put('/admin/products/:id', requireAdmin, async (c) => {
 // Delete product (admin only - soft delete by setting is_active = 0)
 app.delete('/admin/products/:id', requireAdmin, async (c) => {
   try {
+    await ensureProductImportSchema(c.env.DB)
     const id = c.req.param('id')
     
-    // Get product to find image
-    const product = await c.env.DB.prepare('SELECT image_url, slug, category FROM products WHERE id = ?')
+    const product = await c.env.DB.prepare('SELECT image_url, gallery_urls, slug, category FROM products WHERE id = ?')
       .bind(id).first()
-    
-    // Delete image from R2
-    if (product && product.image_url) {
-      const imageKey = extractImageKey(product.image_url)
-      if (imageKey && c.env.IMAGES) {
-        try {
-          await c.env.IMAGES.delete(imageKey)
-        } catch (err) {
-          console.error('Failed to delete image:', err)
-        }
-      }
+
+    if (product) {
+      await deleteUnusedProductImages(
+        c.env,
+        [product.image_url, ...parseProductGalleryUrls(product.gallery_urls)],
+        []
+      )
     }
     
     await c.env.DB.prepare('UPDATE products SET is_active = 0, updated_at = ? WHERE id = ?')

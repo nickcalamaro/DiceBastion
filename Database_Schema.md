@@ -120,9 +120,11 @@ CREATE TABLE products (
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
       , summary TEXT, full_description TEXT, release_date TEXT, import_batch_id INTEGER, ean TEXT, catalog_status TEXT DEFAULT 'listed'
-      , cost_tracked INTEGER DEFAULT 0);
+      , cost_tracked INTEGER DEFAULT 0
+      , gallery_urls TEXT);
 -- catalog_status: 'listed' (in the shop when is_active = 1) | 'archived' (hidden after CSV import cleanup, kept for EAN restore).
 -- cost_tracked: 1 once the product has a stock batch (stock_lots); stock then changes only via Receive stock / Write off / sales.
+-- gallery_urls: JSON array of extra image URLs for the product page carousel. image_url remains the main image.
 
 -- Shop and events accounts (migration 0014). Amounts in pence; dates YYYY-MM-DD.
 CREATE TABLE supplier_bills (

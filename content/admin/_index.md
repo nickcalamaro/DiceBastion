@@ -237,6 +237,11 @@ showDate: false
 
 /* Image cropper */
 .image-preview { max-width: 200px; max-height: 200px; border-radius: 6px; margin-top: 0.5rem; }
+.product-gallery-admin-list { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.75rem; }
+.product-gallery-admin-item { display: flex; gap: 0.75rem; align-items: center; }
+.product-gallery-admin-item img { width: 96px; height: 64px; object-fit: contain; background: rgb(var(--color-neutral-100)); border-radius: 6px; margin: 0; }
+.product-gallery-admin-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.product-gallery-admin-actions .btn { padding: 0.35rem 0.7rem; font-size: 0.85rem; }
 /* Event export previews: fixed frame + cover so card/hero match how they render on site */
 .event-export-thumb { margin-top: 0.5rem; border-radius: 6px; overflow: hidden; background: rgb(var(--color-neutral-200)); }
 .dark .event-export-thumb { background: rgb(var(--color-neutral-700)); }
@@ -607,7 +612,7 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <div class="admin-mb-1">
 <label class="form-label">Image URL</label>
 <input type="url" id="product-image" placeholder="https://..." class="form-input">
-<p class="blog-help-text" style="margin-top:0.35rem;">Product image is used on the SEO page, Open Graph previews, and the product image sitemap for Google Images.</p>
+<p class="blog-help-text" style="margin-top:0.35rem;">Main image for the shop list, cart, and link previews. It is also the first image on the product page.</p>
 <small class="admin-text-small">Or upload an image below</small>
 </div>
 
@@ -615,6 +620,17 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 <label class="form-label">Upload Image</label>
 <input type="file" id="product-image-upload" accept="image/*" class="form-input">
 <div id="product-image-preview" style="margin-top: 0.5rem;"></div>
+</div>
+
+<div class="admin-mb-1">
+<label class="form-label">More images</label>
+<p class="blog-help-text" style="margin-top:0.35rem;">Extra images appear on the product page. Use the buttons there to move between them.</p>
+<input type="file" id="product-gallery-upload" accept="image/*" class="form-input">
+<div class="admin-flex" style="margin-top: 0.75rem; align-items: center;">
+<input type="url" id="product-gallery-url" placeholder="https://..." class="form-input">
+<button type="button" id="product-gallery-add" class="btn btn-secondary">Add image</button>
+</div>
+<div id="product-gallery-list" class="product-gallery-admin-list"></div>
 </div>
 
 <div class="checkbox-group admin-mb-1">
@@ -2320,6 +2336,8 @@ const BLOG_API_BASE = (window.__BLOG_API_BASE || 'https://dicebastionblogger-yvf
 let sessionToken = null;
 let currentUser = null;
 let uploadedProductImage = null;
+const PRODUCT_GALLERY_LIMIT = 8;
+let productGalleryUrls = [];
 /** After crop upload: { image_url, image_url_card, image_url_hero } or null */
 let uploadedEventBundle = null;
 let editingShopPromoId = null;
@@ -2335,6 +2353,59 @@ return String(s)
 .replace(/</g, '&lt;')
 .replace(/>/g, '&gt;')
 .replace(/"/g, '&quot;');
+}
+
+function parseAdminGalleryUrls(raw) {
+if (Array.isArray(raw)) {
+return raw.map(function (url) { return String(url || '').trim(); }).filter(function (url) {
+return /^https?:\/\//i.test(url);
+});
+}
+if (typeof raw === 'string' && raw.trim()) {
+try { return parseAdminGalleryUrls(JSON.parse(raw)); } catch (e) { return []; }
+}
+return [];
+}
+
+function renderProductGallery() {
+const list = document.getElementById('product-gallery-list');
+if (!list) return;
+if (!productGalleryUrls.length) {
+list.innerHTML = '';
+return;
+}
+list.innerHTML = productGalleryUrls.map(function (url, i) {
+const earlierDisabled = i === 0 ? ' disabled' : '';
+const laterDisabled = i === productGalleryUrls.length - 1 ? ' disabled' : '';
+return '<div class="product-gallery-admin-item">' +
+'<img src="' + escapeHtmlPromo(url) + '" alt="" referrerpolicy="no-referrer">' +
+'<div class="product-gallery-admin-actions">' +
+'<button type="button" class="btn btn-secondary" data-gallery-earlier="' + i + '"' + earlierDisabled + '>Earlier</button>' +
+'<button type="button" class="btn btn-secondary" data-gallery-later="' + i + '"' + laterDisabled + '>Later</button>' +
+'<button type="button" class="btn btn-secondary" data-gallery-remove="' + i + '">Remove</button>' +
+'</div></div>';
+}).join('');
+}
+
+function addProductGalleryUrl(raw) {
+const url = String(raw || '').trim();
+if (!/^https?:\/\//i.test(url)) {
+alert('Enter an image URL starting with https://');
+return false;
+}
+const main = (uploadedProductImage || document.getElementById('product-image').value || '').trim();
+if (main && url === main) {
+alert('That image is already the main product image.');
+return false;
+}
+if (productGalleryUrls.indexOf(url) !== -1) return true;
+if (productGalleryUrls.length >= PRODUCT_GALLERY_LIMIT) {
+alert('You can add up to 8 extra images.');
+return false;
+}
+productGalleryUrls.push(url);
+renderProductGallery();
+return true;
 }
 
 function isoToDatetimeLocalPromo(iso) {
@@ -4019,6 +4090,56 @@ document.getElementById('product-image-preview').innerHTML =
 }
 });
 
+document.getElementById('product-gallery-upload').addEventListener('change', (e) => {
+const file = e.target.files[0];
+e.target.value = '';
+if (!file) return;
+if (productGalleryUrls.length >= PRODUCT_GALLERY_LIMIT) {
+alert('You can add up to 8 extra images.');
+return;
+}
+showCropModal(file, (url) => {
+addProductGalleryUrl(url);
+});
+});
+
+document.getElementById('product-gallery-add').addEventListener('click', () => {
+const input = document.getElementById('product-gallery-url');
+if (addProductGalleryUrl(input.value)) input.value = '';
+});
+
+document.getElementById('product-gallery-url').addEventListener('keydown', (e) => {
+if (e.key !== 'Enter') return;
+e.preventDefault();
+if (addProductGalleryUrl(e.target.value)) e.target.value = '';
+});
+
+document.getElementById('product-gallery-list').addEventListener('click', (e) => {
+const earlier = e.target.closest('[data-gallery-earlier]');
+const later = e.target.closest('[data-gallery-later]');
+const remove = e.target.closest('[data-gallery-remove]');
+if (earlier && !earlier.disabled) {
+const i = Number(earlier.getAttribute('data-gallery-earlier'));
+if (i > 0) {
+const swapped = productGalleryUrls[i - 1];
+productGalleryUrls[i - 1] = productGalleryUrls[i];
+productGalleryUrls[i] = swapped;
+renderProductGallery();
+}
+} else if (later && !later.disabled) {
+const i = Number(later.getAttribute('data-gallery-later'));
+if (i < productGalleryUrls.length - 1) {
+const swapped = productGalleryUrls[i + 1];
+productGalleryUrls[i + 1] = productGalleryUrls[i];
+productGalleryUrls[i] = swapped;
+renderProductGallery();
+}
+} else if (remove) {
+productGalleryUrls.splice(Number(remove.getAttribute('data-gallery-remove')), 1);
+renderProductGallery();
+}
+});
+
 document.getElementById('event-image-upload').addEventListener('change', (e) => {
 const file = e.target.files[0];
 if (file) {
@@ -5114,6 +5235,7 @@ price: Math.round(parseFloat(document.getElementById('product-price').value) * 1
 stock_quantity: parseInt(document.getElementById('product-stock').value),
 category: window.ShopCategories ? ShopCategories.normalizeField(selectedCategories.join(',')) : selectedCategories.join(','),
 image_url: imageUrl,
+gallery_urls: productGalleryUrls.slice(),
 is_active: document.getElementById('product-active').checked ? 1 : 0,
 release_date: releaseDate
 };
@@ -5225,6 +5347,8 @@ window.selectedCategories = selectedCategories;
 renderCategoryTags();
 renderExistingCategories();
 uploadedProductImage = null;
+productGalleryUrls = [];
+renderProductGallery();
 const uploadInput = document.getElementById('product-image-upload');
 if (uploadInput) uploadInput.value = '';
 }
@@ -5264,6 +5388,8 @@ document.getElementById('product-image-preview').innerHTML =
 document.getElementById('product-image-preview').innerHTML = '';
 }
 uploadedProductImage = null;
+productGalleryUrls = parseAdminGalleryUrls(product.gallery_urls);
+renderProductGallery();
 const uploadInput = document.getElementById('product-image-upload');
 if (uploadInput) uploadInput.value = '';
 }
