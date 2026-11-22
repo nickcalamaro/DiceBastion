@@ -1260,11 +1260,14 @@
     const matches = products.filter(function (p) {
       if (p.catalog_status === 'archived') return false;
       if (!q) return true;
-      return String(p.name || '').toLowerCase().indexOf(q) !== -1 || String(p.ean || '').indexOf(q) !== -1;
+      return String(p.name || '').toLowerCase().indexOf(q) !== -1
+        || String(p.ean || '').indexOf(q) !== -1
+        || String(p.id) === q;
     }).slice(0, 40);
     if (!matches.length) return '<option value="">No matching products</option>';
     return matches.map(function (p) {
-      return '<option value="' + p.id + '">' + esc(p.name) + (p.ean ? ' (' + esc(p.ean) + ')' : '') + '</option>';
+      const stock = Number(p.stock_quantity) || 0;
+      return '<option value="' + p.id + '">' + esc(p.name) + ' (id ' + p.id + ', ' + stock + ' in stock)' + (p.ean ? ' ' + esc(p.ean) : '') + '</option>';
     }).join('');
   }
 
@@ -1319,6 +1322,13 @@
       setStatus(filledText
         ? 'New product added to the shop and to this receipt, including the summary and description.'
         : 'New product added to the shop and to this receipt.');
+    } else if (result.opens_existing_stock) {
+      const sold = Number(result.backfilled_units) || 0;
+      setStatus(sold
+        ? 'Linked to the existing product. ' + sold + ' already sold ' + (sold === 1 ? 'unit is' : 'units are') + ' costed from this receipt. The shop stock count is unchanged.'
+        : 'Linked to the existing product. No sales since the receipt date needed a cost. The shop stock count is unchanged.');
+    } else if (Number(result.backfilled_units) > 0) {
+      setStatus('Stock was added to the existing product. ' + result.backfilled_units + ' sold ' + (Number(result.backfilled_units) === 1 ? 'unit now has' : 'units now have') + ' a cost from this receipt.');
     } else if (result.matched_existing) {
       setStatus(filledText || copy.indexOf('price') !== -1
         ? 'Stock was added, and the selling price, summary or description you entered was saved on the product.'
@@ -1346,8 +1356,9 @@
       size: 'lg',
       formContent:
         '<div class="session-line-existing">' +
-          field('Find a product', '<input class="modal-form-input session-line-filter" placeholder="Name or EAN">') +
+          field('Find a product', '<input class="modal-form-input session-line-filter" placeholder="Name, EAN, or product id">') +
           '<select name="product_id" class="modal-form-input session-line-products" size="6">' + productOptions(products, '') + '</select>' +
+          '<p class="admin-text-small admin-text-muted">The receipt stores the cost and links it to this product. Sales on or after the receipt date pick up that cost. The number in stock stays as it is.</p>' +
         '</div>' +
         '<label class="checkbox-label" style="display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;">' +
           '<input type="checkbox" name="new_product" class="checkbox-input session-line-new-toggle"> This is a new product' +

@@ -165,6 +165,7 @@ const SCHEMA_STATEMENTS = [
     unit_cost_pence INTEGER NOT NULL,
     entry_method TEXT NOT NULL,
     lot_id INTEGER,
+    opens_existing_stock INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   )`,
   'CREATE INDEX IF NOT EXISTS idx_stock_lots_product ON stock_lots (product_id, received_date, id)',
@@ -179,6 +180,17 @@ const SCHEMA_STATEMENTS = [
 
 let schemaReady = false
 let payLaterColumnsReady = false
+let importLineFlagsReady = false
+
+async function ensureImportLineFlags(db) {
+  if (importLineFlagsReady) return
+  try {
+    await db.prepare('ALTER TABLE stock_import_lines ADD COLUMN opens_existing_stock INTEGER DEFAULT 0').run()
+  } catch (_) {
+    /* column exists */
+  }
+  importLineFlagsReady = true
+}
 
 /**
  * Pay later is a fulfilment flag, not a second payment. Stock is already taken.
@@ -220,7 +232,10 @@ export function movementRecognisedAtSql(movementAlias = 'sm', orderAlias = 'o') 
 /** Creates ledger tables if missing (once per isolate) and seeds books_start_date. */
 export async function ensureLedgerSchema(db) {
   await ensureOrderPayLaterColumns(db)
-  if (schemaReady) return
+  if (schemaReady) {
+    await ensureImportLineFlags(db)
+    return
+  }
   try {
     await db.prepare('ALTER TABLE products ADD COLUMN cost_tracked INTEGER DEFAULT 0').run()
   } catch (_) {
@@ -239,6 +254,7 @@ export async function ensureLedgerSchema(db) {
     ['stock_import_lines', 'bundle_name', 'TEXT'],
     ['stock_import_lines', 'bundle_ean', 'TEXT'],
     ['stock_import_lines', 'bundle_quantity', 'INTEGER'],
+    ['stock_import_lines', 'opens_existing_stock', 'INTEGER DEFAULT 0'],
     ['stock_lots', 'unit_foreign_minor', 'INTEGER'],
     ['stock_import_sessions', 'receipt_key', 'TEXT'],
     ['business_expenses', 'receipt_key', 'TEXT'],
@@ -321,20 +337,23 @@ export async function getBooksStartDate(db) {
  * with reason 'no_cost_batch'. Returns the total cost in pence.
  */
 export async function consumeFifo(db, {
-  productId, quantity, movementType = 'sale', orderId = null, orderItemId = null, reason = null, occurredAt
+  productId, quantity, movementType = 'sale', orderId = null, orderItemId = null, reason = null, occurredAt,
+  receivedOnOrBefore = null, recordUncosted = true
 }) {
   const when = occurredAt || new Date().toISOString()
   let remaining = Math.max(0, Number(quantity) || 0)
   let totalCost = 0
+  const dateSql = receivedOnOrBefore ? ' AND received_date <= ?' : ''
+  const dateBind = receivedOnOrBefore ? [receivedOnOrBefore] : []
 
   for (let attempt = 0; remaining > 0 && attempt < 100; attempt++) {
     const lot = await db.prepare(`
       SELECT id, quantity_remaining, unit_cost_pence
       FROM stock_lots
-      WHERE product_id = ? AND quantity_remaining > 0
+      WHERE product_id = ? AND quantity_remaining > 0${dateSql}
       ORDER BY received_date ASC, id ASC
       LIMIT 1
-    `).bind(productId).first()
+    `).bind(productId, ...dateBind).first()
     if (!lot) break
 
     const take = Math.min(remaining, Number(lot.quantity_remaining))
@@ -352,13 +371,80 @@ export async function consumeFifo(db, {
     remaining -= take
   }
 
-  if (remaining > 0) {
+  if (remaining > 0 && recordUncosted) {
     await db.prepare(`
       INSERT INTO stock_movements (product_id, lot_id, order_id, order_item_id, movement_type, quantity, unit_cost_pence, occurred_at, reason)
       VALUES (?, NULL, ?, ?, ?, ?, 0, ?, 'no_cost_batch')
     `).bind(productId, orderId, orderItemId, movementType, remaining, when).run()
   }
   return totalCost
+}
+
+/**
+ * Costs paid sales of a product from batches received on or before each sale.
+ * Sales before `sinceDate` are left as they are. Shop stock counts are not changed.
+ */
+export async function backfillUncostedSales(db, productId, sinceDate) {
+  const since = parseLedgerDate(sinceDate)
+  if (!since) return { units: 0, cost_pence: 0 }
+  const { results } = await db.prepare(`
+    SELECT oi.id AS item_id, oi.order_id, oi.quantity,
+           COALESCE(o.completed_at, o.created_at) AS sold_at,
+           (SELECT COALESCE(SUM(sm.quantity), 0) FROM stock_movements sm
+            WHERE sm.order_item_id = oi.id AND sm.movement_type = 'sale' AND sm.lot_id IS NOT NULL) AS costed_qty,
+           (SELECT COALESCE(SUM(sm.quantity), 0) FROM stock_movements sm
+            WHERE sm.order_item_id = oi.id AND sm.movement_type = 'sale' AND sm.lot_id IS NULL) AS uncosted_qty
+    FROM order_items oi
+    JOIN orders o ON o.id = oi.order_id
+    WHERE oi.product_id = ?
+      AND UPPER(COALESCE(o.payment_status, '')) = 'PAID'
+      AND NOT ((o.name = 'Walk-in' OR lower(o.email) = 'walk-in') AND IFNULL(o.sale_channel, '') != 'pos')
+      AND substr(COALESCE(o.completed_at, o.created_at), 1, 10) >= ?
+    ORDER BY COALESCE(o.completed_at, o.created_at), o.id, oi.id
+  `).bind(productId, since).all()
+
+  let units = 0
+  let costPence = 0
+  for (const row of results || []) {
+    const need = Math.max(0, Number(row.quantity) - Number(row.costed_qty))
+    if (!need) continue
+    const saleDay = String(row.sold_at || '').slice(0, 10)
+    if (!parseLedgerDate(saleDay) || saleDay < since) continue
+    const hadUncosted = Number(row.uncosted_qty) > 0
+    if (hadUncosted) {
+      await db.prepare(`
+        DELETE FROM stock_movements
+        WHERE order_item_id = ? AND movement_type = 'sale' AND lot_id IS NULL
+      `).bind(row.item_id).run()
+    }
+    const when = String(row.sold_at || '').includes('T') ? row.sold_at : `${saleDay}T12:00:00.000Z`
+    const cost = await consumeFifo(db, {
+      productId,
+      quantity: need,
+      movementType: 'sale',
+      orderId: row.order_id,
+      orderItemId: row.item_id,
+      occurredAt: when,
+      receivedOnOrBefore: saleDay,
+      recordUncosted: false
+    })
+    const costed = await db.prepare(`
+      SELECT COALESCE(SUM(quantity), 0) AS qty
+      FROM stock_movements
+      WHERE order_item_id = ? AND movement_type = 'sale' AND lot_id IS NOT NULL
+    `).bind(row.item_id).first()
+    const gained = Math.max(0, Number(costed?.qty) - Number(row.costed_qty))
+    if (!gained && hadUncosted) {
+      await db.prepare(`
+        INSERT INTO stock_movements (product_id, lot_id, order_id, order_item_id, movement_type, quantity, unit_cost_pence, occurred_at, reason)
+        VALUES (?, NULL, ?, ?, 'sale', ?, 0, ?, 'no_cost_batch')
+      `).bind(productId, row.order_id, row.item_id, need, when).run()
+      continue
+    }
+    units += gained
+    costPence += cost
+  }
+  return { units, cost_pence: costPence }
 }
 
 /** Records cost of goods sold for every tracked line on an order (skips lines already recorded). */
@@ -443,11 +529,17 @@ export async function receiveStock(db, input) {
     input.unit_foreign_minor != null ? parsePence(input.unit_foreign_minor) : null
   ).first()
 
-  await db.prepare(`
-    UPDATE products
-    SET stock_quantity = IFNULL(stock_quantity, 0) + ?, cost_tracked = 1, updated_at = ?
-    WHERE id = ?
-  `).bind(quantity, new Date().toISOString(), productId).run()
+  if (input.skip_stock_quantity) {
+    await db.prepare(`
+      UPDATE products SET cost_tracked = 1, updated_at = ? WHERE id = ?
+    `).bind(new Date().toISOString(), productId).run()
+  } else {
+    await db.prepare(`
+      UPDATE products
+      SET stock_quantity = IFNULL(stock_quantity, 0) + ?, cost_tracked = 1, updated_at = ?
+      WHERE id = ?
+    `).bind(quantity, new Date().toISOString(), productId).run()
+  }
 
   return { lot_id: lot.id, supplier_bill_id: billId }
 }
@@ -830,6 +922,12 @@ export async function getImportSession(db, id) {
     SELECT l.*, p.name AS product_name,
       lot.quantity_remaining,
       CASE
+        WHEN IFNULL(l.opens_existing_stock, 0) = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM stock_movements sm
+            WHERE sm.lot_id = l.lot_id AND sm.movement_type != 'sale'
+          )
+        THEN 1
         WHEN lot.quantity_remaining = l.quantity
           AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.lot_id = l.lot_id)
         THEN 1
@@ -885,11 +983,12 @@ export async function addImportLine(db, sessionId, input) {
   let created = false
   let product = null
   const productId = parseInt(input.product_id, 10)
+  const productSql = 'SELECT id, name, catalog_status, IFNULL(cost_tracked, 0) AS cost_tracked FROM products'
   if (productId > 0) {
-    product = await db.prepare('SELECT id, name, catalog_status FROM products WHERE id = ?').bind(productId).first()
+    product = await db.prepare(`${productSql} WHERE id = ?`).bind(productId).first()
     if (!product) return { error: 'product_not_found' }
   } else if (ean) {
-    product = await db.prepare('SELECT id, name, catalog_status FROM products WHERE ean = ?').bind(ean).first()
+    product = await db.prepare(`${productSql} WHERE ean = ?`).bind(ean).first()
   }
 
   let filledCopy = []
@@ -962,6 +1061,7 @@ export async function addImportLine(db, sessionId, input) {
     }
   }
 
+  const opensExistingStock = !created && !eventWriteOff && !Number(product.cost_tracked)
   const received = await receiveStock(db, {
     product_id: product.id,
     quantity,
@@ -970,7 +1070,8 @@ export async function addImportLine(db, sessionId, input) {
     supplier: session.supplier,
     received_date: session.received_date,
     supplier_bill_id: session.supplier_bill_id,
-    notes: `Import session ${session.id}`
+    notes: `Import session ${session.id}`,
+    skip_stock_quantity: opensExistingStock
   })
   if (received.error) return received
 
@@ -979,8 +1080,8 @@ export async function addImportLine(db, sessionId, input) {
 
   const bundle = cleanBundle(input)
   const line = await db.prepare(`
-    INSERT INTO stock_import_lines (session_id, product_id, ean, name, quantity, unit_cost_pence, entry_method, lot_id, unit_foreign_minor, bundle_name, bundle_ean, bundle_quantity)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    INSERT INTO stock_import_lines (session_id, product_id, ean, name, quantity, unit_cost_pence, entry_method, lot_id, unit_foreign_minor, bundle_name, bundle_ean, bundle_quantity, opens_existing_stock)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
   `).bind(
     session.id,
     product.id,
@@ -993,8 +1094,14 @@ export async function addImportLine(db, sessionId, input) {
     unitForeignMinor,
     bundle ? bundle.name : null,
     bundle ? bundle.ean : null,
-    bundle ? bundle.quantity : null
+    bundle ? bundle.quantity : null,
+    opensExistingStock ? 1 : 0
   ).first()
+
+  let backfill = { units: 0, cost_pence: 0 }
+  if (!eventWriteOff) {
+    backfill = await backfillUncostedSales(db, product.id, session.received_date)
+  }
 
   let writeOff = null
   if (eventWriteOff) {
@@ -1017,6 +1124,9 @@ export async function addImportLine(db, sessionId, input) {
     product_id: product.id,
     created_product: created,
     matched_existing: !created && !(productId > 0),
+    opens_existing_stock: opensExistingStock,
+    backfilled_units: backfill.units,
+    backfilled_cost_pence: backfill.cost_pence,
     filled_copy: filledCopy,
     event_write_off: eventWriteOff || undefined,
     write_off_cost_pence: writeOff ? writeOff.cost_pence : undefined,
@@ -1146,12 +1256,28 @@ export async function removeImportLine(db, sessionId, lineId) {
     && Number(eventUse?.qty) === Number(line.quantity)
     && Number(otherMoves?.c) === 0
   if (!eventLine) {
-    if (Number(lot.quantity_remaining) !== Number(lot.quantity_received)) return { error: 'line_already_used' }
-    if (Number(otherMoves?.c) > 0 || Number(eventUse?.qty) > 0) return { error: 'line_already_used' }
-    const upd = await db.prepare(`
-      UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ? AND stock_quantity >= ?
-    `).bind(line.quantity, new Date().toISOString(), line.product_id, line.quantity).run()
-    if (!Number(upd.meta?.changes ?? 0)) return { error: 'insufficient_stock' }
+    const opensExisting = Number(line.opens_existing_stock) === 1
+    if (opensExisting) {
+      const blocked = await db.prepare(`
+        SELECT COUNT(*) AS c FROM stock_movements
+        WHERE lot_id = ? AND movement_type != 'sale'
+      `).bind(line.lot_id).first()
+      if (Number(blocked?.c) > 0) return { error: 'line_already_used' }
+      await db.prepare('DELETE FROM stock_movements WHERE lot_id = ?').bind(line.lot_id).run()
+      const otherLots = await db.prepare('SELECT COUNT(*) AS c FROM stock_lots WHERE product_id = ? AND id != ?')
+        .bind(line.product_id, line.lot_id).first()
+      if (!Number(otherLots?.c)) {
+        await db.prepare('UPDATE products SET cost_tracked = 0, updated_at = ? WHERE id = ?')
+          .bind(new Date().toISOString(), line.product_id).run()
+      }
+    } else {
+      if (Number(lot.quantity_remaining) !== Number(lot.quantity_received)) return { error: 'line_already_used' }
+      if (Number(otherMoves?.c) > 0 || Number(eventUse?.qty) > 0) return { error: 'line_already_used' }
+      const upd = await db.prepare(`
+        UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ? AND stock_quantity >= ?
+      `).bind(line.quantity, new Date().toISOString(), line.product_id, line.quantity).run()
+      if (!Number(upd.meta?.changes ?? 0)) return { error: 'insufficient_stock' }
+    }
   } else {
     await db.prepare('DELETE FROM stock_movements WHERE lot_id = ?').bind(line.lot_id).run()
   }

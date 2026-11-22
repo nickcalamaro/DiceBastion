@@ -16,7 +16,7 @@ showDate: false
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
 <script src="/js/shopPosAdmin.js?v=20261120a"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
-<script src="/js/shopFinanceAdmin.js?v=20261116c"></script>
+<script src="/js/shopFinanceAdmin.js?v=20261121a"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
 <script src="/js/buybackAdmin.js?v=20261103c"></script>
 <script src="/js/richTextEditor.js"></script>
@@ -1310,7 +1310,7 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 </div>
 
 <h3 id="admin-section-finance-imports" class="admin-section-heading">Stock import sessions</h3>
-<p class="admin-text-muted admin-mb-1">One session is one receipt. Add each item yourself. Every item is linked to that receipt and added to stock at the cost you paid.</p>
+<p class="admin-text-muted admin-mb-1">One session is one receipt. Add a new product, or choose one already in the shop. The receipt records the cost you paid. An existing product keeps its current stock count, and sales on or after the receipt date are costed from that receipt.</p>
 <button type="button" id="finance-session-new" class="btn btn-primary admin-mb-1">New import session</button>
 <div id="finance-sessions-list" class="admin-mb-2"></div>
 <div id="finance-session-panel" class="admin-mb-2" style="display: none;"></div>
