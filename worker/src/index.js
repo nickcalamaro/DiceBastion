@@ -32,6 +32,9 @@ import {
 } from './store-credit.js'
 import {
   buildBuybackListPdf,
+  buybackAccountSetupCopy,
+  buybackListQuoteCopy,
+  createStaffBuybackCase,
   getBuybackCaseDetail,
   issueBuybackCredit,
   listBuybackCases,
@@ -39,9 +42,11 @@ import {
   prepareBuybackAccept,
   prepareBuybackOffer,
   prepareBuybackReject,
+  priceTradeInCsv,
   saveBuybackAccept,
   saveBuybackOffer,
-  saveBuybackReject
+  saveBuybackReject,
+  tradeInOfferNote
 } from './buyback-admin.js'
 import {
   listBuybackMeta,
@@ -14804,7 +14809,18 @@ const BUYBACK_ADMIN_ERRORS = {
   invalid_message: 'Write a short message for the customer, at least 10 characters.',
   not_found: 'That list could not be found.',
   case_changed: 'The email was sent, but the list changed before it could be updated. Refresh it before trying again.',
-  email_failed: 'The email did not send, so the list was left unchanged.'
+  email_failed: 'The email did not send, so the list was left unchanged.',
+  invalid_rate: 'Enter a trade-in rate from 30 to 150.',
+  invalid_fx: 'Enter how many pounds one unit of the file currency is worth, such as 0.85.',
+  empty_csv: 'That file has no cards.',
+  bad_csv: 'Use a ManaBox card list. It needs Name, Quantity and Purchase price columns.',
+  mixed_currency: 'Every row in the file needs the same purchase currency.',
+  no_prices: 'None of the rows have a purchase price, so there is nothing to offer.',
+  too_many_rows: 'This file has more than 400 cards. Split it and import the parts separately.',
+  total_too_high: 'This offer is above £20,000. Lower the rate or split the list.',
+  invalid_email: 'Enter the customer email address.',
+  customer_not_found: 'That member could not be found.',
+  csv_too_large: 'That file is too large.'
 }
 
 function buybackAdminError(result, fallbackStatus = 400) {
@@ -14839,6 +14855,168 @@ async function sendBuybackCustomerEmail(env, { to, copy, caseId, emailType, repl
 
 function emailWentOut(result) {
   return !!(result && result.success === true)
+}
+
+function buybackCustomerEmail(value) {
+  const email = String(value || '').trim()
+  if (email.length < 3 || email.length > 200) return ''
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return ''
+  return email
+}
+
+app.get('/admin/buyback/customers', requireAdmin, async c => {
+  try {
+    const q = String(c.req.query('q') || '').trim().slice(0, 80)
+    if (q.length < 2) return c.json({ ok: true, customers: [] })
+    const like = `%${q.replace(/[%_]/g, '')}%`
+    const { results } = await c.env.DB.prepare(`
+      SELECT user_id, name, email
+      FROM users
+      WHERE LOWER(email) LIKE LOWER(?) OR LOWER(IFNULL(name, '')) LIKE LOWER(?)
+      ORDER BY name
+      LIMIT 15
+    `).bind(like, like).all()
+    return c.json({ ok: true, customers: results || [] })
+  } catch (e) {
+    console.error('[admin/buyback] customers', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.post('/admin/buyback/cases/import', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const csv = String(body.csv || '')
+    if (csv.length > 1_000_000) {
+      const err = buybackAdminError({ error: 'csv_too_large' })
+      return c.json(err.body, err.status)
+    }
+    const priced = priceTradeInCsv(csv, {
+      ratePercent: body.rate_percent,
+      gbpPerUnit: body.gbp_per_unit
+    })
+    if (!priced.ok) {
+      const err = buybackAdminError(priced)
+      return c.json(err.body, err.status)
+    }
+    if (body.send !== true) {
+      return c.json({
+        ok: true,
+        preview: true,
+        currency: priced.currency,
+        rate_percent: priced.ratePercent,
+        gbp_per_unit: priced.gbpPerUnit,
+        total_pence: priced.totalPence,
+        line_count: priced.lineCount,
+        card_count: priced.cardCount,
+        lines: priced.lines.map(line => ({
+          card_name: line.card_name,
+          set_code: line.set_code,
+          collector_number: line.collector_number,
+          quantity: line.quantity,
+          list_price: line.list_price,
+          offer_pence: line.offer_pence,
+          notes: line.notes
+        }))
+      })
+    }
+
+    let user = null
+    const userId = Number(body.user_id)
+    if (Number.isInteger(userId) && userId > 0) {
+      user = await c.env.DB.prepare('SELECT user_id, email, name FROM users WHERE user_id = ?').bind(userId).first()
+      if (!user) {
+        const err = buybackAdminError({ error: 'customer_not_found' })
+        return c.json(err.body, err.status)
+      }
+    } else {
+      const email = buybackCustomerEmail(body.email)
+      if (!email) {
+        const err = buybackAdminError({ error: 'invalid_email' })
+        return c.json(err.body, err.status)
+      }
+      const name = String(body.name || '').trim().slice(0, 80)
+      user = await getOrCreateIdentity(c.env.DB, email, name)
+    }
+    const ownerId = Number(user.user_id || user.id)
+    const now = toIso(new Date())
+    const created = await createStaffBuybackCase(c.env.DB, { userId: ownerId, priced, nowIso: now })
+    if (!created.ok) {
+      const err = buybackAdminError(created)
+      return c.json(err.body, err.status)
+    }
+
+    const copy = buybackListQuoteCopy({
+      name: user.name,
+      amountPence: priced.totalPence,
+      caseId: created.caseId,
+      ratePercent: priced.ratePercent,
+      currency: priced.currency,
+      gbpPerUnit: priced.gbpPerUnit,
+      lines: priced.lines,
+      lineCount: priced.lineCount
+    })
+    let sent = null
+    try {
+      sent = await sendBuybackCustomerEmail(c.env, {
+        to: user.email,
+        copy,
+        caseId: created.caseId,
+        emailType: 'buyback_offer'
+      })
+    } catch (mailErr) {
+      console.error('[admin/buyback] import email', mailErr)
+    }
+    if (!emailWentOut(sent)) {
+      return c.json({
+        ok: true,
+        email_sent: false,
+        case_id: created.caseId,
+        message: 'The list was saved, but the email did not send. Open the list and use Send offer.'
+      })
+    }
+    const saved = await saveBuybackOffer(c.env.DB, {
+      caseId: created.caseId,
+      amountPence: priced.totalPence,
+      note: tradeInOfferNote(priced),
+      nowIso: now
+    })
+    if (!saved.ok) {
+      const err = buybackAdminError(saved)
+      return c.json(err.body, err.status)
+    }
+    return c.json({ ok: true, email_sent: true, case_id: created.caseId, case: saved.case })
+  } catch (e) {
+    console.error('[admin/buyback] import', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+async function sendBuybackAccountSetup(env, db, user, caseId) {
+  const resetToken = crypto.randomUUID() + '-' + crypto.randomUUID()
+  const now = new Date()
+  const tokenExpiry = toIso(new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000))
+  const created = toIso(now)
+  try {
+    await db.prepare(`
+      INSERT INTO password_reset_tokens (user_id, token, expires_at, used, email_sent, source, created_at)
+      VALUES (?, ?, ?, 0, 1, 'buyback', ?)
+    `).bind(user.user_id, resetToken, tokenExpiry, created).run()
+  } catch (_) {
+    await db.prepare(`
+      INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at)
+      VALUES (?, ?, ?, 0, ?)
+    `).bind(user.user_id, resetToken, tokenExpiry, created).run()
+  }
+  const setupLink = `${siteUrl(env)}/reset-password?token=${resetToken}`
+  const copy = buybackAccountSetupCopy({ name: user.name, email: user.email, setupLink })
+  const sent = await sendBuybackCustomerEmail(env, {
+    to: user.email,
+    copy,
+    caseId,
+    emailType: 'buyback_account_setup'
+  })
+  return emailWentOut(sent)
 }
 
 app.get('/admin/buyback/cases', requireAdmin, async c => {
@@ -14971,6 +15149,7 @@ app.post('/admin/buyback/cases/:id/credit', requireAdmin, async c => {
       return c.json(err.body, err.status)
     }
     let emailSent = true
+    let accountSetupSent = null
     if (!issued.already && issued.copy && issued.case?.user_email) {
       try {
         const sent = await sendBuybackCustomerEmail(c.env, {
@@ -14984,11 +15163,29 @@ app.post('/admin/buyback/cases/:id/credit', requireAdmin, async c => {
         console.error('[admin/buyback] credit email', mailErr)
         emailSent = false
       }
+      let setupUser = null
+      try {
+        const user = await c.env.DB.prepare(
+          'SELECT user_id, email, name, password_hash FROM users WHERE user_id = ?'
+        ).bind(issued.case.user_id).first()
+        if (user && !user.password_hash) setupUser = user
+      } catch (lookupErr) {
+        console.error('[admin/buyback] account lookup', lookupErr)
+      }
+      if (setupUser) {
+        try {
+          accountSetupSent = await sendBuybackAccountSetup(c.env, c.env.DB, setupUser, issued.case.id)
+        } catch (setupErr) {
+          console.error('[admin/buyback] account setup', setupErr)
+          accountSetupSent = false
+        }
+      }
     }
     return c.json({
       ok: true,
       already: !!issued.already,
       email_sent: issued.already ? null : emailSent,
+      account_setup_sent: accountSetupSent,
       case: issued.case
     })
   } catch (e) {

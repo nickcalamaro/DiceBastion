@@ -576,6 +576,7 @@ CREATE TABLE buyback_case_items (
   condition TEXT NOT NULL DEFAULT 'EX',
   language TEXT NOT NULL DEFAULT 'EN',
   notes TEXT,
+  quantity INTEGER NOT NULL DEFAULT 1,
   line_quote_pence INTEGER,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY (case_id) REFERENCES buyback_cases(id)

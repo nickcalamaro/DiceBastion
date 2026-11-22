@@ -31,6 +31,348 @@ export function parseBuybackPounds(input) {
   return pence
 }
 
+const TRADE_IN_MAX_ROWS = 400
+const TRADE_IN_MAX_CHARS = 1_000_000
+const CONDITION_FROM_FILE = {
+  mint: 'MT',
+  near_mint: 'NM',
+  excellent: 'EX',
+  good: 'GD',
+  light_played: 'LP',
+  lightly_played: 'LP',
+  played: 'PL',
+  moderately_played: 'PL',
+  heavily_played: 'PO',
+  poor: 'PO',
+  damaged: 'PO'
+}
+const languageCodes = new Set(BUYBACK_LANGUAGES.map(row => row.code))
+
+/** Whole percent from 30 to 150. */
+export function parseTradeInRate(input) {
+  const s = String(input ?? '').trim().replace(/%$/, '')
+  if (!/^\d+$/.test(s)) return null
+  const n = Number(s)
+  if (n < 30 || n > 150) return null
+  return n
+}
+
+/** Starting pounds for one euro on a staff trade-in. Staff can type a different rate. */
+export const DEFAULT_POUNDS_PER_EURO = 0.85
+
+/**
+ * Pounds for one unit of a non-GBP file currency. GBP files always use 1.
+ * A blank rate on a euro file uses 0.85. Accepts up to 4 decimal places, from 0.01 to 10.
+ */
+export function parseGbpPerUnit(input, currency) {
+  const code = String(currency || 'GBP').toUpperCase()
+  if (code === 'GBP') return 1
+  const s = String(input ?? '').trim()
+  if (!s) return code === 'EUR' ? DEFAULT_POUNDS_PER_EURO : null
+  if (!/^\d+(\.\d{1,4})?$/.test(s)) return null
+  const n = Number(s)
+  if (!Number.isFinite(n) || n < 0.01 || n > 10) return null
+  return n
+}
+
+function parseCsvTable(text) {
+  const src = String(text || '').replace(/^\uFEFF/, '')
+  const rows = []
+  let row = []
+  let cell = ''
+  let quoted = false
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') {
+          cell += '"'
+          i += 1
+        } else {
+          quoted = false
+        }
+      } else {
+        cell += ch
+      }
+      continue
+    }
+    if (ch === '"') {
+      quoted = true
+    } else if (ch === ',') {
+      row.push(cell)
+      cell = ''
+    } else if (ch === '\n') {
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ''
+    } else if (ch !== '\r') {
+      cell += ch
+    }
+  }
+  if (cell.length || row.length) {
+    row.push(cell)
+    rows.push(row)
+  }
+  return rows.filter(cols => cols.some(value => String(value).trim()))
+}
+
+function headerMap(headers) {
+  const map = new Map()
+  headers.forEach((header, index) => {
+    map.set(String(header || '').trim().toLowerCase(), index)
+  })
+  return map
+}
+
+function csvCell(row, map, name) {
+  const index = map.get(name)
+  if (index == null) return ''
+  return String(row[index] ?? '').trim()
+}
+
+function parseMajorPrice(value) {
+  let s = String(value ?? '').trim().replace(/[£€$\s]/g, '')
+  if (!s) return null
+  if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '')
+  else if (s.includes(',')) s = s.replace(',', '.')
+  if (!/^\d+(\.\d+)?$/.test(s)) return null
+  const n = Number(s)
+  if (!Number.isFinite(n) || n < 0 || n > 100000) return null
+  return n
+}
+
+function fileFlag(value) {
+  const s = String(value ?? '').trim().toLowerCase()
+  return s === 'true' || s === '1' || s === 'yes'
+}
+
+function formatMajor(n) {
+  return (Math.round(Number(n) * 100) / 100).toFixed(2)
+}
+
+export function formatTradeInFx(gbpPerUnit) {
+  const s = Number(gbpPerUnit).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
+  return `£${s}`
+}
+
+/**
+ * Prices a ManaBox card export. Each line is the purchase price times the rate,
+ * converted into pence. The unit price is rounded, then multiplied by quantity.
+ */
+export function priceTradeInCsv(csvText, { ratePercent, gbpPerUnit } = {}) {
+  const rate = parseTradeInRate(ratePercent)
+  if (rate == null) return { ok: false, error: 'invalid_rate' }
+  const text = String(csvText ?? '')
+  if (text.length > TRADE_IN_MAX_CHARS) return { ok: false, error: 'csv_too_large' }
+  const table = parseCsvTable(text)
+  if (table.length < 2) return { ok: false, error: 'empty_csv' }
+  const map = headerMap(table[0])
+  if (!map.has('name') || !map.has('quantity') || !map.has('purchase price')) {
+    return { ok: false, error: 'bad_csv' }
+  }
+
+  const lines = []
+  let currency = ''
+  for (const row of table.slice(1)) {
+    const cardName = csvCell(row, map, 'name').slice(0, 180)
+    if (!cardName) continue
+    if (lines.length >= TRADE_IN_MAX_ROWS) return { ok: false, error: 'too_many_rows' }
+    const rowCurrency = (csvCell(row, map, 'purchase price currency') || 'GBP').toUpperCase().slice(0, 8)
+    if (!currency) currency = rowCurrency
+    else if (currency !== rowCurrency) return { ok: false, error: 'mixed_currency' }
+
+    const rawPrice = csvCell(row, map, 'purchase price')
+    const price = parseMajorPrice(rawPrice)
+    let quantity = Math.trunc(Number(csvCell(row, map, 'quantity')))
+    if (!Number.isInteger(quantity) || quantity < 1) quantity = 1
+    if (quantity > 250) quantity = 250
+
+    const notes = []
+    const foil = csvCell(row, map, 'foil').toLowerCase()
+    if (foil && foil !== 'normal' && foil !== 'false' && foil !== '0') notes.push('Foil')
+    if (fileFlag(csvCell(row, map, 'misprint'))) notes.push('Misprint')
+    if (fileFlag(csvCell(row, map, 'altered'))) notes.push('Altered')
+    if (fileFlag(csvCell(row, map, 'signed'))) notes.push('Signed')
+    if (fileFlag(csvCell(row, map, 'proxy'))) notes.push('Proxy')
+    if (price == null && rawPrice) notes.push('No list price')
+
+    const conditionKey = csvCell(row, map, 'condition').toLowerCase().replace(/[\s-]+/g, '_')
+    const langRaw = csvCell(row, map, 'language').toUpperCase().slice(0, 2)
+    lines.push({
+      card_name: cardName,
+      set_code: csvCell(row, map, 'set code').slice(0, 12) || null,
+      set_name: csvCell(row, map, 'set name').slice(0, 120) || null,
+      collector_number: csvCell(row, map, 'collector number').slice(0, 20) || null,
+      external_id: (csvCell(row, map, 'scryfall id') || csvCell(row, map, 'manabox id')).slice(0, 80) || null,
+      condition: CONDITION_FROM_FILE[conditionKey] || 'NM',
+      language: languageCodes.has(langRaw) ? langRaw : 'EN',
+      notes: notes.join('. ').slice(0, 500) || null,
+      quantity,
+      list_price: formatMajor(price == null ? 0 : price),
+      list_major: price == null ? 0 : price
+    })
+  }
+  if (!lines.length) return { ok: false, error: 'empty_csv' }
+
+  const fx = parseGbpPerUnit(gbpPerUnit, currency)
+  if (fx == null) return { ok: false, error: 'invalid_fx' }
+
+  let total = 0
+  let cards = 0
+  for (const line of lines) {
+    const unit = Math.round(line.list_major * (rate / 100) * fx * 100)
+    const linePence = unit * line.quantity
+    if (!Number.isFinite(linePence) || linePence < 0 || linePence > BUYBACK_MAX_CREDIT_PENCE) {
+      return { ok: false, error: 'total_too_high' }
+    }
+    line.offer_pence = linePence
+    total += linePence
+    cards += line.quantity
+    delete line.list_major
+  }
+  if (total <= 0) return { ok: false, error: 'no_prices' }
+  if (total > BUYBACK_MAX_CREDIT_PENCE) return { ok: false, error: 'total_too_high' }
+  return {
+    ok: true,
+    currency,
+    ratePercent: rate,
+    gbpPerUnit: fx,
+    totalPence: total,
+    lineCount: lines.length,
+    cardCount: cards,
+    lines
+  }
+}
+
+export function tradeInOfferNote(priced) {
+  const rate = `Priced at ${priced.ratePercent}% of the list prices.`
+  if (String(priced.currency || 'GBP').toUpperCase() === 'GBP') return rate
+  return `${rate} File currency ${priced.currency}, ${formatTradeInFx(priced.gbpPerUnit)} per 1 ${priced.currency}.`
+}
+
+export function buybackListQuoteCopy({ name, amountPence, caseId, ratePercent, currency, gbpPerUnit, lines, lineCount }) {
+  const who = greetingName(name)
+  const shown = (lines || []).slice(0, 30)
+  const extra = Math.max(0, Number(lineCount || shown.length) - shown.length)
+  const rowText = shown.map(line => {
+    const qty = Number(line.quantity) > 1 ? `${line.quantity} x ` : ''
+    return `${qty}${line.card_name}: ${formatBuybackPounds(line.offer_pence)}`
+  })
+  if (extra) rowText.push(`And ${extra} more.`)
+  const fxLine = String(currency || 'GBP').toUpperCase() === 'GBP'
+    ? ''
+    : `Prices on the file are in ${currency}. This offer uses ${formatTradeInFx(gbpPerUnit)} for each 1 ${currency}.`
+  const text = [
+    `Hi ${who},`,
+    '',
+    `Here is an offer for the cards on your list, at ${ratePercent}% of the prices on the file.`,
+    ...(fxLine ? [fxLine] : []),
+    '',
+    `The total is ${formatBuybackPounds(amountPence)} in store credit.`,
+    '',
+    ...rowText,
+    '',
+    'Reply to this email with your thoughts. Once you are happy with the price, bring the cards in and we will check them. The credit is added to your account once we have the cards.',
+    '',
+    'Dice Bastion'
+  ].join('\n')
+  const htmlRows = shown.map(line => {
+    const qty = Number(line.quantity) > 1 ? `${line.quantity} x ` : ''
+    return `<li>${escapeHtml(qty + line.card_name)}: ${escapeHtml(formatBuybackPounds(line.offer_pence))}</li>`
+  }).join('')
+  return {
+    headerTitle: 'Offer for your cards',
+    subject: `Offer for your card list (#${caseId})`,
+    text,
+    htmlInner: `<p>Hi ${escapeHtml(who)},</p>
+<p>Here is an offer for the cards on your list, at ${escapeHtml(ratePercent)}% of the prices on the file.</p>
+${fxLine ? `<p>${escapeHtml(fxLine)}</p>` : ''}
+<p>The total is <strong>${escapeHtml(formatBuybackPounds(amountPence))}</strong> in store credit.</p>
+<ul>${htmlRows}${extra ? `<li>And ${extra} more.</li>` : ''}</ul>
+<p>Reply to this email with your thoughts. Once you are happy with the price, bring the cards in and we will check them. The credit is added to your account once we have the cards.</p>
+<p>Dice Bastion</p>`
+  }
+}
+
+export function buybackAccountSetupCopy({ name, email, setupLink }) {
+  const who = greetingName(name)
+  const safeEmail = escapeHtml(email)
+  const safeLink = escapeHtml(setupLink)
+  const text = [
+    `Hi ${who},`,
+    '',
+    `We added store credit for your cards. To see it and spend it, finish your Dice Bastion account for ${email} by choosing a password:`,
+    '',
+    setupLink,
+    '',
+    'The link works for 7 days. Store credit can be used in the online shop or on event tickets. It cannot be used for memberships.',
+    '',
+    'Dice Bastion'
+  ].join('\n')
+  return {
+    headerTitle: 'Finish your account',
+    subject: 'Finish your Dice Bastion account',
+    text,
+    htmlInner: `<p>Hi ${escapeHtml(who)},</p>
+<p>We added store credit for your cards. To see it and spend it, finish your Dice Bastion account for ${safeEmail} by choosing a password.</p>
+<p><a href="${safeLink}">Choose a password</a></p>
+<p>Or copy this link into your browser:<br>${safeLink}</p>
+<p>The link works for 7 days. Store credit can be used in the online shop or on event tickets. It cannot be used for memberships.</p>
+<p>Dice Bastion</p>`
+  }
+}
+
+export async function ensureBuybackItemColumns(db) {
+  const alters = [
+    'ALTER TABLE buyback_case_items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1',
+    'ALTER TABLE buyback_case_items ADD COLUMN line_quote_pence INTEGER',
+    'ALTER TABLE buyback_case_items ADD COLUMN external_id TEXT'
+  ]
+  for (const sql of alters) {
+    try { await db.prepare(sql).run() } catch (_) { /* column already present */ }
+  }
+}
+
+export async function createStaffBuybackCase(db, { userId, priced, nowIso }) {
+  const uid = Number(userId)
+  if (!Number.isInteger(uid) || uid <= 0) return { ok: false, error: 'customer_not_found' }
+  if (!priced?.ok || !(Number(priced.totalPence) > 0) || !Array.isArray(priced.lines) || !priced.lines.length) {
+    return { ok: false, error: 'no_prices' }
+  }
+  await ensureBuybackItemColumns(db)
+  const now = nowIso || new Date().toISOString()
+  const inserted = await db.prepare(`
+    INSERT INTO buyback_cases (
+      user_id, status, tos_accepted_at, customer_notes, created_at, updated_at
+    ) VALUES (?, 'submitted', ?, ?, ?, ?)
+  `).bind(uid, now, 'Added by staff from a card file.', now, now).run()
+  const caseId = inserted.meta.last_row_id
+  const sql = `
+    INSERT INTO buyback_case_items (
+      case_id, game_system, external_id, card_name, set_code, set_name, collector_number,
+      condition, language, notes, line_quote_pence, quantity
+    ) VALUES (?, 'mtg', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `
+  for (const line of priced.lines) {
+    await db.prepare(sql).bind(
+      caseId,
+      line.external_id || null,
+      line.card_name,
+      line.set_code || null,
+      line.set_name || null,
+      line.collector_number || null,
+      line.condition || 'NM',
+      line.language || 'EN',
+      line.notes || null,
+      line.offer_pence,
+      line.quantity
+    ).run()
+  }
+  const row = await loadCase(db, caseId)
+  return { ok: true, caseId, case: row }
+}
+
 function escapeHtml(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -144,9 +486,10 @@ async function loadCase(db, caseId) {
 }
 
 async function loadItems(db, caseId) {
+  await ensureBuybackItemColumns(db)
   const { results } = await db.prepare(`
     SELECT id, game_system, card_name, set_code, set_name, collector_number,
-           condition, language, notes
+           condition, language, notes, quantity, line_quote_pence
     FROM buyback_case_items
     WHERE case_id = ?
     ORDER BY id
@@ -155,6 +498,7 @@ async function loadItems(db, caseId) {
 }
 
 export async function listBuybackCases(db, { status } = {}) {
+  await ensureBuybackItemColumns(db)
   const params = []
   let where = ''
   if (status === 'open') {
@@ -166,7 +510,7 @@ export async function listBuybackCases(db, { status } = {}) {
   const { results } = await db.prepare(`
     SELECT c.id, c.status, c.agreed_value_pence, c.created_at, c.quoted_at, c.resolved_at,
            u.email AS user_email, u.name AS user_name,
-           (SELECT COUNT(*) FROM buyback_case_items i WHERE i.case_id = c.id) AS item_count
+           (SELECT COALESCE(SUM(quantity), 0) FROM buyback_case_items i WHERE i.case_id = c.id) AS item_count
     FROM buyback_cases c
     JOIN users u ON u.user_id = c.user_id
     ${where}
@@ -413,9 +757,12 @@ export function buybackPdfLines(detail) {
     const game = gameLabel.get(card.game_system) || card.game_system
     const condition = conditionLabel.get(card.condition) || card.condition
     const language = languageLabel.get(card.language) || card.language
+    const qty = Number(card.quantity) > 0 ? `Qty ${card.quantity}` : ''
+    const money = card.line_quote_pence != null ? formatBuybackPounds(card.line_quote_pence) : ''
+    const priced = [qty, money].filter(Boolean).join(', ')
     pushWrapped(items, `${index + 1}. ${card.card_name}`, { size: 11, gap: 14 })
     pushWrapped(items, `${game}${printing ? `, ${printing}` : ''}`)
-    pushWrapped(items, `${condition}, ${language}`, { gap: card.notes ? 14 : 16 })
+    pushWrapped(items, `${condition}, ${language}${priced ? `, ${priced}` : ''}`, { gap: card.notes ? 14 : 16 })
     if (card.notes) pushWrapped(items, `Notes: ${card.notes}`, { gap: 16 })
   })
   return items

@@ -18,7 +18,7 @@ showDate: false
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261121a"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
-<script src="/js/buybackAdmin.js?v=20261103c"></script>
+<script src="/js/buybackAdmin.js?v=20261122b"></script>
 <script src="/js/richTextEditor.js"></script>
 
 <!-- Cropper.js for image cropping -->
@@ -1141,7 +1141,7 @@ Show delivered
 <!-- Trade-ins Tab -->
 <div id="trade-ins-tab" class="tab-content" style="display: none;">
 <h2 id="admin-section-trade-ins" class="admin-section-heading">Trade-ins <a href="#trade-ins" class="admin-permalink" aria-label="Link to trade-ins">#</a></h2>
-<p class="admin-text-muted admin-mb-1">Lists customers have sent in. Download a list, email an offer, and add store credit once they have brought the cards in.</p>
+<p class="admin-text-muted admin-mb-1">Lists customers have sent in, and lists you add for them from a card file. Email an offer, then deliver the trade-in to add store credit.</p>
 <div id="buyback-admin-root"></div>
 </div>
 

@@ -3,14 +3,19 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import {
   buildBuybackListPdf,
   buybackAcceptStaffCopy,
+  buybackAccountSetupCopy,
+  buybackListQuoteCopy,
   buybackOfferCopy,
   buybackRejectCopy,
+  createStaffBuybackCase,
   getBuybackCaseDetail,
   issueBuybackCredit,
   parseBuybackPounds,
+  parseTradeInRate,
   prepareBuybackAccept,
   prepareBuybackOffer,
   prepareBuybackReject,
+  priceTradeInCsv,
   saveBuybackAccept,
   saveBuybackOffer,
   saveBuybackReject
@@ -207,5 +212,97 @@ describe('buyback admin', () => {
     expect(issued.ok).toBe(true)
     expect(issued.case.status).toBe('completed')
     expect(issued.case.agreed_value_pence).toBe(2000)
+  })
+
+  test('prices a ManaBox file and stores the quantity on the case', async () => {
+    expect(parseTradeInRate('29')).toBeNull()
+    expect(parseTradeInRate('151')).toBeNull()
+    expect(parseTradeInRate('150')).toBe(150)
+
+    const csv = [
+      'Name,Set code,Set name,Collector number,Foil,Rarity,Quantity,ManaBox ID,Scryfall ID,Purchase price,Misprint,Altered,Signed,Condition,Language,Proxy,Purchase price currency,Added',
+      'Waste Not,WOT,Wilds of Eldraine: Enchanting Tales,38,normal,rare,1,85839,f5dd,4.98,false,false,false,near_mint,en,false,EUR,2026-11-22T12:55:09.503Z',
+      '"Cloud, Midgar Mercenary",FIN,Final Fantasy,10,normal,mythic,1,105580,abc,22.34,false,false,false,near_mint,en,false,EUR,2026-11-22T12:55:09.504Z',
+      '"Daredevil, Man Without Fear",MSH,Marvel Super Heroes,398,foil,rare,1,113330,def,22.67,false,false,false,near_mint,en,false,EUR,2026-11-22T12:55:09.507Z',
+      'Idyllic Tutor,THB,Theros Beyond Death,24,normal,rare,2,47038,ghi,6.22,false,false,false,near_mint,en,false,EUR,2026-11-22T12:55:09.505Z'
+    ].join('\n')
+
+    expect(priceTradeInCsv(csv, { ratePercent: 20, gbpPerUnit: 1 }).error).toBe('invalid_rate')
+    const priced = priceTradeInCsv(csv, { ratePercent: 30, gbpPerUnit: 1 })
+    expect(priced.ok).toBe(true)
+    expect(priced.currency).toBe('EUR')
+    expect(priced.cardCount).toBe(5)
+    const waste = priced.lines.find(line => line.card_name === 'Waste Not')
+    const tutor = priced.lines.find(line => line.card_name === 'Idyllic Tutor')
+    const daredevil = priced.lines.find(line => line.card_name === 'Daredevil, Man Without Fear')
+    expect(waste.offer_pence).toBe(149)
+    expect(tutor.quantity).toBe(2)
+    expect(tutor.offer_pence).toBe(374)
+    expect(daredevil.condition).toBe('NM')
+    expect(daredevil.language).toBe('EN')
+    expect(daredevil.notes).toBe('Foil')
+    expect(priced.lines.some(line => line.card_name === 'Cloud, Midgar Mercenary')).toBe(true)
+
+    const converted = priceTradeInCsv(csv, { ratePercent: '30', gbpPerUnit: '0.80' })
+    expect(converted.lines.find(line => line.card_name === 'Waste Not').offer_pence).toBe(120)
+    const defaultFx = priceTradeInCsv(csv, { ratePercent: 30 })
+    expect(defaultFx.gbpPerUnit).toBe(0.85)
+    expect(defaultFx.lines.find(line => line.card_name === 'Waste Not').offer_pence).toBe(127)
+    expect(priceTradeInCsv(csv.replace(',EUR,', ',GBP,').replaceAll(',EUR,', ',GBP,'), { ratePercent: 30 }).currency).toBe('GBP')
+
+    const copy = buybackListQuoteCopy({
+      name: 'Alex Vallejo',
+      amountPence: priced.totalPence,
+      caseId: 8,
+      ratePercent: 30,
+      currency: 'EUR',
+      gbpPerUnit: 1,
+      lines: priced.lines,
+      lineCount: priced.lineCount
+    })
+    expect(copy.text).toContain('Reply to this email with your thoughts')
+    expect(copy.text).toContain('at 30% of the prices on the file')
+    expect(copy.text).toContain('2 x Idyllic Tutor')
+    expect(copy.text).not.toMatch(/[—–]/)
+    const setup = buybackAccountSetupCopy({
+      name: 'Alex',
+      email: 'alex@example.com',
+      setupLink: 'https://dicebastion.com/reset-password?token=abc'
+    })
+    expect(setup.text).toContain('choosing a password')
+    expect(setup.text).toContain('https://dicebastion.com/reset-password?token=abc')
+    expect(setup.htmlInner).not.toMatch(/[🎉✨]/)
+
+    await env.DB.prepare(
+      'INSERT INTO users (email, name, store_credit_pence) VALUES (?, ?, 0)'
+    ).bind('alex-trade@example.com', 'Alex Vallejo').run()
+    const user = await env.DB.prepare('SELECT user_id FROM users WHERE email = ?').bind('alex-trade@example.com').first()
+    const created = await createStaffBuybackCase(env.DB, {
+      userId: user.user_id,
+      priced,
+      nowIso: '2026-11-22T13:00:00.000Z'
+    })
+    expect(created.ok).toBe(true)
+    const detail = await getBuybackCaseDetail(env.DB, created.caseId)
+    expect(detail.case.customer_notes).toContain('Added by staff')
+    expect(detail.items.find(item => item.card_name === 'Idyllic Tutor').quantity).toBe(2)
+    expect(detail.items.find(item => item.card_name === 'Idyllic Tutor').line_quote_pence).toBe(374)
+
+    await saveBuybackOffer(env.DB, {
+      caseId: created.caseId,
+      amountPence: priced.totalPence,
+      note: 'Priced at 30% of the list prices.',
+      nowIso: '2026-11-22T13:05:00.000Z'
+    })
+    const issued = await issueBuybackCredit(env.DB, {
+      caseId: created.caseId,
+      amountPence: 5000,
+      createdBy: 'admin@dicebastion.com',
+      nowIso: '2026-11-22T18:00:00.000Z'
+    })
+    expect(issued.ok).toBe(true)
+    expect(issued.case.status).toBe('completed')
+    expect(issued.case.agreed_value_pence).toBe(5000)
+    expect(await getStoreCreditBalance(env.DB, user.user_id)).toBe(5000)
   })
 })
