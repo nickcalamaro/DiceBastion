@@ -251,47 +251,101 @@ export function tradeInOfferNote(priced) {
   return `${rate} File currency ${priced.currency}, ${formatTradeInFx(priced.gbpPerUnit)} per 1 ${priced.currency}.`
 }
 
-export function buybackListQuoteCopy({ name, amountPence, caseId, ratePercent, currency, gbpPerUnit, lines, lineCount }) {
+const TRADE_IN_TABLE_MARKER = '[card table]'
+const TRADE_IN_SUBJECT = 'Offer for your card list'
+const TRADE_IN_COLUMNS = ['Card', 'Set', 'Condition', 'Language', 'Qty', 'List price', 'Offer', 'Notes']
+
+function tradeInPrinting(line) {
+  return [
+    line.set_name,
+    line.set_code ? String(line.set_code).toUpperCase() : '',
+    line.collector_number ? `#${line.collector_number}` : ''
+  ].filter(Boolean).join(' ')
+}
+
+function tradeInCells(line, currency) {
+  return [
+    line.card_name || '',
+    tradeInPrinting(line),
+    line.condition || '',
+    line.language || '',
+    String(line.quantity || 1),
+    `${line.list_price || '0.00'} ${currency || ''}`.trim(),
+    formatBuybackPounds(line.offer_pence),
+    line.notes || ''
+  ]
+}
+
+function tradeInTextTable(lines, currency) {
+  const rows = [TRADE_IN_COLUMNS.join(' | ')]
+  for (const line of lines || []) rows.push(tradeInCells(line, currency).join(' | '))
+  return rows.join('\n')
+}
+
+function tradeInHtmlTable(lines, currency) {
+  const cell = 'padding:6px 8px; border-bottom:1px solid #e5e5e5; vertical-align:top;'
+  const head = TRADE_IN_COLUMNS.map(label => `<th style="text-align:left; ${cell}">${label}</th>`).join('')
+  const body = (lines || []).map(line => `<tr>${tradeInCells(line, currency).map(value => `<td style="${cell}">${escapeHtml(value)}</td>`).join('')}</tr>`).join('')
+  return `<table style="width:100%; border-collapse:collapse; font-size:14px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+}
+
+function emailParagraphs(text) {
+  const chunks = String(text || '').trim().split(/\n{2,}/).filter(Boolean)
+  return chunks.map(chunk => `<p>${escapeHtml(chunk).replace(/\n/g, '<br>')}</p>`).join('')
+}
+
+/** Blank wording uses the standard draft. A typed draft must be 10 to 8,000 characters. */
+export function tradeInEmailOverrides({ message, subject } = {}) {
+  const text = String(message ?? '').replace(/\r\n/g, '\n').trim()
+  if (text && (text.length < 10 || text.length > 8000)) return { ok: false, error: 'invalid_email_draft' }
+  const sub = String(subject ?? '').replace(/\s+/g, ' ').trim()
+  if (sub.length > 140) return { ok: false, error: 'invalid_subject' }
+  return { ok: true, message: text, subject: sub }
+}
+
+export function buybackListQuoteCopy({ name, amountPence, caseId, ratePercent, currency, gbpPerUnit, lines, message, subject }) {
+  const overrides = tradeInEmailOverrides({ message, subject })
+  if (!overrides.ok) return overrides
   const who = greetingName(name)
-  const shown = (lines || []).slice(0, 30)
-  const extra = Math.max(0, Number(lineCount || shown.length) - shown.length)
-  const rowText = shown.map(line => {
-    const qty = Number(line.quantity) > 1 ? `${line.quantity} x ` : ''
-    return `${qty}${line.card_name}: ${formatBuybackPounds(line.offer_pence)}`
-  })
-  if (extra) rowText.push(`And ${extra} more.`)
-  const fxLine = String(currency || 'GBP').toUpperCase() === 'GBP'
+  const code = String(currency || 'GBP').toUpperCase()
+  const fxLine = code === 'GBP'
     ? ''
-    : `Prices on the file are in ${currency}. This offer uses ${formatTradeInFx(gbpPerUnit)} for each 1 ${currency}.`
-  const text = [
+    : `Prices on the file are in ${code}. This offer uses ${formatTradeInFx(gbpPerUnit)} for each 1 ${code}.`
+  const draft = overrides.message || [
     `Hi ${who},`,
     '',
     `Here is an offer for the cards on your list, at ${ratePercent}% of the prices on the file.`,
-    ...(fxLine ? [fxLine] : []),
-    '',
+    ...(fxLine ? [fxLine, ''] : ['']),
     `The total is ${formatBuybackPounds(amountPence)} in store credit.`,
     '',
-    ...rowText,
+    TRADE_IN_TABLE_MARKER,
     '',
     'Reply to this email with your thoughts. Once you are happy with the price, bring the cards in and we will check them. The credit is added to your account once we have the cards.',
     '',
     'Dice Bastion'
   ].join('\n')
-  const htmlRows = shown.map(line => {
-    const qty = Number(line.quantity) > 1 ? `${line.quantity} x ` : ''
-    return `<li>${escapeHtml(qty + line.card_name)}: ${escapeHtml(formatBuybackPounds(line.offer_pence))}</li>`
-  }).join('')
+  const textTable = tradeInTextTable(lines, code)
+  const htmlTable = tradeInHtmlTable(lines, code)
+  const parts = draft.split(TRADE_IN_TABLE_MARKER)
+  const before = parts[0] || ''
+  const after = parts.length > 1 ? parts.slice(1).join(TRADE_IN_TABLE_MARKER) : ''
+  const text = parts.length > 1
+    ? `${before.trim()}\n\n${textTable}\n\n${after.trim()}`.trim()
+    : `${draft.trim()}\n\n${textTable}`.trim()
+  const htmlInner = parts.length > 1
+    ? `${emailParagraphs(before)}${htmlTable}${emailParagraphs(after)}`
+    : `${emailParagraphs(draft)}${htmlTable}`
+  const chosenSubject = overrides.subject || TRADE_IN_SUBJECT
+  const subjectText = chosenSubject === TRADE_IN_SUBJECT && caseId
+    ? `${TRADE_IN_SUBJECT} (#${caseId})`
+    : chosenSubject
   return {
+    ok: true,
     headerTitle: 'Offer for your cards',
-    subject: `Offer for your card list (#${caseId})`,
+    subject: subjectText,
+    draft,
     text,
-    htmlInner: `<p>Hi ${escapeHtml(who)},</p>
-<p>Here is an offer for the cards on your list, at ${escapeHtml(ratePercent)}% of the prices on the file.</p>
-${fxLine ? `<p>${escapeHtml(fxLine)}</p>` : ''}
-<p>The total is <strong>${escapeHtml(formatBuybackPounds(amountPence))}</strong> in store credit.</p>
-<ul>${htmlRows}${extra ? `<li>And ${extra} more.</li>` : ''}</ul>
-<p>Reply to this email with your thoughts. Once you are happy with the price, bring the cards in and we will check them. The credit is added to your account once we have the cards.</p>
-<p>Dice Bastion</p>`
+    htmlInner
   }
 }
 

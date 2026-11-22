@@ -35,6 +35,7 @@ import {
   buybackAccountSetupCopy,
   buybackListQuoteCopy,
   createStaffBuybackCase,
+  tradeInEmailOverrides,
   getBuybackCaseDetail,
   issueBuybackCredit,
   listBuybackCases,
@@ -14820,7 +14821,9 @@ const BUYBACK_ADMIN_ERRORS = {
   total_too_high: 'This offer is above £20,000. Lower the rate or split the list.',
   invalid_email: 'Enter the customer email address.',
   customer_not_found: 'That member could not be found.',
-  csv_too_large: 'That file is too large.'
+  csv_too_large: 'That file is too large.',
+  invalid_email_draft: 'The email draft needs to be at least 10 characters and under 8,000.',
+  invalid_subject: 'Keep the subject under 140 characters.'
 }
 
 function buybackAdminError(result, fallbackStatus = 400) {
@@ -14899,6 +14902,14 @@ app.post('/admin/buyback/cases/import', requireAdmin, async c => {
       const err = buybackAdminError(priced)
       return c.json(err.body, err.status)
     }
+    const previewCopy = buybackListQuoteCopy({
+      name: body.name,
+      amountPence: priced.totalPence,
+      ratePercent: priced.ratePercent,
+      currency: priced.currency,
+      gbpPerUnit: priced.gbpPerUnit,
+      lines: priced.lines
+    })
     if (body.send !== true) {
       return c.json({
         ok: true,
@@ -14909,16 +14920,26 @@ app.post('/admin/buyback/cases/import', requireAdmin, async c => {
         total_pence: priced.totalPence,
         line_count: priced.lineCount,
         card_count: priced.cardCount,
+        email_subject: previewCopy.subject,
+        email_draft: previewCopy.draft,
         lines: priced.lines.map(line => ({
           card_name: line.card_name,
+          set_name: line.set_name,
           set_code: line.set_code,
           collector_number: line.collector_number,
+          condition: line.condition,
+          language: line.language,
           quantity: line.quantity,
           list_price: line.list_price,
           offer_pence: line.offer_pence,
           notes: line.notes
         }))
       })
+    }
+    const overrides = tradeInEmailOverrides(body)
+    if (!overrides.ok) {
+      const err = buybackAdminError(overrides)
+      return c.json(err.body, err.status)
     }
 
     let user = null
@@ -14954,7 +14975,8 @@ app.post('/admin/buyback/cases/import', requireAdmin, async c => {
       currency: priced.currency,
       gbpPerUnit: priced.gbpPerUnit,
       lines: priced.lines,
-      lineCount: priced.lineCount
+      message: overrides.message,
+      subject: overrides.subject
     })
     let sent = null
     try {

@@ -34,7 +34,9 @@
     total_too_high: 'This offer is above £20,000. Lower the rate or split the list.',
     invalid_email: 'Enter the customer email address.',
     customer_not_found: 'That member could not be found.',
-    csv_too_large: 'That file is too large.'
+    csv_too_large: 'That file is too large.',
+    invalid_email_draft: 'The email draft needs to be at least 10 characters and under 8,000.',
+    invalid_subject: 'Keep the subject under 140 characters.'
   };
 
   let apiBase = '';
@@ -43,6 +45,7 @@
   let busy = false;
   let listFilter = 'open';
   let pickedCustomer = null;
+  let customerMode = 'member';
   let searchTimer = null;
   let memberMatches = [];
   let pricedStamp = '';
@@ -144,22 +147,37 @@
       <div class="card admin-mb-2" style="padding:1rem;">
         <h3 style="margin-top:0; font-size:1.05rem;">New list for a customer</h3>
         <p class="admin-text-muted" style="margin-top:0;">Add a ManaBox card list for a member, or for someone who only has an email. Euro prices are converted at the pounds-per-euro rate, then multiplied by the trade-in rate. They are asked to reply with their thoughts.</p>
-        <div class="form-group">
-          <label class="form-label" for="buyback-member-search">Member</label>
-          <input type="text" id="buyback-member-search" class="form-input" placeholder="Search by name or email" autocomplete="off">
-          <div id="buyback-member-results" style="margin-top:0.4rem;"></div>
-          <p id="buyback-member-picked" class="admin-text-small" style="margin-bottom:0;"></p>
+        <div class="admin-flex" style="gap:1rem; margin-bottom:0.75rem;">
+          <label class="form-label" style="display:flex; gap:0.4rem; align-items:center; margin:0;">
+            <input type="radio" name="buyback-customer-mode" value="member">
+            Member
+          </label>
+          <label class="form-label" style="display:flex; gap:0.4rem; align-items:center; margin:0;">
+            <input type="radio" name="buyback-customer-mode" value="email">
+            Email address
+          </label>
         </div>
-        <div class="admin-flex" style="flex-wrap:wrap; align-items:flex-end; gap:0.75rem;">
-          <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label" for="buyback-new-email">Email, if they are not a member yet</label>
-            <input type="email" id="buyback-new-email" class="form-input" autocomplete="off">
-          </div>
-          <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label" for="buyback-new-name">Name</label>
-            <input type="text" id="buyback-new-name" class="form-input" maxlength="80" autocomplete="off">
+        <div id="buyback-member-fields">
+          <div class="form-group">
+            <label class="form-label" for="buyback-member-search">Member</label>
+            <input type="text" id="buyback-member-search" class="form-input" placeholder="Search by name or email" autocomplete="off">
+            <div id="buyback-member-results" style="margin-top:0.4rem;"></div>
+            <p id="buyback-member-picked" class="admin-text-small" style="margin-bottom:0;"></p>
           </div>
         </div>
+        <div id="buyback-email-fields">
+          <div class="admin-flex" style="flex-wrap:wrap; align-items:flex-end; gap:0.75rem;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" for="buyback-new-email">Email address</label>
+              <input type="email" id="buyback-new-email" class="form-input" autocomplete="off">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" for="buyback-new-name">Name</label>
+              <input type="text" id="buyback-new-name" class="form-input" maxlength="80" autocomplete="off">
+            </div>
+          </div>
+        </div>
+        <p id="buyback-customer-using" class="admin-text-small"></p>
         <div class="admin-flex" style="flex-wrap:wrap; align-items:flex-end; gap:0.75rem; margin-top:0.75rem;">
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label" for="buyback-csv-file">Card file</label>
@@ -234,11 +252,12 @@
   function showPicked() {
     const el = document.getElementById('buyback-member-picked');
     if (!el) return;
-    if (!pickedCustomer) {
+    if (!pickedCustomer || customerMode !== 'member') {
       el.textContent = '';
+      updateCustomerLine();
       return;
     }
-    el.textContent = 'This list will be added for ' + (pickedCustomer.name || 'this member') + ' (' + (pickedCustomer.email || '') + ').';
+    el.textContent = (pickedCustomer.name || 'Member') + ', ' + (pickedCustomer.email || '');
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.className = 'btn btn-secondary btn-sm';
@@ -249,6 +268,59 @@
       showPicked();
     });
     el.appendChild(clear);
+    updateCustomerLine();
+  }
+
+  function updateCustomerLine() {
+    const el = document.getElementById('buyback-customer-using');
+    if (!el) return;
+    if (customerMode === 'member') {
+      el.textContent = pickedCustomer
+        ? 'Using member ' + (pickedCustomer.name || 'account') + ', ' + (pickedCustomer.email || '') + '.'
+        : 'Using a member. Search for their name or email.';
+      return;
+    }
+    const email = document.getElementById('buyback-new-email');
+    const typed = email ? email.value.trim() : '';
+    el.textContent = typed
+      ? 'Using email address ' + typed + '.'
+      : 'Using an email address. Enter it below.';
+  }
+
+  function applyCustomerMode() {
+    const memberFields = document.getElementById('buyback-member-fields');
+    const emailFields = document.getElementById('buyback-email-fields');
+    const email = document.getElementById('buyback-new-email');
+    const name = document.getElementById('buyback-new-name');
+    const search = document.getElementById('buyback-member-search');
+    const memberOn = customerMode === 'member';
+    if (memberFields) memberFields.hidden = false;
+    if (emailFields) emailFields.hidden = false;
+    if (email) {
+      email.disabled = memberOn;
+      if (memberOn) email.value = '';
+    }
+    if (name) {
+      name.disabled = memberOn;
+      if (memberOn) name.value = '';
+    }
+    if (search) search.disabled = !memberOn;
+    if (!memberOn) {
+      pickedCustomer = null;
+      if (search) search.value = '';
+      const results = document.getElementById('buyback-member-results');
+      if (results) results.innerHTML = '';
+    }
+    document.querySelectorAll('input[name="buyback-customer-mode"]').forEach(input => {
+      input.checked = input.value === customerMode;
+    });
+    showPicked();
+  }
+
+  function customerNameForDraft() {
+    if (customerMode === 'member') return pickedCustomer ? (pickedCustomer.name || '') : '';
+    const name = document.getElementById('buyback-new-name');
+    return name ? name.value.trim() : '';
   }
 
   function listStamp() {
@@ -257,9 +329,12 @@
     const rate = document.getElementById('buyback-rate');
     const fx = document.getElementById('buyback-gbp-per');
     const email = document.getElementById('buyback-new-email');
+    const name = document.getElementById('buyback-new-name');
     return [
-      pickedCustomer ? pickedCustomer.user_id : '',
-      email ? email.value.trim() : '',
+      customerMode,
+      customerMode === 'member' && pickedCustomer ? pickedCustomer.user_id : '',
+      customerMode === 'email' && email ? email.value.trim() : '',
+      customerMode === 'email' && name ? name.value.trim() : '',
       rate ? rate.value.trim() : '',
       fx ? fx.value.trim() : '',
       chosen ? chosen.name + ':' + chosen.size + ':' + chosen.lastModified : ''
@@ -274,12 +349,21 @@
   }
 
   function bindNewList() {
-    showPicked();
+    applyCustomerMode();
     const search = document.getElementById('buyback-member-search');
     search.addEventListener('input', () => {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(searchMembers, 250);
     });
+    document.querySelectorAll('input[name="buyback-customer-mode"]').forEach(input => {
+      input.addEventListener('change', () => {
+        if (!input.checked) return;
+        customerMode = input.value;
+        applyCustomerMode();
+      });
+    });
+    const email = document.getElementById('buyback-new-email');
+    if (email) email.addEventListener('input', updateCustomerLine);
     document.getElementById('buyback-price-list').addEventListener('click', () => { setTimeout(priceList, 0); });
     document.getElementById('buyback-email-offer').addEventListener('click', () => { setTimeout(emailOffer, 0); });
   }
@@ -297,7 +381,7 @@
       const data = await api('/admin/buyback/customers?q=' + encodeURIComponent(q));
       memberMatches = data.customers || [];
       if (!memberMatches.length) {
-        box.innerHTML = '<p class="admin-text-small" style="margin:0;">No member with that name or email. Use the email field instead.</p>';
+        box.innerHTML = '<p class="admin-text-small" style="margin:0;">No member with that name or email. Switch to Email address.</p>';
         return;
       }
       box.innerHTML = memberMatches.map(row =>
@@ -318,35 +402,56 @@
     }
   }
 
+  function printingText(line) {
+    return [line.set_name, line.set_code ? String(line.set_code).toUpperCase() : '', line.collector_number ? '#' + line.collector_number : ''].filter(Boolean).join(' ');
+  }
+
   function renderPricePreview(data) {
     const box = document.getElementById('buyback-price-preview');
     const fxWrap = document.getElementById('buyback-fx-wrap');
     const fxCode = document.getElementById('buyback-fx-code');
     if (fxWrap) fxWrap.style.display = data.currency && data.currency !== 'GBP' ? 'block' : 'none';
     if (fxCode && data.currency) fxCode.textContent = data.currency;
-    const shown = (data.lines || []).slice(0, 12);
-    const more = (data.line_count || 0) - shown.length;
-    const rows = shown.map(line => `
+    const cell = 'padding:0.35rem 0.4rem; border-bottom:1px solid rgb(var(--color-neutral-200));';
+    const rows = (data.lines || []).map(line => `
       <tr>
-        <td style="padding:0.35rem 0.4rem; border-bottom:1px solid rgb(var(--color-neutral-200));">${esc(line.card_name)}${line.notes ? '<br><span style="color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">' + esc(line.notes) + '</span>' : ''}</td>
-        <td style="padding:0.35rem 0.4rem; border-bottom:1px solid rgb(var(--color-neutral-200));">${Number(line.quantity) || 0}</td>
-        <td style="padding:0.35rem 0.4rem; border-bottom:1px solid rgb(var(--color-neutral-200));">${esc(line.list_price)} ${esc(data.currency || '')}</td>
-        <td style="padding:0.35rem 0.4rem; border-bottom:1px solid rgb(var(--color-neutral-200));">${esc(pounds(line.offer_pence))}</td>
+        <td style="${cell}">${esc(line.card_name)}</td>
+        <td style="${cell}">${esc(printingText(line))}</td>
+        <td style="${cell}">${esc(line.condition || '')}</td>
+        <td style="${cell}">${esc(line.language || '')}</td>
+        <td style="${cell}">${Number(line.quantity) || 0}</td>
+        <td style="${cell}">${esc(line.list_price)} ${esc(data.currency || '')}</td>
+        <td style="${cell}">${esc(pounds(line.offer_pence))}</td>
+        <td style="${cell}">${esc(line.notes || '')}</td>
       </tr>`).join('');
     box.innerHTML = `
       <p style="margin-bottom:0.4rem;"><strong>${esc(pounds(data.total_pence))}</strong> for ${Number(data.card_count) || 0} cards at ${Number(data.rate_percent) || 0}%.</p>
-      <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
-        <thead>
-          <tr>
-            <th style="text-align:left; padding:0.35rem 0.4rem; color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Card</th>
-            <th style="text-align:left; padding:0.35rem 0.4rem; color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Qty</th>
-            <th style="text-align:left; padding:0.35rem 0.4rem; color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">List price</th>
-            <th style="text-align:left; padding:0.35rem 0.4rem; color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Offer</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-      ${more > 0 ? '<p class="admin-text-small">And ' + more + ' more.</p>' : ''}`;
+      <div style="max-height:24rem; overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
+          <thead>
+            <tr>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Card</th>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Set</th>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Condition</th>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Language</th>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Qty</th>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">List price</th>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Offer</th>
+              <th style="text-align:left; ${cell} color:rgb(var(--color-neutral-600)); font-size:0.8125rem;">Notes</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="form-group" style="margin-top:1rem; max-width:32rem;">
+        <label class="form-label" for="buyback-email-subject">Subject</label>
+        <input type="text" id="buyback-email-subject" class="form-input" maxlength="140" value="${esc(data.email_subject || 'Offer for your card list')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="buyback-email-draft">Email draft</label>
+        <textarea id="buyback-email-draft" class="form-textarea" rows="14">${esc(data.email_draft || '')}</textarea>
+        <p class="admin-text-small">Edit the wording before you send. The line [card table] is replaced with the table above, with the same columns.</p>
+      </div>`;
   }
 
   async function priceList() {
@@ -362,7 +467,8 @@
         body: {
           csv: csv,
           rate_percent: document.getElementById('buyback-rate').value.trim(),
-          gbp_per_unit: document.getElementById('buyback-gbp-per').value.trim()
+          gbp_per_unit: document.getElementById('buyback-gbp-per').value.trim(),
+          name: customerNameForDraft()
         }
       });
       pricedPreview = data;
@@ -392,11 +498,16 @@
     }
     const email = document.getElementById('buyback-new-email').value.trim();
     const name = document.getElementById('buyback-new-name').value.trim();
-    if (!pickedCustomer && !email) {
-      setNewStatus('Choose a member or enter an email.', true);
+    const usingMember = customerMode === 'member';
+    if (usingMember && !pickedCustomer) {
+      setNewStatus('Search for a member, or switch to Email address.', true);
       return;
     }
-    const who = pickedCustomer ? (pickedCustomer.name || pickedCustomer.email) : email;
+    if (!usingMember && !email) {
+      setNewStatus('Enter the email address, or switch to Member.', true);
+      return;
+    }
+    const who = usingMember ? (pickedCustomer.name || pickedCustomer.email) : email;
     if (!window.confirm('Email this ' + pounds(pricedPreview.total_pence) + ' offer to ' + who + '?')) return;
     const btn = document.getElementById('buyback-email-offer');
     busy = true;
@@ -408,12 +519,14 @@
         method: 'POST',
         body: {
           send: true,
-          user_id: pickedCustomer ? pickedCustomer.user_id : undefined,
-          email: pickedCustomer ? undefined : email,
-          name: pickedCustomer ? undefined : name,
+          user_id: usingMember ? pickedCustomer.user_id : undefined,
+          email: usingMember ? undefined : email,
+          name: usingMember ? undefined : name,
           csv: csv,
           rate_percent: pricedPreview.rate_percent,
-          gbp_per_unit: pricedPreview.gbp_per_unit
+          gbp_per_unit: pricedPreview.gbp_per_unit,
+          subject: document.getElementById('buyback-email-subject').value,
+          message: document.getElementById('buyback-email-draft').value
         }
       });
       const caseId = data.case_id;
@@ -424,6 +537,7 @@
         return;
       }
       listFilter = 'quoted';
+      customerMode = 'member';
       pickedCustomer = null;
       await load();
       setNewStatus('Offer emailed for case ' + caseId + '. It is under Offer sent.');

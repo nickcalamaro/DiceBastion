@@ -262,8 +262,32 @@ describe('buyback admin', () => {
     })
     expect(copy.text).toContain('Reply to this email with your thoughts')
     expect(copy.text).toContain('at 30% of the prices on the file')
-    expect(copy.text).toContain('2 x Idyllic Tutor')
+    expect(copy.text).toContain('Idyllic Tutor | Theros Beyond Death THB #24 | NM | EN | 2 | 6.22 EUR | £3.74')
+    expect(copy.text).toContain('Daredevil, Man Without Fear')
+    expect(copy.text).toContain('Foil')
+    expect(copy.draft).toContain('[card table]')
+    expect(copy.htmlInner).toContain('<table')
+    expect(copy.htmlInner).not.toContain('<ul>')
+    expect(copy.htmlInner).toContain('Wilds of Eldraine: Enchanting Tales')
+    expect(copy.subject).toBe('Offer for your card list (#8)')
     expect(copy.text).not.toMatch(/[—–]/)
+    const edited = buybackListQuoteCopy({
+      name: 'Alex Vallejo',
+      amountPence: priced.totalPence,
+      caseId: 8,
+      ratePercent: 30,
+      currency: 'EUR',
+      gbpPerUnit: 1,
+      lines: priced.lines,
+      subject: 'Your trade-in offer',
+      message: 'Hi Alex,\n\nHere is the price we can do.\n\n[card table]\n\nTell me what you think.\n\nDice Bastion'
+    })
+    expect(edited.ok).toBe(true)
+    expect(edited.subject).toBe('Your trade-in offer')
+    expect(edited.text).toContain('Here is the price we can do.')
+    expect(edited.text).toContain('Waste Not |')
+    expect(edited.htmlInner).toContain('<table')
+    expect(buybackListQuoteCopy({ message: 'too short', lines: [] }).error).toBe('invalid_email_draft')
     const setup = buybackAccountSetupCopy({
       name: 'Alex',
       email: 'alex@example.com',
