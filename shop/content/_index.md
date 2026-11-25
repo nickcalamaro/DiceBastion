@@ -4,13 +4,13 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
 ---
 
 <div id="shop-app">
-  <div class="shop-header">
-    <h1>Welcome to the Dice Bastion Shop</h1>
-    <p>Browse our collection in Gibraltar: board games, <strong>Magic: The Gathering</strong> (MTG), trading cards, miniatures, dice, and gaming accessories. Local pickup and delivery available across Gibraltar.</p>
-  </div>
-
   <!-- Featured products/categories (no heading; managed in admin Products tab) -->
   <div id="featured-grid" class="product-grid featured-grid" hidden></div>
+
+  <div class="shop-header">
+    <h1>Welcome to the Dice Bastion Shop</h1>
+    <p>Browse our collection in Gibraltar: board games, <strong>Magic: The Gathering</strong> (MTG), trading cards, miniatures, dice, and gaming accessories.</p>
+  </div>
 
   <!-- Search Bar -->
   <div class="search-container">
@@ -300,11 +300,31 @@ color: rgb(var(--color-neutral-800));
   margin: 2rem 0;
 }
 
-/* Featured products/categories: four cards at the top, no heading */
+/* Featured products/categories: four cards at the very top, no heading */
 .featured-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.5rem;
-  margin: 0 0 2rem;
+  margin: 2rem 0 0;
+}
+
+.featured-grid[hidden] {
+  display: none !important;
+}
+
+/* Short fade/slide when the product list is filtered */
+@keyframes shop-filter-fade {
+  from { opacity: 0.3; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.product-grid.filter-animate {
+  animation: shop-filter-fade 0.25s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .product-grid.filter-animate {
+    animation: none;
+  }
 }
 
 .featured-card-name {
@@ -1446,6 +1466,13 @@ function renderFeaturedCards(cards) {
   grid.hidden = false;
 }
 
+// Scroll past the category chips to the filtered products
+function scrollToProductGrid() {
+  const grid = document.getElementById('product-grid');
+  if (!grid) return;
+  grid.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+}
+
 // Same behaviour as the catalogue: product card opens the product modal, category card filters the shop
 function bindFeaturedGrid() {
   const grid = document.getElementById('featured-grid');
@@ -1460,6 +1487,7 @@ function bindFeaturedGrid() {
     e.preventDefault();
     if (link.dataset.featuredKind === 'category') {
       filterByCategory(link.getAttribute('data-category') || null);
+      scrollToProductGrid();
       return;
     }
     const pid = parseInt(link.getAttribute('data-product-id'), 10);
@@ -1689,10 +1717,20 @@ function renderCategoryIntro() {
   el.hidden = !paragraphs.length;
 }
 
+// Very short fade/slide whenever the list is re-filtered
+function animateGridOnFilter() {
+  const grid = document.getElementById('product-grid');
+  if (!grid || prefersReducedMotion()) return;
+  grid.classList.remove('filter-animate');
+  void grid.offsetWidth;
+  grid.classList.add('filter-animate');
+}
+
 function applyFilters({ resetList = false } = {}) {
   if (resetList) visibleCount = PAGE_SIZE;
   renderCategoryIntro();
   renderProducts(getFilteredProducts());
+  animateGridOnFilter();
 }
 
 function prefersReducedMotion() {
