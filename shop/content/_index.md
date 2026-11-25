@@ -3,6 +3,7 @@ title: "Dice Bastion Shop - Gibraltar board games, trading cards and accessories
 description: "Shop board games, Magic: The Gathering (MTG), trading cards, and accessories in Gibraltar."
 ---
 
+<link rel="stylesheet" href="/lib/splide/splide.min.css">
 <div id="shop-app">
   <!-- Featured products/categories (no heading; managed in admin Products tab) -->
   <div id="featured-grid" class="product-grid featured-grid" hidden></div>
@@ -309,6 +310,23 @@ color: rgb(var(--color-neutral-800));
 
 .featured-grid[hidden] {
   display: none !important;
+}
+
+/* Splide carousel mode (slides laid out by the library) */
+.featured-grid.splide {
+  display: block;
+}
+
+.featured-grid .splide__slide {
+  display: flex;
+}
+
+.featured-grid .featured-card {
+  width: 100%;
+}
+
+.featured-grid.splide .splide__pagination {
+  margin: 0.75rem 0 0;
 }
 
 /* Sit flush against the site header while featured cards are shown */
@@ -870,6 +888,7 @@ body.shop-home-featured > .container {
 </style>
 
 <script src="/js/shopCategories.js"></script>
+<script src="/lib/splide/splide.min.js"></script>
 <script>
 // Shop initialization
 const API_BASE = 'https://dicebastion.com/api';
@@ -1482,6 +1501,32 @@ function featuredCardHtml(card) {
   `;
 }
 
+let featuredSplide = null;
+
+// Basic carousel: 4 across on desktop, 2 on tablets, one swipeable row on mobiles
+function mountFeaturedSplide() {
+  const grid = document.getElementById('featured-grid');
+  if (!window.Splide || !grid) return;
+  if (featuredSplide) {
+    featuredSplide.destroy();
+    featuredSplide = null;
+  }
+  featuredSplide = new Splide('#featured-grid', {
+    type: 'slide',
+    perPage: 4,
+    perMove: 1,
+    gap: '1.5rem',
+    arrows: false,
+    pagination: false,
+    speed: 400,
+    breakpoints: {
+      900: { perPage: 2, gap: '1rem', pagination: true },
+      540: { perPage: 1, gap: '0.75rem', pagination: true, padding: { left: '0.25rem', right: '0.25rem' } }
+    }
+  });
+  featuredSplide.mount();
+}
+
 function renderFeaturedCards(cards) {
   const grid = document.getElementById('featured-grid');
   if (!grid) return;
@@ -1492,9 +1537,19 @@ function renderFeaturedCards(cards) {
     document.body.classList.remove('shop-home-featured');
     return;
   }
-  grid.innerHTML = valid.map(featuredCardHtml).join('');
+  const useSplide = !!window.Splide;
+  grid.classList.toggle('splide', useSplide);
+  if (useSplide) {
+    grid.innerHTML =
+      '<div class="splide__track"><ul class="splide__list">' +
+      valid.map(c => '<li class="splide__slide">' + featuredCardHtml(c) + '</li>').join('') +
+      '</ul></div>';
+  } else {
+    grid.innerHTML = valid.map(featuredCardHtml).join('');
+  }
   grid.hidden = false;
   document.body.classList.add('shop-home-featured');
+  if (useSplide) mountFeaturedSplide();
 }
 
 // Scroll past the category chips to the filtered products
