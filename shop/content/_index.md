@@ -304,11 +304,38 @@ color: rgb(var(--color-neutral-800));
 .featured-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.5rem;
-  margin: 2rem 0 0;
+  margin: 0 0 2rem;
 }
 
 .featured-grid[hidden] {
   display: none !important;
+}
+
+/* Sit flush against the site header while featured cards are shown */
+body.shop-home-featured header {
+  margin-bottom: 0;
+}
+
+body.shop-home-featured > .container {
+  padding-top: 0;
+}
+
+/* Featured cards: same card language as the catalogue, lifted with the primary tint */
+.product-card.featured-card {
+  background: linear-gradient(180deg, rgba(var(--color-primary-50), 0.8) 0%, rgb(var(--color-neutral)) 78%);
+  border-color: rgb(var(--color-primary-200));
+  box-shadow: 0 2px 10px rgba(var(--color-primary-100), 0.9);
+}
+
+.product-card.featured-card:hover {
+  border-color: rgb(var(--color-primary-400));
+  box-shadow: 0 10px 26px rgba(var(--color-primary-200), 0.95);
+}
+
+.featured-card-link:focus-visible {
+  outline: 2px solid rgb(var(--color-primary-500));
+  outline-offset: 2px;
+  border-radius: 12px;
 }
 
 /* Short fade/slide when the product list is filtered */
@@ -330,14 +357,15 @@ color: rgb(var(--color-neutral-800));
 .featured-card-name {
   padding: 1rem 1.25rem 0.75rem;
   font-size: 1.125rem;
-  font-weight: 600;
-  color: rgb(var(--color-neutral-800));
+  font-weight: 700;
+  color: rgb(var(--color-primary-700));
   line-height: 1.3;
 }
 
 .featured-card .product-image,
 .featured-card .product-image-placeholder {
   height: 200px;
+  background: rgba(var(--color-primary-50), 0.65);
 }
 
 @media (max-width: 900px) {
@@ -1428,6 +1456,7 @@ async function loadFeaturedCards() {
     console.error('Failed to load featured cards:', error);
     grid.hidden = true;
     grid.innerHTML = '';
+    document.body.classList.remove('shop-home-featured');
   }
 }
 
@@ -1460,10 +1489,12 @@ function renderFeaturedCards(cards) {
   if (!valid.length) {
     grid.hidden = true;
     grid.innerHTML = '';
+    document.body.classList.remove('shop-home-featured');
     return;
   }
   grid.innerHTML = valid.map(featuredCardHtml).join('');
   grid.hidden = false;
+  document.body.classList.add('shop-home-featured');
 }
 
 // Scroll past the category chips to the filtered products
