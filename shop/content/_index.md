@@ -8,7 +8,10 @@ description: "Shop board games, Magic: The Gathering (MTG), trading cards, and a
     <h1>Welcome to the Dice Bastion Shop</h1>
     <p>Browse our collection in Gibraltar: board games, <strong>Magic: The Gathering</strong> (MTG), trading cards, miniatures, dice, and gaming accessories. Local pickup and delivery available across Gibraltar.</p>
   </div>
-  
+
+  <!-- Featured products/categories (no heading; managed in admin Products tab) -->
+  <div id="featured-grid" class="product-grid featured-grid" hidden></div>
+
   <!-- Search Bar -->
   <div class="search-container">
     <div class="search-input-wrapper">
@@ -295,6 +298,38 @@ color: rgb(var(--color-neutral-800));
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 2rem;
   margin: 2rem 0;
+}
+
+/* Featured products/categories: four cards at the top, no heading */
+.featured-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin: 0 0 2rem;
+}
+
+.featured-card-name {
+  padding: 1rem 1.25rem 0.75rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: rgb(var(--color-neutral-800));
+  line-height: 1.3;
+}
+
+.featured-card .product-image,
+.featured-card .product-image-placeholder {
+  height: 200px;
+}
+
+@media (max-width: 900px) {
+  .featured-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 540px) {
+  .featured-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .product-card-link {
@@ -1360,6 +1395,81 @@ function bindProductGridActions() {
   });
 }
 
+// Featured products/categories cards at the top of the shop (set in admin Products tab)
+async function loadFeaturedCards() {
+  const grid = document.getElementById('featured-grid');
+  if (!grid) return;
+  try {
+    const res = await fetch(`${API_BASE}/shop-featured`);
+    if (!res.ok) throw new Error('shop_featured_http_' + res.status);
+    const data = await res.json();
+    renderFeaturedCards(Array.isArray(data.cards) ? data.cards : []);
+  } catch (error) {
+    console.error('Failed to load featured cards:', error);
+    grid.hidden = true;
+    grid.innerHTML = '';
+  }
+}
+
+function featuredCardHtml(card) {
+  const nameHtml = escapeHtml(card.name || '');
+  let href;
+  let attrs;
+  if (card.kind === 'category') {
+    const cat = categoryDisplay(card.category || card.name || '');
+    href = card.href || categoryPath(cat);
+    attrs = `data-featured-kind="category" data-category="${escapeHtml(cat)}"`;
+  } else {
+    href = card.href || ('/products/' + encodeURIComponent(card.slug || ''));
+    attrs = `data-featured-kind="product" data-product-id="${parseInt(card.product_id, 10) || 0}" data-product-slug="${escapeHtml(card.slug || '')}"`;
+  }
+  return `
+<div class="product-card featured-card">
+    <a href="${escapeHtml(href)}" class="product-card-link featured-card-link" ${attrs}>
+      <div class="featured-card-name">${nameHtml}</div>
+      ${productImageHtml(card.image_url, nameHtml, 'product-image')}
+    </a>
+</div>
+  `;
+}
+
+function renderFeaturedCards(cards) {
+  const grid = document.getElementById('featured-grid');
+  if (!grid) return;
+  const valid = (cards || []).filter(c => c && c.name && c.href);
+  if (!valid.length) {
+    grid.hidden = true;
+    grid.innerHTML = '';
+    return;
+  }
+  grid.innerHTML = valid.map(featuredCardHtml).join('');
+  grid.hidden = false;
+}
+
+// Same behaviour as the catalogue: product card opens the product modal, category card filters the shop
+function bindFeaturedGrid() {
+  const grid = document.getElementById('featured-grid');
+  if (!grid || grid.dataset.bound === '1') return;
+  grid.dataset.bound = '1';
+  grid.addEventListener('click', function (e) {
+    const link = e.target.closest('a.featured-card-link');
+    if (!link || !grid.contains(link)) return;
+    if (e.defaultPrevented) return;
+    if (e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    if (link.dataset.featuredKind === 'category') {
+      filterByCategory(link.getAttribute('data-category') || null);
+      return;
+    }
+    const pid = parseInt(link.getAttribute('data-product-id'), 10);
+    const slug = link.getAttribute('data-product-slug') || '';
+    if (Number.isFinite(pid) && pid > 0) {
+      showProductDetail(pid, slug);
+    }
+  });
+}
+
 // Load products from API
 async function loadProducts() {
   try {
@@ -2025,6 +2135,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   bindProductGridActions();
   bindCategoryFilter();
   bindInfiniteScroll();
+  bindFeaturedGrid();
 
   const searchInput = document.getElementById('search-input');
   if (searchInput) {
@@ -2034,7 +2145,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     closeProductModal();
   });
 
-  await loadProducts();
+  await Promise.all([loadProducts(), loadFeaturedCards()]);
   updateCartBadge();
 
   if (allProducts.length > 0) {

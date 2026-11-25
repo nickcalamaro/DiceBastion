@@ -523,6 +523,25 @@ CREATE TABLE product_categories (
 );
 ```
 
+### Featured shop cards
+
+Migration: `worker/migrations/0024_shop_featured_cards.sql`.
+
+Four cards shown at the top of shop.dicebastion.com (no heading). `kind` is `product` (`ref` = `products.id`) or `category` (`ref` = category name). `custom_name` and `image_url` are optional overrides; blank falls back to the product name/image or the category name/featured (SEO) image.
+
+```sql
+CREATE TABLE shop_featured_cards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slot INTEGER NOT NULL UNIQUE,        -- 0-3, display order left to right
+  kind TEXT NOT NULL CHECK (kind IN ('product', 'category')),
+  ref TEXT NOT NULL,
+  custom_name TEXT,
+  image_url TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```
+
 ### Store credit + TCG buyback
 
 Migration: `worker/migrations/0010_store_credit_buyback.sql`.
