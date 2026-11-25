@@ -10122,6 +10122,166 @@ app.put('/admin/product-categories', requireAdmin, async (c) => {
   }
 })
 
+// ====== Featured shop cards (top-of-shop section on shop.dicebastion.com) ======
+
+const SHOP_FEATURED_SLOTS = 4
+const SHOP_ORIGIN_DEFAULT = 'https://shop.dicebastion.com'
+
+async function ensureShopFeaturedCardsSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS shop_featured_cards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slot INTEGER NOT NULL UNIQUE,
+      kind TEXT NOT NULL CHECK (kind IN ('product', 'category')),
+      ref TEXT NOT NULL,
+      custom_name TEXT,
+      image_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )
+  `).run()
+}
+
+async function readShopFeaturedCards(db) {
+  await ensureShopFeaturedCardsSchema(db)
+  const rows = await db.prepare(`
+    SELECT slot, kind, ref, custom_name, image_url
+    FROM shop_featured_cards
+    ORDER BY slot ASC
+  `).all()
+  return rows.results || []
+}
+
+// Public: resolved cards for the shop homepage. Missing/inactive refs are skipped.
+app.get('/shop-featured', async (c) => {
+  try {
+    const shopOrigin = SHOP_ORIGIN_DEFAULT
+    const rows = await readShopFeaturedCards(c.env.DB)
+    const meta = await listProductCategoryMeta(c.env.DB)
+    const metaByKey = new Map(meta.map((m) => [categoryMatchKey(m.name), m]))
+    const cards = []
+    for (const row of rows) {
+      const slot = Number(row.slot)
+      const kind = String(row.kind || '')
+      const customName = clampSeoText(row.custom_name, 120)
+      const customImage = ensureAbsoluteImageUrl(row.image_url, shopOrigin)
+      if (kind === 'product') {
+        const pid = parseInt(row.ref, 10)
+        if (!Number.isFinite(pid) || pid <= 0) continue
+        const product = await c.env.DB.prepare(
+          'SELECT id, name, slug, image_url, is_active FROM products WHERE id = ?'
+        ).bind(pid).first()
+        if (!product || Number(product.is_active) !== 1) continue
+        const slug = String(product.slug || '').trim()
+        if (!slug) continue
+        cards.push({
+          slot,
+          kind: 'product',
+          product_id: product.id,
+          slug,
+          name: customName || String(product.name || ''),
+          image_url: customImage || ensureAbsoluteImageUrl(product.image_url, shopOrigin),
+          href: '/products/' + encodeURIComponent(slug)
+        })
+      } else if (kind === 'category') {
+        const name = normalizeCategoryLabel(row.ref)
+        if (!name || isDrinksCategoryName(name)) continue
+        const catMeta = metaByKey.get(categoryMatchKey(name))
+        if (!catMeta) continue
+        const displayName = catMeta.name
+        let image = customImage || ensureAbsoluteImageUrl(catMeta.seo_image, shopOrigin)
+        if (!image) {
+          const products = await c.env.DB.prepare(
+            'SELECT id, name, slug, image_url, stock_quantity, category FROM products WHERE is_active = 1'
+          ).all()
+          const inCategory = (products.results || []).filter((p) => productBelongsToCategory(p, displayName))
+          const ordered = sortCatalogueProducts(inCategory)
+          const withImage = ordered.find((p) => p.image_url && isProductInStock(p)) || ordered.find((p) => p.image_url)
+          image = withImage ? ensureAbsoluteImageUrl(withImage.image_url, shopOrigin) : ''
+        }
+        cards.push({
+          slot,
+          kind: 'category',
+          category: displayName,
+          name: customName || displayName,
+          image_url: image,
+          href: '/products/category/' + categorySlug(displayName)
+        })
+      }
+    }
+    return c.json({ cards })
+  } catch (e) {
+    console.error('[shop-featured] list:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.get('/admin/shop-featured', requireAdmin, async (c) => {
+  try {
+    const cards = await readShopFeaturedCards(c.env.DB)
+    return c.json({ cards })
+  } catch (e) {
+    console.error('[admin/shop-featured] list:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+app.put('/admin/shop-featured', requireAdmin, async (c) => {
+  try {
+    await ensureShopFeaturedCardsSchema(c.env.DB)
+    const body = await c.req.json()
+    const input = Array.isArray(body.cards) ? body.cards : []
+    if (input.length > SHOP_FEATURED_SLOTS) {
+      return c.json({ error: 'too_many_cards' }, 400)
+    }
+    const meta = await listProductCategoryMeta(c.env.DB)
+    const metaKeys = new Set(meta.map((m) => categoryMatchKey(m.name)).filter(Boolean))
+    const now = toIso(new Date())
+    const statements = [c.env.DB.prepare('DELETE FROM shop_featured_cards')]
+    for (let i = 0; i < input.length; i++) {
+      const card = input[i] || {}
+      const kind = String(card.kind || '')
+      const refRaw = String(card.ref == null ? '' : card.ref).trim()
+      if (!refRaw) continue
+      if (kind !== 'product' && kind !== 'category') {
+        return c.json({ error: 'invalid_kind', slot: i }, 400)
+      }
+      let ref
+      if (kind === 'product') {
+        const pid = parseInt(refRaw, 10)
+        if (!Number.isFinite(pid) || pid <= 0) {
+          return c.json({ error: 'invalid_ref', slot: i }, 400)
+        }
+        const exists = await c.env.DB.prepare('SELECT id FROM products WHERE id = ?').bind(pid).first()
+        if (!exists) {
+          return c.json({ error: 'product_not_found', slot: i }, 400)
+        }
+        ref = String(pid)
+      } else {
+        ref = normalizeCategoryLabel(refRaw)
+        if (!ref || !metaKeys.has(categoryMatchKey(ref))) {
+          return c.json({ error: 'category_not_found', slot: i }, 400)
+        }
+      }
+      const customName = clampSeoText(card.custom_name, 120) || null
+      const imageRaw = String(card.image_url || '').trim()
+      const imageUrl = imageRaw ? (ensureAbsoluteImageUrl(imageRaw, SHOP_ORIGIN_DEFAULT) || null) : null
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO shop_featured_cards (slot, kind, ref, custom_name, image_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(i, kind, ref, customName, imageUrl, now, now)
+      )
+    }
+    await c.env.DB.batch(statements)
+    const cards = await readShopFeaturedCards(c.env.DB)
+    return c.json({ success: true, cards })
+  } catch (e) {
+    console.error('[admin/shop-featured] save:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
 // Get single product by ID or slug (public)
 app.get('/products/:id', async (c) => {
   try {

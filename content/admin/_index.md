@@ -14,6 +14,7 @@ showDate: false
 <script src="/js/productCsvImport.js?v=20260831a"></script>
 <script src="/js/shopCategoryAdmin.js?v=20260817b"></script>
 <script src="/js/shopProductAdmin.js?v=20261002a"></script>
+<script src="/js/shopFeaturedAdmin.js?v=20261125a"></script>
 <script src="/js/shopPosAdmin.js?v=20261120a"></script>
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261121a"></script>
@@ -196,6 +197,8 @@ showDate: false
 .item-card h3 { margin-top: 0; margin-bottom: 0.5rem; color: rgb(var(--color-neutral-900)); }
 .dark .item-card h3 { color: rgb(var(--color-neutral-100)); }
 .item-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+.shop-featured-preview { width: 120px; height: 80px; object-fit: contain; border-radius: 6px; background: rgb(var(--color-neutral-100)); border: 1px solid rgb(var(--color-neutral-200)); }
+.dark .shop-featured-preview { background: rgb(var(--color-neutral-900)); border-color: rgb(var(--color-neutral-700)); }
 
 /* Recurring fields container */
 .recurring-container { padding: 1rem; background: rgb(var(--color-neutral-50)); border-radius: 6px; border: 1px solid rgb(var(--color-neutral-200)); }
@@ -514,6 +517,19 @@ Feature a category to pin it on the shop. Keywords help shop search. SEO fields 
 </div>
 </div>
 <div id="shop-categories-editor"><p class="admin-text-muted" style="margin:0;">Select a category to edit featured order, search keywords, and SEO.</p></div>
+</div>
+
+<div class="card card-compact admin-mb-2">
+<h2 class="admin-section-heading admin-mt-0">Featured products and categories</h2>
+<p class="admin-text-muted" style="margin: 0 0 1rem; font-size: 0.9375rem; max-width: 52rem;">
+Four cards shown at the top of the shop page, with no heading. Pick a product or a category for each card. Leave the display name or image blank to use the product name and image, or the category name and featured image.
+</p>
+<div id="shop-featured-slots"><p class="admin-text-muted" style="margin:0;">Loading featured cards…</p></div>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem;">
+<button type="button" id="shop-featured-refresh-btn" class="btn btn-secondary">Refresh</button>
+<button type="button" id="shop-featured-save-btn" class="btn btn-primary">Save featured</button>
+</div>
+<div id="shop-featured-status" class="admin-mb-1" style="display: none; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9375rem;"></div>
 </div>
 
 <div class="card card-compact">
@@ -4024,6 +4040,7 @@ function switchAdminTab(tab, options = {}) {
   if (tab === 'shop-promos') loadShopPromoCodes();
   if (tab === 'products') {
     loadShopCategories();
+    if (window.ShopFeaturedAdmin) ShopFeaturedAdmin.load();
   }
   if (options.sectionId) {
     setTimeout(() => scrollToAdminSection(options.sectionId), 80);
