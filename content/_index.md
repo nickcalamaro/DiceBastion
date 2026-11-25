@@ -32,6 +32,17 @@ description: Gibraltar's premier location for board games, wargames, card games 
     </div>
   </a>
 
+  <a href="https://shop.dicebastion.com" target="_blank" rel="noopener noreferrer" class="feature-card">
+    <div class="feature-card-img-wrap">
+      <img src="/img/shopShelves.jpg" alt="Shop Online at Dice Bastion" class="feature-card-img">
+    </div>
+    <div class="feature-card-body">
+      <h3 class="feature-card-title">Shop Online</h3>
+      <p class="feature-card-text">We operate an online store to support our community and stock RPGs, Board Games, Trading cards and more!</p>
+      <span class="feature-card-btn">Visit the Shop</span>
+    </div>
+  </a>
+
   <a href="/memberships/" class="feature-card">
     <div class="feature-card-img-wrap">
       <img src="/img/membershipHands.jpg" alt="Become a Member of Dice Bastion" class="feature-card-img">
