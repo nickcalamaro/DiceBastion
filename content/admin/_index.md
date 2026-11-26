@@ -2052,6 +2052,15 @@ Loading cron job logs...
 .dark #nl-toolbar .nl-tb-btn:hover { background: rgb(var(--color-neutral-700)); }
 .nl-btn-embed, .nl-copy-embed { margin: 20px 0; }
 #nl-editor .nl-copy-btn { cursor: pointer; }
+/* Narrow editor viewport: promo code and card titles take the full width, copy button and
+   card buttons drop below as full-width blocks (matches the small-screen email layout) */
+@media only screen and (max-width:640px){
+  #nl-editor .nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}
+  #nl-editor .nl-copy-code{font-size:18px!important;overflow-wrap:anywhere!important;}
+  #nl-editor .nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}
+  #nl-editor .nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}
+  #nl-editor .nl-card-btn{display:block!important;text-align:center!important;}
+}
 .nl-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .nl-modal-box { background: rgb(var(--color-neutral)); border-radius: 12px; padding: 1.5rem; max-width: 560px; width: 100%; max-height: 80vh; overflow-y: auto; }
 .dark .nl-modal-box { background: rgb(var(--color-neutral-800)); }
@@ -8433,7 +8442,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
   const nlMedia = stO + '@media only screen and (max-width:480px){'
     + '.nl-shell{padding:12px 8px!important;}'
     + '.nl-header{padding:24px 20px 20px 20px!important;}'
-    + '.nl-subject{font-size:22px!important;}'
+    + '.nl-subject{font-size:22px!important;max-width:100%!important;}'
     + '.nl-body{padding:20px!important;font-size:15px!important;}'
     + '.nl-footer{padding:16px 20px!important;}'
     + '.nl-card-body{padding:14px 16px 16px 16px!important;}'
@@ -8441,7 +8450,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + '.nl-card-btn{display:block!important;text-align:center!important;}'
     + '.nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}'
     + '.nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}'
-    + '.nl-copy-code{font-size:18px!important;}'
+    + '.nl-copy-code{font-size:18px!important;overflow-wrap:anywhere!important;}'
     + '.nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}'
     + '}' + stC;
   // Copy boxes: wire the Copy elements inside the preview iframe. Goldmark ends an inline
