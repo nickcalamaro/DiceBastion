@@ -2425,7 +2425,7 @@ const NL_MOBILE_CSS = '@media only screen and (max-width:680px){'
  */
 const NL_WIDE_CSS = '@media only screen and (min-width:681px){'
   + '.nl-copy-inner{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;flex-wrap:wrap!important;text-align:left!important;}'
-  + '.nl-copy-btn{display:inline-block!important;width:auto!important;box-sizing:content-box!important;margin-top:0!important;padding:8px 14px!important;font-size:13px!important;}'
+  + '.nl-copy-btn{display:inline-block!important;width:auto!important;box-sizing:content-box!important;margin-left:auto!important;margin-top:0!important;padding:8px 14px!important;font-size:13px!important;}'
   + '}'
 
 /**

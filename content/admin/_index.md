@@ -8464,7 +8464,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
   // layout is the inline default, so these overrides need !important to beat inline styles.
   const nlWide = stO + '@media only screen and (min-width:681px){'
     + '.nl-copy-inner{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;flex-wrap:wrap!important;text-align:left!important;}'
-    + '.nl-copy-btn{display:inline-block!important;width:auto!important;box-sizing:content-box!important;margin-top:0!important;padding:8px 14px!important;font-size:13px!important;}'
+    + '.nl-copy-btn{display:inline-block!important;width:auto!important;box-sizing:content-box!important;margin-left:auto!important;margin-top:0!important;padding:8px 14px!important;font-size:13px!important;}'
     + '}' + stC;
   // Copy boxes: wire the Copy elements inside the preview iframe. Goldmark ends an inline
   // script block on a literal closing tag, so the script's own closing tag is split.
