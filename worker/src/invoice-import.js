@@ -67,6 +67,16 @@ const MISTRAL_HEARTBEAT_MS = 15000
 const MISTRAL_PROGRESS_CHARS_STEP = 2000
 /** Conversations web search. Small 4 is the model that still accepts web_search. reasoning_effort none keeps it on one search, same shape as the remote large call. */
 const LISTING_SEARCH_MODEL = 'mistral-small-2603'
+/**
+ * Exact-code lookups (barcode, item no., variant pages) use web_search_premium: same Conversations API,
+ * events named web_search_premium, with the search engine plus news-provider verification behind it.
+ */
+export const LOOKUP_SEARCH_TOOL = { type: 'web_search_premium' }
+/** Vision check of candidate product photos. Web search cannot see images; this model can. Up to 8 images per request. */
+const VISION_CHECK_MODEL = 'mistral-small-latest'
+const MISTRAL_VISION_MAX_MS = 120000
+/** Byte-verified image candidates sent to the vision check per line, best first. */
+const VISION_MAX_CANDIDATES = 4
 /** Streamed requests fail when Mistral sends nothing for this long, however long the whole answer takes. */
 const MISTRAL_STREAM_IDLE_MS = 120000
 const MISTRAL_FAMILY_MAX_MS = 300000
@@ -155,16 +165,32 @@ const SOURCES_GUIDE =
   '- image_url: a direct image file URL only when that exact URL appeared in the search results text. Never construct or guess an image URL. Otherwise null.\n' +
   '- Set confidence 0-1, product_verified true only when the EAN or exact name matched a result, and reason briefly names the source.\n\n'
 
+/** Marketing copy found during the search, kept verbatim so the listing can reuse the publisher's own wording. */
+const MARKETING_COPY_GUIDE =
+  'Marketing copy to reuse:\n' +
+  '- source_copy: up to 6 passages of the product\'s own description or marketing copy, copied verbatim from the publisher or manufacturer pages in your results, each prefixed with the site, for example "gamegenic.com: ...". ' +
+  'Prefer the publisher or manufacturer wording over retailers. Leave out prices, stock, delivery and calls to action. Empty when no result carries such copy.\n' +
+  '- Base the summary and description wording on source_copy where it fits, lightly edited into British English and the tone above. Do not paraphrase a spec away: keep the numbers and sizes exactly as the source writes them.\n\n'
+
+/** Every factual statement in the copy must carry a verbatim quote from a result, so the shop can check it against the source page. */
+const CLAIMS_GUIDE =
+  'Claims (the shop verifies these against the source pages after you answer):\n' +
+  '- claims: one entry per factual statement in your summary and description (contents, counts, sizes, materials, compatibility, format). Leave out pure opinions.\n' +
+  '- quote: the sentence from a search result that states the claim, copied exactly as it appeared, punctuation included. Never invent or reconstruct a quote; when no result states a fact, do not put it in the copy and do not add a claim for it.\n' +
+  '- source_url: the result page the quote came from, copied exactly. Every source_url must also appear in source_urls.\n\n'
+
 /** Single product: one web search, then the listing JSON. */
 const LISTING_ENRICHMENT_INSTRUCTIONS =
   'You write shop listing copy. ' + SHOP_CONTEXT +
   COPY_TONE +
   'Always use web search before writing. ' + IDENTIFY_GUIDE +
   SOURCE_COPY_GUIDE +
+  MARKETING_COPY_GUIDE +
   PRODUCT_TYPE_GUIDE +
   'Return JSON with display_name (shop product title with expanded brand/name, max 200 characters), summary, and description.\n\n' +
   SUMMARY_GUIDE +
   SOURCES_GUIDE +
+  CLAIMS_GUIDE +
   `Use at most ${MISTRAL_MAX_SINGLE_WEB_SEARCHES} web searches, in the order above. Respond with JSON matching the listing_enrichment schema only.`
 
 /** Family step 1: web search for facts and pages only. Copy is written afterwards from this research. */
@@ -187,8 +213,8 @@ const FAMILY_RESEARCH_INSTRUCTIONS =
   '- product_type: a short noun phrase (for example "card sleeves", "d6 dice block").\n' +
   '- line_facts: every spec the sources state that applies to all lines: size, count, dimensions, material, finish, contents, compatibility. One short factual phrase each, copied from sources. Include every one you found; do not infer or generalise. ' +
   'Keep fit and compatibility exactly as stated, including "does not fit" and size comparisons, and only when the source is about this product line.\n' +
-  '- source_descriptions: up to 6 passages from the product descriptions in your results that describe the whole line (what it is, theme, setting, characters, contents, what it is for, legality), the publisher or manufacturer first. ' +
-  'Copy the wording as it appears, each prefixed with its site, for example "wizards.com: ...". Leave out passages about only one variant and other shops\' prices, stock or delivery. Empty when none appeared.\n' +
+  '- source_descriptions: up to 8 passages of the line\'s own marketing and description copy from your results, copied verbatim (what it is, theme, setting, characters, contents, what it is for, legality), the publisher or manufacturer first. ' +
+  'These passages are reused as the basis of the listing copy, so keep their descriptive wording intact. Copy each as it appears, prefixed with its site, for example "wizards.com: ...". Leave out passages about only one variant and other shops\' prices, stock or delivery. Empty when none appeared.\n' +
   '- lines has one entry per input key (L1, L2, ...). Answer each key for the product listed under that key.\n' +
   '- variant_label: the part of the title that differs between lines (e.g. "Apple Green", or "Translucent Red/White" when finishes also differ).\n' +
   '- range_pages: up to 3 official manufacturer or publisher pages that list the variants of this line (a collection, category or range page), copied exactly from your results. Empty when none appeared.\n' +
@@ -204,12 +230,14 @@ const FAMILY_COPY_INSTRUCTIONS =
   PRODUCT_TYPE_GUIDE +
   'You receive research JSON for one product family: brand, product line, product type, line_facts, source_descriptions, search result snippets, and the variant labels.\n' +
   SOURCE_COPY_GUIDE +
+  '- Reuse the marketing copy: base the summary_template and description_paragraphs wording on the source_descriptions passages (the publisher\'s or manufacturer\'s own copy, kept verbatim in the research), lightly edited into British English and the tone above. Keep their numbers and sizes exactly.\n' +
   '- source_descriptions are the source copy to follow. Search result snippets back them up; use a snippet only when it describes this product line, not a single variant or another product.\n' +
   '- Write from that research only. Every spec you state must appear in line_facts or the source descriptions. Use the specs customers care about after the descriptive copy.\n' +
   '- All variants share the same summary_template and description_paragraphs. Use the {variant} placeholder where the variant label belongs.\n' +
   '- naming_pattern uses {product_line_name} and {variant} only (e.g. "{product_line_name} — {variant}").\n' +
   '- product_line_name: the research product_line_name, tidied for a shop title.\n\n' +
   SUMMARY_GUIDE +
+  '- claims: one entry per factual statement in summary_template and description_paragraphs (contents, counts, sizes, materials, compatibility). quote: the sentence from the source_descriptions or a search snippet that states the claim, copied exactly as it appears there. source_url: the page that passage or snippet came from. Never invent a quote; when no source states a fact, do not put it in the copy.\n\n' +
   'Respond with JSON matching the family_copy schema only.'
 
 const PATTERN_LOOKUP_INSTRUCTIONS =
@@ -274,7 +302,7 @@ async function callMistralPatternLookup(apiKey, { host, brand, productLineName, 
     {
       model: LISTING_SEARCH_MODEL,
       store: false,
-      tools: [{ type: 'web_search' }],
+      tools: [LOOKUP_SEARCH_TOOL],
       instructions: PATTERN_LOOKUP_INSTRUCTIONS,
       inputs: buildPatternLookupUserPrompt({ host, brand, productLineName, examples, missing }),
       completion_args: {
@@ -354,7 +382,7 @@ async function callMistralCodeLookup(apiKey, { mode, batch, onProgress }) {
     {
       model: LISTING_SEARCH_MODEL,
       store: false,
-      tools: [{ type: 'web_search' }],
+      tools: [LOOKUP_SEARCH_TOOL],
       instructions: CODE_LOOKUP_INSTRUCTIONS,
       inputs: buildCodeLookupUserPrompt(mode, batch),
       completion_args: {
@@ -536,6 +564,17 @@ const SPLIT_LINES_SCHEMA = {
 
 const SOURCE_URLS_SCHEMA = { type: 'array', items: { type: 'string' }, maxItems: 3 }
 
+const CLAIM_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    claim: { type: 'string' },
+    quote: { type: 'string' },
+    source_url: { type: 'string' }
+  },
+  required: ['claim', 'quote', 'source_url']
+}
+
 const LISTING_ENRICHMENT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -544,12 +583,14 @@ const LISTING_ENRICHMENT_SCHEMA = {
     summary: { type: 'string' },
     description: { type: 'string' },
     source_urls: SOURCE_URLS_SCHEMA,
+    source_copy: { type: 'array', items: { type: 'string' }, maxItems: 6 },
+    claims: { type: 'array', items: CLAIM_SCHEMA, maxItems: 12 },
     image_url: { type: ['string', 'null'] },
     confidence: { type: 'number' },
     reason: { type: 'string' },
     product_verified: { type: 'boolean' }
   },
-  required: ['display_name', 'summary', 'description', 'source_urls', 'image_url', 'confidence', 'reason', 'product_verified']
+  required: ['display_name', 'summary', 'description', 'source_urls', 'source_copy', 'claims', 'image_url', 'confidence', 'reason', 'product_verified']
 }
 
 const FAMILY_ENRICHMENT_MAX_LINES = 48
@@ -583,7 +624,7 @@ export function buildFamilyResearchSchema(lineCount) {
       product_line_name: { type: 'string' },
       product_type: { type: 'string' },
       line_facts: { type: 'array', items: { type: 'string' }, maxItems: 15 },
-      source_descriptions: { type: 'array', items: { type: 'string' }, maxItems: 6 },
+      source_descriptions: { type: 'array', items: { type: 'string' }, maxItems: 8 },
       range_pages: { type: 'array', items: { type: 'string' }, maxItems: 3 },
       lines: {
         type: 'object',
@@ -603,9 +644,10 @@ const FAMILY_COPY_SCHEMA = {
     product_line_name: { type: 'string' },
     naming_pattern: { type: 'string' },
     summary_template: { type: 'string' },
-    description_paragraphs: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 4 }
+    description_paragraphs: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 4 },
+    claims: { type: 'array', items: CLAIM_SCHEMA, maxItems: 12 }
   },
-  required: ['product_line_name', 'naming_pattern', 'summary_template', 'description_paragraphs']
+  required: ['product_line_name', 'naming_pattern', 'summary_template', 'description_paragraphs', 'claims']
 }
 
 export function applyFamilyTemplate(template, variantLabel, productLineName) {
@@ -784,6 +826,76 @@ export function copySnippets(references, max = 12) {
   return out
 }
 
+/** Normalise a quote or page text for comparison: case, accents, quote and dash glyphs, tags, punctuation, whitespace. */
+export function normalizeClaimText(s) {
+  return String(s || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-')
+    .toLowerCase()
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+/** True when the quote appears (normalised) inside one of the texts. Very short quotes never count. */
+export function quoteFoundInTexts(quote, texts) {
+  const q = normalizeClaimText(quote)
+  if (q.length < 8) return false
+  return (texts || []).some((t) => normalizeClaimText(t).includes(q))
+}
+
+/**
+ * Checks each copy claim's verbatim quote against the gathered source texts.
+ * Returns {total, supported, unsupported:[{claim, quote, source_url, reason}]}.
+ */
+export function evaluateClaims(claims, texts) {
+  const unsupported = []
+  let supported = 0
+  for (const c of claims || []) {
+    if (!c || typeof c !== 'object') continue
+    const claim = String(c.claim || '').trim()
+    const quote = String(c.quote || '').trim()
+    const sourceUrl = String(c.source_url || '').trim()
+    if (!claim) continue
+    if (!quote) {
+      unsupported.push({ claim, quote, source_url: sourceUrl, reason: 'no quote given' })
+      continue
+    }
+    if (quoteFoundInTexts(quote, texts)) supported += 1
+    else unsupported.push({ claim, quote, source_url: sourceUrl, reason: 'quote not found in any gathered source' })
+  }
+  return { total: supported + unsupported.length, supported, unsupported }
+}
+
+/**
+ * Verifies copy claims against the search result texts plus the pages named as sources (fetched once,
+ * shared pageCache with the image step). Claims whose quote is found nowhere are reported, not hidden.
+ */
+export async function verifyCopyClaims({ claims, references = [], sourceUrls = [], pageCache, onProgress }) {
+  const texts = (references || []).map((r) => `${r.url || ''} ${r.title || ''} ${r.description || ''}`)
+  const urls = [...new Set([...(sourceUrls || []), ...(claims || []).map((c) => c && c.source_url).filter(Boolean)])]
+    .map(normalizeEnrichmentImageUrl)
+    .filter(Boolean)
+    .slice(0, 6)
+  for (const url of urls) {
+    if (fetchLimitHit()) break
+    const page = await fetchPageHtml(url, pageCache || new Map())
+    if (!page.error) texts.push(`${page.url} ${pageTitle(page.html)} ${stripTags(page.html)}`)
+  }
+  const result = evaluateClaims(claims, texts)
+  if (typeof onProgress === 'function') {
+    await onProgress(
+      `Copy claims · ${result.supported} of ${result.total} supported by gathered sources` +
+        (result.unsupported.length ? ` · ${result.unsupported.length} quote(s) not found on any source page` : '')
+    )
+  }
+  return result
+}
+
 export function buildFamilyCopyUserPrompt(research, inputLines, references = []) {
   const variants = inputLines.map((_, i) => {
     const row = research.lines[familyLineKey(i)]
@@ -954,6 +1066,16 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
   if (!template.summary_template || template.description_paragraphs.length < 2) {
     return { error: 'invalid_family_copy', message: 'Mistral returned an incomplete family template.', duration_ms: Date.now() - started }
   }
+  const claimsCheck = await verifyCopyClaims({
+    claims: parsed.claims,
+    references,
+    sourceUrls: [
+      ...(Array.isArray(research.range_pages) ? research.range_pages : []),
+      ...Object.values(research.lines || {}).flatMap((r) => (Array.isArray(r && r.source_urls) ? r.source_urls : []))
+    ],
+    pageCache,
+    onProgress: progress
+  })
 
   const imagesStarted = Date.now()
   await progress('Step 4 images · pages that showed each code first, then range pages and other variant pages')
@@ -1081,6 +1203,7 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
 
   const usedImageUrls = new Set()
   const outLines = []
+  let visionChecks = 0
   for (let i = 0; i < inputLines.length; i++) {
     const input = inputLines[i]
     const key = familyLineKey(i)
@@ -1101,7 +1224,15 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
     }
     const variantLabel = variantLabels[i]
     const applied = applyFamilyTemplate(template, variantLabel, template.product_line_name)
-    const image = await pickListingImage(collected[i], pattern, usedImageUrls)
+    const image = await pickListingImage(collected[i], pattern, usedImageUrls, {
+      apiKey,
+      name: input.name,
+      variantLabel,
+      itemCode: input.itemCode,
+      family: true,
+      onProgress: progress
+    })
+    if (image.image_vision) visionChecks += 1
     await progress(imageProgressLine(key, input.ean, applied.display_name, image))
     outLines.push({
       ean: input.ean,
@@ -1112,6 +1243,8 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       image_url: image.image_url,
       image_source: image.image_source,
       image_rejected: image.image_rejected || undefined,
+      image_vision: image.image_vision || undefined,
+      image_visible: image.image_visible || undefined,
       source_url: image.image_page || undefined,
       confidence: Number.isFinite(Number(row.confidence)) ? Number(row.confidence) : undefined,
       product_verified: row.product_verified === true,
@@ -1143,6 +1276,9 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
       lines_found_by_code: codesFound,
       line_facts: lineFacts.length,
       copy_ms: copyMs,
+      copy_claims: { total: claimsCheck.total, supported: claimsCheck.supported, unsupported: claimsCheck.unsupported.length },
+      unsupported_claims: claimsCheck.unsupported.map((u) => ({ claim: u.claim.slice(0, 200), source_url: u.source_url, reason: u.reason })),
+      vision_checks: visionChecks,
       image_pattern: pattern ? `${pattern.host} ${pattern.slot}` : null,
       range_pages: linked.rangeUrls,
       lines_linked: linkedCount,
@@ -1159,6 +1295,7 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
         ean: l.ean,
         has_image: !!l.image_url,
         image_source: l.image_source,
+        image_vision: l.image_vision,
         image_rejected: l.image_rejected,
         source_url: l.source_url,
         error: l.error
@@ -1395,7 +1532,7 @@ export function parseSearchResults(info) {
 }
 
 function addSearchResults(state, event) {
-  if (event.name && event.name !== 'web_search') return []
+  if (event.name && event.name !== 'web_search' && event.name !== 'web_search_premium') return []
   const added = []
   for (const r of parseSearchResults(event.info)) {
     if (state.references.some((x) => x.url === r.url)) continue
@@ -2013,14 +2150,60 @@ const IMAGE_SLOT_LABELS = {
   jsonld: 'JSON-LD product image',
   og: 'og:image',
   twitter: 'twitter:image',
+  itemprop: 'itemprop image',
+  image_src: 'image_src link',
+  srcset: 'largest srcset image',
   direct: 'URL from search results',
   thumbnail: 'search result thumbnail',
   catalogue: 'shop catalogue image'
 }
 
+/** <link rel="image_src" href="..."> tags. */
+function linkImageSrcSlots(html) {
+  const out = []
+  for (const m of String(html || '').matchAll(/<link\b[^>]*>/gi)) {
+    const tag = m[0]
+    const rel = tag.match(/\brel\s*=\s*["']([^"']+)["']/i)
+    if (!rel || !/image_src/i.test(rel[1])) continue
+    const href = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i)
+    if (href) out.push({ url: href[1], slot: 'image_src' })
+  }
+  return out
+}
+
+/** The last srcset entry is usually the largest; a width descriptor decides when present. */
+export function srcsetLargest(srcset) {
+  let best = null
+  let bestW = -1
+  for (const part of String(srcset || '').split(',')) {
+    const bits = part.trim().split(/\s+/)
+    if (!bits[0]) continue
+    const w = parseInt(String(bits[1] || '').replace(/[wx]$/i, ''), 10)
+    const width = Number.isFinite(w) ? w : 0
+    if (width >= bestW) {
+      bestW = width
+      best = bits[0]
+    }
+  }
+  return best
+}
+
+/** Largest srcset candidate of an <img itemprop="image"> tag. */
+function itempropImgSrcsetSlots(html) {
+  const out = []
+  for (const m of String(html || '').matchAll(/<img\b[^>]*>/gi)) {
+    const tag = m[0]
+    if (!/\bitemprop\s*=\s*["']?image/i.test(tag)) continue
+    const srcset = tag.match(/\bsrcset\s*=\s*["']([^"']+)["']/i)
+    const largest = srcset && srcsetLargest(srcset[1])
+    if (largest) out.push({ url: largest, slot: 'srcset' })
+  }
+  return out
+}
+
 /**
  * Product photo candidates a page declares about itself, tagged with where on the page they sit:
- * JSON-LD Product image, then og:image, then twitter:image.
+ * JSON-LD Product image, then og:image, then twitter:image, then itemprop/link/srcset fallbacks.
  */
 export function extractPageImageSlots(html, pageUrl) {
   const raw = [
@@ -2028,7 +2211,10 @@ export function extractPageImageSlots(html, pageUrl) {
     { url: metaContent(html, 'property', 'og:image:secure_url'), slot: 'og' },
     { url: metaContent(html, 'property', 'og:image'), slot: 'og' },
     { url: metaContent(html, 'name', 'twitter:image'), slot: 'twitter' },
-    { url: metaContent(html, 'property', 'twitter:image'), slot: 'twitter' }
+    { url: metaContent(html, 'property', 'twitter:image'), slot: 'twitter' },
+    { url: metaContent(html, 'itemprop', 'image'), slot: 'itemprop' },
+    ...linkImageSrcSlots(html),
+    ...itempropImgSrcsetSlots(html)
   ].filter((c) => c.url)
   const seen = new Set()
   const out = []
@@ -3058,8 +3244,11 @@ export function dropSharedImageCandidates(collectedList) {
 /**
  * Pass 2 for one line: book cover by EAN first (978/979 barcodes), then candidates in pattern order.
  * URLs in usedImageUrls belong to an earlier line and are skipped; the chosen URL is added.
+ * Byte-verifies up to 6 candidates (keeping VISION_MAX_CANDIDATES when a vision check will run), then,
+ * when vision is given and wantsVisionCheck says the choice is ambiguous, asks a vision model which
+ * candidate actually shows this product/variant.
  */
-async function pickListingImage(collected, pattern, usedImageUrls = null) {
+async function pickListingImage(collected, pattern, usedImageUrls = null, vision = null) {
   if (!collected) return { image_url: null, image_source: null, image_rejected: 'no_entry' }
   const tried = [...collected.tried]
 
@@ -3082,29 +3271,78 @@ async function pickListingImage(collected, pattern, usedImageUrls = null) {
     return true
   })
   if (taken) tried.push(`${taken} image(s) already used by another line`)
+  const verified = []
   for (const c of ordered.slice(0, 6)) {
     if (fetchLimitHit()) {
-      tried.push(`${ordered.length} image(s) not checked: ${fetchLimitNote()}`)
-      return { image_url: null, image_source: null, image_rejected: tried.join('; ') }
+      tried.push(`${ordered.length - verified.length - failed} image(s) not checked: ${fetchLimitNote()}`)
+      break
     }
     if (await verifyImageUrl(c.url)) {
-      if (usedImageUrls) usedImageUrls.add(c.url)
-      return {
-        image_url: c.url,
-        image_source: c.origin,
-        image_slot: c.slot,
-        image_page: c.page || undefined,
-        matches_pattern: pattern ? c.host === pattern.host && c.slot === pattern.slot : undefined
+      verified.push(c)
+      if (!vision || verified.length >= VISION_MAX_CANDIDATES) break
+    } else {
+      failed += 1
+    }
+  }
+  if (!verified.length) {
+    if (failed) tried.push(`${failed} image(s) failed to download${fetchLimitHit() ? ` (${fetchLimitNote()})` : ''}`)
+    return { image_url: null, image_source: null, image_rejected: tried.join('; ') || 'no_source' }
+  }
+
+  let chosen = verified[0]
+  let imageVision
+  let imageVisible
+  if (vision && wantsVisionCheck({ family: vision.family, pattern, verified, chosen })) {
+    const verdicts = await callMistralVisionCheck(vision.apiKey, {
+      images: verified.slice(0, VISION_MAX_CANDIDATES).map((c) => c.url),
+      ean: collected.gtin || vision.ean || null,
+      itemCode: vision.itemCode || null,
+      name: vision.name || '',
+      variantLabel: vision.variantLabel || '',
+      onProgress: vision.onProgress
+    })
+    if (verdicts) {
+      let picked = null
+      let pickedVerdict = null
+      for (let i = 0; i < verified.length && i < VISION_MAX_CANDIDATES; i++) {
+        const v = verdicts.get(i)
+        if (v && v.matches) {
+          picked = verified[i]
+          pickedVerdict = v
+          break
+        }
+      }
+      if (picked) {
+        chosen = picked
+        imageVision = 'match'
+        imageVisible = pickedVerdict.visible || undefined
+        if (picked !== verified[0]) {
+          const earlier = verdicts.get(0)
+          tried.push(`vision chose image ${verified.indexOf(picked)} of ${verified.length}; first showed "${(earlier && earlier.visible) || 'unreadable'}"`)
+        }
+      } else {
+        imageVision = 'no_match'
+        imageVisible = (verdicts.get(0) && verdicts.get(0).visible) || undefined
+        tried.push(`vision: no candidate showed this product (first showed "${imageVisible || 'unreadable'}"); first downloadable image kept`)
       }
     }
-    failed += 1
   }
-  if (failed) tried.push(`${failed} image(s) failed to download${fetchLimitHit() ? ` (${fetchLimitNote()})` : ''}`)
-  return { image_url: null, image_source: null, image_rejected: tried.join('; ') || 'no_source' }
+
+  if (usedImageUrls) usedImageUrls.add(chosen.url)
+  return {
+    image_url: chosen.url,
+    image_source: chosen.origin,
+    image_slot: chosen.slot,
+    image_page: chosen.page || undefined,
+    matches_pattern: pattern ? chosen.host === pattern.host && chosen.slot === pattern.slot : undefined,
+    image_vision: imageVision,
+    image_visible: imageVisible,
+    ...(failed ? { image_failed_probes: failed } : {})
+  }
 }
 
 async function findListingImage(args) {
-  return pickListingImage(await collectImageCandidates(args), null)
+  return pickListingImage(await collectImageCandidates(args), null, null, args.vision || null)
 }
 
 function imageProgressLine(key, ean, title, image) {
@@ -3112,7 +3350,13 @@ function imageProgressLine(key, ean, title, image) {
   if (image.image_url) {
     const where = image.image_slot ? ` · ${IMAGE_SLOT_LABELS[image.image_slot] || image.image_slot}` : ''
     const off = image.matches_pattern === false && image.image_page ? ' · differs from family pattern' : ''
-    return `Image · ${label} · ${image.image_source} · ${hostOf(image.image_page || image.image_url)}${where}${off}`
+    const vision =
+      image.image_vision === 'match'
+        ? ' · visually confirmed'
+        : image.image_vision === 'no_match'
+          ? ' · vision could not confirm this product'
+          : ''
+    return `Image · ${label} · ${image.image_source} · ${hostOf(image.image_page || image.image_url)}${where}${off}${vision}`
   }
   return `Image missing · ${label} · ${image.image_rejected}`
 }
@@ -3244,6 +3488,141 @@ export async function verifyImageUrl(url) {
   }
 }
 
+/** Strict schema for one vision check: a verdict per attached image, by 0-based index. */
+export function buildVisionCheckSchema(count) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      verdicts: {
+        type: 'array',
+        minItems: 1,
+        maxItems: Math.max(1, count),
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            index: { type: 'number', description: '0-based position of the image in this request' },
+            matches: { type: 'boolean' },
+            visible: { type: 'string', description: 'what the image actually shows, including any pack text' },
+            reason: { type: 'string' }
+          },
+          required: ['index', 'matches', 'visible', 'reason']
+        }
+      }
+    },
+    required: ['verdicts']
+  }
+}
+
+export function buildVisionCheckPrompt({ ean, itemCode, name, variantLabel }, count) {
+  const variant = String(variantLabel || '').trim()
+  return [
+    `You check product photos for a board game and TCG shop. ${count} image(s) are attached in order: image 0, image 1, and so on.`,
+    `The product to match: ${String(name || '').trim() || '(unnamed invoice line)'}` +
+      (ean ? ` · EAN ${ean}` : '') +
+      (itemCode ? ` · item no. ${itemCode}` : '') +
+      (variant ? ` · variant "${variant}"` : ''),
+    '',
+    'For every image, add one verdict with its index:',
+    '- matches: true only when the photo shows exactly this product' + (variant ? ` in the variant "${variant}"` : '') +
+      ': the pack or product matches the name, and any colour, size, edition, language or count wording visible on it matches too. ' +
+      'false for sibling variants of the same line, range or brand shots, groups of several different products, lifestyle photos where the product cannot be identified, watermarks, placeholders, logos, icons and unreadable photos.',
+    '- visible: what the image actually shows, in a few words, quoting any brand, product name, variant, count or size text on the pack.',
+    '- reason: one short sentence why matches is true or false.',
+    '',
+    'Respond with JSON matching the vision_check schema only.'
+  ].join('\n')
+}
+
+/**
+ * Sends candidate image URLs to a vision model (up to 8 per request) and returns one verdict per index,
+ * or null when the call fails, in which case the caller keeps the first byte-verified candidate.
+ */
+export async function callMistralVisionCheck(apiKey, { images, ean, itemCode, name, variantLabel, onProgress }) {
+  const urls = (images || []).map(normalizeEnrichmentImageUrl).filter(Boolean).slice(0, 8)
+  if (!apiKey || !urls.length) return null
+  const body = {
+    model: VISION_CHECK_MODEL,
+    temperature: 0,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: buildVisionCheckPrompt({ ean, itemCode, name, variantLabel }, urls.length) },
+          ...urls.map((url) => ({ type: 'image_url', image_url: url }))
+        ]
+      }
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'vision_check', strict: true, schema: buildVisionCheckSchema(urls.length) }
+    }
+  }
+  for (let attempt = 0; ; attempt++) {
+    let res
+    try {
+      res = await fetchWithTimeout(
+        MISTRAL_CHAT_URL,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body)
+        },
+        MISTRAL_VISION_MAX_MS
+      )
+    } catch {
+      return null
+    }
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}))
+      const parsed = parseChatJsonContent(chatContentText(data.choices?.[0]?.message?.content))
+      const verdicts = Array.isArray(parsed?.verdicts) ? parsed.verdicts : []
+      const byIndex = new Map()
+      for (const v of verdicts) {
+        const i = Number(v && v.index)
+        if (Number.isInteger(i) && i >= 0 && i < urls.length) {
+          byIndex.set(i, {
+            matches: v.matches === true,
+            visible: String(v.visible || '').trim().slice(0, 200),
+            reason: String(v.reason || '').trim().slice(0, 200)
+          })
+        }
+      }
+      if (typeof onProgress === 'function') {
+        await onProgress(
+          `Vision check · ${urls.length} image(s) · ${[...byIndex.values()].filter((v) => v.matches).length} match` +
+            (byIndex.size ? ` · first: ${[...byIndex.values()][0].visible || 'unreadable'}` : '')
+        )
+      }
+      return byIndex
+    }
+    const data = await res.json().catch(() => ({}))
+    const message = String(data.message || data.detail || res.statusText).slice(0, 400)
+    if (attempt < MISTRAL_BUSY_RETRY_MS.length && isMistralBusy(res.status, message)) {
+      console.log(`[invoice-import/mistral] vision busy status=${res.status} retry=${attempt + 1}`)
+      await new Promise((r) => setTimeout(r, MISTRAL_BUSY_RETRY_MS[attempt]))
+      continue
+    }
+    console.log(`[invoice-import/mistral] vision check failed status=${res.status} message=${message}`)
+    return null
+  }
+}
+
+/**
+ * Whether the byte-verified candidates should also be shown to the vision model. Always when several
+ * images downloaded (which one is right?); in a family also for a single weak-source candidate that
+ * breaks the family pattern, because that is where a sibling variant's photo slips in.
+ */
+export function wantsVisionCheck({ family, pattern, verified, chosen }) {
+  if (!verified.length || !chosen) return false
+  if (verified.length > 1) return true
+  if (!family) return false
+  if (chosen.origin === 'code_page' || chosen.origin === 'shop_catalogue') return false
+  if (pattern && chosen.host === pattern.host && chosen.slot === pattern.slot) return false
+  return true
+}
+
 /**
  * Equal per-unit cost split: parent line total divided by sum of child quantities.
  */
@@ -3370,13 +3749,22 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
       named.includes(normalizeEnrichmentImageUrl(r.url)) ||
       (eanNorm && (r.url.includes(eanNorm) || (r.title || '').includes(eanNorm) || (r.description || '').includes(eanNorm)))
   )
+  const pageCache = new Map()
+  const claimsCheck = await verifyCopyClaims({
+    claims: parsed.claims,
+    references: researched.references,
+    sourceUrls: parsed.source_urls,
+    pageCache,
+    onProgress
+  })
   const image = await findListingImage({
     ean: eanNorm,
     imageUrl: parsed.image_url,
     sourceUrls: parsed.source_urls,
     citedRefs: researched.references,
-    pageCache: new Map(),
-    searchMatches: singleMatches
+    pageCache,
+    searchMatches: singleMatches,
+    vision: { apiKey, name: title, itemCode: normalizeItemCode(sku), family: false, onProgress }
   })
   if (typeof onProgress === 'function') await onProgress(imageProgressLine('', eanNorm, displayName || title, image))
 
@@ -3393,12 +3781,19 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
     image_url: image.image_url,
     image_source: image.image_source || undefined,
     image_rejected: image.image_rejected || undefined,
+    image_vision: image.image_vision || undefined,
+    image_visible: image.image_visible || undefined,
     source_url: image.image_page || undefined,
     confidence: Number.isFinite(confidence) ? confidence : undefined,
     reason: parsed.reason ? String(parsed.reason).trim().slice(0, 500) : undefined,
     product_verified: parsed.product_verified === true,
     identified_by: matchedBy,
     copy_source: 'web_search',
+    web_searches: researched.searches,
+    source_copy_count: Array.isArray(parsed.source_copy) ? parsed.source_copy.length : 0,
+    copy_claims: { total: claimsCheck.total, supported: claimsCheck.supported },
+    copy_verified: claimsCheck.total > 0 && claimsCheck.unsupported.length === 0,
+    unsupported_claims: claimsCheck.unsupported.map((u) => ({ claim: u.claim.slice(0, 200), source_url: u.source_url, reason: u.reason })),
     duration_ms: durationMs,
     web_search_ms: webMs
   }

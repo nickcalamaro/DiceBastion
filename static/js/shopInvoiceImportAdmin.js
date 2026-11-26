@@ -452,7 +452,11 @@
       row.source_product_verified = lineData.product_verified === true;
     }
     row.notes = ['Listing enriched (harmonised family set)'];
-    if (lineData.image_url) row.notes[0] += '; image from ' + imageSourceLabel(lineData.image_source, true);
+    if (lineData.image_url) {
+      row.notes[0] += '; image from ' + imageSourceLabel(lineData.image_source, true);
+      if (lineData.image_vision === 'match') row.notes[0] += ' (visually confirmed)';
+      else if (lineData.image_vision === 'no_match') row.notes[0] += ' (vision could not confirm this product)';
+    }
     return true;
   }
 
@@ -483,7 +487,9 @@
       cited_pages: dbg && dbg.cited_pages,
       images_ok: dbg && dbg.images_ok,
       images_ms: dbg && dbg.images_ms,
-      line_details: dbg && dbg.lines
+      line_details: dbg && dbg.lines,
+      copy_claims: dbg && dbg.copy_claims,
+      vision_checks: dbg && dbg.vision_checks
     });
     if (dbg) {
       appendLog(
@@ -491,9 +497,13 @@
         (dbg.cited_pages != null ? dbg.cited_pages : '?') + ' search result(s), ' +
         (dbg.lines_catalogue != null ? dbg.lines_catalogue + ' from shop catalogue, ' : '') +
         (dbg.line_facts != null ? dbg.line_facts : '?') + ' line fact(s), copy ' +
-        (dbg.copy_ms != null ? Math.round(dbg.copy_ms / 1000) + 's' : '?') + ', image pattern ' +
+        (dbg.copy_ms != null ? Math.round(dbg.copy_ms / 1000) + 's' : '?') +
+        (dbg.copy_claims ? ', claims ' + dbg.copy_claims.supported + ' of ' + dbg.copy_claims.total + ' source-checked' : '') +
+        (dbg.copy_claims && dbg.copy_claims.unsupported ? ' (' + dbg.copy_claims.unsupported + ' not found)' : '') +
+        ', image pattern ' +
         (dbg.image_pattern || 'none') + ', images ' +
         (dbg.images_ok != null ? dbg.images_ok : '?') + ' of ' + setRows.length +
+        (dbg.vision_checks != null ? ', ' + dbg.vision_checks + ' vision-checked' : '') +
         (dbg.images_ms != null ? ' in ' + Math.round(dbg.images_ms / 1000) + 's' : '')
       );
     }
@@ -1664,9 +1674,18 @@
     }
     const secs = data.duration_ms != null ? Math.round(data.duration_ms / 1000) : null;
     const srcLabel = 'web research';
-    let note = 'Listing enriched (' + srcLabel + (secs != null ? ', ' + secs + 's' : '') + ')';
+    const searches = data.web_searches != null ? ', ' + data.web_searches + ' search' + (data.web_searches === 1 ? '' : 'es') : '';
+    let note = 'Listing enriched (' + srcLabel + searches + (secs != null ? ', ' + secs + 's' : '') + ')';
+    if (data.copy_claims && data.copy_claims.total) {
+      note += '; copy claims ' + data.copy_claims.supported + ' of ' + data.copy_claims.total + ' source-checked';
+      if (data.copy_verified === false && data.unsupported_claims && data.unsupported_claims.length) {
+        note += ' (' + data.unsupported_claims.length + ' not found on source pages)';
+      }
+    }
     if (data.image_url) {
       note += '; image from ' + imageSourceLabel(data.image_source, true);
+      if (data.image_vision === 'match') note += ' (visually confirmed)';
+      else if (data.image_vision === 'no_match') note += ' (vision could not confirm this product)';
     } else if (data.image_rejected) {
       note += '; no image found (' + data.image_rejected + ')';
     }
@@ -1704,9 +1723,14 @@
       logProgress('Enrichment API done ' + batchLabel + row.name, {
         ms: Date.now() - started,
         copy_source: data.copy_source,
+        web_searches: data.web_searches != null ? data.web_searches : null,
+        copy_verified: data.copy_verified != null ? data.copy_verified : null,
+        unsupported_claims: data.unsupported_claims ? data.unsupported_claims.length : 0,
+        source_copy_count: data.source_copy_count != null ? data.source_copy_count : null,
         source_url: data.source_url || null,
         suggested_image: !!data.image_url,
         image_source: data.image_source || null,
+        image_vision: data.image_vision || null,
         image_rejected: data.image_rejected || null,
         product_verified: data.product_verified,
         saved_to_storage: !!row.image_url

@@ -59,7 +59,16 @@ import {
   identifiedByCodeLines,
   dedupeFamilyLines,
   relatesToLines,
-  isRangePageForFamily
+  isRangePageForFamily,
+  LOOKUP_SEARCH_TOOL,
+  normalizeClaimText,
+  quoteFoundInTexts,
+  evaluateClaims,
+  buildVisionCheckSchema,
+  buildVisionCheckPrompt,
+  wantsVisionCheck,
+  extractPageImageSlots,
+  srcsetLargest
 } from './invoice-import.js'
 
 describe('relatesToLines', () => {
@@ -923,3 +932,96 @@ describe('isFamilyBatchEligible', () => {
   })
 })
 
+
+describe('web_search_premium events', () => {
+  it('accepts results from web_search_premium tool executions like web_search', () => {
+    const state = { text: '', references: [], searches: 0, searchIds: {}, reportedChars: 0, error: null, done: false }
+    applyConversationEvent(state, { type: 'tool.execution.started', name: 'web_search_premium', id: 't1' })
+    applyConversationEvent(state, {
+      type: 'tool.execution.done',
+      name: 'web_search_premium',
+      id: 't1',
+      info: { result: JSON.stringify({ a: { url: 'https://pub.example.com/p/123', title: 'Dice', description: 'A dice set', metadata: { thumbnail: 'https://cdn.example.com/t.jpg' } } }) }
+    })
+    expect(state.searches).toBe(1)
+    expect(state.references).toEqual([{ url: 'https://pub.example.com/p/123', title: 'Dice', description: 'A dice set', thumbnail: 'https://cdn.example.com/t.jpg' }])
+  })
+
+  it('uses the premium tool for exact-code lookups', () => {
+    expect(LOOKUP_SEARCH_TOOL).toEqual({ type: 'web_search_premium' })
+  })
+})
+
+describe('copy claims verification', () => {
+  it('normalises quotes across case, punctuation, accents and dashes', () => {
+    expect(normalizeClaimText('  “Hello — World!”  ')).toBe('hello world')
+    expect(normalizeClaimText('Café naïve')).toBe('cafe naive')
+    expect(quoteFoundInTexts('“Pack of 96 sleeves!”', ['a pack of 96 sleeves for your deck'])).toBe(true)
+    expect(quoteFoundInTexts('xy', ['xy'])).toBe(false)
+  })
+
+  it('marks claims supported only when the verbatim quote appears in a gathered source', () => {
+    const texts = ['https://pub.example.com/p · Dice · Each pack contains 7 polyhedral dice.']
+    const result = evaluateClaims(
+      [
+        { claim: 'contains 7 dice', quote: 'Each pack contains 7 polyhedral dice.', source_url: 'https://pub.example.com/p' },
+        { claim: 'contains 14 dice', quote: 'Each pack contains 14 polyhedral dice.', source_url: 'https://pub.example.com/p' },
+        { claim: 'no quote claim', quote: '', source_url: 'https://pub.example.com/p' }
+      ],
+      texts
+    )
+    expect(result.total).toBe(3)
+    expect(result.supported).toBe(1)
+    expect(result.unsupported.map((u) => u.reason)).toEqual(['quote not found in any gathered source', 'no quote given'])
+  })
+})
+
+describe('vision image check', () => {
+  it('builds a strict schema with one verdict per image', () => {
+    const schema = buildVisionCheckSchema(3)
+    expect(schema.required).toEqual(['verdicts'])
+    expect(schema.properties.verdicts.maxItems).toBe(3)
+    expect(schema.properties.verdicts.items.required).toEqual(['index', 'matches', 'visible', 'reason'])
+  })
+
+  it('names the product, codes and variant in the prompt', () => {
+    const prompt = buildVisionCheckPrompt({ ean: '5012345678900', itemCode: 'ABC123', name: 'Vortex d6', variantLabel: 'Opaque Black' }, 2)
+    expect(prompt).toContain('5012345678900')
+    expect(prompt).toContain('ABC123')
+    expect(prompt).toContain('Vortex d6')
+    expect(prompt).toContain('Opaque Black')
+    expect(prompt).toContain('image 0')
+  })
+
+  it('wants a vision check when several images downloaded, or a weak family candidate breaks the pattern', () => {
+    const c = (origin, host = 'a.com', slot = 'og') => ({ origin, host, slot })
+    expect(wantsVisionCheck({ family: false, pattern: null, verified: [c('source_page'), c('cited_page')], chosen: c('source_page') })).toBe(true)
+    expect(wantsVisionCheck({ family: false, pattern: null, verified: [c('source_page')], chosen: c('source_page') })).toBe(false)
+    expect(wantsVisionCheck({ family: true, pattern: { host: 'a.com', slot: 'og' }, verified: [c('search_result', 'b.com')], chosen: c('search_result', 'b.com') })).toBe(true)
+    expect(wantsVisionCheck({ family: true, pattern: { host: 'a.com', slot: 'og' }, verified: [c('source_page', 'a.com')], chosen: c('source_page', 'a.com') })).toBe(false)
+    expect(wantsVisionCheck({ family: true, pattern: null, verified: [c('code_page')], chosen: c('code_page') })).toBe(false)
+  })
+})
+
+describe('page image slot fallbacks', () => {
+  it('reads itemprop image, image_src link and the largest srcset entry', () => {
+    const html = [
+      '<meta itemprop="image" content="https://cdn.example.com/itemprop.jpg">',
+      '<link rel="image_src" href="https://cdn.example.com/image_src.jpg">',
+      '<img itemprop="image" src="https://cdn.example.com/small.jpg" srcset="https://cdn.example.com/s400.jpg 400w, https://cdn.example.com/s800.jpg 800w">'
+    ].join('')
+    const slots = extractPageImageSlots(html, 'https://example.com/p')
+    expect(slots.map((s) => s.slot)).toEqual(['itemprop', 'image_src', 'srcset'])
+    expect(slots.map((s) => s.url)).toEqual([
+      'https://cdn.example.com/itemprop.jpg',
+      'https://cdn.example.com/image_src.jpg',
+      'https://cdn.example.com/s800.jpg'
+    ])
+  })
+
+  it('picks the widest srcset candidate by descriptor', () => {
+    expect(srcsetLargest('https://a.com/1.jpg 100w, https://a.com/2.jpg 2x, https://a.com/3.jpg 300w')).toBe('https://a.com/3.jpg')
+    expect(srcsetLargest('https://a.com/only.jpg')).toBe('https://a.com/only.jpg')
+    expect(srcsetLargest('')).toBe(null)
+  })
+})
