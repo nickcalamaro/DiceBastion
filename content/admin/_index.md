@@ -1673,11 +1673,11 @@ Loading cron job logs...
 <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
 <span class="ql-formats"><button class="ql-list" value="bullet"></button><button class="ql-list" value="ordered"></button></span>
 <span class="ql-formats"><button class="ql-link"></button></span>
-<span class="ql-formats nl-extra-fmts"><button type="button" onclick="nlInsertDivider()" class="nl-tb-btn">Divider</button><button type="button" onclick="openNlEventPicker()" class="nl-tb-btn nl-tb-event-btn">Insert Event</button><button type="button" onclick="openNlCalendarPicker()" class="nl-tb-btn nl-tb-calendar-btn">Event Calendar</button></span>
+<span class="ql-formats nl-extra-fmts"><button type="button" onclick="nlInsertDivider()" class="nl-tb-btn">Divider</button><button type="button" onclick="nlInsertButton()" class="nl-tb-btn">Button</button><button type="button" onclick="nlInsertCopyBox()" class="nl-tb-btn">Copy Box</button><button type="button" onclick="openNlProductPicker()" class="nl-tb-btn nl-tb-product-btn">Insert Product</button><button type="button" onclick="openNlEventPicker()" class="nl-tb-btn nl-tb-event-btn">Insert Event</button><button type="button" onclick="openNlCalendarPicker()" class="nl-tb-btn nl-tb-calendar-btn">Event Calendar</button></span>
 </div>
 <div id="nl-editor"></div>
 </div>
-<small class="admin-text-small">Tip: Type # / ## / ### then Space for headings, - or * then Space for bullets. Ctrl+B bold, Ctrl+I italic.</small>
+<small class="admin-text-small">Tip: Type # / ## / ### then Space for headings, - or * then Space for bullets. Ctrl+B bold, Ctrl+I italic. The toolbar buttons add a divider, a button link, or a copy box (for promo codes readers can copy).</small>
 </div>
 </div>
 
@@ -1702,6 +1702,20 @@ Loading cron job logs...
 </div>
 <div id="nl-event-picker-list">
 <div style="text-align: center; padding: 1.5rem; color: rgb(var(--color-neutral-500));">Loading events...</div>
+</div>
+</div>
+</div>
+
+<!-- Product Picker Modal -->
+<div id="nl-product-picker" class="nl-modal" style="display: none;">
+<div class="nl-modal-box" style="max-width: 640px;">
+<div class="admin-flex-between admin-mb-2">
+<h3 class="admin-m-0">Insert Product</h3>
+<button onclick="closeNlProductPicker()" class="btn btn-secondary btn-sm">Cancel</button>
+</div>
+<input type="text" id="nl-product-search" class="form-input admin-mb-2" placeholder="Search products by name or EAN..." oninput="renderNlProductPickerList(this.value)">
+<div id="nl-product-picker-list">
+<div style="text-align: center; padding: 1.5rem; color: rgb(var(--color-neutral-500));">Loading products...</div>
 </div>
 </div>
 </div>
@@ -2012,12 +2026,21 @@ Loading cron job logs...
 .dark .nl-tb-btn { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-300)); }
 .nl-tb-btn:hover { background: rgb(var(--color-neutral-100)); }
 .dark .nl-tb-btn:hover { background: rgb(var(--color-neutral-700)); }
+.nl-tb-product-btn { background: rgb(var(--color-primary-600)) !important; color: white !important; border-color: rgb(var(--color-primary-600)) !important; }
+.nl-tb-product-btn:hover { background: rgb(var(--color-primary-700)) !important; }
 .nl-tb-event-btn { background: rgb(var(--color-secondary-600)) !important; color: white !important; border-color: rgb(var(--color-secondary-600)) !important; }
 .nl-tb-event-btn:hover { background: rgb(var(--color-secondary-700)) !important; }
 .nl-tb-calendar-btn { background: #312e81 !important; color: white !important; border-color: #312e81 !important; }
 .nl-tb-calendar-btn:hover { background: #3730a3 !important; }
 .nl-extra-fmts { border-left: 1px solid rgb(var(--color-neutral-200)); padding-left: 8px; margin-left: 4px; display: inline-flex; gap: 4px; align-items: center; vertical-align: middle; }
 .dark .nl-extra-fmts { border-left-color: rgb(var(--color-neutral-700)); }
+/* Flex rows so the custom buttons wrap to a new line instead of overlapping Quill's inline-block .ql-formats */
+#nl-toolbar.ql-toolbar { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; }
+#nl-toolbar .ql-formats { display: inline-flex !important; align-items: center; margin-right: 12px; }
+#nl-toolbar .nl-extra-fmts { display: inline-flex !important; margin-right: 0; }
+#nl-toolbar .nl-tb-btn { white-space: nowrap; position: relative; }
+.nl-btn-embed, .nl-copy-embed { margin: 20px 0; }
+#nl-editor .nl-copy-btn { cursor: pointer; }
 .nl-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .nl-modal-box { background: rgb(var(--color-neutral)); border-radius: 12px; padding: 1.5rem; max-width: 560px; width: 100%; max-height: 80vh; overflow-y: auto; }
 .dark .nl-modal-box { background: rgb(var(--color-neutral-800)); }
@@ -2294,7 +2317,7 @@ Loading cron job logs...
   color: rgb(var(--color-neutral-500));
 }
 
-.nl-event-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.nl-event-card-embed, .nl-product-card-embed { margin: 16px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 .nl-event-card-embed .nl-event-card-img-wrap { background: #f1f5f9; line-height: 0; font-size: 0; }
 .nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: auto; display: block; }
 /* Keep loose pasted/linked images inside the editor frame (mirrors the email shell) */
@@ -7766,6 +7789,25 @@ function registerNewsletterQuillBlots() {
   EventCardBlot.className = 'nl-event-card-embed';
   Quill.register(EventCardBlot);
 
+  // Product cards reuse the event-card shape with their own blot and class, so the email
+  // cleaner can tell them apart if ever needed; styling matches the event card.
+  class ProductCardBlot extends BlockEmbed {
+    static create(html) {
+      const node = super.create();
+      node.setAttribute('data-card', html);
+      node.innerHTML = html;
+      node.contentEditable = 'false';
+      return node;
+    }
+    static value(node) {
+      return node.getAttribute('data-card');
+    }
+  }
+  ProductCardBlot.blotName = 'product-card';
+  ProductCardBlot.tagName = 'div';
+  ProductCardBlot.className = 'nl-product-card-embed';
+  Quill.register(ProductCardBlot);
+
   class CalendarBlot extends BlockEmbed {
     static create(html) {
       const node = super.create();
@@ -7782,6 +7824,72 @@ function registerNewsletterQuillBlots() {
   CalendarBlot.tagName = 'div';
   CalendarBlot.className = 'nl-calendar-embed';
   Quill.register(CalendarBlot);
+
+  // Button link and copy box embeds. Both store their raw value as JSON in data-card
+  // (stripped from the email by cleanNewsletterBody / buildNlEmailHtml) and render
+  // fully inline-styled inner HTML, because emails carry no stylesheet.
+  function nlEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function nlParseBlotValue(value) {
+    if (typeof value === 'string') {
+      try { return JSON.parse(value); } catch (e) { return { t: value }; }
+    }
+    return value || {};
+  }
+  function nlButtonInnerHtml(v) {
+    const text = String(v && v.t || '').trim() || 'Button';
+    let url = String(v && v.u || '').trim();
+    if (url && !/^(https?:|mailto:)/i.test(url)) url = 'https://' + url;
+    return '<a href="' + nlEsc(url || '#') + '" target="_blank" rel="noopener" style="display:inline-block;background:#2563eb;color:#ffffff !important;text-decoration:none;font-weight:600;font-size:15px;line-height:1.4;padding:12px 24px;border-radius:8px;">' + nlEsc(text) + '</a>';
+  }
+  class ButtonBlot extends BlockEmbed {
+    static create(value) {
+      const node = super.create();
+      const v = nlParseBlotValue(value);
+      node.setAttribute('data-card', JSON.stringify(v));
+      node.innerHTML = nlButtonInnerHtml(v);
+      node.contentEditable = 'false';
+      return node;
+    }
+    static value(node) {
+      return node.getAttribute('data-card');
+    }
+  }
+  ButtonBlot.blotName = 'nl-button';
+  ButtonBlot.tagName = 'div';
+  ButtonBlot.className = 'nl-btn-embed';
+  Quill.register(ButtonBlot);
+
+  function nlCopyBoxInnerHtml(v) {
+    const code = String(v && v.t || '').trim();
+    const label = String(v && v.l || '').trim();
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;">'
+      + '<div style="min-width:0;">'
+      + (label ? '<div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">' + nlEsc(label) + '</div>' : '')
+      + '<span style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:20px;font-weight:700;letter-spacing:0.08em;color:#111827;user-select:all;word-break:break-all;">' + nlEsc(code) + '</span>'
+      + '</div>'
+      + '<button type="button" class="nl-copy-btn" data-copy="' + nlEsc(code) + '" style="flex-shrink:0;padding:8px 14px;font-size:13px;font-weight:600;color:#2563eb;background:#ffffff;border:1px solid #c7cdf5;border-radius:8px;cursor:pointer;">Copy</button>'
+      + '</div>';
+  }
+  class CopyBoxBlot extends BlockEmbed {
+    static create(value) {
+      const node = super.create();
+      const v = nlParseBlotValue(value);
+      node.setAttribute('data-card', JSON.stringify(v));
+      node.innerHTML = nlCopyBoxInnerHtml(v);
+      node.contentEditable = 'false';
+      return node;
+    }
+    static value(node) {
+      return node.getAttribute('data-card');
+    }
+  }
+  CopyBoxBlot.blotName = 'nl-copy';
+  CopyBoxBlot.tagName = 'div';
+  CopyBoxBlot.className = 'nl-copy-embed';
+  Quill.register(CopyBoxBlot);
 }
 
 function registerBlogQuillBlots() {
@@ -7851,6 +7959,7 @@ function nlCreateEditor() {
     newsletterBlots: true,
     keyboardBindings: quillMarkdownKeyboardBindings,
   });
+  nlInstallCopyHandler();
 
   nlQuill.on('text-change', function() {
     if (nlRestoringDraft) return;
@@ -7896,6 +8005,104 @@ async function loadNewsletterEvents() {
     console.error('Newsletter events error:', err);
     nlEvents = [];
   }
+}
+
+let nlProducts = null;
+
+/** Listed, active shop products for the Insert Product picker. Cached after the first load. */
+async function loadNlProducts() {
+  if (nlProducts) return nlProducts;
+  try {
+    const res = await fetch(`${API_BASE}/admin/products`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    const all = await res.json();
+    nlProducts = (Array.isArray(all) ? all : []).filter(function (p) {
+      return Number(p.is_active) === 1 && (p.catalog_status || 'listed') === 'listed';
+    });
+  } catch (err) {
+    console.error('Newsletter products error:', err);
+    nlProducts = [];
+  }
+  return nlProducts;
+}
+
+function nlProductPrice(p) {
+  const cur = String(p.currency || 'GBP').toUpperCase() === 'EUR' ? '€' : '£';
+  return cur + (Number(p.price || 0) / 100).toFixed(2);
+}
+
+function renderNlProductPickerList(filter) {
+  const list = document.getElementById('nl-product-picker-list');
+  if (!list) return;
+  const esc = window.escapeHtml || function (s) { return String(s == null ? '' : s); };
+  const q = String(filter || '').trim().toLowerCase();
+  const items = (nlProducts || []).filter(function (p) {
+    if (!q) return true;
+    return String(p.name || '').toLowerCase().includes(q) || String(p.ean || '').includes(q);
+  });
+  if (!items.length) {
+    list.innerHTML = '<div style="text-align:center;padding:1.5rem;color:rgb(var(--color-neutral-500));">No matching products.</div>';
+    return;
+  }
+  list.innerHTML = items.map(function (p) {
+    const idx = nlProducts.indexOf(p);
+    const imgHtml = p.image_url ? `<img class="nl-event-pick-img" src="${esc(p.image_url)}" alt="">` : '<div class="nl-event-pick-img"></div>';
+    return `
+      <div class="nl-event-pick-card" onclick="insertNlProductBlock(${idx})">
+        ${imgHtml}
+        <div>
+          <div class="nl-event-pick-title">${esc(p.name || '')}</div>
+          <div class="nl-event-pick-date">${nlProductPrice(p)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function openNlProductPicker() {
+  document.getElementById('nl-product-picker').style.display = 'flex';
+  const search = document.getElementById('nl-product-search');
+  if (search) search.value = '';
+  await loadNlProducts();
+  renderNlProductPickerList('');
+}
+
+function closeNlProductPicker() {
+  document.getElementById('nl-product-picker').style.display = 'none';
+}
+
+function insertNlProductBlock(idx) {
+  closeNlProductPicker();
+  if (!nlQuill) return;
+  const p = nlProducts[idx];
+  if (!p) return;
+  const esc = window.escapeHtml || function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
+
+  // object-fit:contain keeps the product photo uncropped; normalizeEmailImages leaves such tags alone.
+  const imgPart = p.image_url
+    ? '<div style="background:#f1f5f9;line-height:0;font-size:0;"><img src="' + esc(p.image_url) + '" alt="" style="display:block;width:100%;max-height:280px;object-fit:contain;border:0;"></div>'
+    : '';
+  const descPart = p.summary
+    ? '<p style="margin:8px 0 0 0;font-size:14px;color:#475569;">' + esc(p.summary) + '</p>'
+    : '';
+  const linkHref = p.slug
+    ? 'https://shop.dicebastion.com/products/' + encodeURIComponent(p.slug)
+    : 'https://shop.dicebastion.com';
+
+  const cardHtml = imgPart
+    + '<div style="padding:18px 20px 20px 20px;">'
+    + '<p style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#4f46e5;margin:0 0 8px 0;">From the Shop</p>'
+    + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + esc(p.name || '') + '</h3>'
+    + '<p style="margin:0 0 4px 0;font-size:14px;color:#64748b;">' + nlProductPrice(p) + '</p>'
+    + descPart
+    + '<a href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Product</a>'
+    + '</div>';
+
+  const range = nlQuill.getSelection(true);
+  const index = range ? range.index : nlQuill.getLength() - 1;
+  nlQuill.insertEmbed(index, 'product-card', cardHtml, 'user');
+  nlQuill.setSelection(index + 1, 0, 'user');
 }
 
 function nlEventImageSrc(ev) {
@@ -8105,6 +8312,52 @@ function nlInsertDivider() {
   nlQuill.setSelection(index + 1, 0, 'user');
 }
 
+function nlInsertButton() {
+  if (!nlQuill) return;
+  const text = (prompt('Button text:', '') || '').trim();
+  if (!text) return;
+  const url = (prompt('Button link URL:', 'https://') || '').trim();
+  if (!url || url === 'https://') return;
+  const range = nlQuill.getSelection(true);
+  const index = range ? range.index : nlQuill.getLength() - 1;
+  nlQuill.insertEmbed(index, 'nl-button', JSON.stringify({ t: text, u: url }), 'user');
+  nlQuill.setSelection(index + 1, 0, 'user');
+}
+
+function nlInsertCopyBox() {
+  if (!nlQuill) return;
+  const code = (prompt('Text to copy when the reader clicks Copy (for example a promo code):', '') || '').trim();
+  if (!code) return;
+  const label = (prompt('Optional label above the text (for example "Promo code"):', '') || '').trim();
+  const range = nlQuill.getSelection(true);
+  const index = range ? range.index : nlQuill.getLength() - 1;
+  nlQuill.insertEmbed(index, 'nl-copy', JSON.stringify({ t: code, l: label }), 'user');
+  nlQuill.setSelection(index + 1, 0, 'user');
+}
+
+let nlCopyHandlerInstalled = false;
+
+/** Click on a copy box's Copy element copies its text and flashes "Copied". Works in the editor and the preview. */
+function nlInstallCopyHandler() {
+  if (nlCopyHandlerInstalled) return;
+  nlCopyHandlerInstalled = true;
+  document.addEventListener('click', function (e) {
+    const btn = e.target && e.target.closest ? e.target.closest('.nl-copy-btn') : null;
+    if (!btn) return;
+    const text = btn.getAttribute('data-copy') || '';
+    if (!text) return;
+    e.preventDefault();
+    const original = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(function () { btn.textContent = original; }, 1500);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () { window.prompt('Copy this text:', text); });
+    } else {
+      window.prompt('Copy this text:', text);
+    }
+  });
+}
+
 function clearNewsletter() {
   if (!confirm('Clear the editor? Any unsaved changes will be lost.')) return;
   nlActiveDraftId = null;
@@ -8141,7 +8394,11 @@ function buildNlEmailHtml(bodyHtml, subject) {
     .replace(/ contenteditable="[^"]*"/g, '')
     .replace(/class="nl-event-card-embed"/g,
       'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    .replace(/class="nl-product-card-embed"/g,
+      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
     .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
+    .replace(/class="nl-btn-embed"/g, 'style="text-align:center;margin:20px 0;"')
+    .replace(/class="nl-copy-embed"/g, 'style="margin:20px 0;"')
     .replace(/ class="ql-[^"]*"/g, '')
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, ''));
   // Goldmark terminates a script block on a literal closing style tag,
@@ -8157,6 +8414,13 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + 'a{color:#4f46e5;}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0;}'
     + stC;
   const ecMedia = stO + '@media only screen and (max-width:480px){.ec-cell{display:block!important;width:100%!important;padding:0 0 12px 0!important;}}' + stC;
+  // Copy boxes: wire the Copy elements inside the preview iframe. Goldmark ends an inline
+  // script block on a literal closing tag, so the script's own closing tag is split.
+  const scO = '<scr' + 'ipt>';
+  const scC = '</scr' + 'ipt>';
+  const cpScript = scO
+    + '(function(){document.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".nl-copy-btn"):null;if(!b)return;var t=b.getAttribute("data-copy")||"";if(!t)return;e.preventDefault();var o=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=o;},1500);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(function(){window.prompt("Copy this text:",t);});}else{window.prompt("Copy this text:",t);}});})();'
+    + scC;
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + ecMedia + '</head>'
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#1a1a1a;">'
     + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
@@ -8172,7 +8436,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + '<p style="margin:0;"><a href="https://dicebastion.com/account" style="color:#9ca3af;text-decoration:underline;">Manage email preferences</a></p>'
     + '</div>'
     + '</div>'
-    + '</div></body></html>';
+    + '</div>' + cpScript + '</body></html>';
 }
 
 function previewNewsletter() {

@@ -2345,11 +2345,18 @@ function cleanNewsletterBody(html) {
     .replace(/ data-card="[^"]*"/g, '')
     // contenteditable is a browser-only attribute
     .replace(/ contenteditable="[^"]*"/g, '')
-    // Replace the Quill event-card class with full inline styles for email clients
+    // Replace the Quill event-card and product-card classes with full inline styles for email clients
     .replace(/class="nl-event-card-embed"/g,
+      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    .replace(/class="nl-product-card-embed"/g,
       'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
     // Replace the calendar-embed class (no stylesheet in email) with its margin
     .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
+    // Button-link and copy-box embeds: the inner HTML is already inline-styled, the outer
+    // div only needs its margin (the Copy element is inert in mail clients; the code text
+    // itself stays selectable, and the preview iframe wires the button with a script)
+    .replace(/class="nl-btn-embed"/g, 'style="text-align:center;margin:20px 0;"')
+    .replace(/class="nl-copy-embed"/g, 'style="margin:20px 0;"')
     // Strip Quill formatting classes (ql-align, ql-indent, etc.) — no stylesheet in email
     .replace(/ class="ql-[^"]*"/g, '')
     // Quill inserts <p><br></p> for every blank line the user types.
@@ -2437,6 +2444,8 @@ function htmlToPlainText(html) {
   t = t.replace(/<li[^>]*>([\.\s\S]*?)<\/li>/gi, (_, s) => '\n- ' + _stripTags(s).trim());
   t = t.replace(/<\/?[uod]l[^>]*>/gi, '\n');
   t = t.replace(/<hr[^>]*>/gi, '\n\n---\n\n');
+  // Copy-box buttons are meaningless in plain text; the code text itself is kept
+  t = t.replace(/<button[^>]*>[\s\S]*?<\/button>/gi, '');
   // Strip all remaining tags
   t = _stripTags(t);
   // Decode common HTML entities
