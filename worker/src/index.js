@@ -2345,18 +2345,19 @@ function cleanNewsletterBody(html) {
     .replace(/ data-card="[^"]*"/g, '')
     // contenteditable is a browser-only attribute
     .replace(/ contenteditable="[^"]*"/g, '')
-    // Replace the Quill event-card and product-card classes with full inline styles for email clients
+    // Keep each embed's class alongside the inline style so the mobile media query in
+    // wrapNewsletterHtml can target the embeds (classes are inert otherwise in email)
     .replace(/class="nl-event-card-embed"/g,
-      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+      'class="nl-event-card-embed" style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
     .replace(/class="nl-product-card-embed"/g,
-      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+      'class="nl-product-card-embed" style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
     // Replace the calendar-embed class (no stylesheet in email) with its margin
-    .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
+    .replace(/class="nl-calendar-embed"/g, 'class="nl-calendar-embed" style="margin:24px 0;"')
     // Button-link and copy-box embeds: the inner HTML is already inline-styled, the outer
     // div only needs its margin (the Copy element is inert in mail clients; the code text
     // itself stays selectable, and the preview iframe wires the button with a script)
-    .replace(/class="nl-btn-embed"/g, 'style="text-align:center;margin:20px 0;"')
-    .replace(/class="nl-copy-embed"/g, 'style="margin:20px 0;"')
+    .replace(/class="nl-btn-embed"/g, 'class="nl-btn-embed" style="text-align:center;margin:20px 0;"')
+    .replace(/class="nl-copy-embed"/g, 'class="nl-copy-embed" style="margin:20px 0;"')
     // Strip Quill formatting classes (ql-align, ql-indent, etc.) — no stylesheet in email
     .replace(/ class="ql-[^"]*"/g, '')
     // Quill inserts <p><br></p> for every blank line the user types.
@@ -2388,6 +2389,28 @@ function normalizeEmailImages(html) {
 }
 
 /**
+ * Mobile (<=480px) rules for the newsletter email. Class hooks (nl-shell, nl-header, nl-body,
+ * nl-card-body, nl-copy-inner, ...) survive into the email because cleanNewsletterBody keeps the
+ * embed classes next to their inline styles. On small screens the copy box stacks: code centred
+ * on top, full-width Copy button below; card and button links become full-width tap targets.
+ */
+const NL_MOBILE_CSS = '@media only screen and (max-width:480px){'
+  + '.ec-cell{display:block!important;width:100%!important;padding:0 0 12px 0!important;}'
+  + '.nl-shell{padding:12px 8px!important;}'
+  + '.nl-header{padding:24px 20px 20px 20px!important;}'
+  + '.nl-subject{font-size:22px!important;}'
+  + '.nl-body{padding:20px!important;font-size:15px!important;}'
+  + '.nl-footer{padding:16px 20px!important;}'
+  + '.nl-card-body{padding:14px 16px 16px 16px!important;}'
+  + '.nl-card-body h3{font-size:16px!important;}'
+  + '.nl-card-btn{display:block!important;text-align:center!important;}'
+  + '.nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}'
+  + '.nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}'
+  + '.nl-copy-code{font-size:18px!important;}'
+  + '.nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}'
+  + '}'
+
+/**
  * Wrap newsletter body HTML in a full email template
  */
 function wrapNewsletterHtml(bodyHtml, subject, unsubscribeUrl = null) {
@@ -2401,18 +2424,18 @@ function wrapNewsletterHtml(bodyHtml, subject, unsubscribeUrl = null) {
   return '<!DOCTYPE html><html lang="en"><head>'
     + '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
     + '<title>' + subject + '</title>'
-    + '<style>' + pReset + '</style>'
+    + '<style>' + pReset + NL_MOBILE_CSS + '</style>'
     + '</head>'
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif;color:#1a1a1a;">'
-    + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
+    + '<div class="nl-shell" style="max-width:680px;margin:0 auto;padding:24px 16px;">'
     + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'
     + '<div style="background:linear-gradient(155deg,#2d1f8a 0%,#4f46e5 100%);">'
-    + '<div style="padding:36px 32px 32px 32px;">'
+    + '<div class="nl-header" style="padding:36px 32px 32px 32px;">'
     + '<div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:rgba(255,255,255,0.6);margin-bottom:12px;">Dice Bastion</div>'
-    + '<div style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
+    + '<div class="nl-subject" style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
     + '</div></div>'
-    + '<div style="padding:32px;line-height:1.75;font-size:16px;color:#1a1a1a;">' + cleaned + '</div>'
-    + '<div style="padding:20px 32px;background:#f8f8fc;border-top:1px solid #ebebf5;font-size:12px;color:#9ca3af;line-height:1.6;">'
+    + '<div class="nl-body" style="padding:32px;line-height:1.75;font-size:16px;color:#1a1a1a;">' + cleaned + '</div>'
+    + '<div class="nl-footer" style="padding:20px 32px;background:#f8f8fc;border-top:1px solid #ebebf5;font-size:12px;color:#9ca3af;line-height:1.6;">'
     + '<p style="margin:0 0 6px 0;">You\'re receiving this as a Dice Bastion member who signed up for updates.</p>'
     + (unsubscribeUrl
         ? '<p style="margin:0;"><a href="' + unsubscribeUrl + '" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> &middot; <a href="https://dicebastion.com/account" style="color:#9ca3af;text-decoration:underline;">Manage preferences</a></p>'

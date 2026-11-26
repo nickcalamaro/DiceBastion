@@ -7876,10 +7876,12 @@ function registerNewsletterQuillBlots() {
   function nlCopyBoxInnerHtml(v) {
     const code = String(v && v.t || '').trim();
     const label = String(v && v.l || '').trim();
-    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;">'
+    // nl-copy-inner / nl-copy-code / nl-copy-btn are hooks for the mobile media query in the
+    // email <style> block: on small screens the box stacks, code on top, full-width button below.
+    return '<div class="nl-copy-inner" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;">'
       + '<div style="min-width:0;">'
       + (label ? '<div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">' + nlEsc(label) + '</div>' : '')
-      + '<span style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:20px;font-weight:700;letter-spacing:0.08em;color:#111827;user-select:all;word-break:break-all;">' + nlEsc(code) + '</span>'
+      + '<span class="nl-copy-code" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:20px;font-weight:700;letter-spacing:0.08em;color:#111827;user-select:all;word-break:break-all;">' + nlEsc(code) + '</span>'
       + '</div>'
       + '<button type="button" class="nl-copy-btn" data-copy="' + nlEsc(code) + '" style="flex-shrink:0;padding:8px 14px;font-size:13px;font-weight:600;color:#2563eb;background:#ffffff;border:1px solid #c7cdf5;border-radius:8px;cursor:pointer;">Copy</button>'
       + '</div>';
@@ -8102,12 +8104,12 @@ function insertNlProductBlock(idx) {
     : 'https://shop.dicebastion.com';
 
   const cardHtml = imgPart
-    + '<div style="padding:18px 20px 20px 20px;">'
+    + '<div class="nl-card-body" style="padding:18px 20px 20px 20px;">'
     + '<p style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#4f46e5;margin:0 0 8px 0;">From the Shop</p>'
     + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + esc(p.name || '') + '</h3>'
     + '<p style="margin:0 0 4px 0;font-size:14px;color:#64748b;">' + nlProductPrice(p) + '</p>'
     + descPart
-    + '<a href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Product</a>'
+    + '<a class="nl-card-btn" href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Product</a>'
     + '</div>';
 
   const range = nlQuill.getSelection(true);
@@ -8201,12 +8203,12 @@ function insertNlEventBlock(idx) {
     : 'https://dicebastion.com/events';
 
   const cardHtml = imgPart
-    + '<div style="padding:18px 20px 20px 20px;">'
+    + '<div class="nl-card-body" style="padding:18px 20px 20px 20px;">'
     + '<p style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#4f46e5;margin:0 0 8px 0;">Upcoming Event</p>'
     + '<h3 style="font-size:18px;font-weight:700;color:#111827;margin:0 0 8px 0;line-height:1.3;">' + nlEventDisplayName(ev) + '</h3>'
     + '<p style="margin:0 0 4px 0;font-size:14px;color:#64748b;">' + dateStr + ' at ' + timeStr + '</p>'
     + locationPart + descPart
-    + '<a href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Event</a>'
+    + '<a class="nl-card-btn" href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Event</a>'
     + '</div>';
 
   const range = nlQuill.getSelection(true);
@@ -8403,13 +8405,14 @@ function buildNlEmailHtml(bodyHtml, subject) {
   const body = nlNormalizeEmailImages(bodyHtml
     .replace(/ data-card="[^"]*"/g, '')
     .replace(/ contenteditable="[^"]*"/g, '')
+    // Keep the embed class alongside the inline style so the mobile media query can target it
     .replace(/class="nl-event-card-embed"/g,
-      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+      'class="nl-event-card-embed" style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
     .replace(/class="nl-product-card-embed"/g,
-      'style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
-    .replace(/class="nl-calendar-embed"/g, 'style="margin:24px 0;"')
-    .replace(/class="nl-btn-embed"/g, 'style="text-align:center;margin:20px 0;"')
-    .replace(/class="nl-copy-embed"/g, 'style="margin:20px 0;"')
+      'class="nl-product-card-embed" style="margin:24px 0;background:#f8f9ff;border:1px solid #dde0fa;border-radius:12px;overflow:hidden;display:block;"')
+    .replace(/class="nl-calendar-embed"/g, 'class="nl-calendar-embed" style="margin:24px 0;"')
+    .replace(/class="nl-btn-embed"/g, 'class="nl-btn-embed" style="text-align:center;margin:20px 0;"')
+    .replace(/class="nl-copy-embed"/g, 'class="nl-copy-embed" style="margin:20px 0;"')
     .replace(/ class="ql-[^"]*"/g, '')
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, ''));
   // Goldmark terminates a script block on a literal closing style tag,
@@ -8425,6 +8428,22 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + 'a{color:#4f46e5;}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0;}'
     + stC;
   const ecMedia = stO + '@media only screen and (max-width:480px){.ec-cell{display:block!important;width:100%!important;padding:0 0 12px 0!important;}}' + stC;
+  // Mobile tweaks for the shell, event/product cards, button links and copy boxes. On small
+  // screens the copy box stacks: code centred on top, full-width Copy button below it.
+  const nlMedia = stO + '@media only screen and (max-width:480px){'
+    + '.nl-shell{padding:12px 8px!important;}'
+    + '.nl-header{padding:24px 20px 20px 20px!important;}'
+    + '.nl-subject{font-size:22px!important;}'
+    + '.nl-body{padding:20px!important;font-size:15px!important;}'
+    + '.nl-footer{padding:16px 20px!important;}'
+    + '.nl-card-body{padding:14px 16px 16px 16px!important;}'
+    + '.nl-card-body h3{font-size:16px!important;}'
+    + '.nl-card-btn{display:block!important;text-align:center!important;}'
+    + '.nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}'
+    + '.nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}'
+    + '.nl-copy-code{font-size:18px!important;}'
+    + '.nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}'
+    + '}' + stC;
   // Copy boxes: wire the Copy elements inside the preview iframe. Goldmark ends an inline
   // script block on a literal closing tag, so the script's own closing tag is split.
   const scO = '<scr' + 'ipt>';
@@ -8432,17 +8451,17 @@ function buildNlEmailHtml(bodyHtml, subject) {
   const cpScript = scO
     + '(function(){document.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".nl-copy-btn"):null;if(!b)return;var t=b.getAttribute("data-copy")||"";if(!t)return;e.preventDefault();var o=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=o;},1500);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(function(){window.prompt("Copy this text:",t);});}else{window.prompt("Copy this text:",t);}});})();'
     + scC;
-  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + ecMedia + '</head>'
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + ecMedia + nlMedia + '</head>'
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#1a1a1a;">'
-    + '<div style="max-width:680px;margin:0 auto;padding:24px 16px;">'
+    + '<div class="nl-shell" style="max-width:680px;margin:0 auto;padding:24px 16px;">'
     + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'
     + '<div style="background:linear-gradient(155deg,#2d1f8a 0%,#4f46e5 100%);">'
-    + '<div style="padding:36px 32px 32px 32px;">'
+    + '<div class="nl-header" style="padding:36px 32px 32px 32px;">'
     + '<div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:rgba(255,255,255,0.6);margin-bottom:12px;">Dice Bastion</div>'
-    + '<div style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
+    + '<div class="nl-subject" style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.25;letter-spacing:-0.02em;max-width:480px;">' + subject.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
     + '</div></div>'
-    + '<div style="padding:32px;line-height:1.75;font-size:16px;color:#1a1a1a;">' + body + '</div>'
-    + '<div style="padding:20px 32px;background:#f8f8fc;border-top:1px solid #ebebf5;font-size:12px;color:#9ca3af;line-height:1.6;">'
+    + '<div class="nl-body" style="padding:32px;line-height:1.75;font-size:16px;color:#1a1a1a;">' + body + '</div>'
+    + '<div class="nl-footer" style="padding:20px 32px;background:#f8f8fc;border-top:1px solid #ebebf5;font-size:12px;color:#9ca3af;line-height:1.6;">'
     + '<p style="margin:0 0 6px 0;">You\'re receiving this as a Dice Bastion member who signed up for updates.</p>'
     + '<p style="margin:0;"><a href="https://dicebastion.com/account" style="color:#9ca3af;text-decoration:underline;">Manage email preferences</a></p>'
     + '</div>'
