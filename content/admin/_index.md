@@ -2054,7 +2054,7 @@ Loading cron job logs...
 #nl-editor .nl-copy-btn { cursor: pointer; }
 /* Narrow editor viewport: promo code and card titles take the full width, copy button and
    card buttons drop below as full-width blocks (matches the small-screen email layout) */
-@media only screen and (max-width:640px){
+@media only screen and (max-width:680px){
   #nl-editor .nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}
   #nl-editor .nl-copy-code{font-size:18px!important;overflow-wrap:anywhere!important;}
   #nl-editor .nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}
@@ -8422,6 +8422,13 @@ function buildNlEmailHtml(bodyHtml, subject) {
     .replace(/class="nl-calendar-embed"/g, 'class="nl-calendar-embed" style="margin:24px 0;"')
     .replace(/class="nl-btn-embed"/g, 'class="nl-btn-embed" style="text-align:center;margin:20px 0;"')
     .replace(/class="nl-copy-embed"/g, 'class="nl-copy-embed" style="margin:20px 0;"')
+    // Copy box inner: ship the stacked layout inline (label and code full width on top,
+    // full-width Copy button below) so it holds in every mail client; nlWide below restores
+    // the side-by-side row on wide screens.
+    .replace(/class="nl-copy-inner" style="[^"]*"/g,
+      'class="nl-copy-inner" style="padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;text-align:center;"')
+    .replace(/class="nl-copy-btn"([^>]*?)style="[^"]*"/g,
+      'class="nl-copy-btn"$1 style="display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:12px 14px;font-size:15px;font-weight:600;color:#2563eb;background:#ffffff;border:1px solid #c7cdf5;border-radius:8px;cursor:pointer;"')
     .replace(/ class="ql-[^"]*"/g, '')
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, ''));
   // Goldmark terminates a script block on a literal closing style tag,
@@ -8436,10 +8443,12 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + 'ul,ol{margin:0 0 14px 0;padding-left:1.5em;}li{margin:0 0 5px 0;}'
     + 'a{color:#4f46e5;}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0;}'
     + stC;
-  const ecMedia = stO + '@media only screen and (max-width:480px){.ec-cell{display:block!important;width:100%!important;padding:0 0 12px 0!important;}}' + stC;
-  // Mobile tweaks for the shell, event/product cards, button links and copy boxes. On small
-  // screens the copy box stacks: code centred on top, full-width Copy button below it.
-  const nlMedia = stO + '@media only screen and (max-width:480px){'
+  const ecMedia = stO + '@media only screen and (max-width:680px){.ec-cell{display:block!important;width:100%!important;padding:0 0 12px 0!important;}}' + stC;
+  // Narrow-screen (<=680px, anything narrower than the 680px email shell) tweaks: the subject
+  // title takes the full width, card/button links become full-width blocks. The copy box needs
+  // no rules here: it is shipped stacked inline (code centred on top, full-width Copy button
+  // below), and nlWide restores the side-by-side row on wide screens.
+  const nlMedia = stO + '@media only screen and (max-width:680px){'
     + '.nl-shell{padding:12px 8px!important;}'
     + '.nl-header{padding:24px 20px 20px 20px!important;}'
     + '.nl-subject{font-size:22px!important;max-width:100%!important;}'
@@ -8449,9 +8458,13 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + '.nl-card-body h3{font-size:16px!important;}'
     + '.nl-card-btn{display:block!important;text-align:center!important;}'
     + '.nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}'
-    + '.nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}'
-    + '.nl-copy-code{font-size:18px!important;overflow-wrap:anywhere!important;}'
-    + '.nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}'
+    + '.nl-copy-code{display:block;margin-top:2px!important;font-size:18px!important;overflow-wrap:anywhere!important;}'
+    + '}' + stC;
+  // Wide screens: restore the copy box row (label+code left, Copy button right). The stacked
+  // layout is the inline default, so these overrides need !important to beat inline styles.
+  const nlWide = stO + '@media only screen and (min-width:681px){'
+    + '.nl-copy-inner{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;flex-wrap:wrap!important;text-align:left!important;}'
+    + '.nl-copy-btn{display:inline-block!important;width:auto!important;box-sizing:content-box!important;margin-top:0!important;padding:8px 14px!important;font-size:13px!important;}'
     + '}' + stC;
   // Copy boxes: wire the Copy elements inside the preview iframe. Goldmark ends an inline
   // script block on a literal closing tag, so the script's own closing tag is split.
@@ -8460,7 +8473,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
   const cpScript = scO
     + '(function(){document.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".nl-copy-btn"):null;if(!b)return;var t=b.getAttribute("data-copy")||"";if(!t)return;e.preventDefault();var o=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=o;},1500);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(function(){window.prompt("Copy this text:",t);});}else{window.prompt("Copy this text:",t);}});})();'
     + scC;
-  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + ecMedia + nlMedia + '</head>'
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + ecMedia + nlMedia + nlWide + '</head>'
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#1a1a1a;">'
     + '<div class="nl-shell" style="max-width:680px;margin:0 auto;padding:24px 16px;">'
     + '<div style="background:#ffffff;border-radius:16px;border:1px solid #dde0fa;overflow:hidden;">'

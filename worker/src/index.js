@@ -2358,6 +2358,14 @@ function cleanNewsletterBody(html) {
     // itself stays selectable, and the preview iframe wires the button with a script)
     .replace(/class="nl-btn-embed"/g, 'class="nl-btn-embed" style="text-align:center;margin:20px 0;"')
     .replace(/class="nl-copy-embed"/g, 'class="nl-copy-embed" style="margin:20px 0;"')
+    // Copy box inner: ship the stacked layout inline (label and code full width on top,
+    // full-width Copy button below) so it holds in every mail client, including ones that
+    // strip <style> or ignore media queries. The wide-screen media query in
+    // wrapNewsletterHtml (NL_WIDE_CSS) restores the side-by-side row on desktop.
+    .replace(/class="nl-copy-inner" style="[^"]*"/g,
+      'class="nl-copy-inner" style="padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;text-align:center;"')
+    .replace(/class="nl-copy-btn"([^>]*?)style="[^"]*"/g,
+      'class="nl-copy-btn"$1 style="display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:12px 14px;font-size:15px;font-weight:600;color:#2563eb;background:#ffffff;border:1px solid #c7cdf5;border-radius:8px;cursor:pointer;"')
     // Strip Quill formatting classes (ql-align, ql-indent, etc.) — no stylesheet in email
     .replace(/ class="ql-[^"]*"/g, '')
     // Quill inserts <p><br></p> for every blank line the user types.
@@ -2389,12 +2397,14 @@ function normalizeEmailImages(html) {
 }
 
 /**
- * Mobile (<=480px) rules for the newsletter email. Class hooks (nl-shell, nl-header, nl-body,
- * nl-card-body, nl-copy-inner, ...) survive into the email because cleanNewsletterBody keeps the
- * embed classes next to their inline styles. On small screens the copy box stacks: code centred
- * on top, full-width Copy button below; card and button links become full-width tap targets.
+ * Narrow-screen (<=680px, i.e. anything narrower than the 680px email shell) rules for the
+ * newsletter email. Class hooks (nl-shell, nl-header, nl-body, nl-card-body, nl-copy-code, ...)
+ * survive into the email because cleanNewsletterBody keeps the embed classes next to their
+ * inline styles. The copy box needs no rules here: cleanNewsletterBody ships it stacked inline.
+ * On narrow screens the subject title takes the full width and card/button links become
+ * full-width tap targets.
  */
-const NL_MOBILE_CSS = '@media only screen and (max-width:480px){'
+const NL_MOBILE_CSS = '@media only screen and (max-width:680px){'
   + '.ec-cell{display:block!important;width:100%!important;padding:0 0 12px 0!important;}'
   + '.nl-shell{padding:12px 8px!important;}'
   + '.nl-header{padding:24px 20px 20px 20px!important;}'
@@ -2405,9 +2415,17 @@ const NL_MOBILE_CSS = '@media only screen and (max-width:480px){'
   + '.nl-card-body h3{font-size:16px!important;}'
   + '.nl-card-btn{display:block!important;text-align:center!important;}'
   + '.nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}'
-  + '.nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}'
-  + '.nl-copy-code{font-size:18px!important;overflow-wrap:anywhere!important;}'
-  + '.nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}'
+  + '.nl-copy-code{display:block;margin-top:2px!important;font-size:18px!important;overflow-wrap:anywhere!important;}'
+  + '}'
+
+/**
+ * Wide-screen (>=681px) rules: restore the copy box's side-by-side row (label and code left,
+ * Copy button right) on desktop. The stacked layout is the inline default, so these overrides
+ * need !important to beat the inline styles in clients that do support media queries.
+ */
+const NL_WIDE_CSS = '@media only screen and (min-width:681px){'
+  + '.nl-copy-inner{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;flex-wrap:wrap!important;text-align:left!important;}'
+  + '.nl-copy-btn{display:inline-block!important;width:auto!important;box-sizing:content-box!important;margin-top:0!important;padding:8px 14px!important;font-size:13px!important;}'
   + '}'
 
 /**
@@ -2424,7 +2442,7 @@ function wrapNewsletterHtml(bodyHtml, subject, unsubscribeUrl = null) {
   return '<!DOCTYPE html><html lang="en"><head>'
     + '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
     + '<title>' + subject + '</title>'
-    + '<style>' + pReset + NL_MOBILE_CSS + '</style>'
+    + '<style>' + pReset + NL_MOBILE_CSS + NL_WIDE_CSS + '</style>'
     + '</head>'
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif;color:#1a1a1a;">'
     + '<div class="nl-shell" style="max-width:680px;margin:0 auto;padding:24px 16px;">'
