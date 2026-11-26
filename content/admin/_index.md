@@ -2034,11 +2034,22 @@ Loading cron job logs...
 .nl-tb-calendar-btn:hover { background: #3730a3 !important; }
 .nl-extra-fmts { border-left: 1px solid rgb(var(--color-neutral-200)); padding-left: 8px; margin-left: 4px; display: inline-flex; gap: 4px; align-items: center; vertical-align: middle; }
 .dark .nl-extra-fmts { border-left-color: rgb(var(--color-neutral-700)); }
-/* Flex rows so the custom buttons wrap to a new line instead of overlapping Quill's inline-block .ql-formats */
-#nl-toolbar.ql-toolbar { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; }
+/* Quill snow forces every toolbar <button> to float:left; width:28px; height:24px, which clumps the
+   custom buttons into 28px slivers. Re-assert their box with ID-scoped selectors (which beat
+   .ql-snow .ql-toolbar button) and lay the toolbar out as wrapping flex rows. */
+#nl-quill-wrap #nl-toolbar { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; }
 #nl-toolbar .ql-formats { display: inline-flex !important; align-items: center; margin-right: 12px; }
 #nl-toolbar .nl-extra-fmts { display: inline-flex !important; margin-right: 0; }
-#nl-toolbar .nl-tb-btn { white-space: nowrap; position: relative; }
+#nl-toolbar .nl-tb-btn {
+  float: none; width: auto; height: auto; display: inline-block;
+  padding: 4px 10px; font-size: 0.8rem; line-height: 1.4;
+  border: 1px solid rgb(var(--color-neutral-300)); border-radius: 4px;
+  background: white; color: rgb(var(--color-neutral-700));
+  font-weight: 500; cursor: pointer; white-space: nowrap; position: relative;
+}
+#nl-toolbar .nl-tb-btn:hover { background: rgb(var(--color-neutral-100)); }
+.dark #nl-toolbar .nl-tb-btn { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-300)); }
+.dark #nl-toolbar .nl-tb-btn:hover { background: rgb(var(--color-neutral-700)); }
 .nl-btn-embed, .nl-copy-embed { margin: 20px 0; }
 #nl-editor .nl-copy-btn { cursor: pointer; }
 .nl-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 1rem; }
