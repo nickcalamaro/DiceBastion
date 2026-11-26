@@ -68,7 +68,9 @@ import {
   buildVisionCheckPrompt,
   wantsVisionCheck,
   extractPageImageSlots,
-  srcsetLargest
+  srcsetLargest,
+  buildCopyRevisionSchema,
+  buildCopyRevisionUserPrompt
 } from './invoice-import.js'
 
 describe('relatesToLines', () => {
@@ -1023,5 +1025,42 @@ describe('page image slot fallbacks', () => {
     expect(srcsetLargest('https://a.com/1.jpg 100w, https://a.com/2.jpg 2x, https://a.com/3.jpg 300w')).toBe('https://a.com/3.jpg')
     expect(srcsetLargest('https://a.com/only.jpg')).toBe('https://a.com/only.jpg')
     expect(srcsetLargest('')).toBe(null)
+  })
+})
+
+describe('copy revision pass', () => {
+  it('builds a strict schema for the revised title, summary, description and claims', () => {
+    const schema = buildCopyRevisionSchema()
+    expect(schema.required).toEqual(['title', 'summary', 'description', 'claims'])
+    expect(schema.properties.claims.maxItems).toBe(12)
+    expect(schema.additionalProperties).toBe(false)
+  })
+
+  it('sends the card title, draft copy, marketing passages and claims to the revision', () => {
+    const prompt = buildCopyRevisionUserPrompt({
+      title: 'Brand Line Variant',
+      summary: 'Brand Line Variant dry summary',
+      description: 'A dry paragraph.',
+      marketing: ['pub.example.com: Work with the crew to display their bravery.'],
+      claims: [{ claim: 'has 3 boosters', quote: 'Includes 3 boosters.', source_url: 'https://pub.example.com/p' }],
+      placeholders: false
+    })
+    expect(prompt).toContain('Brand Line Variant')
+    expect(prompt).toContain('dry summary')
+    expect(prompt).toContain('Work with the crew')
+    expect(prompt).toContain('Includes 3 boosters.')
+    expect(prompt).not.toContain('{variant}')
+  })
+
+  it('keeps placeholder instructions for shared family templates', () => {
+    const prompt = buildCopyRevisionUserPrompt({
+      title: '{product_line_name} — {variant}',
+      summary: 's',
+      description: 'd',
+      marketing: [],
+      claims: [],
+      placeholders: true
+    })
+    expect(prompt).toContain('{variant} and {product_line_name} placeholders')
   })
 })

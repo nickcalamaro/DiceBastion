@@ -120,6 +120,7 @@ const COPY_TONE =
   '- Write like someone at the club counter talking to another player: friendly, plain and specific. British spelling.\n' +
   '- Say what the product is, what is in the pack, and how people use it, using facts from the sources. Do not invent praise or selling points.\n' +
   '- Numbers and specs support the description; they do not replace it.\n' +
+  '- Where the sources give the product character or flavour wording, carry one line of it over, lightly edited. A dry contents list is not the goal.\n' +
   '- No emojis. No arrow characters. No decorative Unicode symbols. No em dashes (use a full stop, comma, or "and").\n' +
   '- Avoid marketing and AI filler: no "elevate your game", "must-have", "perfect for every player", "premium quality", or keyword stuffing.\n' +
   '- Short card summary; longer modal description in clear paragraphs.\n\n'
@@ -154,7 +155,8 @@ const IDENTIFY_GUIDE =
 
 const SUMMARY_GUIDE =
   'Summary (SEO-aware, same field as manual product add; max 500 characters, aim 140–160, shown as the shop card blurb and Google meta description):\n' +
-  '- One or two sentences: brand and product line, plus the detail shoppers choose by (finish, pack count, die types, size). Draw wording from sources; include game names only when sources support compatibility.\n' +
+  '- One or two sentences. The shop card already shows the product title, so do not restate it: leave out the brand and product-name words of the title and start with what the product is, what is in it, or what it is for, plus the detail shoppers choose by (finish, pack count, die types, size, contents).\n' +
+  '- Draw wording from the sources. Where the source copy has character or flavour, carry a line of it over. Include game names only when sources support compatibility.\n' +
   '- Natural British English keywords: the brand, line and game names the sources give for this product; no hype, no stuffing, no emojis.\n' +
   '- Description: 2-4 short plain-text paragraphs for the product page body, no HTML. Open with what the product is; practical specs and compatibility after.\n\n'
 
@@ -165,11 +167,11 @@ const SOURCES_GUIDE =
   '- image_url: a direct image file URL only when that exact URL appeared in the search results text. Never construct or guess an image URL. Otherwise null.\n' +
   '- Set confidence 0-1, product_verified true only when the EAN or exact name matched a result, and reason briefly names the source.\n\n'
 
-/** Marketing copy found during the search, kept verbatim so the listing can reuse the publisher's own wording. */
+/** Marketing copy found during the search, kept verbatim so the listing can reuse how others sell the product. */
 const MARKETING_COPY_GUIDE =
   'Marketing copy to reuse:\n' +
-  '- source_copy: up to 6 passages of the product\'s own description or marketing copy, copied verbatim from the publisher or manufacturer pages in your results, each prefixed with the site, for example "gamegenic.com: ...". ' +
-  'Prefer the publisher or manufacturer wording over retailers. Leave out prices, stock, delivery and calls to action. Empty when no result carries such copy.\n' +
+  '- source_copy: up to 6 passages of how this product is described and sold, copied verbatim, each prefixed with the site, for example "wizards.com: ...". ' +
+  'Take the publisher or manufacturer first, then major retailers\' product-page wording, so the copy step can see how others sell it. Leave out prices, stock, delivery, ratings, store names and calls to action. Empty when no result carries such copy.\n' +
   '- Base the summary and description wording on source_copy where it fits, lightly edited into British English and the tone above. Do not paraphrase a spec away: keep the numbers and sizes exactly as the source writes them.\n\n'
 
 /** Every factual statement in the copy must carry a verbatim quote from a result, so the shop can check it against the source page. */
@@ -178,6 +180,73 @@ const CLAIMS_GUIDE =
   '- claims: one entry per factual statement in your summary and description (contents, counts, sizes, materials, compatibility, format). Leave out pure opinions.\n' +
   '- quote: the sentence from a search result that states the claim, copied exactly as it appeared, punctuation included. Never invent or reconstruct a quote; when no result states a fact, do not put it in the copy and do not add a claim for it.\n' +
   '- source_url: the result page the quote came from, copied exactly. Every source_url must also appear in source_urls.\n\n'
+
+/**
+ * Second pass over drafted copy: the card shows the title already, so the summary must not restate it,
+ * and the sources' own selling wording should be borrowed where it has character. Facts stay via claims.
+ */
+const COPY_REVISION_INSTRUCTIONS =
+  'You revise shop listing copy before it is published. ' + SHOP_CONTEXT +
+  COPY_TONE +
+  'You receive a draft title, summary and description, the marketing copy the sources use to sell this product, and the claims (facts with their source quotes).\n' +
+  'Revise and return copy_revision JSON:\n' +
+  '- The shop card and search results already show the title, so the summary must not restate it: no brand, product-line or product-name words from the title. Start with what the product is, what is in it, or what it is for, plus the one detail shoppers choose by.\n' +
+  '- Compare the draft with how the sources sell the product (the marketing copy). Borrow their specific descriptive or character wording, one sentence is enough, lightly edited into British English and the tone above. A dry contents list is not the goal when the sources give livelier wording; equally, do not invent character the sources do not have.\n' +
+  '- Description: 2-4 short plain-text paragraphs, no HTML. Open with what the product is; practical specs and compatibility after.\n' +
+  '- Keep every fact in claims. You may reword a claim to match the revised copy, but never change its quote, and never add a fact that has no claim.\n' +
+  '- Tidy the title: remove words it repeats (a brand or product line written twice), but keep the brand, product line, variant and any language code.\n' +
+  '- When the title, summary or description use {variant} or {product_line_name} placeholders, keep them exactly.\n' +
+  '- summary max 500 characters (aim 140-160); description max 4000 characters.\n'
+
+export function buildCopyRevisionSchema() {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      title: { type: 'string' },
+      summary: { type: 'string' },
+      description: { type: 'string' },
+      claims: { type: 'array', items: CLAIM_SCHEMA, maxItems: 12 }
+    },
+    required: ['title', 'summary', 'description', 'claims']
+  }
+}
+
+export function buildCopyRevisionUserPrompt({ title, summary, description, marketing, claims, placeholders }) {
+  const lines = [
+    `Title shown on the card: ${String(title || '').trim()}`,
+    '',
+    'Draft summary:',
+    String(summary || ''),
+    '',
+    'Draft description:',
+    String(description || ''),
+    '',
+    'Marketing copy from the sources (verbatim, site-prefixed) — how others sell this product:',
+    ...(marketing && marketing.length ? marketing : ['(none found)']),
+    '',
+    'Claims (keep every fact; quotes stay exactly as written):',
+    JSON.stringify(claims || [], null, 2)
+  ]
+  if (placeholders) {
+    lines.push('', 'This family shares one template across variants: keep the {variant} and {product_line_name} placeholders in the title, summary and description.')
+  }
+  return lines.join('\n')
+}
+
+/** Rewrites drafted title/summary/description against the card title and the source marketing copy. */
+async function callMistralCopyRevision(apiKey, { title, summary, description, marketing, claims, placeholders, onProgress }) {
+  return callMistralChatJson(apiKey, {
+    system: COPY_REVISION_INSTRUCTIONS,
+    user: buildCopyRevisionUserPrompt({ title, summary, description, marketing, claims, placeholders }),
+    schemaName: 'copy_revision',
+    schema: buildCopyRevisionSchema(),
+    model: FAMILY_COPY_MODEL,
+    timeoutMs: MISTRAL_COPY_TIMEOUT_MS,
+    onProgress,
+    progressLabel: 'Copy revision'
+  })
+}
 
 /** Single product: one web search, then the listing JSON. */
 const LISTING_ENRICHMENT_INSTRUCTIONS =
@@ -213,7 +282,7 @@ const FAMILY_RESEARCH_INSTRUCTIONS =
   '- product_type: a short noun phrase (for example "card sleeves", "d6 dice block").\n' +
   '- line_facts: every spec the sources state that applies to all lines: size, count, dimensions, material, finish, contents, compatibility. One short factual phrase each, copied from sources. Include every one you found; do not infer or generalise. ' +
   'Keep fit and compatibility exactly as stated, including "does not fit" and size comparisons, and only when the source is about this product line.\n' +
-  '- source_descriptions: up to 8 passages of the line\'s own marketing and description copy from your results, copied verbatim (what it is, theme, setting, characters, contents, what it is for, legality), the publisher or manufacturer first. ' +
+  '- source_descriptions: up to 8 passages of the line\'s own marketing and description copy from your results, copied verbatim (what it is, theme, setting, characters, contents, what it is for, legality), the publisher or manufacturer first, then major retailers\' product descriptions, so the copy step can see how others sell the line. ' +
   'These passages are reused as the basis of the listing copy, so keep their descriptive wording intact. Copy each as it appears, prefixed with its site, for example "wizards.com: ...". Leave out passages about only one variant and other shops\' prices, stock or delivery. Empty when none appeared.\n' +
   '- lines has one entry per input key (L1, L2, ...). Answer each key for the product listed under that key.\n' +
   '- variant_label: the part of the title that differs between lines (e.g. "Apple Green", or "Translucent Red/White" when finishes also differ).\n' +
@@ -1066,6 +1135,28 @@ async function runProductFamily(apiKey, { lines, family_hint, product_family, bu
   if (!template.summary_template || template.description_paragraphs.length < 2) {
     return { error: 'invalid_family_copy', message: 'Mistral returned an incomplete family template.', duration_ms: Date.now() - started }
   }
+
+  const revision = await callMistralCopyRevision(apiKey, {
+    title: template.naming_pattern,
+    summary: template.summary_template,
+    description: template.description_paragraphs.join('\n\n'),
+    marketing: sourceDescriptions,
+    claims: Array.isArray(parsed.claims) ? parsed.claims : [],
+    placeholders: true,
+    onProgress: progress
+  })
+  if (!revision.error && revision.parsed && String(revision.parsed.summary || '').trim()) {
+    template.naming_pattern = String(revision.parsed.title || '').trim().slice(0, 200) || template.naming_pattern
+    template.summary_template = String(revision.parsed.summary || '').trim().slice(0, 500)
+    template.description_paragraphs = String(revision.parsed.description || '')
+      .split(/\n\n+/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .slice(0, 4)
+    if (Array.isArray(revision.parsed.claims) && revision.parsed.claims.length) parsed.claims = revision.parsed.claims
+    await progress('Copy revised against the naming pattern and the source marketing copy')
+  }
+
   const claimsCheck = await verifyCopyClaims({
     claims: parsed.claims,
     references,
@@ -3743,6 +3834,33 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
     )
   }
 
+  let copyOut = {
+    display_name: displayName,
+    summary,
+    description,
+    claims: Array.isArray(parsed.claims) ? parsed.claims : []
+  }
+  const revision = await callMistralCopyRevision(apiKey, {
+    title: displayName || title,
+    summary,
+    description,
+    marketing: Array.isArray(parsed.source_copy) ? parsed.source_copy.map((s) => String(s || '')).filter(Boolean) : [],
+    claims: copyOut.claims,
+    placeholders: false,
+    onProgress
+  })
+  if (!revision.error && revision.parsed && String(revision.parsed.summary || '').trim()) {
+    copyOut = {
+      display_name: String(revision.parsed.title || '').trim().slice(0, 200) || displayName,
+      summary: String(revision.parsed.summary || '').trim().slice(0, 500),
+      description: String(revision.parsed.description || '').trim().slice(0, 4000),
+      claims: Array.isArray(revision.parsed.claims) && revision.parsed.claims.length ? revision.parsed.claims : copyOut.claims
+    }
+    if (typeof onProgress === 'function') {
+      await onProgress(`Copy revised against the card title and the source marketing copy · ${copyOut.display_name || title}`)
+    }
+  }
+
   const named = (parsed.source_urls || []).map(normalizeEnrichmentImageUrl).filter(Boolean)
   const singleMatches = researched.references.filter(
     (r) =>
@@ -3751,7 +3869,7 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
   )
   const pageCache = new Map()
   const claimsCheck = await verifyCopyClaims({
-    claims: parsed.claims,
+    claims: copyOut.claims,
     references: researched.references,
     sourceUrls: parsed.source_urls,
     pageCache,
@@ -3766,7 +3884,7 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
     searchMatches: singleMatches,
     vision: { apiKey, name: title, itemCode: normalizeItemCode(sku), family: false, onProgress }
   })
-  if (typeof onProgress === 'function') await onProgress(imageProgressLine('', eanNorm, displayName || title, image))
+  if (typeof onProgress === 'function') await onProgress(imageProgressLine('', eanNorm, copyOut.display_name || title, image))
 
   const confidence = Number(parsed.confidence)
   const durationMs = Date.now() - started
@@ -3775,9 +3893,9 @@ export async function generateListingCopy(apiKey, { name, ean, category, sku }, 
   )
   return {
     success: true,
-    display_name: displayName || undefined,
-    summary,
-    description,
+    display_name: copyOut.display_name || undefined,
+    summary: copyOut.summary,
+    description: copyOut.description,
     image_url: image.image_url,
     image_source: image.image_source || undefined,
     image_rejected: image.image_rejected || undefined,

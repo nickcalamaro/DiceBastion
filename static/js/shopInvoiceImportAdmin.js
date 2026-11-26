@@ -1707,10 +1707,10 @@
     });
     try {
       if (!quiet) {
-        setStatus('Enriching listing (web research can take 30–60 seconds)…', 'info');
+        setStatus('Enriching listing (research, copy and revision can take a few minutes)…', 'info');
       }
       const data = await apiNdjson('/admin/invoice-import/generate-copy', {
-        timeoutMs: 4 * 60 * 1000,
+        timeoutMs: 8 * 60 * 1000,
         body: JSON.stringify({
           name: row.name,
           ean: row.ean || null,
