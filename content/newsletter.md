@@ -51,24 +51,30 @@ Already have an account? <a href="/login?redirect=/newsletter" class="link">Log 
 </p>
 </div>
 
-  <!-- State: Logged in, not yet subscribed -->
-  <div id="nl-optin-state" class="card" style="display:none;">
-    <h2 class="card-header" style="margin-bottom: 0.5rem;">Stay up to date</h2>
-    <p style="color: rgb(var(--color-neutral-600)); margin-top: 0;">
-      You're not currently subscribed to our newsletter. Subscribe to get updates on upcoming events, game nights, new arrivals, and offers.
-    </p>
-    <div id="nl-optin-error" class="alert alert-error" style="display:none; margin-bottom: 1rem;"></div>
-    <button id="nl-optin-btn" class="btn btn-primary btn-full">Subscribe to newsletter</button>
-  </div>
-
-  <!-- State: Already subscribed -->
-  <div id="nl-subscribed-state" class="card" style="display:none;">
-    <div class="alert alert-success" style="margin-bottom: 1.25rem;">
-      You're already subscribed to our newsletter.
+  <!-- State: Logged in — newsletter settings (same as the account page) -->
+  <div id="nl-settings-state" class="card" style="display:none;">
+    <h2 class="card-header">Email Preferences</h2>
+    <div class="card-section" style="display: flex; align-items: start; gap: 1rem; margin-bottom: 1rem;">
+      <input type="checkbox" id="nl-essential-emails" checked disabled style="margin-top: 0.25rem;">
+      <div style="flex: 1;">
+        <label for="nl-essential-emails" class="card-label" style="display: block; margin-bottom: 0.25rem; text-transform: none; font-size: 1rem;">Essential Emails</label>
+        <p class="text-muted" style="margin: 0; font-size: 0.875rem;">
+          Order confirmations, event tickets, and account updates (required)
+        </p>
+      </div>
     </div>
-    <p style="color: rgb(var(--color-neutral-600)); margin: 0;">
-      You can manage your email preferences, including unsubscribing, from your
-      <a href="/account" class="link">account page</a>.
+    <div class="card-section" style="display: flex; align-items: start; gap: 1rem;">
+      <input type="checkbox" id="nl-newsletter" style="margin-top: 0.25rem;">
+      <div style="flex: 1;">
+        <label for="nl-newsletter" class="card-label" style="display: block; margin-bottom: 0.25rem; text-transform: none; font-size: 1rem;">Newsletter</label>
+        <p class="text-muted" style="margin: 0; font-size: 0.875rem;">
+          The Dice Bastion newsletter: upcoming events, game nights, new arrivals, and special offers. You can unsubscribe at any time.
+        </p>
+      </div>
+    </div>
+    <div id="nl-prefs-message" style="display: none; margin-top: 1rem; padding: 0.75rem; border-radius: 6px; font-size: 0.875rem;"></div>
+    <p style="margin: 1rem 0 0; font-size: 0.875rem; color: rgb(var(--color-neutral-500));">
+      You can also manage these preferences from your <a href="/account" class="link">account page</a>.
     </p>
   </div>
 
@@ -100,7 +106,7 @@ Already have an account? <a href="/login?redirect=/newsletter" class="link">Log 
   const API_BASE = typeof utils !== 'undefined' ? utils.getApiBase(true) : 'https://dicebastion-memberships.ncalamaro.workers.dev';
 
   // ── State helpers ──────────────────────────────────────────────────────────
-  const states = ['nl-loading', 'nl-form-state', 'nl-optin-state', 'nl-subscribed-state', 'nl-registered-state', 'nl-success-state'];
+  const states = ['nl-loading', 'nl-form-state', 'nl-settings-state', 'nl-registered-state', 'nl-success-state'];
   function showState(id) {
     states.forEach(s => {
       const el = document.getElementById(s);
@@ -115,16 +121,18 @@ Already have an account? <a href="/login?redirect=/newsletter" class="link">Log 
     el.style.display = msg ? 'block' : 'none';
   }
 
-  function showOptinError(msg) {
-    const el = document.getElementById('nl-optin-error');
+  function showPrefsMessage(msg, isError) {
+    const el = document.getElementById('nl-prefs-message');
     if (!el) return;
     el.textContent = msg;
+    el.style.background = isError ? '#fee2e2' : '#d1fae5';
+    el.style.color = isError ? '#991b1b' : '#065f46';
     el.style.display = msg ? 'block' : 'none';
   }
 
   // ── On page load: check login status ──────────────────────────────────────
   async function init() {
-    const sessionToken = localStorage.getItem('admin_session');
+    const sessionToken = typeof utils !== 'undefined' ? utils.session.get() : localStorage.getItem('admin_session');
 
     if (!sessionToken) {
       showState('nl-form-state');
@@ -132,23 +140,61 @@ Already have an account? <a href="/login?redirect=/newsletter" class="link">Log 
     }
 
     try {
-      const res = await fetch(`${API_BASE}/account`, {
+      const res = await fetch(`${API_BASE}/account/info`, {
         headers: { 'X-Session-Token': sessionToken }
       });
 
       if (!res.ok) {
         // Session expired / invalid — fall through to email form
+        if (res.status === 401 && typeof utils !== 'undefined') utils.session.clear();
         showState('nl-form-state');
         return;
       }
 
       const data = await res.json();
-      const isSubscribed = data.email_preferences && data.email_preferences.marketing_emails === 1;
-      showState(isSubscribed ? 'nl-subscribed-state' : 'nl-optin-state');
+      const prefs = data.email_preferences || {};
+      const newsletterCheckbox = document.getElementById('nl-newsletter');
+      if (newsletterCheckbox) newsletterCheckbox.checked = prefs.marketing_emails === 1;
+      setupNewsletterPreferenceListener();
+      showState('nl-settings-state');
     } catch (e) {
       // Network error — still show form
       showState('nl-form-state');
     }
+  }
+
+  // ── Newsletter preference toggle (logged in) — same endpoint as /account ──
+  function setupNewsletterPreferenceListener() {
+    const checkbox = document.getElementById('nl-newsletter');
+    if (!checkbox) return;
+
+    checkbox.addEventListener('change', async function (e) {
+      const sessionToken = typeof utils !== 'undefined' ? utils.session.get() : localStorage.getItem('admin_session');
+      if (!sessionToken) { showState('nl-form-state'); return; }
+      showPrefsMessage('');
+
+      try {
+        const response = await fetch(`${API_BASE}/account/email-preferences`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': sessionToken
+          },
+          body: JSON.stringify({ marketing_emails: e.target.checked })
+        });
+
+        if (response.ok) {
+          showPrefsMessage('Email preferences updated successfully!', false);
+          setTimeout(() => showPrefsMessage(''), 3000);
+        } else {
+          throw new Error('Failed to update preferences');
+        }
+      } catch (error) {
+        showPrefsMessage('Failed to update preferences. Please try again.', true);
+        // Revert checkbox
+        e.target.checked = !e.target.checked;
+      }
+    });
   }
 
   // ── Email form submit ──────────────────────────────────────────────────────
@@ -210,44 +256,6 @@ Already have an account? <a href="/login?redirect=/newsletter" class="link">Log 
         showFormError('Network error. Please check your connection and try again.');
         btn.disabled = false;
         btn.textContent = 'Subscribe';
-      }
-    });
-  }
-
-  // ── Opt-in button (logged-in, not yet subscribed) ──────────────────────────
-  const optinBtn = document.getElementById('nl-optin-btn');
-  if (optinBtn) {
-    optinBtn.addEventListener('click', async function () {
-      showOptinError('');
-      const sessionToken = localStorage.getItem('admin_session');
-      if (!sessionToken) { showState('nl-form-state'); return; }
-
-      optinBtn.disabled = true;
-      optinBtn.textContent = 'Subscribing\u2026';
-
-      try {
-        const res = await fetch(`${API_BASE}/newsletter/subscribe`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Session-Token': sessionToken
-          }
-        });
-
-        const data = await res.json();
-
-        if (!res.ok || !['subscribed', 'already_subscribed'].includes(data.status)) {
-          showOptinError('Something went wrong. Please try again.');
-          optinBtn.disabled = false;
-          optinBtn.textContent = 'Subscribe to newsletter';
-          return;
-        }
-
-        showState('nl-success-state');
-      } catch (err) {
-        showOptinError('Network error. Please try again.');
-        optinBtn.disabled = false;
-        optinBtn.textContent = 'Subscribe to newsletter';
       }
     });
   }

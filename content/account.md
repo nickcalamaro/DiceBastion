@@ -170,9 +170,9 @@ Go to Login
 <div class="card-section" style="display: flex; align-items: start; gap: 1rem;">
 <input type="checkbox" id="marketing-emails" style="margin-top: 0.25rem;">
 <div style="flex: 1;">
-    <label for="marketing-emails" class="card-label" style="display: block; margin-bottom: 0.25rem; text-transform: none; font-size: 1rem;">Marketing Emails</label>
+    <label for="marketing-emails" class="card-label" style="display: block; margin-bottom: 0.25rem; text-transform: none; font-size: 1rem;">Newsletter</label>
     <p class="text-muted" style="margin: 0; font-size: 0.875rem;">
-    News, special offers, and upcoming events
+    The Dice Bastion newsletter: upcoming events, game nights, new arrivals, and special offers. You can unsubscribe at any time.
     </p>
 </div>
 </div>
@@ -669,7 +669,7 @@ return `
 // Load account data on page load
 loadAccountData();
 
-// Handle marketing email preference changes (set up after page loads)
+// Handle newsletter preference changes (set up after page loads)
 function setupEmailPreferenceListener() {
 const marketingCheckbox = document.getElementById('marketing-emails');
 if (!marketingCheckbox) return;
