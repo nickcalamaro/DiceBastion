@@ -2354,18 +2354,20 @@ function cleanNewsletterBody(html) {
     // Replace the calendar-embed class (no stylesheet in email) with its margin
     .replace(/class="nl-calendar-embed"/g, 'class="nl-calendar-embed" style="margin:24px 0;"')
     // Button-link and copy-box embeds: the inner HTML is already inline-styled, the outer
-    // div only needs its margin (the Copy element is inert in mail clients; the code text
-    // itself stays selectable, and the preview iframe wires the button with a script)
+    // div only needs its margin
     .replace(/class="nl-btn-embed"/g, 'class="nl-btn-embed" style="text-align:center;margin:20px 0;"')
     .replace(/class="nl-copy-embed"/g, 'class="nl-copy-embed" style="margin:20px 0;"')
     // Copy box inner: ship the stacked layout inline (label and code full width on top,
-    // full-width Copy button below) so it holds in every mail client, including ones that
+    // full-width Shop now button below) so it holds in every mail client, including ones that
     // strip <style> or ignore media queries. The wide-screen media query in
     // wrapNewsletterHtml (NL_WIDE_CSS) restores the side-by-side row on desktop.
     .replace(/class="nl-copy-inner" style="[^"]*"/g,
       'class="nl-copy-inner" style="padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;text-align:center;"')
-    .replace(/class="nl-copy-btn"([^>]*?)style="[^"]*"/g,
-      'class="nl-copy-btn"$1 style="display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:12px 14px;font-size:15px;font-weight:600;color:#2563eb;background:#ffffff;border:1px solid #c7cdf5;border-radius:8px;cursor:pointer;"')
+    // The CTA is a plain link: mail clients strip <script>, so a real button can never work in
+    // an email. Normalise any copy-box button/link (including older draft markup) to the
+    // Shop now anchor.
+    .replace(/<(button|a)\b[^>]*class="nl-copy-btn"[^>]*>[\s\S]*?<\/\1>/gi,
+      '<a href="https://shop.dicebastion.com/" target="_blank" rel="noopener" class="nl-copy-btn" style="display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:12px 14px;font-size:15px;font-weight:600;color:#ffffff;background:#2563eb;border:1px solid #2563eb;border-radius:8px;text-decoration:none;text-align:center;">Shop now</a>')
     // Strip Quill formatting classes (ql-align, ql-indent, etc.) — no stylesheet in email
     .replace(/ class="ql-[^"]*"/g, '')
     // Quill inserts <p><br></p> for every blank line the user types.
@@ -2420,8 +2422,8 @@ const NL_MOBILE_CSS = '@media only screen and (max-width:680px){'
 
 /**
  * Wide-screen (>=681px) rules: restore the copy box's side-by-side row (label and code left,
- * Copy button right) on desktop. The stacked layout is the inline default, so these overrides
- * need !important to beat the inline styles in clients that do support media queries.
+ * Shop now button right) on desktop. The stacked layout is the inline default, so these
+ * overrides need !important to beat the inline styles in clients that do support media queries.
  */
 const NL_WIDE_CSS = '@media only screen and (min-width:681px){'
   + '.nl-copy-inner{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;flex-wrap:wrap!important;text-align:left!important;}'

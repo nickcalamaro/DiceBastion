@@ -7885,14 +7885,14 @@ function registerNewsletterQuillBlots() {
   function nlCopyBoxInnerHtml(v) {
     const code = String(v && v.t || '').trim();
     const label = String(v && v.l || '').trim();
-    // nl-copy-inner / nl-copy-code / nl-copy-btn are hooks for the mobile media query in the
-    // email <style> block: on small screens the box stacks, code on top, full-width button below.
+    // nl-copy-inner / nl-copy-code / nl-copy-btn are hooks for the media queries in the email
+    // <style> block: on small screens the box stacks, code on top, full-width button below.
     return '<div class="nl-copy-inner" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;">'
       + '<div style="min-width:0;">'
       + (label ? '<div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">' + nlEsc(label) + '</div>' : '')
       + '<span class="nl-copy-code" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:20px;font-weight:700;letter-spacing:0.08em;color:#111827;user-select:all;word-break:break-all;">' + nlEsc(code) + '</span>'
       + '</div>'
-      + '<button type="button" class="nl-copy-btn" data-copy="' + nlEsc(code) + '" style="flex-shrink:0;padding:8px 14px;font-size:13px;font-weight:600;color:#2563eb;background:#ffffff;border:1px solid #c7cdf5;border-radius:8px;cursor:pointer;">Copy</button>'
+      + '<a href="https://shop.dicebastion.com/" target="_blank" rel="noopener" class="nl-copy-btn" style="flex-shrink:0;padding:8px 14px;font-size:13px;font-weight:600;color:#ffffff;background:#2563eb;border:1px solid #2563eb;border-radius:8px;text-decoration:none;">Shop now</a>'
       + '</div>';
   }
   class CopyBoxBlot extends BlockEmbed {
@@ -7981,7 +7981,7 @@ function nlCreateEditor() {
     newsletterBlots: true,
     keyboardBindings: quillMarkdownKeyboardBindings,
   });
-  nlInstallCopyHandler();
+  nlInstallCtaLinkHandler();
 
   nlQuill.on('text-change', function() {
     if (nlRestoringDraft) return;
@@ -8348,7 +8348,7 @@ function nlInsertButton() {
 
 function nlInsertCopyBox() {
   if (!nlQuill) return;
-  const code = (prompt('Text to copy when the reader clicks Copy (for example a promo code):', '') || '').trim();
+  const code = (prompt('Promo code to show in the box (for example SAVE10):', '') || '').trim();
   if (!code) return;
   const label = (prompt('Optional label above the text (for example "Promo code"):', '') || '').trim();
   const range = nlQuill.getSelection(true);
@@ -8357,26 +8357,18 @@ function nlInsertCopyBox() {
   nlQuill.setSelection(index + 1, 0, 'user');
 }
 
-let nlCopyHandlerInstalled = false;
+let nlCtaHandlerInstalled = false;
 
-/** Click on a copy box's Copy element copies its text and flashes "Copied". Works in the editor and the preview. */
-function nlInstallCopyHandler() {
-  if (nlCopyHandlerInstalled) return;
-  nlCopyHandlerInstalled = true;
+/** Clicks on a promo box's Shop now link open the shop in a new tab instead of navigating the admin page. */
+function nlInstallCtaLinkHandler() {
+  if (nlCtaHandlerInstalled) return;
+  nlCtaHandlerInstalled = true;
   document.addEventListener('click', function (e) {
-    const btn = e.target && e.target.closest ? e.target.closest('.nl-copy-btn') : null;
-    if (!btn) return;
-    const text = btn.getAttribute('data-copy') || '';
-    if (!text) return;
+    const link = e.target && e.target.closest ? e.target.closest('a.nl-copy-btn') : null;
+    if (!link) return;
     e.preventDefault();
-    const original = btn.textContent;
-    btn.textContent = 'Copied';
-    setTimeout(function () { btn.textContent = original; }, 1500);
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(function () { window.prompt('Copy this text:', text); });
-    } else {
-      window.prompt('Copy this text:', text);
-    }
+    const href = link.getAttribute('href');
+    if (href) window.open(href, '_blank', 'noopener');
   });
 }
 
@@ -8423,12 +8415,12 @@ function buildNlEmailHtml(bodyHtml, subject) {
     .replace(/class="nl-btn-embed"/g, 'class="nl-btn-embed" style="text-align:center;margin:20px 0;"')
     .replace(/class="nl-copy-embed"/g, 'class="nl-copy-embed" style="margin:20px 0;"')
     // Copy box inner: ship the stacked layout inline (label and code full width on top,
-    // full-width Copy button below) so it holds in every mail client; nlWide below restores
-    // the side-by-side row on wide screens.
+    // full-width Shop now button below); nlWide below restores the side-by-side row on wide
+    // screens. The CTA is a plain link, so it also works in real mail clients.
     .replace(/class="nl-copy-inner" style="[^"]*"/g,
       'class="nl-copy-inner" style="padding:14px 18px;background:#f8f9ff;border:1px dashed #b9c0f2;border-radius:10px;text-align:center;"')
-    .replace(/class="nl-copy-btn"([^>]*?)style="[^"]*"/g,
-      'class="nl-copy-btn"$1 style="display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:12px 14px;font-size:15px;font-weight:600;color:#2563eb;background:#ffffff;border:1px solid #c7cdf5;border-radius:8px;cursor:pointer;"')
+    .replace(/<(button|a)\b[^>]*class="nl-copy-btn"[^>]*>[\s\S]*?<\/\1>/gi,
+      '<a href="https://shop.dicebastion.com/" target="_blank" rel="noopener" class="nl-copy-btn" style="display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:12px 14px;font-size:15px;font-weight:600;color:#ffffff;background:#2563eb;border:1px solid #2563eb;border-radius:8px;text-decoration:none;text-align:center;">Shop now</a>')
     .replace(/ class="ql-[^"]*"/g, '')
     .replace(/<p[^>]*>\s*<br\s*\/?>\s*<\/p>/gi, ''));
   // Goldmark terminates a script block on a literal closing style tag,
@@ -8460,19 +8452,12 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + '.nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}'
     + '.nl-copy-code{display:block;margin-top:2px!important;font-size:18px!important;overflow-wrap:anywhere!important;}'
     + '}' + stC;
-  // Wide screens: restore the copy box row (label+code left, Copy button right). The stacked
+  // Wide screens: restore the copy box row (label+code left, Shop now button right). The stacked
   // layout is the inline default, so these overrides need !important to beat inline styles.
   const nlWide = stO + '@media only screen and (min-width:681px){'
     + '.nl-copy-inner{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;flex-wrap:wrap!important;text-align:left!important;}'
     + '.nl-copy-btn{display:inline-block!important;width:auto!important;box-sizing:content-box!important;margin-left:auto!important;margin-top:0!important;padding:8px 14px!important;font-size:13px!important;}'
     + '}' + stC;
-  // Copy boxes: wire the Copy elements inside the preview iframe. Goldmark ends an inline
-  // script block on a literal closing tag, so the script's own closing tag is split.
-  const scO = '<scr' + 'ipt>';
-  const scC = '</scr' + 'ipt>';
-  const cpScript = scO
-    + '(function(){document.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".nl-copy-btn"):null;if(!b)return;var t=b.getAttribute("data-copy")||"";if(!t)return;e.preventDefault();var o=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=o;},1500);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(function(){window.prompt("Copy this text:",t);});}else{window.prompt("Copy this text:",t);}});})();'
-    + scC;
   return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + subject + '</title>' + pReset + ecMedia + nlMedia + nlWide + '</head>'
     + '<body style="margin:0;padding:0;background:#f0f0f8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#1a1a1a;">'
     + '<div class="nl-shell" style="max-width:680px;margin:0 auto;padding:24px 16px;">'
@@ -8488,7 +8473,7 @@ function buildNlEmailHtml(bodyHtml, subject) {
     + '<p style="margin:0;"><a href="https://dicebastion.com/account" style="color:#9ca3af;text-decoration:underline;">Manage email preferences</a></p>'
     + '</div>'
     + '</div>'
-    + '</div>' + cpScript + '</body></html>';
+    + '</div></body></html>';
 }
 
 function previewNewsletter() {
