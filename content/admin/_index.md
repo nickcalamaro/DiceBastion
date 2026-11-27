@@ -1693,6 +1693,38 @@ Loading cron job logs...
 <div id="nl-send-result" style="display: none;"></div>
 </div>
 
+<!-- Welcome Email (sent automatically to new subscribers) -->
+<div class="card card-compact admin-mb-2" style="margin-top:1.5rem;">
+<div class="admin-flex-between admin-mb-2">
+<h3 class="admin-section-heading admin-m-0" style="font-size:1.1rem;">Welcome Email <span class="admin-text-muted" style="font-weight:400;">(sent automatically to new subscribers)</span></h3>
+<div class="checkbox-group" style="margin:0;"><input type="checkbox" id="wl-enabled" class="checkbox-input" checked><label for="wl-enabled" class="checkbox-label">Enabled</label></div>
+</div>
+<div class="form-group">
+<label class="form-label" for="wl-subject">Subject Line</label>
+<input type="text" id="wl-subject" class="form-input" placeholder="e.g. Welcome to the Dice Bastion newsletter">
+</div>
+<div class="form-group">
+<label class="form-label">Email Body</label>
+<div id="wl-quill-wrap">
+<div id="wl-toolbar">
+<span class="ql-formats"><select class="ql-header"><option selected></option><option value="1">Heading 1</option><option value="2">Heading 2</option><option value="3">Heading 3</option></select></span>
+<span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
+<span class="ql-formats"><button class="ql-list" value="bullet"></button><button class="ql-list" value="ordered"></button></span>
+<span class="ql-formats"><button class="ql-link"></button></span>
+<span class="ql-formats nl-extra-fmts"><button type="button" onclick="nlInsertDivider(wlQuill)" class="nl-tb-btn">Divider</button><button type="button" onclick="nlInsertButton(wlQuill)" class="nl-tb-btn">Button</button><button type="button" onclick="nlInsertCopyBox(wlQuill)" class="nl-tb-btn">Copy Box</button><button type="button" onclick="openNlProductPicker(wlQuill)" class="nl-tb-btn nl-tb-product-btn">Insert Product</button><button type="button" onclick="openNlEventPicker(wlQuill)" class="nl-tb-btn nl-tb-event-btn">Insert Event</button><button type="button" onclick="openNlCalendarPicker(wlQuill)" class="nl-tb-btn nl-tb-calendar-btn">Event Calendar</button></span>
+</div>
+<div id="wl-editor"></div>
+</div>
+<small class="admin-text-small">Same editor as the newsletter builder above: the toolbar adds a divider, a button link, a promo code box, a product card, an event card, or an event calendar.</small>
+</div>
+<div class="admin-flex" style="justify-content: flex-end; gap: 1rem; flex-wrap: wrap; align-items: center;">
+<span id="wl-status" class="nl-draft-status"></span>
+<button onclick="previewWelcome()" class="btn btn-secondary">Preview</button>
+<button onclick="sendWelcomeTest()" class="btn btn-secondary" id="wl-test-btn">Send Test</button>
+<button onclick="saveWelcome()" class="btn btn-primary" id="wl-save-btn">Save Welcome Email</button>
+</div>
+</div>
+
 <!-- Event Picker Modal -->
 <div id="nl-event-picker" class="nl-modal" style="display: none;">
 <div class="nl-modal-box">
@@ -2037,29 +2069,29 @@ Loading cron job logs...
 /* Quill snow forces every toolbar <button> to float:left; width:28px; height:24px, which clumps the
    custom buttons into 28px slivers. Re-assert their box with ID-scoped selectors (which beat
    .ql-snow .ql-toolbar button) and lay the toolbar out as wrapping flex rows. */
-#nl-quill-wrap #nl-toolbar { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; }
-#nl-toolbar .ql-formats { display: inline-flex !important; align-items: center; margin-right: 12px; }
-#nl-toolbar .nl-extra-fmts { display: inline-flex !important; margin-right: 0; }
-#nl-toolbar .nl-tb-btn {
+#nl-quill-wrap #nl-toolbar, #wl-quill-wrap #wl-toolbar { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; }
+#nl-toolbar .ql-formats, #wl-toolbar .ql-formats { display: inline-flex !important; align-items: center; margin-right: 12px; }
+#nl-toolbar .nl-extra-fmts, #wl-toolbar .nl-extra-fmts { display: inline-flex !important; margin-right: 0; }
+#nl-toolbar .nl-tb-btn, #wl-toolbar .nl-tb-btn {
   float: none; width: auto; height: auto; display: inline-block;
   padding: 4px 10px; font-size: 0.8rem; line-height: 1.4;
   border: 1px solid rgb(var(--color-neutral-300)); border-radius: 4px;
   background: white; color: rgb(var(--color-neutral-700));
   font-weight: 500; cursor: pointer; white-space: nowrap; position: relative;
 }
-#nl-toolbar .nl-tb-btn:hover { background: rgb(var(--color-neutral-100)); }
-.dark #nl-toolbar .nl-tb-btn { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-300)); }
-.dark #nl-toolbar .nl-tb-btn:hover { background: rgb(var(--color-neutral-700)); }
+#nl-toolbar .nl-tb-btn:hover, #wl-toolbar .nl-tb-btn:hover { background: rgb(var(--color-neutral-100)); }
+.dark #nl-toolbar .nl-tb-btn, .dark #wl-toolbar .nl-tb-btn { background: rgb(var(--color-neutral-800)); border-color: rgb(var(--color-neutral-600)); color: rgb(var(--color-neutral-300)); }
+.dark #nl-toolbar .nl-tb-btn:hover, .dark #wl-toolbar .nl-tb-btn:hover { background: rgb(var(--color-neutral-700)); }
 .nl-btn-embed, .nl-copy-embed { margin: 20px 0; }
-#nl-editor .nl-copy-btn { cursor: pointer; }
+#nl-editor .nl-copy-btn, #wl-editor .nl-copy-btn { cursor: pointer; }
 /* Narrow editor viewport: promo code and card titles take the full width, copy button and
    card buttons drop below as full-width blocks (matches the small-screen email layout) */
 @media only screen and (max-width:680px){
-  #nl-editor .nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}
-  #nl-editor .nl-copy-code{font-size:18px!important;overflow-wrap:anywhere!important;}
-  #nl-editor .nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}
-  #nl-editor .nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}
-  #nl-editor .nl-card-btn{display:block!important;text-align:center!important;}
+  #nl-editor .nl-copy-inner, #wl-editor .nl-copy-inner{flex-direction:column!important;align-items:stretch!important;gap:10px!important;text-align:center!important;}
+  #nl-editor .nl-copy-code, #wl-editor .nl-copy-code{font-size:18px!important;overflow-wrap:anywhere!important;}
+  #nl-editor .nl-copy-btn, #wl-editor .nl-copy-btn{width:100%!important;box-sizing:border-box!important;padding:12px 14px!important;font-size:15px!important;}
+  #nl-editor .nl-btn-embed a, #wl-editor .nl-btn-embed a{display:block!important;text-align:center!important;box-sizing:border-box!important;}
+  #nl-editor .nl-card-btn, #wl-editor .nl-card-btn{display:block!important;text-align:center!important;}
 }
 .nl-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .nl-modal-box { background: rgb(var(--color-neutral)); border-radius: 12px; padding: 1.5rem; max-width: 560px; width: 100%; max-height: 80vh; overflow-y: auto; }
@@ -2341,7 +2373,7 @@ Loading cron job logs...
 .nl-event-card-embed .nl-event-card-img-wrap { background: #f1f5f9; line-height: 0; font-size: 0; }
 .nl-event-card-embed .nl-event-card-img-wrap img { width: 100%; height: auto; display: block; }
 /* Keep loose pasted/linked images inside the editor frame (mirrors the email shell) */
-#nl-editor .ql-editor img { max-width: 100%; height: auto; }
+#nl-editor .ql-editor img, #wl-editor .ql-editor img { max-width: 100%; height: auto; }
 .nl-calendar-embed { margin: 16px 0; padding: 16px; background: #f8f9ff; border: 1px solid #dde0fa; border-radius: 10px; overflow: hidden; }
 .nl-cal-check-card { border: 1px solid rgb(var(--color-neutral-200)); border-radius: 8px; padding: 0.625rem 0.875rem; display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem; cursor: pointer; transition: background 0.15s; }
 .dark .nl-cal-check-card { border-color: rgb(var(--color-neutral-700)); }
@@ -4076,6 +4108,8 @@ function switchAdminTab(tab, options = {}) {
     loadNewsletterRecipients();
     loadNewsletterEvents();
     nlInitEditor();
+    wlInitEditor();
+    wlLoad();
   }
   if (tab === 'blog') {
     blogInitTab();
@@ -7738,6 +7772,9 @@ function nlNewDraft() {
 }
 
 let nlQuill = null;
+let wlQuill = null;
+let wlReady = false;
+let nlPickerTargetQuill = null;
 let nlEditorReady = false;
 
 const quillMarkdownKeyboardBindings = {
@@ -7967,6 +8004,111 @@ function initQuillEditor(containerId, toolbarId, options = {}) {
   });
 }
 
+function wlInitEditor() {
+  if (wlReady) return;
+  wlReady = true;
+  loadQuillAssets(function () {
+    if (wlQuill) return;
+    wlQuill = initQuillEditor('#wl-editor', '#wl-toolbar', {
+      placeholder: 'Write the welcome email...',
+      newsletterBlots: true,
+      keyboardBindings: quillMarkdownKeyboardBindings,
+    });
+  });
+}
+
+async function wlLoad() {
+  try {
+    const res = await fetch(`${API_BASE}/admin/newsletter/welcome`, {
+      headers: { 'X-Session-Token': sessionToken }
+    });
+    if (!res.ok) throw new Error('load failed');
+    const cfg = await res.json();
+    const subjectEl = document.getElementById('wl-subject');
+    if (subjectEl) subjectEl.value = cfg.subject || '';
+    const enabledEl = document.getElementById('wl-enabled');
+    if (enabledEl) enabledEl.checked = Number(cfg.enabled) === 1;
+    if (wlQuill && cfg.html) wlQuill.root.innerHTML = cfg.html;
+  } catch (e) {
+    console.error('wlLoad error:', e);
+  }
+}
+
+function wlShowStatus(msg) {
+  const el = document.getElementById('wl-status');
+  if (el) el.textContent = msg;
+}
+
+async function saveWelcome() {
+  const btn = document.getElementById('wl-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const subject = document.getElementById('wl-subject').value;
+    const html = wlQuill ? wlQuill.root.innerHTML : '';
+    const enabled = document.getElementById('wl-enabled').checked ? 1 : 0;
+    const res = await fetch(`${API_BASE}/admin/newsletter/welcome`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+      body: JSON.stringify({ subject, html, enabled })
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || 'Save failed');
+    }
+    wlShowStatus('Saved');
+    setTimeout(() => wlShowStatus(''), 3000);
+  } catch (e) {
+    wlShowStatus('Save failed');
+    Modal.alert({ title: 'Error', message: 'Could not save the welcome email. ' + e.message });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Welcome Email'; }
+  }
+}
+
+function previewWelcome() {
+  const subject = document.getElementById('wl-subject').value.trim() || 'Welcome Email Preview';
+  const bodyHtml = wlQuill ? wlQuill.root.innerHTML.trim() : '';
+  if (!bodyHtml || bodyHtml === '<p><br></p>') {
+    Modal.alert({ title: 'Empty', message: 'Add some content before previewing.' });
+    return;
+  }
+  const fullHtml = buildNlEmailHtml(bodyHtml, subject);
+  const frame = document.getElementById('nl-preview-frame');
+  frame.srcdoc = fullHtml;
+  document.getElementById('nl-preview-modal').style.display = 'flex';
+}
+
+async function sendWelcomeTest() {
+  const subject = document.getElementById('wl-subject').value.trim();
+  const bodyHtml = wlQuill ? wlQuill.root.innerHTML.trim() : '';
+  if (!subject) { Modal.alert({ title: 'Missing Subject', message: 'Please enter a subject line before sending a test.' }); return; }
+  if (!bodyHtml || bodyHtml === '<p><br></p>') { Modal.alert({ title: 'Empty', message: 'Please write some content before sending a test.' }); return; }
+  const to = (prompt('Send a test copy of the welcome email to:', '') || '').trim();
+  if (!to) return;
+  const btn = document.getElementById('wl-test-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending test...'; }
+  try {
+    await saveWelcome(); // test sends exactly what is configured
+    const res = await fetch(`${API_BASE}/admin/newsletter/welcome/test-send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+      body: JSON.stringify({ to })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      wlShowStatus(data.skipped
+        ? 'Test not delivered: email sending is not configured on this environment.'
+        : 'Test welcome email sent to ' + data.to + '.');
+    } else {
+      throw new Error(data.error || 'Send failed');
+    }
+  } catch (e) {
+    Modal.alert({ title: 'Error', message: 'Test send failed. ' + e.message });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send Test'; }
+  }
+}
+
 function nlInitEditor() {
   if (nlEditorReady) return;
   nlEditorReady = true;
@@ -8082,7 +8224,8 @@ function renderNlProductPickerList(filter) {
   }).join('');
 }
 
-async function openNlProductPicker() {
+async function openNlProductPicker(q) {
+  nlPickerTargetQuill = q || nlQuill;
   document.getElementById('nl-product-picker').style.display = 'flex';
   const search = document.getElementById('nl-product-search');
   if (search) search.value = '';
@@ -8096,7 +8239,8 @@ function closeNlProductPicker() {
 
 function insertNlProductBlock(idx) {
   closeNlProductPicker();
-  if (!nlQuill) return;
+  const quill = nlPickerTargetQuill || nlQuill;
+  if (!quill) return;
   const p = nlProducts[idx];
   if (!p) return;
   const esc = window.escapeHtml || function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
@@ -8121,10 +8265,10 @@ function insertNlProductBlock(idx) {
     + '<a class="nl-card-btn" href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Product</a>'
     + '</div>';
 
-  const range = nlQuill.getSelection(true);
-  const index = range ? range.index : nlQuill.getLength() - 1;
-  nlQuill.insertEmbed(index, 'product-card', cardHtml, 'user');
-  nlQuill.setSelection(index + 1, 0, 'user');
+  const range = quill.getSelection(true);
+  const index = range ? range.index : quill.getLength() - 1;
+  quill.insertEmbed(index, 'product-card', cardHtml, 'user');
+  quill.setSelection(index + 1, 0, 'user');
 }
 
 function nlEventImageSrc(ev) {
@@ -8181,7 +8325,8 @@ function renderNlEventPickerList() {
   }).join('');
 }
 
-function openNlEventPicker() {
+function openNlEventPicker(q) {
+  nlPickerTargetQuill = q || nlQuill;
   renderNlEventPickerList();
   document.getElementById('nl-event-picker').style.display = 'flex';
 }
@@ -8192,7 +8337,8 @@ function closeNlEventPicker() {
 
 function insertNlEventBlock(idx) {
   closeNlEventPicker();
-  if (!nlQuill) return;
+  const quill = nlPickerTargetQuill || nlQuill;
+  if (!quill) return;
   const ev = nlEvents[idx];
   if (!ev) return;
 
@@ -8220,10 +8366,10 @@ function insertNlEventBlock(idx) {
     + '<a class="nl-card-btn" href="' + linkHref + '" style="display:inline-block;background:#4f46e5;color:#ffffff;padding:11px 24px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;letter-spacing:0.01em;">View Event</a>'
     + '</div>';
 
-  const range = nlQuill.getSelection(true);
-  const index = range ? range.index : nlQuill.getLength() - 1;
-  nlQuill.insertEmbed(index, 'event-card', cardHtml, 'user');
-  nlQuill.setSelection(index + 1, 0, 'user');
+  const range = quill.getSelection(true);
+  const index = range ? range.index : quill.getLength() - 1;
+  quill.insertEmbed(index, 'event-card', cardHtml, 'user');
+  quill.setSelection(index + 1, 0, 'user');
 }
 
 function buildCalendarHtml(events) {
@@ -8273,7 +8419,8 @@ function buildCalendarHtml(events) {
     + '</table>';
 }
 
-function openNlCalendarPicker() {
+function openNlCalendarPicker(q) {
+  nlPickerTargetQuill = q || nlQuill;
   renderNlCalendarPickerList();
   document.getElementById('nl-calendar-picker').style.display = 'flex';
 }
@@ -8318,43 +8465,47 @@ function insertNlCalendarBlock() {
   const boxes = document.querySelectorAll('#nl-calendar-picker-list input[type="checkbox"]:checked');
   const selected = Array.from(boxes).map(b => nlEvents[parseInt(b.value)]).filter(Boolean);
   closeNlCalendarPicker();
-  if (!nlQuill || selected.length === 0) return;
+  const quill = nlPickerTargetQuill || nlQuill;
+  if (!quill || selected.length === 0) return;
   const calHtml = buildCalendarHtml(selected);
-  const range = nlQuill.getSelection(true);
-  const index = range ? range.index : nlQuill.getLength() - 1;
-  nlQuill.insertEmbed(index, 'event-calendar', calHtml, 'user');
-  nlQuill.setSelection(index + 1, 0, 'user');
+  const range = quill.getSelection(true);
+  const index = range ? range.index : quill.getLength() - 1;
+  quill.insertEmbed(index, 'event-calendar', calHtml, 'user');
+  quill.setSelection(index + 1, 0, 'user');
 }
 
-function nlInsertDivider() {
-  if (!nlQuill) return;
-  const range = nlQuill.getSelection(true);
-  const index = range ? range.index : nlQuill.getLength() - 1;
-  nlQuill.insertEmbed(index, 'divider', true, 'user');
-  nlQuill.setSelection(index + 1, 0, 'user');
+function nlInsertDivider(q) {
+  const quill = q || nlQuill;
+  if (!quill) return;
+  const range = quill.getSelection(true);
+  const index = range ? range.index : quill.getLength() - 1;
+  quill.insertEmbed(index, 'divider', true, 'user');
+  quill.setSelection(index + 1, 0, 'user');
 }
 
-function nlInsertButton() {
-  if (!nlQuill) return;
+function nlInsertButton(q) {
+  const quill = q || nlQuill;
+  if (!quill) return;
   const text = (prompt('Button text:', '') || '').trim();
   if (!text) return;
   const url = (prompt('Button link URL:', 'https://') || '').trim();
   if (!url || url === 'https://') return;
-  const range = nlQuill.getSelection(true);
-  const index = range ? range.index : nlQuill.getLength() - 1;
-  nlQuill.insertEmbed(index, 'nl-button', JSON.stringify({ t: text, u: url }), 'user');
-  nlQuill.setSelection(index + 1, 0, 'user');
+  const range = quill.getSelection(true);
+  const index = range ? range.index : quill.getLength() - 1;
+  quill.insertEmbed(index, 'nl-button', JSON.stringify({ t: text, u: url }), 'user');
+  quill.setSelection(index + 1, 0, 'user');
 }
 
-function nlInsertCopyBox() {
-  if (!nlQuill) return;
+function nlInsertCopyBox(q) {
+  const quill = q || nlQuill;
+  if (!quill) return;
   const code = (prompt('Promo code to show in the box (for example SAVE10):', '') || '').trim();
   if (!code) return;
   const label = (prompt('Optional label above the text (for example "Promo code"):', '') || '').trim();
-  const range = nlQuill.getSelection(true);
-  const index = range ? range.index : nlQuill.getLength() - 1;
-  nlQuill.insertEmbed(index, 'nl-copy', JSON.stringify({ t: code, l: label }), 'user');
-  nlQuill.setSelection(index + 1, 0, 'user');
+  const range = quill.getSelection(true);
+  const index = range ? range.index : quill.getLength() - 1;
+  quill.insertEmbed(index, 'nl-copy', JSON.stringify({ t: code, l: label }), 'user');
+  quill.setSelection(index + 1, 0, 'user');
 }
 
 let nlCtaHandlerInstalled = false;

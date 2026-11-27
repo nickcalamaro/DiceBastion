@@ -103,7 +103,7 @@ layout: "simple"
         </div>
         <div>
           <input type="checkbox" id="consent-marketing" style="margin-right: 8px;" />
-          <label for="consent-marketing" style="font-size: 14px; color: #374151;">I agree to receive marketing emails (discounts, news, and event announcements)</label>
+          <label for="consent-marketing" style="font-size: 14px; color: #374151;">I agree to receive the Dice Bastion newsletter (upcoming events, game nights, new arrivals, and special offers)</label>
         </div>
       </div>
 

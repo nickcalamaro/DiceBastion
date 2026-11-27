@@ -12043,6 +12043,173 @@ async function sendNewsletterCampaign(env, subject, html, draftId = null, sendAt
 }
 
 // ============================================================================
+// NEWSLETTER SCHEMA + WELCOME EMAIL
+// ============================================================================
+
+/** Create the newsletter tables if missing (self-healing; cheap to call per request). */
+async function ensureNewsletterSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS newsletter_drafts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject TEXT NOT NULL DEFAULT '',
+      html TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'draft',
+      scheduled_for TEXT,
+      sent_at TEXT,
+      recipients_count INTEGER,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )
+  `).run()
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS newsletter_unsub_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )
+  `).run()
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS newsletter_welcome (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      subject TEXT NOT NULL DEFAULT '',
+      html TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )
+  `).run()
+}
+
+/** Load the singleton welcome-email config row (null when never saved). */
+async function getWelcomeEmailConfig(db) {
+  await ensureNewsletterSchema(db)
+  return db.prepare('SELECT id, subject, html, enabled, updated_at FROM newsletter_welcome WHERE id = 1').first()
+}
+
+/**
+ * Best-effort welcome email to a newly subscribed user. Never throws.
+ * Uses the same wrap/pipeline as newsletters, with a single-use unsubscribe link.
+ */
+async function sendWelcomeEmail(env, userId, email) {
+  try {
+    const cfg = await getWelcomeEmailConfig(env.DB)
+    if (!cfg || !Number(cfg.enabled) || !String(cfg.subject || '').trim() || !String(cfg.html || '').trim()) {
+      return { skipped: true }
+    }
+    const token = crypto.randomUUID().replace(/-/g, '')
+    const tokenExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+    try {
+      await env.DB.prepare(
+        'INSERT INTO newsletter_unsub_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'
+      ).bind(userId, token, tokenExpiry).run()
+    } catch (tokenErr) {
+      console.error('[Welcome] Failed to create unsub token for', email, tokenErr)
+    }
+    const unsubscribeUrl = `https://dicebastion.com/unsubscribe?token=${token}`
+    const fullHtml = wrapNewsletterHtml(String(cfg.html), String(cfg.subject), unsubscribeUrl)
+    return await sendEmail(env, {
+      to: email,
+      subject: String(cfg.subject),
+      html: fullHtml,
+      text: htmlToPlainText(String(cfg.html)),
+      replyTo: env.MAILERSEND_REPLY_TO || env.MAILERSEND_FROM_EMAIL || 'hello@dicebastion.com',
+      emailType: 'welcome_email',
+      metadata: JSON.stringify({ campaign: 'welcome', userId })
+    })
+  } catch (e) {
+    console.error('[Welcome] send error:', e)
+    return { success: false, error: String(e) }
+  }
+}
+
+/**
+ * GET /admin/newsletter/welcome
+ * Returns the welcome-email config (defaults when never saved).
+ */
+app.get('/admin/newsletter/welcome', requireAdmin, async c => {
+  try {
+    const row = await getWelcomeEmailConfig(c.env.DB)
+    return c.json(row || { id: 1, subject: '', html: '', enabled: 1, updated_at: null })
+  } catch (e) {
+    console.error('[Newsletter] welcome get error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * PUT /admin/newsletter/welcome
+ * Upserts the singleton welcome-email config. Body: any of { subject, html, enabled }.
+ */
+app.put('/admin/newsletter/welcome', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    await ensureNewsletterSchema(c.env.DB)
+    const subject = body.subject !== undefined ? String(body.subject) : null
+    const html = body.html !== undefined ? String(body.html) : null
+    const enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : null
+    const existing = await c.env.DB.prepare('SELECT id FROM newsletter_welcome WHERE id = 1').first()
+    if (existing) {
+      const setClauses = []
+      const args = []
+      if (subject !== null) { setClauses.push('subject = ?'); args.push(subject) }
+      if (html !== null) { setClauses.push('html = ?'); args.push(html) }
+      if (enabled !== null) { setClauses.push('enabled = ?'); args.push(enabled) }
+      if (setClauses.length === 0) return c.json({ error: 'No fields to update' }, 400)
+      setClauses.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+      args.push(1)
+      await c.env.DB.prepare(`UPDATE newsletter_welcome SET ${setClauses.join(', ')} WHERE id = 1`).bind(...args).run()
+    } else {
+      await c.env.DB.prepare(
+        'INSERT INTO newsletter_welcome (id, subject, html, enabled) VALUES (1, ?, ?, ?)'
+      ).bind(subject ?? '', html ?? '', enabled ?? 1).run()
+    }
+    const row = await c.env.DB.prepare('SELECT id, subject, html, enabled, updated_at FROM newsletter_welcome WHERE id = 1').first()
+    return c.json(row)
+  } catch (e) {
+    console.error('[Newsletter] welcome update error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * POST /admin/newsletter/welcome/test-send
+ * Sends a single test copy of the configured welcome email. Body: { to }
+ */
+app.post('/admin/newsletter/welcome/test-send', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const to = String(body.to || '').trim().toLowerCase()
+    if (!to || !EMAIL_RE.test(to)) {
+      return c.json({ error: 'A valid test recipient email is required.' }, 400)
+    }
+    const cfg = await getWelcomeEmailConfig(c.env.DB)
+    if (!cfg || !String(cfg.subject || '').trim() || !String(cfg.html || '').trim()) {
+      return c.json({ error: 'Configure and save the welcome email subject and body first.' }, 400)
+    }
+    const unsubscribeUrl = 'https://dicebastion.com/unsubscribe'
+    const fullHtml = wrapNewsletterHtml(String(cfg.html), String(cfg.subject), unsubscribeUrl)
+    const result = await sendEmail(c.env, {
+      to,
+      subject: `[TEST] ${cfg.subject}`,
+      html: fullHtml,
+      text: htmlToPlainText(String(cfg.html)),
+      replyTo: c.env.MAILERSEND_REPLY_TO || c.env.MAILERSEND_FROM_EMAIL || 'hello@dicebastion.com',
+      emailType: 'welcome_email_test',
+      metadata: JSON.stringify({ campaign: 'welcome-test', to })
+    })
+    if (result.success || result.skipped) {
+      return c.json({ success: true, to, skipped: !!result.skipped })
+    }
+    return c.json({ error: result.error || 'Send failed' }, 500)
+  } catch (e) {
+    console.error('[Newsletter] welcome test-send error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// ============================================================================
 // ADMIN NEWSLETTER DRAFTS CRUD
 // ============================================================================
 
@@ -12585,6 +12752,13 @@ app.post('/newsletter/subscribe', async c => {
           last_updated = excluded.last_updated
       `).bind(session.user_id, now, now).run()
 
+      // Newly subscribed: send the configured welcome email (best-effort, never blocks)
+      const userRow = await c.env.DB.prepare('SELECT email FROM users WHERE user_id = ?').bind(session.user_id).first()
+      if (userRow && userRow.email) {
+        const welcome = sendWelcomeEmail(c.env, session.user_id, userRow.email)
+        try { c.executionCtx.waitUntil(welcome) } catch (_) { await welcome }
+      }
+
       return c.json({ status: 'subscribed' })
     }
 
@@ -12621,6 +12795,10 @@ app.post('/newsletter/subscribe', async c => {
         consent_date = COALESCE(consent_date, excluded.consent_date),
         last_updated = excluded.last_updated
     `).bind(ident.id, now, now).run()
+
+    // New subscriber: send the configured welcome email (best-effort, never blocks)
+    const welcome = sendWelcomeEmail(c.env, ident.id, email)
+    try { c.executionCtx.waitUntil(welcome) } catch (_) { await welcome }
 
     return c.json({ status: 'subscribed', new_account: true })
   } catch (e) {
@@ -12666,6 +12844,7 @@ async function processScheduledNewsletters(env) {
   let failed = 0
 
   try {
+    await ensureNewsletterSchema(env.DB)
     // Widen window to 72 hours — anything within that range can be handed to
     // MailerSend's native send_at scheduling for precise delivery time.
     // Newsletters further than 72 h away are skipped until the cron run that

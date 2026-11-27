@@ -190,7 +190,7 @@ window.getConsentCheckboxesHTML = function(idPrefix = '') {
       </div>
       <div class="checkbox-group">
         <input type="checkbox" id="${marketingId}" class="checkbox-input" />
-        <label for="${marketingId}" class="checkbox-label text-sm">I agree to receive marketing emails (discounts, news, and event announcements)</label>
+        <label for="${marketingId}" class="checkbox-label text-sm">I agree to receive the Dice Bastion newsletter (upcoming events, game nights, new arrivals, and special offers)</label>
       </div>
     </div>
   `;
