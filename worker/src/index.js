@@ -12159,7 +12159,7 @@ app.put('/admin/newsletter/welcome', requireAdmin, async c => {
       if (setClauses.length === 0) return c.json({ error: 'No fields to update' }, 400)
       setClauses.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
       args.push(1)
-      await c.env.DB.prepare(`UPDATE newsletter_welcome SET ${setClauses.join(', ')} WHERE id = 1`).bind(...args).run()
+      await c.env.DB.prepare(`UPDATE newsletter_welcome SET ${setClauses.join(', ')} WHERE id = ?`).bind(...args).run()
     } else {
       await c.env.DB.prepare(
         'INSERT INTO newsletter_welcome (id, subject, html, enabled) VALUES (1, ?, ?, ?)'
@@ -12205,6 +12205,44 @@ app.post('/admin/newsletter/welcome/test-send', requireAdmin, async c => {
     return c.json({ error: result.error || 'Send failed' }, 500)
   } catch (e) {
     console.error('[Newsletter] welcome test-send error:', e)
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+/**
+ * POST /admin/newsletter/welcome/send
+ * Manually sends the configured welcome email to specific addresses — for subscribers who
+ * joined before the welcome email was configured. Only existing, marketing-opted-in users
+ * are sent to. Body: { emails: string[] }
+ */
+app.post('/admin/newsletter/welcome/send', requireAdmin, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const emails = Array.isArray(body.emails) ? body.emails : []
+    if (emails.length === 0) return c.json({ error: 'emails array required' }, 400)
+    const cfg = await getWelcomeEmailConfig(c.env.DB)
+    if (!cfg || !String(cfg.subject || '').trim() || !String(cfg.html || '').trim()) {
+      return c.json({ error: 'Welcome email is not configured yet — save a subject and body first.' }, 400)
+    }
+    const results = []
+    for (const raw of emails.slice(0, 50)) {
+      const email = String(raw || '').trim().toLowerCase()
+      if (!EMAIL_RE.test(email)) { results.push({ email: String(raw || ''), status: 'invalid_email' }); continue }
+      const user = await c.env.DB.prepare('SELECT user_id FROM users WHERE LOWER(email) = LOWER(?)').bind(email).first()
+      if (!user) { results.push({ email, status: 'no_user' }); continue }
+      const prefs = await c.env.DB.prepare('SELECT marketing_emails FROM email_preferences WHERE user_id = ?').bind(user.user_id).first()
+      if (!prefs || Number(prefs.marketing_emails) !== 1) { results.push({ email, status: 'not_subscribed' }); continue }
+      const r = await sendWelcomeEmail(c.env, user.user_id, email)
+      const ok = r && (r.success || r.skipped)
+      results.push({
+        email,
+        status: ok ? (r.skipped ? 'skipped' : 'sent') : 'error',
+        ...(r && r.error ? { error: String(r.error).slice(0, 200) } : {})
+      })
+    }
+    return c.json({ success: true, results })
+  } catch (e) {
+    console.error('[Newsletter] welcome send error:', e)
     return c.json({ error: e.message }, 500)
   }
 })
