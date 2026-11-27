@@ -1293,6 +1293,121 @@ export async function removeImportLine(db, sessionId, lineId) {
 }
 
 // ---------------------------------------------------------------------------
+// Pre-invoice items (stock on hand, supplier invoice not received yet)
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates one pre-invoice item before any of them are saved.
+ * There is no cost here by design: the supplier invoice import links the cost
+ * back to the product by EAN later (addImportLine opens_existing_stock).
+ */
+export function preInvoiceItemProblem(item) {
+  const quantity = parseInt(item?.quantity, 10)
+  if (!quantity || quantity <= 0 || quantity > 100000) return { error: 'invalid_quantity', message: 'quantity must be 1 to 100000' }
+  if (!String(item?.name || '').trim()) return { error: 'missing_name', message: 'missing product name' }
+  const eanRaw = String(item?.ean || '').trim()
+  if (eanRaw && !cleanEan(eanRaw)) return { error: 'invalid_ean', message: 'EAN must be 8 to 14 digits' }
+  if (item.image_url != null && String(item.image_url).trim() !== '' && cleanUrl(item.image_url) === undefined) {
+    return { error: 'invalid_image', message: 'image is not a stored link' }
+  }
+  return null
+}
+
+async function addPreInvoiceItem(db, input) {
+  const name = String(input.name || '').trim().slice(0, 200)
+  const quantity = parseInt(input.quantity, 10)
+  const ean = cleanEan(input.ean)
+  const image = cleanUrl(input.image_url)
+  const category = input.category ? String(input.category).trim().slice(0, 200) : null
+  const summary = input.summary ? String(input.summary).trim().slice(0, 500) : null
+  const fullDescription = toStoredDescription(input.description)
+  const now = new Date().toISOString()
+
+  let product = null
+  if (ean) {
+    product = await db.prepare('SELECT id, name, catalog_status, is_active, IFNULL(cost_tracked, 0) AS cost_tracked FROM products WHERE ean = ?').bind(ean).first()
+  }
+
+  if (product) {
+    const sets = []
+    const binds = []
+    const filled = []
+    if (summary) { sets.push('summary = ?', 'description = ?'); binds.push(summary, summary); filled.push('summary') }
+    if (fullDescription) { sets.push('full_description = ?'); binds.push(fullDescription); filled.push('full_description') }
+    if (image) { sets.push('image_url = ?'); binds.push(image); filled.push('image') }
+    if (category) { sets.push('category = ?'); binds.push(category); filled.push('category') }
+    if (sets.length) {
+      sets.push('updated_at = ?')
+      binds.push(now, product.id)
+      await db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).bind(...binds).run()
+    }
+    // Uncosted stock can be counted now: the invoice line for this EAN then opens
+    // cost tracking without adding the stock again. Cost-tracked products get their
+    // stock from the invoice line, so it is not added twice here.
+    let stockAdded = 0
+    if (!Number(product.cost_tracked)) {
+      await db.prepare('UPDATE products SET stock_quantity = IFNULL(stock_quantity, 0) + ?, updated_at = ? WHERE id = ?')
+        .bind(quantity, now, product.id).run()
+      stockAdded = quantity
+    }
+    return {
+      product_id: product.id,
+      created: false,
+      matched_existing: true,
+      stock_added: stockAdded,
+      cost_tracked: Number(product.cost_tracked),
+      filled_copy: filled
+    }
+  }
+
+  // New product: unpriced and hidden until the invoice sets a price or you price it
+  // in the Products tab. catalog_status 'archived' lets the invoice import reactivate
+  // it when the matching EAN arrives.
+  const slug = await uniqueProductSlug(db, name)
+  try {
+    const row = await db.prepare(`
+      INSERT INTO products (name, slug, description, summary, full_description, price, currency, stock_quantity, image_url, category, ean, catalog_status, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 0, 'GBP', ?, ?, ?, ?, 'archived', 0, ?, ?) RETURNING id
+    `).bind(name, slug, summary, summary, fullDescription, quantity, image, category, ean, now, now).first()
+    const filled = []
+    if (summary) filled.push('summary')
+    if (fullDescription) filled.push('full_description')
+    if (image) filled.push('image')
+    if (category) filled.push('category')
+    return { product_id: row.id, created: true, stock_added: quantity, filled_copy: filled }
+  } catch (e) {
+    const msg = String(e?.message || '')
+    if (msg.includes('UNIQUE') && /ean/i.test(msg)) return { error: 'ean_already_exists' }
+    if (msg.includes('UNIQUE')) return { error: 'slug_already_exists' }
+    throw e
+  }
+}
+
+/**
+ * Saves items entered before the invoice arrived. Each item creates an unpriced
+ * product with stock, or links to the product with the same EAN. No cost is stored.
+ * Every item is validated before any is saved.
+ */
+export async function addPreInvoiceItems(db, input) {
+  await ensureLedgerSchema(db)
+  const items = input?.items
+  if (!Array.isArray(items) || !items.length) return { error: 'no_items' }
+  for (let i = 0; i < items.length; i++) {
+    const problem = preInvoiceItemProblem(items[i])
+    if (problem) return lineError(items[i], i, problem.error, problem.message)
+  }
+  const results = []
+  for (let i = 0; i < items.length; i++) {
+    const added = await addPreInvoiceItem(db, items[i])
+    if (added.error) {
+      return lineError(items[i], i, added.error, `${added.error.replace(/_/g, ' ')}; ${i} earlier item(s) were saved`)
+    }
+    results.push(added)
+  }
+  return { success: true, lines: results }
+}
+
+// ---------------------------------------------------------------------------
 // SumUp fees (shared with Club accounts)
 // ---------------------------------------------------------------------------
 

@@ -75,6 +75,7 @@ import {
   getImportSession,
   addImportLine,
   addImportLinesBatch,
+  addPreInvoiceItems,
   removeImportLine,
   setImportLinesBundle,
   parseLedgerDate,
@@ -7874,6 +7875,21 @@ app.post('/admin/finance/import-sessions/:id/lines/batch', requireAdmin, require
     return c.json({ success: true, ...result })
   } catch (e) {
     console.error('[finance/import-sessions lines batch POST] ERROR:', e)
+    return c.json({ error: 'internal_error' }, 500)
+  }
+})
+
+// Items entered before the supplier invoice arrives: products and stock with no cost
+// yet. The invoice import links the cost back by EAN (addImportLine opens_existing_stock).
+app.post('/admin/finance/pre-invoice-items', requireAdmin, requireAccountsOwner, async c => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const result = await addPreInvoiceItems(c.env.DB, body)
+    if (result.error) return c.json(result, LEDGER_ERROR_STATUS[result.error] || 400)
+    invalidateProductCategoryMetaCache()
+    return c.json({ success: true, ...result })
+  } catch (e) {
+    console.error('[finance/pre-invoice-items POST] ERROR:', e)
     return c.json({ error: 'internal_error' }, 500)
   }
 })

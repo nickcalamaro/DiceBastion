@@ -19,6 +19,7 @@ showDate: false
 <script src="/js/eventPosAdmin.js?v=20261109a"></script>
 <script src="/js/shopFinanceAdmin.js?v=20261121a"></script>
 <script src="/js/shopInvoiceImportAdmin.js?v=20261111e"></script>
+<script src="/js/shopPreInvoiceAdmin.js?v=20261127a"></script>
 <script src="/js/buybackAdmin.js?v=20261122c"></script>
 <script src="/js/richTextEditor.js"></script>
 
@@ -1323,6 +1324,22 @@ Upload a supplier invoice PDF. Mistral OCR parses line items into an editable pr
 </div>
 <div id="invoice-import-preview" class="admin-mb-1"></div>
 <div id="invoice-import-log" class="admin-mb-1" style="max-height: 12rem; overflow-y: auto;"></div>
+</div>
+
+<div id="pre-invoice-card" class="card card-compact admin-mb-2">
+<h3 id="admin-section-finance-pre-invoice" class="admin-section-heading">Add products before the invoice arrives</h3>
+<p class="admin-text-muted admin-mb-1" style="max-width: 52rem;">
+No invoice yet? Add each item with its product name, EAN, stock quantity and categories. Tick <strong>Enrich</strong> on the items you want, then run <strong>Enrich selected</strong> once to research the listing (summary, description and image), exactly like the invoice import above, and edit any field yourself. Items are saved as unpriced products that stay hidden from the shop. When the invoice arrives, import it as usual: lines with the same EAN match these products and add the cost and receipt, so the stock is linked back without counting it twice.
+</p>
+<div class="admin-flex admin-mb-1" style="gap: 0.75rem; flex-wrap: wrap;">
+<button type="button" id="pre-invoice-add-row" class="btn btn-secondary">Add item</button>
+<button type="button" id="pre-invoice-enrich-selected" class="btn btn-secondary">Enrich selected</button>
+<button type="button" id="pre-invoice-save" class="btn btn-primary" disabled>Save items</button>
+<input type="file" id="pre-invoice-row-file" accept="image/*" style="display:none" aria-hidden="true">
+</div>
+<div id="pre-invoice-status" class="admin-mb-1" style="display: none; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9375rem;"></div>
+<div id="pre-invoice-preview" class="admin-mb-1"></div>
+<div id="pre-invoice-log" class="admin-mb-1" style="max-height: 12rem; overflow-y: auto;"></div>
 </div>
 
 <h3 id="admin-section-finance-imports" class="admin-section-heading">Stock import sessions</h3>
@@ -2736,6 +2753,7 @@ loadCronLogs();
 loadShopPromoCodes();
 revealAccountsTabIfOwner();
 if (window.ShopInvoiceImportAdmin) ShopInvoiceImportAdmin.init();
+if (window.ShopPreInvoiceAdmin) ShopPreInvoiceAdmin.init();
 handleAdminHash();
 // Verify session is still valid in background
 verifySession();
@@ -2779,6 +2797,7 @@ localStorage.setItem('admin_user', JSON.stringify(currentUser));
 }
 revealAccountsTabIfOwner();
 if (window.ShopInvoiceImportAdmin) ShopInvoiceImportAdmin.init();
+if (window.ShopPreInvoiceAdmin) ShopPreInvoiceAdmin.init();
 }
 // If OK, dashboard is already showing - do nothing
 } catch (err) {
@@ -2825,6 +2844,7 @@ loadCronLogs();
       loadShopPromoCodes();
       revealAccountsTabIfOwner();
       if (window.ShopInvoiceImportAdmin) ShopInvoiceImportAdmin.init();
+if (window.ShopPreInvoiceAdmin) ShopPreInvoiceAdmin.init();
       handleAdminHash();
 } else {
 errorEl.textContent = data.error === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed';
@@ -4170,6 +4190,9 @@ if (window.ShopFinance) {
 }
 if (window.ShopInvoiceImportAdmin) {
   ShopInvoiceImportAdmin.init();
+}
+if (window.ShopPreInvoiceAdmin) {
+  ShopPreInvoiceAdmin.init();
 }
 
 // Image Upload Handlers

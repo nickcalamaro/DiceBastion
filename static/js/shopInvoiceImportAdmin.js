@@ -111,11 +111,12 @@
   }
 
   /** Sets a row's EAN and re-matches it to a product already in the shop with that EAN. */
-  function setRowEan(row, raw) {
+  function setRowEan(row, raw, byEan) {
     const ean = normalizeEan(raw);
     if (ean === normalizeEan(row.ean)) return;
     row.ean = ean;
-    const existing = ean ? productByEan[ean] : null;
+    const catalog = byEan || productByEan;
+    const existing = ean ? catalog[ean] : null;
     row.existing_listed = !!(existing && (existing.catalog_status || 'listed') === 'listed' && Number(existing.is_active) === 1);
     row.existing_product_id = existing ? existing.id : null;
     row.override_listing = false;
@@ -873,13 +874,13 @@
     });
   }
 
-  function mountCategoryPickers(host) {
+  function mountCategoryPickers(host, rowByIdFn, showsPickerFn) {
     if (!host || !global.ShopCategoryPicker) return;
     ShopCategoryPicker.unmountAll(host);
     host.querySelectorAll('.invoice-import-category-mount').forEach(function (cell) {
       const id = cell.getAttribute('data-row-id');
-      const row = rowById(id);
-      if (!row || !rowShowsCategoryPicker(row)) return;
+      const row = (rowByIdFn || rowById)(id);
+      if (!row || !(showsPickerFn || rowShowsCategoryPicker)(row)) return;
       ShopCategoryPicker.mount(cell, {
         rowId: id,
         category: row.category,
@@ -952,10 +953,10 @@
     }
   }
 
-  function hydrateSuggestedImageThumbs(host) {
+  function hydrateSuggestedImageThumbs(host, rowByIdFn) {
     if (!host || !window.utils || typeof window.utils.adminProxyImageObjectUrl !== 'function') return;
     host.querySelectorAll('.invoice-import-suggested-thumb[data-id]').forEach(function (node) {
-      const row = rowById(node.getAttribute('data-id'));
+      const row = (rowByIdFn || rowById)(node.getAttribute('data-id'));
       if (!row || !row.source_image_url || row.image_url) return;
       if (node.getAttribute('data-loaded') === row.source_image_url) return;
       node.setAttribute('data-loaded', 'pending');
@@ -1551,9 +1552,10 @@
   }
 
   /** The shared crop modal uploads product crops itself and returns the stored URL; older callers pass a data URL. */
-  function uploadCroppedProductImage(row, croppedImage, successNote) {
+  function uploadCroppedProductImage(row, croppedImage, successNote, hooks) {
+    const render = (hooks && hooks.render) || renderPreview;
     row.image_pending = true;
-    renderPreview();
+    render();
     const value = String(croppedImage || '');
     const alreadyStored = /^https?:\/\//i.test(value) || value.indexOf('/r2-placeholder/') === 0;
     if (!alreadyStored) logProgress('Uploading cropped product image to storage…', { name: row.name });
@@ -1572,7 +1574,7 @@
       })
       .finally(function () {
         row.image_pending = false;
-        renderPreview();
+        render();
       });
   }
 
@@ -1597,9 +1599,10 @@
    * Frames the suggested source image in the shop product frame and saves it, so no review is needed.
    * The source stays on the row, so Adjust crop and Upload image can still replace it.
    */
-  async function autoSaveSuggestedImage(row) {
+  async function autoSaveSuggestedImage(row, hooks) {
     if (!row || !row.source_image_url || row.image_url) return false;
     if (!window.utils || !window.utils.productImage) return false;
+    const log = (hooks && hooks.log) || appendLog;
     row.image_pending = true;
     const baseNote = row.notes && row.notes[0] ? row.notes[0] : 'Listing enriched';
     try {
@@ -1611,55 +1614,60 @@
       return true;
     } catch (e) {
       row.notes = [baseNote + '; image could not be saved automatically (' + e.message + '), use Review and crop'];
-      appendLog('Image auto-save failed: ' + row.name + ' · ' + e.message);
+      log('Image auto-save failed: ' + row.name + ' · ' + e.message);
       return false;
     } finally {
       row.image_pending = false;
     }
   }
 
-  async function autoSaveSuggestedImages(targetRows) {
+  async function autoSaveSuggestedImages(targetRows, hooks) {
+    const log = (hooks && hooks.log) || appendLog;
+    const render = (hooks && hooks.render) || renderPreview;
     const pending = (targetRows || []).filter(function (r) { return r.source_image_url && !r.image_url; });
     if (!pending.length) return;
-    appendLog('Saving ' + pending.length + ' suggested image(s) to the shop…');
-    renderPreview();
+    log('Saving ' + pending.length + ' suggested image(s) to the shop…');
+    render();
     let saved = 0;
     let next = 0;
     async function worker() {
       while (next < pending.length) {
         const row = pending[next++];
-        if (await autoSaveSuggestedImage(row)) saved++;
-        renderPreview();
+        if (await autoSaveSuggestedImage(row, hooks)) saved++;
+        render();
       }
     }
     const workers = [];
     for (let i = 0; i < Math.min(3, pending.length); i++) workers.push(worker());
     await Promise.all(workers);
-    appendLog('Images saved: ' + saved + ' of ' + pending.length + (saved < pending.length ? ' (the rest need Review and crop)' : ''));
+    log('Images saved: ' + saved + ' of ' + pending.length + (saved < pending.length ? ' (the rest need Review and crop)' : ''));
   }
 
-  async function openAdjustCropForRow(id) {
-    const row = rowById(id);
+  async function openAdjustCropForRow(id, hooks) {
+    const getRow = (hooks && hooks.rowById) || rowById;
+    const setSt = (hooks && hooks.setStatus) || setStatus;
+    const render = (hooks && hooks.render) || renderPreview;
+    const row = getRow(id);
     if (!row || !row.source_image_url || typeof global.showCropModal !== 'function') return;
     if (!window.utils || !window.utils.productImage) {
-      setStatus('Product image tools are not loaded.', 'warn');
+      setSt('Product image tools are not loaded.', 'warn');
       return;
     }
     logProgress('Loading suggested image for review (not uploaded yet)…', { name: row.name });
     row.image_pending = true;
-    renderPreview();
+    render();
     try {
       const framed = await window.utils.productImage.exportProductImageFromUrl(row.source_image_url);
       row.image_pending = false;
-      renderPreview();
+      render();
       global.showCropModal(framed, function (croppedImage) {
-        uploadCroppedProductImage(row, croppedImage, 'Product image saved after review');
+        uploadCroppedProductImage(row, croppedImage, 'Product image saved after review', hooks);
       }, 336 / 220, 'product');
     } catch (e) {
       row.image_pending = false;
-      setStatus('Could not load source image for crop: ' + e.message, 'err');
+      setSt('Could not load source image for crop: ' + e.message, 'err');
       logProgress('Review crop failed to load source', { name: row.name, error: e.message });
-      renderPreview();
+      render();
     }
   }
 
@@ -1693,10 +1701,13 @@
     return { secs: secs, srcLabel: srcLabel };
   }
 
-  async function generateCopyForRowInternal(row, quiet, batchMeta, onSearchLimit) {
+  async function generateCopyForRowInternal(row, quiet, batchMeta, onSearchLimit, hooks) {
     if (!row || row.copy_pending) return false;
+    const setSt = (hooks && hooks.setStatus) || setStatus;
+    const log = (hooks && hooks.log) || appendLog;
+    const render = (hooks && hooks.render) || renderPreview;
     row.copy_pending = true;
-    renderPreview();
+    render();
     const batchLabel = batchMeta && batchMeta.total
       ? '(' + batchMeta.index + '/' + batchMeta.total + ') '
       : '';
@@ -1707,7 +1718,7 @@
     });
     try {
       if (!quiet) {
-        setStatus('Enriching listing (research, copy and revision can take a few minutes)…', 'info');
+        setSt('Enriching listing (research, copy and revision can take a few minutes)…', 'info');
       }
       const data = await apiNdjson('/admin/invoice-import/generate-copy', {
         timeoutMs: 8 * 60 * 1000,
@@ -1717,9 +1728,9 @@
           sku: row.sku || null,
           category: row.category || null
         })
-      }, function (message) { appendLog(message); });
+      }, function (message) { log(message); });
       const meta = applyEnrichmentApiResult(row, data);
-      if (data.image_url && !row.image_url) await autoSaveSuggestedImages([row]);
+      if (data.image_url && !row.image_url) await autoSaveSuggestedImages([row], hooks);
       logProgress('Enrichment API done ' + batchLabel + row.name, {
         ms: Date.now() - started,
         copy_source: data.copy_source,
@@ -1743,19 +1754,19 @@
         });
       }
       if (!quiet) {
-        setStatus(
+        setSt(
           'Listing updated for: ' + row.name +
           (meta.secs != null ? ' (' + meta.secs + 's, ' + meta.srcLabel + ')' : ''),
           'ok'
         );
       }
       if (data.web_search_ms != null) {
-        appendLog(
+        log(
           (quiet ? row.name + ': ' : 'Enrichment timing: ') +
           'web search ' + Math.round(data.web_search_ms / 1000) + 's, total ' + (meta.secs || '?') + 's'
         );
       } else if (quiet) {
-        appendLog('Enrichment OK: ' + row.name + (row.source_image_url && !row.image_url ? ' (suggested image)' : '') + (row.image_url ? ' (saved)' : ''));
+        log('Enrichment OK: ' + row.name + (row.source_image_url && !row.image_url ? ' (suggested image)' : '') + (row.image_url ? ' (saved)' : ''));
       }
       logProgress('Enrichment complete ' + batchLabel + row.name, {
         ms: Date.now() - started,
@@ -1768,14 +1779,14 @@
         error: e.message
       });
       if (!quiet) {
-        setStatus('Listing enrichment failed: ' + e.message, 'err');
+        setSt('Listing enrichment failed: ' + e.message, 'err');
       }
       if (typeof onSearchLimit === 'function') onSearchLimit(e.message);
-      appendLog('Enrichment failed: ' + row.name + ' — ' + e.message);
+      log('Enrichment failed: ' + row.name + ' — ' + e.message);
       return false;
     } finally {
       row.copy_pending = false;
-      renderPreview();
+      render();
     }
   }
 
@@ -1959,13 +1970,19 @@
     }
   }
 
-  async function loadProductsForMatch() {
+  /** Loads /admin/products into productByEan (and seeds the category picker catalog); returns the EAN map. */
+  async function loadProductsIndex() {
     try {
       const list = await api('/admin/products');
       indexProducts(Array.isArray(list) ? list : []);
     } catch (_) {
       indexProducts([]);
     }
+    return productByEan;
+  }
+
+  async function loadProductsForMatch() {
+    await loadProductsIndex();
   }
 
   async function parseInvoice() {
@@ -2221,5 +2238,27 @@
     }
   }
 
-  global.ShopInvoiceImportAdmin = { init: init };
+  global.ShopInvoiceImportAdmin = {
+    init: init,
+    // Shared listing-row blocks, reused by the pre-invoice card (shopPreInvoiceAdmin.js).
+    // Row helpers take the same row field names; DOM-bound ones accept optional hooks
+    // ({ setStatus, log, render, rowById }) so another card can supply its own.
+    api: api,
+    apiNdjson: apiNdjson,
+    normalizeEan: normalizeEan,
+    imageSourceLabel: imageSourceLabel,
+    applyEnrichmentApiResult: applyEnrichmentApiResult,
+    setRowEan: setRowEan,
+    rowThumbHtml: rowThumbHtml,
+    revokeSuggestedThumbBlob: revokeSuggestedThumbBlob,
+    hydrateSuggestedImageThumbs: hydrateSuggestedImageThumbs,
+    mountCategoryPickers: mountCategoryPickers,
+    autoSaveSuggestedImage: autoSaveSuggestedImage,
+    autoSaveSuggestedImages: autoSaveSuggestedImages,
+    uploadCroppedProductImage: uploadCroppedProductImage,
+    openAdjustCropForRow: openAdjustCropForRow,
+    generateCopyForRowInternal: generateCopyForRowInternal,
+    applyInvoiceImportTabOrder: applyInvoiceImportTabOrder,
+    loadProductsIndex: loadProductsIndex
+  };
 })(typeof window !== 'undefined' ? window : globalThis);
